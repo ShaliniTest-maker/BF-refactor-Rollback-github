@@ -1,0 +1,144 @@
+# Flask Application Requirements for Node.js to Python 3.13.3 Migration
+# This file defines all Flask ecosystem dependencies and versions required
+# for the comprehensive technology migration from Node.js/Express.js to Python/Flask
+# Ensures reproducible builds, dependency security verification, and consistent
+# environment provisioning across development, staging, and production deployments
+
+# ==============================================================================
+# CORE FLASK FRAMEWORK - Section 3.2.1
+# Flask 3.1.1 micro web framework with required core dependencies
+# ==============================================================================
+Flask==3.1.1
+
+# Flask Core Dependencies - Required by Flask 3.1.1 per Section 3.2.1
+Werkzeug>=3.1.0,<3.2.0        # WSGI implementation for application-server interface
+ItsDangerous>=2.2.0,<2.3.0    # Secure data signing for Flask session cookie protection
+Jinja2>=3.1.2,<3.2.0          # Template language for page rendering and response formatting
+Click>=8.1.3,<8.2.0           # Command line framework for flask commands and custom management
+Blinker>=1.9.0,<2.0.0         # Signal support for Flask Service Layer pattern implementation
+
+# ==============================================================================
+# DATABASE INTEGRATION - Section 3.2.2
+# Flask-SQLAlchemy ORM and migration management for database operations
+# ==============================================================================
+Flask-SQLAlchemy==3.1.1        # SQLAlchemy support with useful defaults for Flask
+Flask-Migrate==4.1.0           # Database migrations using Alembic with zero data loss
+
+# SQLAlchemy and related database dependencies
+SQLAlchemy>=2.0.0,<3.0.0      # Core ORM functionality required by Flask-SQLAlchemy
+SQLAlchemy-Utils>=0.41.0       # Enhanced SQLAlchemy utilities including EncryptedType
+Alembic>=1.13.0                # Database migration engine (via Flask-Migrate)
+
+# ==============================================================================
+# AUTHENTICATION & SECURITY - Section 6.4
+# Auth0 integration, JWT handling, and Flask authentication components
+# ==============================================================================
+Auth0-Python==4.9.0            # Auth0 Python SDK for identity management integration
+Flask-JWT-Extended==4.7.1      # JWT token handling with enhanced security features
+Flask-Login>=0.6.3             # User session management for authentication state tracking
+
+# Security and Cryptography
+cryptography>=41.0.0           # Encryption libraries for field-level encryption
+PyJWT>=2.8.0                   # JSON Web Token implementation for Auth0 integration
+
+# ==============================================================================
+# PRODUCTION WSGI SERVER - Section 8.1.1
+# Gunicorn WSGI server for production deployment optimization
+# ==============================================================================
+Gunicorn>=21.2.0               # Production WSGI HTTP Server for Flask applications
+
+# ==============================================================================
+# DEVELOPMENT & CONFIGURATION - Section 3.3.1
+# Environment variable management and development tools
+# ==============================================================================
+python-dotenv>=1.0.0           # Environment variable support for flask commands and config
+
+# ==============================================================================
+# MONITORING & OBSERVABILITY - Section 6.4.6.1
+# Prometheus metrics, structured logging, and security monitoring
+# ==============================================================================
+prometheus_client>=0.19.0      # Prometheus Python client for metrics collection
+structlog>=23.2.0              # Structured logging for machine-readable JSON output
+
+# ==============================================================================
+# AWS CLOUD INTEGRATION - Section 6.4.3.2
+# AWS services integration for encryption, secrets management, and infrastructure
+# ==============================================================================
+boto3>=1.34.0                  # AWS SDK for Python (KMS, Secrets Manager, CloudWatch)
+botocore>=1.34.0               # Low-level AWS service client library
+
+# ==============================================================================
+# HTTP CLIENT & SECURITY - Section 6.4.3.5
+# Secure HTTP client with certificate validation capabilities
+# ==============================================================================
+requests>=2.31.0               # HTTP library with security enhancements
+certifi>=2023.11.17            # Certificate authority bundle for SSL/TLS validation
+urllib3>=1.26.18               # HTTP client used by requests with security updates
+
+# ==============================================================================
+# SYSTEM MONITORING & ANOMALY DETECTION - Section 6.4.6.1
+# Python runtime monitoring and ML-based anomaly detection
+# ==============================================================================
+psutil>=5.9.6                  # System and process monitoring utilities
+scikit-learn>=1.3.0            # Machine learning library for anomaly detection
+numpy>=1.24.0                  # Numerical computing library (scikit-learn dependency)
+
+# ==============================================================================
+# TESTING FRAMEWORK - Section 3.6.3 & 6.4.5.2
+# Comprehensive testing suite for functionality validation and security testing
+# ==============================================================================
+pytest>=7.4.0                  # Python testing framework for Flask applications
+pytest-cov>=4.1.0              # Coverage reporting for pytest
+pytest-flask>=1.3.0            # Pytest fixtures for Flask applications
+
+# ==============================================================================
+# SECURITY TESTING TOOLS - Section 6.4.5.2
+# Static analysis and vulnerability scanning for Python security validation
+# ==============================================================================
+bandit>=1.7.5                  # Python security vulnerability scanner (SAST)
+safety>=3.0.0                  # Python package vulnerability assessment
+pip-audit>=2.6.0               # Official PyPA tool for Python package security auditing
+
+# ==============================================================================
+# ADDITIONAL FLASK EXTENSIONS
+# Enhanced Flask functionality for security and development
+# ==============================================================================
+Flask-CORS>=4.0.0              # Cross-Origin Resource Sharing support
+Flask-Limiter>=3.5.0           # Rate limiting for API endpoints
+
+# ==============================================================================
+# DATABASE DRIVER
+# PostgreSQL adapter for SQLAlchemy database connections
+# ==============================================================================
+psycopg2-binary>=2.9.7         # PostgreSQL database adapter for Python
+
+# ==============================================================================
+# DATA VALIDATION & SERIALIZATION
+# Enhanced data handling and API response formatting
+# ==============================================================================
+marshmallow>=3.20.0            # Object serialization and validation library
+email-validator>=2.1.0         # Email validation support for forms and API inputs
+
+# ==============================================================================
+# DEVELOPMENT UTILITIES
+# Code formatting, linting, and development productivity tools
+# ==============================================================================
+black>=23.11.0                 # Python code formatter
+flake8>=6.1.0                  # Python linting and style checking
+mypy>=1.7.0                    # Static type checker for Python
+
+# ==============================================================================
+# VERSION COMPATIBILITY NOTES
+# ==============================================================================
+# All packages are compatible with Python 3.13.3 runtime environment
+# Core dependencies maintain compatibility with Flask 3.1.1 ecosystem
+# Security packages provide comprehensive vulnerability scanning and protection
+# Testing dependencies enable complete functionality validation against Node.js baseline
+# AWS packages support full cloud infrastructure integration and monitoring
+# Monitoring tools provide real-time observability and security event tracking
+#
+# For production deployment:
+# - Use frozen versions via pip freeze for reproducible builds
+# - Verify security scanning results before deployment
+# - Ensure AWS credentials and KMS keys are properly configured
+# - Validate database connection strings and encryption settings
