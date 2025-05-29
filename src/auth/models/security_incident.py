@@ -1,954 +1,1309 @@
 """
-SecurityIncident Model Implementation for Automated Security Incident Tracking.
+SecurityIncident Model Implementation for Automated Security Incident Tracking and Response.
 
-This module implements the SecurityIncident model for comprehensive threat detection,
-incident classification, and automated response coordination. The model captures
-security violations, authentication anomalies, and potential threats with integrated
-incident management capabilities for real-time security response.
+This module implements the SecurityIncident model using Flask-SQLAlchemy declarative patterns
+with PostgreSQL optimization and comprehensive security incident management capabilities. The model
+provides automated threat detection, incident classification, containment action tracking, and
+integration with the Flask incident response system for real-time security management.
 
 Key Features:
-- Automated security incident detection and tracking per Section 6.4.6.2
-- Incident classification system with severity levels and response prioritization
+- Comprehensive security incident tracking with automated threat detection
+- Incident classification system with severity levels and response procedures
 - Containment action coordination and automated response procedures
-- Evidence collection and storage for security investigations
+- Evidence collection and storage for security investigations using JSONB
 - Integration with monitoring systems for real-time incident response
-- Flask incident response system integration for automated threat containment
-- JSON-based evidence storage for comprehensive incident documentation
-- Temporal incident management with status tracking and resolution workflows
+- Threat intelligence correlation and risk assessment capabilities
+- GDPR and compliance-ready incident documentation and audit trails
+- Automated escalation and notification workflows
+- Integration with Flask incident response system per Section 6.4.6.2
 
 Technical Specification References:
 - Section 6.4.6.2: Incident Response Procedures with Python-Specific Response Capabilities
-- Section 6.4.6.1: Real-Time Security Monitoring with Python Observability Integration
-- Section 6.4.1.4: Token Handling for security incident token revocation procedures
-- Section 6.2.2.1: Database relationship integrity with proper foreign key constraints
+- Section 6.4.6.1: Real-Time Security Monitoring with Enhanced Security Monitoring Framework
+- Section 6.4.2.5: Enhanced Audit Framework with Structured Logging
+- Section 6.2.2.1: Entity Relationships and Data Models
+- Section 3.2.2: Flask-SQLAlchemy 3.1.1 integration requirements
+- Section 6.4.5.2: Security Testing Framework for incident validation
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union
+from typing import Optional, Dict, Any, List, Union
 from enum import Enum
-import uuid
 import json
-
+import uuid
+import structlog
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import (
-    Column, Integer, String, Text, Boolean, DateTime, ForeignKey,
-    Index, CheckConstraint, UniqueConstraint, Enum as SQLEnum
+    Column, Integer, String, DateTime, Boolean, Text, JSON,
+    ForeignKey, Index, CheckConstraint, UniqueConstraint, 
+    Enum as SQLEnum, event, Float
 )
-from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import relationship, validates
+from sqlalchemy.dialects.postgresql import JSONB, UUID, INET
 from sqlalchemy.sql import func
 
+# Import base model and User model for relationships
 from src.models.base import BaseModel, db
+from src.models.user import User
 
-
-class IncidentType(Enum):
-    """
-    Enumeration of security incident types for classification and response automation.
-    
-    These incident types align with the Flask security architecture and provide
-    comprehensive coverage of authentication, authorization, and runtime security
-    threats as specified in Section 6.4.6.2.
-    """
-    # Authentication and Authorization Incidents
-    AUTHENTICATION_BREACH = "auth_breach"
-    AUTHORIZATION_BYPASS = "authz_bypass"
-    PRIVILEGE_ESCALATION = "privilege_escalation"
-    BRUTE_FORCE = "brute_force"
-    
-    # Application Security Incidents
-    SQL_INJECTION = "sql_injection"
-    XSS_ATTEMPT = "xss_attempt"
-    CSRF_VIOLATION = "csrf_violation"
-    DATA_EXFILTRATION = "data_exfiltration"
-    
-    # Python Runtime and Flask-Specific Incidents
-    PYTHON_RUNTIME_ERROR = "python_runtime_error"
-    FLASK_SECURITY_VIOLATION = "flask_security_violation"
-    BLUEPRINT_ANOMALY = "blueprint_anomaly"
-    SESSION_HIJACKING = "session_hijacking"
-    
-    # Infrastructure and Network Security
-    SUSPICIOUS_NETWORK_ACTIVITY = "suspicious_network_activity"
-    CONTAINER_SECURITY_VIOLATION = "container_security_violation"
-    DEPENDENCY_VULNERABILITY = "dependency_vulnerability"
-    
-    # Monitoring and Compliance
-    AUDIT_LOG_TAMPERING = "audit_log_tampering"
-    COMPLIANCE_VIOLATION = "compliance_violation"
-    ANOMALY_DETECTION = "anomaly_detection"
+# Configure structured logging for security incident tracking per Section 6.4.6.2
+logger = structlog.get_logger("security_incident")
 
 
 class IncidentSeverity(Enum):
     """
-    Enumeration of incident severity levels for response prioritization.
+    Security incident severity levels for alerting and automated response coordination.
     
-    Severity levels determine automated response procedures and escalation
-    workflows as specified in Section 6.4.6.2 incident response procedures.
+    Aligns with Section 6.4.6.2 incident classification and automated response procedures.
+    Each severity level triggers specific containment actions and escalation workflows.
     """
-    CRITICAL = "critical"    # Immediate response required, potential data breach
-    HIGH = "high"           # Urgent response required, security compromise likely
-    MEDIUM = "medium"       # Timely response required, security risk present
-    LOW = "low"            # Standard response timeframe, minimal security impact
-    INFO = "info"          # Informational, monitoring and logging purposes
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
+
+
+class IncidentType(Enum):
+    """
+    Security incident types for comprehensive threat categorization and response procedures.
+    
+    Provides standardized incident classification for automated threat detection and
+    response coordination per Section 6.4.6.2 incident response procedures.
+    """
+    AUTHENTICATION_BREACH = "auth_breach"
+    AUTHORIZATION_BYPASS = "authz_bypass"
+    SQL_INJECTION = "sql_injection"
+    XSS_ATTEMPT = "xss_attempt"
+    CSRF_ATTACK = "csrf_attack"
+    PRIVILEGE_ESCALATION = "privilege_escalation"
+    DATA_EXFILTRATION = "data_exfiltration"
+    BRUTE_FORCE = "brute_force"
+    ACCOUNT_TAKEOVER = "account_takeover"
+    MALWARE_DETECTION = "malware_detection"
+    PYTHON_RUNTIME_ERROR = "python_runtime_error"
+    FLASK_SECURITY_VIOLATION = "flask_security_violation"
+    API_ABUSE = "api_abuse"
+    RATE_LIMIT_VIOLATION = "rate_limit_violation"
+    SUSPICIOUS_ACTIVITY = "suspicious_activity"
+    INSIDER_THREAT = "insider_threat"
+    PHISHING_ATTEMPT = "phishing_attempt"
+    SOCIAL_ENGINEERING = "social_engineering"
+    NETWORK_INTRUSION = "network_intrusion"
+    CONTAINER_BREACH = "container_breach"
+    INFRASTRUCTURE_ATTACK = "infrastructure_attack"
 
 
 class IncidentStatus(Enum):
     """
-    Enumeration of incident lifecycle status values for workflow management.
+    Security incident lifecycle status for workflow management and response tracking.
     
-    Status values track incident progression through detection, response,
-    containment, and resolution phases.
+    Supports automated incident response workflows and escalation procedures
+    per Section 6.4.6.2 incident response framework.
     """
-    DETECTED = "detected"               # Initial detection, automated analysis pending
-    ANALYZING = "analyzing"             # Automated analysis in progress
-    CONFIRMED = "confirmed"             # Incident validated, response initiated
-    CONTAINED = "contained"             # Threat contained, recovery in progress
-    INVESTIGATING = "investigating"     # Manual investigation ongoing
-    RESOLVED = "resolved"               # Incident fully resolved
-    FALSE_POSITIVE = "false_positive"   # Determined to be false alarm
-    ESCALATED = "escalated"            # Escalated to security team or external responders
+    DETECTED = "detected"
+    INVESTIGATING = "investigating"
+    TRIAGING = "triaging"
+    CONFIRMED = "confirmed"
+    CONTAINED = "contained"
+    MITIGATING = "mitigating"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+    FALSE_POSITIVE = "false_positive"
+
+
+class ContainmentActionType(Enum):
+    """
+    Automated containment action types for incident response procedures.
+    
+    Defines available containment actions per Section 6.4.6.2 automated response orchestration.
+    """
+    USER_SESSION_REVOCATION = "user_session_revocation"
+    IP_BLOCKING = "ip_blocking"
+    ENDPOINT_RATE_LIMITING = "endpoint_rate_limiting"
+    ACCOUNT_LOCKOUT = "account_lockout"
+    TOKEN_REVOCATION = "token_revocation"
+    BLUEPRINT_DISABLING = "blueprint_disabling"
+    CONTAINER_ISOLATION = "container_isolation"
+    NETWORK_SEGMENTATION = "network_segmentation"
+    DATABASE_CONNECTION_MONITORING = "database_connection_monitoring"
+    ENHANCED_LOGGING = "enhanced_logging"
+    SECURITY_TEAM_NOTIFICATION = "security_team_notification"
+    AUTOMATED_ROLLBACK = "automated_rollback"
+    TRAFFIC_ROUTING_MODIFICATION = "traffic_routing_modification"
+    ENCRYPTION_KEY_ROTATION = "encryption_key_rotation"
+    CERTIFICATE_REVOCATION = "certificate_revocation"
+
+
+class ThreatIntelligenceSource(Enum):
+    """
+    Threat intelligence source types for evidence correlation and threat assessment.
+    
+    Supports threat intelligence integration per Section 6.4.6.1 enhanced security monitoring.
+    """
+    INTERNAL_DETECTION = "internal_detection"
+    THREAT_INTELLIGENCE_FEED = "threat_intelligence_feed"
+    HONEYPOT = "honeypot"
+    IDS_IPS = "ids_ips"
+    SIEM_CORRELATION = "siem_correlation"
+    ML_ANOMALY_DETECTION = "ml_anomaly_detection"
+    USER_REPORT = "user_report"
+    EXTERNAL_NOTIFICATION = "external_notification"
+    AUTOMATED_SCANNING = "automated_scanning"
+    FLASK_SECURITY_FRAMEWORK = "flask_security_framework"
 
 
 class SecurityIncident(BaseModel):
     """
-    SecurityIncident model implementing automated security incident tracking with
-    comprehensive threat detection and response coordination.
+    Comprehensive security incident model for automated threat detection and response coordination.
     
-    This model captures security violations, authentication anomalies, and potential
-    threats with automated incident classification, containment action tracking,
-    and integration with the Flask incident response system for real-time security
-    management.
+    This model captures security violations, authentication anomalies, and potential threats
+    with automated incident classification, containment action tracking, and integration with
+    the Flask incident response system for real-time security management per Section 6.4.6.2.
     
     Attributes:
-        id (int): Auto-incrementing primary key for optimal PostgreSQL join performance
-        incident_uuid (UUID): Unique identifier for cross-system incident correlation
-        incident_type (IncidentType): Classification of incident type for response automation
-        severity (IncidentSeverity): Severity level for response prioritization
-        status (IncidentStatus): Current incident lifecycle status
-        title (str): Human-readable incident title for dashboard display
-        description (Text): Detailed incident description and initial analysis
-        
-        # Attribution and Source Information
-        user_id (int): Foreign key to User model for incident attribution
-        source_ip (str): Source IP address of the incident trigger
-        user_agent (str): User agent string for client identification
-        session_id (str): Associated session identifier for authentication incidents
-        
-        # Flask Application Context
-        blueprint_name (str): Flask blueprint where incident occurred
-        endpoint_name (str): Specific endpoint associated with the incident
-        request_method (str): HTTP method of the incident-triggering request
-        request_url (str): Full URL of the incident-triggering request
-        
-        # Evidence and Metadata Storage
-        evidence (JSON): Comprehensive evidence collection as JSON document
-        request_data (JSON): Request payload and parameters for analysis
-        python_traceback (Text): Python exception traceback for runtime errors
-        
-        # Response and Containment Tracking
-        containment_actions (JSON): List of executed containment actions
-        automated_response (JSON): Automated response details and outcomes
-        escalation_reason (Text): Reason for manual escalation if applicable
-        
-        # Temporal Management
-        detection_time (DateTime): Timestamp of initial incident detection
-        first_response_time (DateTime): Timestamp of first automated response
-        resolution_time (DateTime): Timestamp of incident resolution
-        
-        # Assignment and Workflow
-        assigned_to (str): Security analyst or team assigned to incident
-        priority_score (int): Calculated priority score for response ordering
-        false_positive_reason (Text): Explanation if marked as false positive
-        
-        # Audit and Compliance
-        compliance_impact (JSON): Impact assessment for regulatory compliance
-        audit_trail (JSON): Complete audit trail of incident handling actions
+        id (int): Primary key with auto-incrementing integer for optimal join performance
+        correlation_id (UUID): Unique correlation identifier for incident tracking across systems
+        incident_title (str): Human-readable incident title for identification and reporting
+        incident_description (text): Detailed incident description for investigation and analysis
+        incident_type (IncidentType): Standardized incident categorization for response procedures
+        severity (IncidentSeverity): Security severity level for automated response and escalation
+        status (IncidentStatus): Current incident workflow status for lifecycle management
+        detection_time (datetime): Precise timestamp of initial incident detection
+        last_activity_time (datetime): Timestamp of most recent incident activity or update
+        resolution_time (datetime): Timestamp of incident resolution for SLA tracking
+        affected_user_id (int): Foreign key to affected User for incident attribution
+        reporter_user_id (int): Foreign key to reporting User for incident accountability
+        assigned_to_user_id (int): Foreign key to assigned User for incident response ownership
+        source_ip_address (INET): Client IP address for network-based threat analysis
+        target_resource (str): Affected system resource or endpoint for impact assessment
+        attack_vector (str): Identified attack vector or exploitation method
+        threat_actor (str): Suspected threat actor or attack attribution information
+        threat_intelligence_sources (JSONB): Threat intelligence correlation data and sources
+        detection_method (str): Method used for incident detection and discovery
+        confidence_score (float): ML-based confidence score for incident validity assessment
+        risk_score (float): Risk assessment score for incident prioritization and response
+        impact_assessment (JSONB): Detailed impact analysis and business consequence evaluation
+        evidence_data (JSONB): Comprehensive evidence collection for security investigation
+        containment_actions (JSONB): Automated and manual containment actions performed
+        investigation_notes (JSONB): Investigation progress, findings, and analyst observations
+        compliance_implications (JSONB): Regulatory compliance impact and reporting requirements
+        related_incidents (JSONB): Related incident correlation and pattern analysis
+        automated_response_triggered (bool): Flag indicating if automated response was executed
+        escalation_required (bool): Flag indicating if manual escalation is required
+        false_positive_likelihood (float): ML-based false positive assessment score
+        timeline_data (JSONB): Detailed incident timeline for forensic analysis
+        forensic_artifacts (JSONB): Digital forensic evidence and artifact collection
+        communication_log (JSONB): Incident communication history and stakeholder notifications
+        lessons_learned (JSONB): Post-incident analysis and improvement recommendations
+        external_case_id (str): External ticketing system or case management reference
+        tags (JSONB): Flexible tagging system for incident categorization and search
+        archived (bool): Archive status for incident lifecycle management
+        retention_until (datetime): Data retention expiration for compliance management
+        created_at (datetime): Record creation timestamp with timezone support
+        updated_at (datetime): Record modification timestamp with automatic updates
         
     Relationships:
-        user (User): Many-to-one relationship with User model for attribution
-        related_incidents (List[SecurityIncident]): Self-referential relationship for incident correlation
+        affected_user (User): Many-to-one relationship with affected User for attribution
+        reporter_user (User): Many-to-one relationship with reporting User for accountability
+        assigned_to_user (User): Many-to-one relationship with assigned User for ownership
     """
     
     __tablename__ = 'security_incidents'
     
-    # Unique incident identifier for cross-system correlation
-    incident_uuid = Column(
+    # Unique correlation identifier for incident tracking per Section 6.4.6.2
+    correlation_id = Column(
         UUID(as_uuid=True),
-        unique=True,
         nullable=False,
         default=uuid.uuid4,
+        unique=True,
         index=True,
-        comment="Unique identifier for cross-system incident correlation and tracking"
+        comment="Unique correlation identifier for end-to-end incident tracking"
     )
     
-    # Incident Classification Fields
+    # Human-readable incident identification and description
+    incident_title = Column(
+        String(500),
+        nullable=False,
+        index=True,
+        comment="Human-readable incident title for identification and reporting"
+    )
+    
+    incident_description = Column(
+        Text,
+        nullable=False,
+        comment="Detailed incident description for investigation and analysis"
+    )
+    
+    # Incident classification using PostgreSQL Enum per Section 6.4.6.2
     incident_type = Column(
         SQLEnum(IncidentType),
         nullable=False,
         index=True,
-        comment="Classification of incident type for automated response procedures"
+        comment="Standardized incident type for automated response procedures"
     )
     
+    # Security severity level for automated response per Section 6.4.6.2
     severity = Column(
         SQLEnum(IncidentSeverity),
         nullable=False,
         index=True,
-        comment="Severity level for response prioritization and escalation workflows"
+        comment="Security severity level for automated response and escalation"
     )
     
+    # Incident workflow status for lifecycle management
     status = Column(
         SQLEnum(IncidentStatus),
         nullable=False,
         default=IncidentStatus.DETECTED,
         index=True,
-        comment="Current incident lifecycle status for workflow management"
+        comment="Current incident workflow status for lifecycle management"
     )
     
-    # Incident Identification and Description
-    title = Column(
-        String(255),
-        nullable=False,
-        comment="Human-readable incident title for dashboard display and reporting"
-    )
-    
-    description = Column(
-        Text,
-        nullable=False,
-        comment="Detailed incident description and initial automated analysis"
-    )
-    
-    # Attribution and Source Information
-    user_id = Column(
-        Integer,
-        ForeignKey('users.id', ondelete='SET NULL'),
-        nullable=True,  # Some incidents may not be attributable to specific users
-        index=True,
-        comment="Foreign key to User model for incident attribution and user-based analysis"
-    )
-    
-    source_ip = Column(
-        String(45),  # Support IPv6 addresses
-        nullable=True,
-        index=True,
-        comment="Source IP address of the incident trigger for network-based analysis"
-    )
-    
-    user_agent = Column(
-        Text,
-        nullable=True,
-        comment="User agent string for client identification and automated threat analysis"
-    )
-    
-    session_id = Column(
-        String(128),
-        nullable=True,
-        index=True,
-        comment="Associated session identifier for authentication and session-based incidents"
-    )
-    
-    # Flask Application Context Information
-    blueprint_name = Column(
-        String(100),
-        nullable=True,
-        index=True,
-        comment="Flask blueprint where incident occurred for application context analysis"
-    )
-    
-    endpoint_name = Column(
-        String(200),
-        nullable=True,
-        index=True,
-        comment="Specific endpoint associated with the incident for route-based analysis"
-    )
-    
-    request_method = Column(
-        String(10),
-        nullable=True,
-        comment="HTTP method of the incident-triggering request for request pattern analysis"
-    )
-    
-    request_url = Column(
-        Text,
-        nullable=True,
-        comment="Full URL of the incident-triggering request for forensic analysis"
-    )
-    
-    # Evidence and Metadata Storage (JSON fields for flexibility)
-    evidence = Column(
-        JSON,
-        nullable=False,
-        default=dict,
-        comment="Comprehensive evidence collection as JSON document for incident analysis"
-    )
-    
-    request_data = Column(
-        JSON,
-        nullable=True,
-        comment="Request payload and parameters for detailed forensic analysis"
-    )
-    
-    python_traceback = Column(
-        Text,
-        nullable=True,
-        comment="Python exception traceback for runtime error incidents and debugging"
-    )
-    
-    # Response and Containment Tracking
-    containment_actions = Column(
-        JSON,
-        nullable=False,
-        default=list,
-        comment="List of executed containment actions for response tracking and audit"
-    )
-    
-    automated_response = Column(
-        JSON,
-        nullable=True,
-        comment="Automated response details and outcomes for response effectiveness analysis"
-    )
-    
-    escalation_reason = Column(
-        Text,
-        nullable=True,
-        comment="Reason for manual escalation if automated response insufficient"
-    )
-    
-    # Temporal Management Fields
+    # Temporal fields for incident lifecycle tracking
     detection_time = Column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
         index=True,
-        comment="Timestamp of initial incident detection for response time analysis"
+        comment="Precise timestamp of initial incident detection"
     )
     
-    first_response_time = Column(
+    last_activity_time = Column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
-        comment="Timestamp of first automated response for response time metrics"
+        comment="Timestamp of most recent incident activity or update"
     )
     
     resolution_time = Column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
-        comment="Timestamp of incident resolution for closure metrics and SLA tracking"
+        comment="Timestamp of incident resolution for SLA tracking"
     )
     
-    # Assignment and Workflow Management
-    assigned_to = Column(
-        String(100),
-        nullable=True,
-        index=True,
-        comment="Security analyst or team assigned to incident for workflow management"
-    )
-    
-    priority_score = Column(
+    # User relationships for incident attribution and ownership per Section 6.2.2.1
+    affected_user_id = Column(
         Integer,
-        nullable=False,
-        default=0,
+        ForeignKey('users.id', ondelete='SET NULL'),
+        nullable=True,
         index=True,
-        comment="Calculated priority score for response ordering and resource allocation"
+        comment="Foreign key to affected User for incident attribution"
     )
     
-    false_positive_reason = Column(
-        Text,
+    reporter_user_id = Column(
+        Integer,
+        ForeignKey('users.id', ondelete='SET NULL'),
         nullable=True,
-        comment="Explanation if incident marked as false positive for tuning improvement"
+        index=True,
+        comment="Foreign key to reporting User for incident accountability"
     )
     
-    # Audit and Compliance Fields
-    compliance_impact = Column(
-        JSON,
+    assigned_to_user_id = Column(
+        Integer,
+        ForeignKey('users.id', ondelete='SET NULL'),
         nullable=True,
-        comment="Impact assessment for regulatory compliance and reporting requirements"
+        index=True,
+        comment="Foreign key to assigned User for incident response ownership"
     )
     
-    audit_trail = Column(
-        JSON,
+    # Network and system context for threat analysis per Section 6.4.6.1
+    source_ip_address = Column(
+        INET,
+        nullable=True,
+        index=True,
+        comment="Client IP address for network-based threat analysis and blocking"
+    )
+    
+    target_resource = Column(
+        String(500),
+        nullable=True,
+        index=True,
+        comment="Affected system resource or endpoint for impact assessment"
+    )
+    
+    # Threat analysis and attribution fields
+    attack_vector = Column(
+        String(200),
+        nullable=True,
+        index=True,
+        comment="Identified attack vector or exploitation method for threat analysis"
+    )
+    
+    threat_actor = Column(
+        String(200),
+        nullable=True,
+        index=True,
+        comment="Suspected threat actor or attack attribution information"
+    )
+    
+    # Threat intelligence correlation using PostgreSQL JSONB per Section 6.4.6.1
+    threat_intelligence_sources = Column(
+        JSONB,
+        nullable=True,
+        comment="Threat intelligence correlation data and external intelligence sources"
+    )
+    
+    detection_method = Column(
+        String(200),
+        nullable=True,
+        index=True,
+        comment="Method used for incident detection and discovery"
+    )
+    
+    # ML-based scoring for incident assessment per Section 6.4.6.1
+    confidence_score = Column(
+        Float,
+        nullable=True,
+        default=0.0,
+        index=True,
+        comment="ML-based confidence score for incident validity assessment"
+    )
+    
+    risk_score = Column(
+        Float,
+        nullable=True,
+        default=0.0,
+        index=True,
+        comment="Risk assessment score for incident prioritization and response"
+    )
+    
+    false_positive_likelihood = Column(
+        Float,
+        nullable=True,
+        default=0.0,
+        index=True,
+        comment="ML-based false positive assessment score for incident validation"
+    )
+    
+    # Comprehensive incident documentation using JSONB per Section 6.4.6.2
+    impact_assessment = Column(
+        JSONB,
+        nullable=True,
+        comment="Detailed impact analysis and business consequence evaluation"
+    )
+    
+    evidence_data = Column(
+        JSONB,
+        nullable=True,
+        comment="Comprehensive evidence collection for security investigation"
+    )
+    
+    containment_actions = Column(
+        JSONB,
+        nullable=True,
+        comment="Automated and manual containment actions performed during response"
+    )
+    
+    investigation_notes = Column(
+        JSONB,
+        nullable=True,
+        comment="Investigation progress, findings, and analyst observations"
+    )
+    
+    compliance_implications = Column(
+        JSONB,
+        nullable=True,
+        comment="Regulatory compliance impact and reporting requirements"
+    )
+    
+    related_incidents = Column(
+        JSONB,
+        nullable=True,
+        comment="Related incident correlation and pattern analysis"
+    )
+    
+    timeline_data = Column(
+        JSONB,
+        nullable=True,
+        comment="Detailed incident timeline for forensic analysis"
+    )
+    
+    forensic_artifacts = Column(
+        JSONB,
+        nullable=True,
+        comment="Digital forensic evidence and artifact collection"
+    )
+    
+    communication_log = Column(
+        JSONB,
+        nullable=True,
+        comment="Incident communication history and stakeholder notifications"
+    )
+    
+    lessons_learned = Column(
+        JSONB,
+        nullable=True,
+        comment="Post-incident analysis and improvement recommendations"
+    )
+    
+    # Workflow and escalation flags for automated response
+    automated_response_triggered = Column(
+        Boolean,
         nullable=False,
-        default=list,
-        comment="Complete audit trail of incident handling actions for compliance"
+        default=False,
+        index=True,
+        comment="Flag indicating if automated response was executed"
     )
     
-    # Relationship to User model for incident attribution
-    user = relationship(
+    escalation_required = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        comment="Flag indicating if manual escalation is required"
+    )
+    
+    # External system integration and categorization
+    external_case_id = Column(
+        String(200),
+        nullable=True,
+        index=True,
+        comment="External ticketing system or case management reference"
+    )
+    
+    tags = Column(
+        JSONB,
+        nullable=True,
+        comment="Flexible tagging system for incident categorization and search"
+    )
+    
+    # Data lifecycle management per Section 6.2.4.1
+    archived = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        comment="Archive status for incident lifecycle management"
+    )
+    
+    retention_until = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="Data retention expiration for compliance management"
+    )
+    
+    # Relationships to User model for comprehensive incident attribution per Section 6.2.2.1
+    affected_user = relationship(
         'User',
-        backref='security_incidents',
+        foreign_keys=[affected_user_id],
+        back_populates=None,
         lazy='select',
-        foreign_keys=[user_id],
-        doc="Many-to-one relationship with User model for incident attribution"
+        doc="Many-to-one relationship with affected User for incident attribution"
     )
     
-    # Self-referential relationship for incident correlation
-    related_incident_id = Column(
-        Integer,
-        ForeignKey('security_incidents.id', ondelete='SET NULL'),
-        nullable=True,
-        comment="Foreign key for incident correlation and relationship tracking"
+    reporter_user = relationship(
+        'User',
+        foreign_keys=[reporter_user_id],
+        back_populates=None,
+        lazy='select',
+        doc="Many-to-one relationship with reporting User for accountability"
     )
     
-    related_incidents = relationship(
-        'SecurityIncident',
-        backref='parent_incident',
-        remote_side='SecurityIncident.id',
-        lazy='dynamic',
-        doc="Self-referential relationship for incident correlation and grouping"
+    assigned_to_user = relationship(
+        'User',
+        foreign_keys=[assigned_to_user_id],
+        back_populates=None,
+        lazy='select',
+        doc="Many-to-one relationship with assigned User for response ownership"
     )
     
-    # Database constraints and indexes for performance optimization
+    # Database constraints and indexes for performance optimization per Section 6.2.2.2
     __table_args__ = (
-        # Unique constraints
-        UniqueConstraint('incident_uuid', name='uq_security_incident_uuid'),
-        
-        # Check constraints for data validation
-        CheckConstraint('LENGTH(title) >= 5', name='ck_security_incident_title_length'),
-        CheckConstraint('LENGTH(description) >= 10', name='ck_security_incident_description_length'),
-        CheckConstraint('priority_score >= 0 AND priority_score <= 100', name='ck_security_incident_priority_range'),
+        # Check constraints for data validation and integrity
         CheckConstraint(
-            "source_ip IS NULL OR (source_ip ~ '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' OR source_ip ~ '^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$')",
-            name='ck_security_incident_ip_format'
+            "confidence_score >= 0.0 AND confidence_score <= 1.0",
+            name='ck_security_incident_confidence_score_range'
+        ),
+        CheckConstraint(
+            "risk_score >= 0.0 AND risk_score <= 1.0",
+            name='ck_security_incident_risk_score_range'
+        ),
+        CheckConstraint(
+            "false_positive_likelihood >= 0.0 AND false_positive_likelihood <= 1.0",
+            name='ck_security_incident_false_positive_range'
+        ),
+        CheckConstraint(
+            "LENGTH(incident_title) >= 5",
+            name='ck_security_incident_title_length'
+        ),
+        CheckConstraint(
+            "LENGTH(incident_description) >= 10",
+            name='ck_security_incident_description_length'
         ),
         
-        # Composite indexes for query optimization
-        Index('ix_security_incident_severity_status', 'severity', 'status'),
-        Index('ix_security_incident_type_severity', 'incident_type', 'severity'),
-        Index('ix_security_incident_detection_severity', 'detection_time', 'severity'),
-        Index('ix_security_incident_user_detection', 'user_id', 'detection_time'),
-        Index('ix_security_incident_source_detection', 'source_ip', 'detection_time'),
-        Index('ix_security_incident_blueprint_endpoint', 'blueprint_name', 'endpoint_name'),
-        Index('ix_security_incident_status_assigned', 'status', 'assigned_to'),
-        Index('ix_security_incident_priority_detection', 'priority_score', 'detection_time'),
+        # Composite indexes for performance optimization per Section 6.2.2.2
+        Index('ix_security_incident_type_severity_status', 'incident_type', 'severity', 'status'),
+        Index('ix_security_incident_detection_status', 'detection_time', 'status'),
+        Index('ix_security_incident_severity_detection', 'severity', 'detection_time'),
+        Index('ix_security_incident_affected_user_time', 'affected_user_id', 'detection_time'),
+        Index('ix_security_incident_assigned_status', 'assigned_to_user_id', 'status'),
+        Index('ix_security_incident_ip_detection', 'source_ip_address', 'detection_time'),
+        Index('ix_security_incident_risk_confidence', 'risk_score', 'confidence_score'),
+        Index('ix_security_incident_archived_retention', 'archived', 'retention_until'),
+        Index('ix_security_incident_escalation_status', 'escalation_required', 'status'),
+        Index('ix_security_incident_automated_response', 'automated_response_triggered', 'detection_time'),
+        Index('ix_security_incident_external_case', 'external_case_id'),
+        Index('ix_security_incident_attack_vector', 'attack_vector'),
+        Index('ix_security_incident_threat_actor', 'threat_actor'),
+        Index('ix_security_incident_detection_method', 'detection_method'),
         
-        # Performance indexes for common queries
-        Index('ix_security_incident_unresolved', 'status', 'detection_time', 
-              postgresql_where="status NOT IN ('resolved', 'false_positive')"),
-        Index('ix_security_incident_critical_unresolved', 'severity', 'status', 'detection_time',
-              postgresql_where="severity = 'critical' AND status NOT IN ('resolved', 'false_positive')"),
+        # GIN indexes for JSONB columns to support complex queries per PostgreSQL optimization
+        Index('ix_security_incident_evidence_gin', 'evidence_data', postgresql_using='gin'),
+        Index('ix_security_incident_containment_gin', 'containment_actions', postgresql_using='gin'),
+        Index('ix_security_incident_impact_gin', 'impact_assessment', postgresql_using='gin'),
+        Index('ix_security_incident_intelligence_gin', 'threat_intelligence_sources', postgresql_using='gin'),
+        Index('ix_security_incident_investigation_gin', 'investigation_notes', postgresql_using='gin'),
+        Index('ix_security_incident_timeline_gin', 'timeline_data', postgresql_using='gin'),
+        Index('ix_security_incident_forensic_gin', 'forensic_artifacts', postgresql_using='gin'),
+        Index('ix_security_incident_tags_gin', 'tags', postgresql_using='gin'),
+        Index('ix_security_incident_compliance_gin', 'compliance_implications', postgresql_using='gin'),
+        Index('ix_security_incident_related_gin', 'related_incidents', postgresql_using='gin'),
+        Index('ix_security_incident_communication_gin', 'communication_log', postgresql_using='gin'),
         
         # Table-level comment for documentation
-        {'comment': 'Security incidents for automated threat detection and response coordination'}
+        {'comment': 'Comprehensive security incident tracking for automated threat detection and response'}
     )
     
     def __init__(self, **kwargs) -> None:
         """
-        Initialize a new SecurityIncident instance with validation and defaults.
+        Initialize SecurityIncident instance with comprehensive security context.
+        
+        Automatically generates correlation ID, sets retention policy, configures detection time,
+        and establishes structured logging context for security incident tracking per Section 6.4.6.2.
         
         Args:
-            **kwargs: Field values for incident initialization
-            
-        Raises:
-            ValueError: If required fields are missing or invalid
+            **kwargs: Field values for security incident initialization
         """
-        # Set default values if not provided
-        if 'incident_uuid' not in kwargs:
-            kwargs['incident_uuid'] = uuid.uuid4()
+        # Generate unique correlation ID if not provided
+        if 'correlation_id' not in kwargs:
+            kwargs['correlation_id'] = uuid.uuid4()
         
+        # Set detection time to current timestamp if not provided
         if 'detection_time' not in kwargs:
             kwargs['detection_time'] = datetime.now(timezone.utc)
         
-        if 'evidence' not in kwargs:
-            kwargs['evidence'] = {}
+        # Set last activity time to detection time if not provided
+        if 'last_activity_time' not in kwargs:
+            kwargs['last_activity_time'] = kwargs.get('detection_time', datetime.now(timezone.utc))
         
-        if 'containment_actions' not in kwargs:
-            kwargs['containment_actions'] = []
-        
-        if 'audit_trail' not in kwargs:
-            kwargs['audit_trail'] = []
-        
-        # Calculate initial priority score if not provided
-        if 'priority_score' not in kwargs and 'severity' in kwargs:
-            kwargs['priority_score'] = self._calculate_priority_score(
-                kwargs.get('severity'),
-                kwargs.get('incident_type')
+        # Set default retention period based on incident type and severity
+        if 'retention_until' not in kwargs:
+            kwargs['retention_until'] = self._calculate_retention_period(
+                kwargs.get('incident_type'), 
+                kwargs.get('severity', IncidentSeverity.MEDIUM)
             )
         
+        # Initialize JSONB fields as empty dictionaries if not provided
+        jsonb_fields = [
+            'evidence_data', 'containment_actions', 'investigation_notes', 
+            'compliance_implications', 'related_incidents', 'timeline_data',
+            'forensic_artifacts', 'communication_log', 'impact_assessment',
+            'threat_intelligence_sources', 'tags', 'lessons_learned'
+        ]
+        
+        for field in jsonb_fields:
+            if field not in kwargs:
+                kwargs[field] = {}
+        
+        # Initialize with structured logging context
         super().__init__(**kwargs)
+        
+        # Log incident creation for monitoring per Section 6.4.6.2
+        logger.error(
+            "Security incident created",
+            correlation_id=str(self.correlation_id),
+            incident_type=self.incident_type.value if self.incident_type else None,
+            severity=self.severity.value if self.severity else None,
+            title=self.incident_title,
+            affected_user_id=self.affected_user_id,
+            source_ip=str(self.source_ip_address) if self.source_ip_address else None,
+            detection_time=self.detection_time.isoformat() if self.detection_time else None
+        )
     
-    @staticmethod
-    def _calculate_priority_score(severity: IncidentSeverity, incident_type: IncidentType) -> int:
+    @validates('source_ip_address')
+    def validate_ip_address(self, key, address):
         """
-        Calculate incident priority score based on severity and type.
-        
-        Args:
-            severity (IncidentSeverity): Incident severity level
-            incident_type (IncidentType): Type of security incident
-            
-        Returns:
-            int: Priority score from 0-100 for response ordering
-        """
-        # Base priority by severity
-        severity_scores = {
-            IncidentSeverity.CRITICAL: 90,
-            IncidentSeverity.HIGH: 70,
-            IncidentSeverity.MEDIUM: 50,
-            IncidentSeverity.LOW: 30,
-            IncidentSeverity.INFO: 10
-        }
-        
-        # Type-specific modifiers
-        type_modifiers = {
-            IncidentType.AUTHENTICATION_BREACH: 10,
-            IncidentType.AUTHORIZATION_BYPASS: 8,
-            IncidentType.SQL_INJECTION: 10,
-            IncidentType.DATA_EXFILTRATION: 10,
-            IncidentType.PRIVILEGE_ESCALATION: 8,
-            IncidentType.PYTHON_RUNTIME_ERROR: 5,
-            IncidentType.BRUTE_FORCE: 6,
-        }
-        
-        base_score = severity_scores.get(severity, 30)
-        modifier = type_modifiers.get(incident_type, 0)
-        
-        return min(100, base_score + modifier)
-    
-    @validates('source_ip')
-    def validate_source_ip(self, key: str, address: str) -> Optional[str]:
-        """
-        Validate source IP address format for IPv4 and IPv6.
+        Validate IP address format for accurate threat analysis.
         
         Args:
             key (str): Field name being validated
-            address (str): IP address to validate
+            address: IP address to validate (can be string or IPv4/IPv6 object)
             
         Returns:
-            Optional[str]: Validated IP address or None if invalid
+            Valid IP address object
+            
+        Raises:
+            ValueError: If IP address format is invalid
         """
-        if not address:
-            return None
+        if address is None:
+            return address
         
         import ipaddress
         try:
-            ipaddress.ip_address(address)
+            # Convert string to IP address object for validation
+            if isinstance(address, str):
+                return ipaddress.ip_address(address)
             return address
         except ValueError:
-            # Log validation error but don't raise exception to allow incident creation
-            return address  # Store as-is for forensic analysis
+            logger.warning(
+                "Invalid IP address format in security incident",
+                ip_address=str(address),
+                correlation_id=str(self.correlation_id) if hasattr(self, 'correlation_id') else None
+            )
+            raise ValueError(f"Invalid IP address format: {address}")
     
-    @validates('evidence', 'request_data', 'containment_actions', 'automated_response', 'compliance_impact', 'audit_trail')
-    def validate_json_fields(self, key: str, value: Any) -> Any:
+    @validates('evidence_data', 'containment_actions', 'investigation_notes', 'compliance_implications',
+              'related_incidents', 'timeline_data', 'forensic_artifacts', 'communication_log',
+              'impact_assessment', 'threat_intelligence_sources', 'tags', 'lessons_learned')
+    def validate_jsonb_fields(self, key, value):
         """
-        Validate JSON fields can be serialized and contain valid data.
+        Validate JSONB field structure and security content.
         
         Args:
             key (str): Field name being validated
-            value (Any): Value to validate
+            value: JSON data to validate
             
         Returns:
-            Any: Validated value
-            
-        Raises:
-            ValueError: If value cannot be JSON serialized
+            dict: Validated JSON data
         """
         if value is None:
-            return None
+            return {}
         
-        try:
-            # Ensure value can be JSON serialized
-            json.dumps(value)
-            return value
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid JSON data for field {key}: {str(e)}")
-    
-    def add_evidence(self, key: str, value: Any) -> None:
-        """
-        Add evidence to the incident with timestamp.
-        
-        Args:
-            key (str): Evidence key for organization
-            value (Any): Evidence value (must be JSON serializable)
-        """
-        if self.evidence is None:
-            self.evidence = {}
-        
-        self.evidence[key] = {
-            'value': value,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'source': 'manual_addition'
-        }
-        
-        # Mark the JSON field as modified for SQLAlchemy
-        self.evidence = self.evidence.copy()
-    
-    def add_containment_action(self, action: str, result: str = None, metadata: Dict = None) -> None:
-        """
-        Record a containment action taken for the incident.
-        
-        Args:
-            action (str): Description of the containment action
-            result (str): Result or outcome of the action
-            metadata (Dict): Additional metadata about the action
-        """
-        action_entry = {
-            'action': action,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'result': result,
-            'metadata': metadata or {}
-        }
-        
-        if self.containment_actions is None:
-            self.containment_actions = []
-        
-        self.containment_actions.append(action_entry)
-        
-        # Mark the JSON field as modified for SQLAlchemy
-        self.containment_actions = self.containment_actions.copy()
-    
-    def add_audit_entry(self, action: str, actor: str, details: Dict = None) -> None:
-        """
-        Add entry to the incident audit trail.
-        
-        Args:
-            action (str): Action performed on the incident
-            actor (str): Person or system that performed the action
-            details (Dict): Additional details about the action
-        """
-        audit_entry = {
-            'action': action,
-            'actor': actor,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'details': details or {}
-        }
-        
-        if self.audit_trail is None:
-            self.audit_trail = []
-        
-        self.audit_trail.append(audit_entry)
-        
-        # Mark the JSON field as modified for SQLAlchemy
-        self.audit_trail = self.audit_trail.copy()
-    
-    def escalate(self, reason: str, assigned_to: str = None) -> None:
-        """
-        Escalate the incident to manual investigation.
-        
-        Args:
-            reason (str): Reason for escalation
-            assigned_to (str): Security analyst or team to assign
-        """
-        self.status = IncidentStatus.ESCALATED
-        self.escalation_reason = reason
-        
-        if assigned_to:
-            self.assigned_to = assigned_to
-        
-        self.add_audit_entry(
-            action='escalated',
-            actor='system',
-            details={
-                'reason': reason,
-                'assigned_to': assigned_to,
-                'escalation_time': datetime.now(timezone.utc).isoformat()
-            }
-        )
-    
-    def resolve(self, resolution_notes: str, actor: str = 'system') -> None:
-        """
-        Mark the incident as resolved.
-        
-        Args:
-            resolution_notes (str): Notes about the resolution
-            actor (str): Who resolved the incident
-        """
-        self.status = IncidentStatus.RESOLVED
-        self.resolution_time = datetime.now(timezone.utc)
-        
-        self.add_audit_entry(
-            action='resolved',
-            actor=actor,
-            details={
-                'resolution_notes': resolution_notes,
-                'resolution_time': self.resolution_time.isoformat()
-            }
-        )
-    
-    def mark_false_positive(self, reason: str, actor: str = 'system') -> None:
-        """
-        Mark the incident as a false positive.
-        
-        Args:
-            reason (str): Reason for false positive classification
-            actor (str): Who made the determination
-        """
-        self.status = IncidentStatus.FALSE_POSITIVE
-        self.false_positive_reason = reason
-        self.resolution_time = datetime.now(timezone.utc)
-        
-        self.add_audit_entry(
-            action='marked_false_positive',
-            actor=actor,
-            details={
-                'reason': reason,
-                'classification_time': self.resolution_time.isoformat()
-            }
-        )
-    
-    def get_response_time_seconds(self) -> Optional[int]:
-        """
-        Calculate response time in seconds from detection to first response.
-        
-        Returns:
-            Optional[int]: Response time in seconds, None if not yet responded
-        """
-        if not self.first_response_time:
-            return None
-        
-        delta = self.first_response_time - self.detection_time
-        return int(delta.total_seconds())
-    
-    def get_resolution_time_seconds(self) -> Optional[int]:
-        """
-        Calculate total resolution time in seconds from detection to resolution.
-        
-        Returns:
-            Optional[int]: Resolution time in seconds, None if not yet resolved
-        """
-        if not self.resolution_time:
-            return None
-        
-        delta = self.resolution_time - self.detection_time
-        return int(delta.total_seconds())
-    
-    def is_active(self) -> bool:
-        """
-        Check if the incident is still active and requires attention.
-        
-        Returns:
-            bool: True if incident is active, False if resolved or false positive
-        """
-        return self.status not in (IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE)
-    
-    def is_critical(self) -> bool:
-        """
-        Check if the incident is critical severity.
-        
-        Returns:
-            bool: True if incident is critical severity
-        """
-        return self.severity == IncidentSeverity.CRITICAL
-    
-    def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
-        """
-        Convert SecurityIncident instance to dictionary representation.
-        
-        Args:
-            include_sensitive (bool): Whether to include sensitive evidence data
-            
-        Returns:
-            Dict[str, Any]: Dictionary representation of the incident
-        """
-        result = {
-            'id': self.id,
-            'incident_uuid': str(self.incident_uuid),
-            'incident_type': self.incident_type.value,
-            'severity': self.severity.value,
-            'status': self.status.value,
-            'title': self.title,
-            'description': self.description,
-            'user_id': self.user_id,
-            'source_ip': self.source_ip,
-            'session_id': self.session_id,
-            'blueprint_name': self.blueprint_name,
-            'endpoint_name': self.endpoint_name,
-            'request_method': self.request_method,
-            'detection_time': self.detection_time.isoformat() if self.detection_time else None,
-            'first_response_time': self.first_response_time.isoformat() if self.first_response_time else None,
-            'resolution_time': self.resolution_time.isoformat() if self.resolution_time else None,
-            'assigned_to': self.assigned_to,
-            'priority_score': self.priority_score,
-            'containment_actions': self.containment_actions or [],
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-        }
-        
-        if include_sensitive:
-            result.update({
-                'evidence': self.evidence or {},
-                'request_data': self.request_data,
-                'python_traceback': self.python_traceback,
-                'user_agent': self.user_agent,
-                'request_url': self.request_url,
-                'automated_response': self.automated_response,
-                'audit_trail': self.audit_trail or [],
-                'compliance_impact': self.compliance_impact,
-                'escalation_reason': self.escalation_reason,
-                'false_positive_reason': self.false_positive_reason
-            })
-        
-        return result
-    
-    @classmethod
-    def find_by_uuid(cls, incident_uuid: Union[str, uuid.UUID]) -> Optional['SecurityIncident']:
-        """
-        Find incident by UUID with efficient query.
-        
-        Args:
-            incident_uuid (Union[str, uuid.UUID]): UUID to search for
-            
-        Returns:
-            Optional[SecurityIncident]: Incident if found, None otherwise
-        """
-        if isinstance(incident_uuid, str):
+        # Ensure value is a dictionary for consistent JSON structure
+        if not isinstance(value, dict):
             try:
-                incident_uuid = uuid.UUID(incident_uuid)
-            except ValueError:
-                return None
+                value = json.loads(value) if isinstance(value, str) else dict(value)
+            except (ValueError, TypeError) as e:
+                logger.error(
+                    "Invalid JSONB structure in security incident",
+                    field=key,
+                    error=str(e),
+                    correlation_id=str(self.correlation_id) if hasattr(self, 'correlation_id') else None
+                )
+                raise ValueError(f"Invalid JSONB structure for field {key}: {e}")
         
-        return cls.query.filter_by(incident_uuid=incident_uuid).first()
+        return value
     
-    @classmethod
-    def find_active_incidents(cls, severity: IncidentSeverity = None, limit: int = 100) -> List['SecurityIncident']:
+    @validates('confidence_score', 'risk_score', 'false_positive_likelihood')
+    def validate_score_ranges(self, key, value):
         """
-        Find active incidents with optional severity filtering.
+        Validate ML-based score ranges for incident assessment.
         
         Args:
-            severity (IncidentSeverity): Optional severity filter
-            limit (int): Maximum number of incidents to return
+            key (str): Field name being validated
+            value (float): Score value to validate
             
         Returns:
-            List[SecurityIncident]: List of active incidents
+            float: Validated score value
+            
+        Raises:
+            ValueError: If score is outside valid range
         """
-        query = cls.query.filter(
-            cls.status.notin_([IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE])
-        )
+        if value is None:
+            return 0.0
         
-        if severity:
-            query = query.filter_by(severity=severity)
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(f"{key} must be between 0.0 and 1.0, got {value}")
         
-        return query.order_by(
-            cls.priority_score.desc(),
-            cls.detection_time.desc()
-        ).limit(limit).all()
+        return float(value)
     
-    @classmethod
-    def find_by_user(cls, user_id: int, limit: int = 50) -> List['SecurityIncident']:
+    def _calculate_retention_period(
+        self, 
+        incident_type: Optional[IncidentType], 
+        severity: IncidentSeverity
+    ) -> datetime:
         """
-        Find incidents associated with a specific user.
+        Calculate data retention period based on incident type and severity per Section 6.2.4.1.
         
         Args:
-            user_id (int): User ID to search for
-            limit (int): Maximum number of incidents to return
+            incident_type (Optional[IncidentType]): Type of security incident
+            severity (IncidentSeverity): Incident severity level
             
         Returns:
-            List[SecurityIncident]: List of user-associated incidents
+            datetime: Retention expiration timestamp
         """
-        return cls.query.filter_by(user_id=user_id).order_by(
-            cls.detection_time.desc()
-        ).limit(limit).all()
-    
-    @classmethod
-    def find_by_source_ip(cls, source_ip: str, limit: int = 50) -> List['SecurityIncident']:
-        """
-        Find incidents from a specific source IP address.
+        current_time = datetime.now(timezone.utc)
         
-        Args:
-            source_ip (str): Source IP address to search for
-            limit (int): Maximum number of incidents to return
-            
-        Returns:
-            List[SecurityIncident]: List of incidents from the IP address
-        """
-        return cls.query.filter_by(source_ip=source_ip).order_by(
-            cls.detection_time.desc()
-        ).limit(limit).all()
-    
-    @classmethod
-    def get_incident_statistics(cls, days: int = 30) -> Dict[str, Any]:
-        """
-        Get incident statistics for the specified time period.
-        
-        Args:
-            days (int): Number of days to include in statistics
-            
-        Returns:
-            Dict[str, Any]: Statistics about incidents
-        """
-        start_time = datetime.now(timezone.utc) - timedelta(days=days)
-        
-        incidents = cls.query.filter(cls.detection_time >= start_time).all()
-        
-        stats = {
-            'total_incidents': len(incidents),
-            'by_severity': {},
-            'by_type': {},
-            'by_status': {},
-            'avg_response_time_seconds': 0,
-            'avg_resolution_time_seconds': 0,
-            'active_incidents': 0,
-            'false_positive_rate': 0
+        # Base retention periods by severity level
+        severity_retention = {
+            IncidentSeverity.CRITICAL: timedelta(days=2555),  # 7 years for critical incidents
+            IncidentSeverity.HIGH: timedelta(days=1825),      # 5 years for high severity
+            IncidentSeverity.MEDIUM: timedelta(days=1095),    # 3 years for medium severity
+            IncidentSeverity.LOW: timedelta(days=730),        # 2 years for low severity
+            IncidentSeverity.INFO: timedelta(days=365),       # 1 year for informational
         }
         
-        response_times = []
-        resolution_times = []
+        # Extended retention for specific incident types
+        extended_retention_types = {
+            IncidentType.AUTHENTICATION_BREACH,
+            IncidentType.DATA_EXFILTRATION,
+            IncidentType.PRIVILEGE_ESCALATION,
+            IncidentType.ACCOUNT_TAKEOVER,
+            IncidentType.INSIDER_THREAT,
+            IncidentType.NETWORK_INTRUSION
+        }
         
-        for incident in incidents:
-            # Count by severity
-            severity = incident.severity.value
-            stats['by_severity'][severity] = stats['by_severity'].get(severity, 0) + 1
-            
-            # Count by type
-            incident_type = incident.incident_type.value
-            stats['by_type'][incident_type] = stats['by_type'].get(incident_type, 0) + 1
-            
-            # Count by status
-            status = incident.status.value
-            stats['by_status'][status] = stats['by_status'].get(status, 0) + 1
-            
-            # Collect timing data
-            response_time = incident.get_response_time_seconds()
-            if response_time:
-                response_times.append(response_time)
-            
-            resolution_time = incident.get_resolution_time_seconds()
-            if resolution_time:
-                resolution_times.append(resolution_time)
-            
-            # Count active incidents
-            if incident.is_active():
-                stats['active_incidents'] += 1
+        base_retention = severity_retention.get(severity, timedelta(days=1095))
         
-        # Calculate averages
-        if response_times:
-            stats['avg_response_time_seconds'] = sum(response_times) / len(response_times)
+        # Extend retention for high-risk incident types
+        if incident_type in extended_retention_types:
+            base_retention = max(base_retention, timedelta(days=2555))  # Minimum 7 years
         
-        if resolution_times:
-            stats['avg_resolution_time_seconds'] = sum(resolution_times) / len(resolution_times)
+        return current_time + base_retention
+    
+    def update_status(self, new_status: IncidentStatus, notes: str = None) -> None:
+        """
+        Update incident status with timeline tracking and automated workflows.
         
-        # Calculate false positive rate
-        false_positives = stats['by_status'].get('false_positive', 0)
-        if stats['total_incidents'] > 0:
-            stats['false_positive_rate'] = false_positives / stats['total_incidents']
+        Args:
+            new_status (IncidentStatus): New incident status
+            notes (str): Optional status change notes
+        """
+        old_status = self.status
+        self.status = new_status
+        self.last_activity_time = datetime.now(timezone.utc)
         
-        return stats
+        # Set resolution time if incident is resolved or closed
+        if new_status in (IncidentStatus.RESOLVED, IncidentStatus.CLOSED):
+            self.resolution_time = self.last_activity_time
+        
+        # Update timeline data with status change
+        if not self.timeline_data:
+            self.timeline_data = {}
+        
+        if 'status_changes' not in self.timeline_data:
+            self.timeline_data['status_changes'] = []
+        
+        self.timeline_data['status_changes'].append({
+            'timestamp': self.last_activity_time.isoformat(),
+            'old_status': old_status.value if old_status else None,
+            'new_status': new_status.value,
+            'notes': notes,
+            'changed_by': 'system'  # Could be enhanced to track actual user
+        })
+        
+        # Log status change for monitoring
+        logger.info(
+            "Security incident status updated",
+            correlation_id=str(self.correlation_id),
+            old_status=old_status.value if old_status else None,
+            new_status=new_status.value,
+            incident_type=self.incident_type.value if self.incident_type else None,
+            severity=self.severity.value if self.severity else None
+        )
+    
+    def add_containment_action(
+        self, 
+        action_type: ContainmentActionType, 
+        action_details: Dict[str, Any], 
+        automated: bool = False
+    ) -> None:
+        """
+        Add containment action to incident tracking per Section 6.4.6.2.
+        
+        Args:
+            action_type (ContainmentActionType): Type of containment action performed
+            action_details (Dict[str, Any]): Detailed action information and results
+            automated (bool): Whether action was automated or manual
+        """
+        if not self.containment_actions:
+            self.containment_actions = {}
+        
+        if 'actions' not in self.containment_actions:
+            self.containment_actions['actions'] = []
+        
+        action_record = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'action_type': action_type.value,
+            'automated': automated,
+            'details': action_details,
+            'success': action_details.get('success', True),
+            'error_message': action_details.get('error_message', None)
+        }
+        
+        self.containment_actions['actions'].append(action_record)
+        self.last_activity_time = datetime.now(timezone.utc)
+        
+        # Update automated response flag if applicable
+        if automated:
+            self.automated_response_triggered = True
+        
+        # Log containment action for monitoring
+        logger.info(
+            "Containment action added to security incident",
+            correlation_id=str(self.correlation_id),
+            action_type=action_type.value,
+            automated=automated,
+            success=action_record['success'],
+            incident_type=self.incident_type.value if self.incident_type else None
+        )
+    
+    def add_evidence(
+        self, 
+        evidence_type: str, 
+        evidence_data: Dict[str, Any], 
+        source: str = None
+    ) -> None:
+        """
+        Add evidence data to incident for security investigation per Section 6.4.6.2.
+        
+        Args:
+            evidence_type (str): Type of evidence being collected
+            evidence_data (Dict[str, Any]): Detailed evidence information
+            source (str): Source of evidence collection
+        """
+        if not self.evidence_data:
+            self.evidence_data = {}
+        
+        if 'evidence_items' not in self.evidence_data:
+            self.evidence_data['evidence_items'] = []
+        
+        evidence_record = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'evidence_type': evidence_type,
+            'source': source or 'automated_collection',
+            'data': evidence_data,
+            'evidence_id': str(uuid.uuid4())
+        }
+        
+        self.evidence_data['evidence_items'].append(evidence_record)
+        self.last_activity_time = datetime.now(timezone.utc)
+        
+        # Log evidence collection for audit trail
+        logger.info(
+            "Evidence added to security incident",
+            correlation_id=str(self.correlation_id),
+            evidence_type=evidence_type,
+            source=source,
+            evidence_id=evidence_record['evidence_id'],
+            incident_type=self.incident_type.value if self.incident_type else None
+        )
+    
+    def add_investigation_note(
+        self, 
+        note: str, 
+        analyst: str = None, 
+        note_type: str = "general"
+    ) -> None:
+        """
+        Add investigation note for incident analysis and documentation.
+        
+        Args:
+            note (str): Investigation note content
+            analyst (str): Analyst or system adding the note
+            note_type (str): Type or category of the note
+        """
+        if not self.investigation_notes:
+            self.investigation_notes = {}
+        
+        if 'notes' not in self.investigation_notes:
+            self.investigation_notes['notes'] = []
+        
+        note_record = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'note_type': note_type,
+            'content': note,
+            'analyst': analyst or 'automated_system',
+            'note_id': str(uuid.uuid4())
+        }
+        
+        self.investigation_notes['notes'].append(note_record)
+        self.last_activity_time = datetime.now(timezone.utc)
+        
+        # Log investigation note addition
+        logger.info(
+            "Investigation note added to security incident",
+            correlation_id=str(self.correlation_id),
+            note_type=note_type,
+            analyst=analyst,
+            note_id=note_record['note_id']
+        )
+    
+    def correlate_related_incident(self, related_incident_id: int, relationship_type: str) -> None:
+        """
+        Correlate with related security incidents for pattern analysis.
+        
+        Args:
+            related_incident_id (int): ID of related security incident
+            relationship_type (str): Type of relationship between incidents
+        """
+        if not self.related_incidents:
+            self.related_incidents = {}
+        
+        if 'correlations' not in self.related_incidents:
+            self.related_incidents['correlations'] = []
+        
+        correlation_record = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'related_incident_id': related_incident_id,
+            'relationship_type': relationship_type,
+            'correlation_confidence': 0.8,  # Could be ML-based
+            'correlation_id': str(uuid.uuid4())
+        }
+        
+        self.related_incidents['correlations'].append(correlation_record)
+        self.last_activity_time = datetime.now(timezone.utc)
+        
+        # Log incident correlation
+        logger.info(
+            "Related incident correlation added",
+            correlation_id=str(self.correlation_id),
+            related_incident_id=related_incident_id,
+            relationship_type=relationship_type
+        )
+    
+    def calculate_risk_score(self) -> float:
+        """
+        Calculate comprehensive risk score based on incident characteristics.
+        
+        Returns:
+            float: Calculated risk score between 0.0 and 1.0
+        """
+        # Base risk scores by incident type
+        type_risk_scores = {
+            IncidentType.AUTHENTICATION_BREACH: 0.9,
+            IncidentType.DATA_EXFILTRATION: 0.95,
+            IncidentType.PRIVILEGE_ESCALATION: 0.85,
+            IncidentType.ACCOUNT_TAKEOVER: 0.9,
+            IncidentType.SQL_INJECTION: 0.8,
+            IncidentType.NETWORK_INTRUSION: 0.85,
+            IncidentType.INSIDER_THREAT: 0.9,
+            IncidentType.BRUTE_FORCE: 0.6,
+            IncidentType.API_ABUSE: 0.5,
+            IncidentType.SUSPICIOUS_ACTIVITY: 0.4,
+        }
+        
+        # Severity multipliers
+        severity_multipliers = {
+            IncidentSeverity.CRITICAL: 1.0,
+            IncidentSeverity.HIGH: 0.8,
+            IncidentSeverity.MEDIUM: 0.6,
+            IncidentSeverity.LOW: 0.4,
+            IncidentSeverity.INFO: 0.2,
+        }
+        
+        base_risk = type_risk_scores.get(self.incident_type, 0.5)
+        severity_multiplier = severity_multipliers.get(self.severity, 0.6)
+        
+        # Factor in confidence score
+        confidence_factor = self.confidence_score or 0.5
+        
+        # Calculate composite risk score
+        risk_score = min(1.0, base_risk * severity_multiplier * (0.5 + 0.5 * confidence_factor))
+        
+        # Update the risk score field
+        self.risk_score = risk_score
+        
+        return risk_score
+    
+    def to_structured_log(self) -> Dict[str, Any]:
+        """
+        Convert security incident to structured logging format per Section 6.4.6.2.
+        
+        Returns:
+            Dict[str, Any]: Structured log data for external monitoring systems
+        """
+        return {
+            'correlation_id': str(self.correlation_id),
+            'incident_type': self.incident_type.value if self.incident_type else None,
+            'severity': self.severity.value if self.severity else None,
+            'status': self.status.value if self.status else None,
+            'title': self.incident_title,
+            'detection_time': self.detection_time.isoformat() if self.detection_time else None,
+            'last_activity_time': self.last_activity_time.isoformat() if self.last_activity_time else None,
+            'resolution_time': self.resolution_time.isoformat() if self.resolution_time else None,
+            'affected_user_id': self.affected_user_id,
+            'source_ip_address': str(self.source_ip_address) if self.source_ip_address else None,
+            'target_resource': self.target_resource,
+            'attack_vector': self.attack_vector,
+            'threat_actor': self.threat_actor,
+            'detection_method': self.detection_method,
+            'confidence_score': self.confidence_score,
+            'risk_score': self.risk_score,
+            'false_positive_likelihood': self.false_positive_likelihood,
+            'automated_response_triggered': self.automated_response_triggered,
+            'escalation_required': self.escalation_required,
+            'external_case_id': self.external_case_id,
+            'archived': self.archived,
+            'containment_actions_count': len(self.containment_actions.get('actions', [])) if self.containment_actions else 0,
+            'evidence_items_count': len(self.evidence_data.get('evidence_items', [])) if self.evidence_data else 0,
+            'investigation_notes_count': len(self.investigation_notes.get('notes', [])) if self.investigation_notes else 0,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    def to_prometheus_metrics(self) -> Dict[str, Union[int, float, str]]:
+        """
+        Convert security incident to Prometheus metrics format per Section 6.4.6.1.
+        
+        Returns:
+            Dict[str, Union[int, float, str]]: Prometheus metrics data
+        """
+        return {
+            'security_incident_total': 1,
+            'security_incident_by_type': self.incident_type.value if self.incident_type else 'unknown',
+            'security_incident_by_severity': self.severity.value if self.severity else 'unknown',
+            'security_incident_by_status': self.status.value if self.status else 'unknown',
+            'security_incident_risk_score': self.risk_score or 0.0,
+            'security_incident_confidence_score': self.confidence_score or 0.0,
+            'security_incident_false_positive_likelihood': self.false_positive_likelihood or 0.0,
+            'security_incident_automated_response': 1 if self.automated_response_triggered else 0,
+            'security_incident_escalation_required': 1 if self.escalation_required else 0,
+            'security_incident_containment_actions': len(self.containment_actions.get('actions', [])) if self.containment_actions else 0,
+            'security_incident_evidence_items': len(self.evidence_data.get('evidence_items', [])) if self.evidence_data else 0,
+            'correlation_id': str(self.correlation_id),
+            'affected_user_id': str(self.affected_user_id) if self.affected_user_id else 'unknown',
+            'source_ip': str(self.source_ip_address) if self.source_ip_address else 'unknown'
+        }
+    
+    @classmethod
+    def create_incident(
+        cls,
+        incident_type: IncidentType,
+        severity: IncidentSeverity,
+        title: str,
+        description: str,
+        affected_user_id: Optional[int] = None,
+        reporter_user_id: Optional[int] = None,
+        source_ip: Optional[str] = None,
+        target_resource: Optional[str] = None,
+        attack_vector: Optional[str] = None,
+        detection_method: Optional[str] = None,
+        evidence_data: Optional[Dict[str, Any]] = None,
+        automated_detection: bool = True,
+        **kwargs
+    ) -> 'SecurityIncident':
+        """
+        Factory method for creating security incidents with comprehensive context.
+        
+        Args:
+            incident_type (IncidentType): Type of security incident
+            severity (IncidentSeverity): Incident severity level
+            title (str): Human-readable incident title
+            description (str): Detailed incident description
+            affected_user_id (Optional[int]): ID of affected user
+            reporter_user_id (Optional[int]): ID of reporting user
+            source_ip (Optional[str]): Source IP address
+            target_resource (Optional[str]): Affected resource
+            attack_vector (Optional[str]): Attack vector used
+            detection_method (Optional[str]): Detection method
+            evidence_data (Optional[Dict[str, Any]]): Initial evidence
+            automated_detection (bool): Whether detection was automated
+            **kwargs: Additional incident fields
+            
+        Returns:
+            SecurityIncident: Created and saved security incident instance
+        """
+        # Create security incident instance
+        incident = cls(
+            incident_type=incident_type,
+            severity=severity,
+            incident_title=title,
+            incident_description=description,
+            affected_user_id=affected_user_id,
+            reporter_user_id=reporter_user_id,
+            source_ip_address=source_ip,
+            target_resource=target_resource,
+            attack_vector=attack_vector,
+            detection_method=detection_method,
+            evidence_data=evidence_data or {},
+            automated_response_triggered=automated_detection,
+            **kwargs
+        )
+        
+        # Calculate initial risk score
+        incident.calculate_risk_score()
+        
+        # Save to database and return instance
+        return incident.save()
+    
+    @classmethod
+    def get_active_incidents(
+        cls,
+        severity_filter: Optional[IncidentSeverity] = None,
+        incident_type_filter: Optional[IncidentType] = None,
+        limit: int = 100
+    ) -> List['SecurityIncident']:
+        """
+        Retrieve active security incidents for incident response dashboard.
+        
+        Args:
+            severity_filter (Optional[IncidentSeverity]): Filter by minimum severity
+            incident_type_filter (Optional[IncidentType]): Filter by incident type
+            limit (int): Maximum number of incidents to return
+            
+        Returns:
+            List[SecurityIncident]: Active security incidents
+        """
+        # Define active statuses
+        active_statuses = [
+            IncidentStatus.DETECTED,
+            IncidentStatus.INVESTIGATING,
+            IncidentStatus.TRIAGING,
+            IncidentStatus.CONFIRMED,
+            IncidentStatus.CONTAINED,
+            IncidentStatus.MITIGATING
+        ]
+        
+        query = cls.query.filter(
+            cls.status.in_(active_statuses),
+            cls.archived == False
+        )
+        
+        # Apply severity filter if specified
+        if severity_filter:
+            # Define severity hierarchy for filtering
+            severity_levels = [IncidentSeverity.CRITICAL, IncidentSeverity.HIGH, IncidentSeverity.MEDIUM, IncidentSeverity.LOW, IncidentSeverity.INFO]
+            min_index = severity_levels.index(severity_filter)
+            included_severities = severity_levels[:min_index + 1]
+            query = query.filter(cls.severity.in_(included_severities))
+        
+        # Apply incident type filter if specified
+        if incident_type_filter:
+            query = query.filter(cls.incident_type == incident_type_filter)
+        
+        # Order by risk score and detection time
+        return query.order_by(cls.risk_score.desc(), cls.detection_time.desc()).limit(limit).all()
+    
+    @classmethod
+    def get_incidents_requiring_escalation(cls, limit: int = 50) -> List['SecurityIncident']:
+        """
+        Retrieve incidents requiring manual escalation per Section 6.4.6.2.
+        
+        Args:
+            limit (int): Maximum number of incidents to return
+            
+        Returns:
+            List[SecurityIncident]: Incidents requiring escalation
+        """
+        return cls.query.filter(
+            cls.escalation_required == True,
+            cls.status.in_([IncidentStatus.DETECTED, IncidentStatus.INVESTIGATING, IncidentStatus.TRIAGING]),
+            cls.archived == False
+        ).order_by(cls.severity.desc(), cls.detection_time.asc()).limit(limit).all()
+    
+    @classmethod
+    def get_incidents_by_ip(
+        cls,
+        ip_address: str,
+        hours: int = 24,
+        limit: int = 100
+    ) -> List['SecurityIncident']:
+        """
+        Retrieve incidents from specific IP address for threat analysis.
+        
+        Args:
+            ip_address (str): IP address to search for
+            hours (int): Time window in hours
+            limit (int): Maximum number of incidents to return
+            
+        Returns:
+            List[SecurityIncident]: Incidents from the specified IP
+        """
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        
+        return cls.query.filter(
+            cls.source_ip_address == ip_address,
+            cls.detection_time >= start_time,
+            cls.archived == False
+        ).order_by(cls.detection_time.desc()).limit(limit).all()
+    
+    @classmethod
+    def get_high_risk_incidents(
+        cls,
+        risk_threshold: float = 0.7,
+        hours: int = 24,
+        limit: int = 100
+    ) -> List['SecurityIncident']:
+        """
+        Retrieve high-risk incidents for priority response per Section 6.4.6.2.
+        
+        Args:
+            risk_threshold (float): Minimum risk score threshold
+            hours (int): Time window in hours
+            limit (int): Maximum number of incidents to return
+            
+        Returns:
+            List[SecurityIncident]: High-risk security incidents
+        """
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        
+        return cls.query.filter(
+            cls.risk_score >= risk_threshold,
+            cls.detection_time >= start_time,
+            cls.archived == False
+        ).order_by(cls.risk_score.desc(), cls.detection_time.desc()).limit(limit).all()
     
     def __repr__(self) -> str:
         """
         String representation of SecurityIncident for debugging and logging.
         
         Returns:
-            str: String representation of the incident
+            str: Human-readable representation of security incident
         """
         return (
-            f"<SecurityIncident(id={self.id}, uuid={self.incident_uuid}, "
-            f"type={self.incident_type.value}, severity={self.severity.value}, "
-            f"status={self.status.value})>"
+            f"<SecurityIncident(id={self.id}, correlation_id='{self.correlation_id}', "
+            f"type='{self.incident_type.value if self.incident_type else None}', "
+            f"severity='{self.severity.value if self.severity else None}', "
+            f"status='{self.status.value if self.status else None}', "
+            f"title='{self.incident_title[:50]}...' if len(self.incident_title) > 50 else '{self.incident_title}', "
+            f"detection_time='{self.detection_time}')>"
         )
+
+
+# SQLAlchemy event listeners for automated incident management per Section 6.4.6.2
+
+@event.listens_for(SecurityIncident, 'after_insert')
+def trigger_incident_response(mapper, connection, target):
+    """
+    SQLAlchemy event listener for triggering automated incident response.
     
-    def __str__(self) -> str:
-        """
-        Human-readable string representation of SecurityIncident.
-        
-        Returns:
-            str: User-friendly string representation
-        """
-        return f"Security Incident: {self.title} ({self.severity.value.upper()})"
+    Automatically initiates incident response procedures based on severity and type
+    according to Section 6.4.6.2 automated response orchestration.
+    """
+    logger.error(
+        "Security incident detected - automated response triggered",
+        correlation_id=str(target.correlation_id),
+        incident_type=target.incident_type.value if target.incident_type else None,
+        severity=target.severity.value if target.severity else None,
+        title=target.incident_title,
+        affected_user_id=target.affected_user_id,
+        source_ip=str(target.source_ip_address) if target.source_ip_address else None,
+        risk_score=target.risk_score,
+        automated_response=target.automated_response_triggered
+    )
 
 
-# Export the model and enums for use throughout the application
+@event.listens_for(SecurityIncident, 'after_update')
+def log_incident_changes(mapper, connection, target):
+    """
+    SQLAlchemy event listener for logging incident status changes.
+    
+    Captures all changes to security incidents for comprehensive audit trail
+    and incident lifecycle tracking.
+    """
+    logger.info(
+        "Security incident updated",
+        correlation_id=str(target.correlation_id),
+        incident_type=target.incident_type.value if target.incident_type else None,
+        severity=target.severity.value if target.severity else None,
+        status=target.status.value if target.status else None,
+        last_activity=target.last_activity_time.isoformat() if target.last_activity_time else None,
+        risk_score=target.risk_score,
+        escalation_required=target.escalation_required,
+        archived=target.archived
+    )
+
+
+# Export the model and enums for use throughout the security incident module
 __all__ = [
     'SecurityIncident',
+    'IncidentSeverity',
     'IncidentType',
-    'IncidentSeverity', 
-    'IncidentStatus'
+    'IncidentStatus',
+    'ContainmentActionType',
+    'ThreatIntelligenceSource'
 ]
