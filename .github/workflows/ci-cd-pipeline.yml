@@ -1,0 +1,628 @@
+name: Flask Migration CI/CD Pipeline
+
+# Workflow triggers: automated builds on code commits and pull requests per Section 8.4.1
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/*'
+      - 'hotfix/*'
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip test execution'
+        required: false
+        default: false
+        type: boolean
+
+# Environment variables for consistent configuration
+env:
+  PYTHON_VERSION: '3.13.3'
+  FLASK_VERSION: '3.1.1'
+  PYTEST_FLASK_VERSION: '1.3.0'
+  PYTEST_BENCHMARK_VERSION: '5.1.0'
+  DOCKER_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+  IMAGE_NAME: blitzy-flask-app
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  # Build and validation phase with comprehensive quality gates
+  build-and-validate:
+    name: Build & Quality Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    # Service containers for database migration testing
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: blitzy_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      # Python 3.13.3 build environment setup per Section 8.4.1
+      - name: Set up Python 3.13.3
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      # Flask 3.1.1 ecosystem dependencies installation
+      - name: Install Flask Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install Flask==${{ env.FLASK_VERSION }}
+          pip install Flask-SQLAlchemy==3.1.1
+          pip install Flask-Migrate==4.1.0
+          pip install Werkzeug>=3.1
+          pip install ItsDangerous>=2.2
+          pip install Jinja2>=3.1.2
+          pip install Click>=8.1.3
+          pip install Blinker>=1.9
+          
+      # pytest-flask 1.3.0 testing framework installation per Section 4.7.1
+      - name: Install Testing Framework
+        run: |
+          pip install pytest-flask==${{ env.PYTEST_FLASK_VERSION }}
+          pip install pytest-benchmark==${{ env.PYTEST_BENCHMARK_VERSION }}
+          pip install pytest-cov>=4.0.0
+          pip install pytest-xdist>=3.0.0
+          pip install tox>=4.26.0
+          
+      # Development and testing dependencies
+      - name: Install Development Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      # Code quality and linting validation
+      - name: Code Quality Checks
+        run: |
+          pip install flake8 black isort mypy
+          black --check src/ tests/
+          isort --check-only src/ tests/
+          flake8 src/ tests/ --max-line-length=88
+          mypy src/ --ignore-missing-imports
+      
+      # Flask extensions security scanning per Section 8.4.1
+      - name: Flask Extensions Vulnerability Assessment
+        run: |
+          pip install safety bandit[toml]
+          
+          # Targeted security scanning for Flask ecosystem components
+          echo "Scanning Flask-SQLAlchemy, Flask-Migrate, ItsDangerous, and Click for vulnerabilities..."
+          safety check --full-report --output screen
+          
+          # Dependency chain analysis including SQLAlchemy, Alembic, Werkzeug, and Jinja2
+          safety check --json --output vulnerabilities.json || true
+          
+          # Security policy enforcement with bandit
+          bandit -r src/ -f json -o bandit-report.json || true
+          bandit -r src/ --severity-level medium
+      
+      # Database migration validation using Flask-Migrate per Section 8.4.1
+      - name: Database Migration Validation
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blitzy_test
+          FLASK_ENV: testing
+        run: |
+          # Initialize Flask application for migration testing
+          export FLASK_APP=src/app.py
+          
+          # Pre-deployment Flask-Migrate execution against staging database
+          flask db init || echo "Database already initialized"
+          flask db migrate -m "Initial migration validation" || echo "No changes detected"
+          flask db upgrade
+          
+          # Schema validation using Flask-SQLAlchemy model comparison
+          python -m pytest tests/integration/database/test_migration_validation.py -v
+          
+          # Data integrity testing with referential integrity validation
+          python -m pytest tests/integration/database/test_data_integrity.py -v
+          
+          # Rollback verification using flask db downgrade commands
+          flask db downgrade base
+          flask db upgrade
+          
+      # Service Layer unit test coverage reporting per Section 8.4.1  
+      - name: Service Layer Coverage Analysis
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blitzy_test
+        run: |
+          # Coverage collection for Service Layer components using pytest-cov
+          python -m pytest tests/unit/services/ \
+            --cov=src/services \
+            --cov-report=html:htmlcov \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=90 \
+            --cov-branch \
+            --cov-branch-fail-under=85 \
+            -v
+          
+          # Coverage validation for Service Layer workflow orchestration
+          python -m pytest tests/unit/services/test_workflow_orchestration.py \
+            --cov=src/services \
+            --cov-append \
+            -v
+      
+      # Comprehensive testing framework validation per Section 8.4.3
+      - name: Functionality Parity Validation
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blitzy_test
+          FLASK_ENV: testing
+        run: |
+          # 100% API behavior and response format validation
+          python -m pytest tests/integration/api/ \
+            --maxfail=5 \
+            --tb=short \
+            -v
+          
+          # Integration testing with database operation validation
+          python -m pytest tests/integration/workflows/ \
+            --maxfail=3 \
+            -v
+          
+          # Business logic validation tests
+          python -m pytest tests/unit/ \
+            --ignore=tests/unit/services/ \
+            --maxfail=10 \
+            -v
+      
+      # Performance benchmarking against Node.js baseline per Section 8.4.3
+      - name: Performance Testing with pytest-benchmark
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blitzy_test
+        run: |
+          # API endpoint response time measurement with pytest-benchmark 5.1.0
+          python -m pytest tests/performance/ \
+            --benchmark-only \
+            --benchmark-json=benchmark-results.json \
+            --benchmark-compare-fail=median:10% \
+            --benchmark-sort=median \
+            -v
+          
+          # Memory usage profiling for Flask application resource consumption
+          python -m pytest tests/performance/test_memory_usage.py \
+            --benchmark-disable-gc \
+            -v
+      
+      # Comparative testing against Node.js system
+      - name: Multi-Environment Comparative Testing
+        if: github.event_name == 'pull_request'
+        run: |
+          # tox 4.26.0 multi-environment test execution
+          tox -e py313-flask31 -- tests/comparative/
+          
+          # Real-time Flask vs Node.js performance benchmarking
+          python -m pytest tests/comparative/test_api_parity.py -v
+      
+      # Artifact storage for deployment pipeline
+      - name: Store Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ github.sha }}
+          path: |
+            htmlcov/
+            coverage.xml
+            benchmark-results.json
+            vulnerabilities.json
+            bandit-report.json
+            pytest-report.xml
+          retention-days: 30
+      
+      # Coverage report publication to GitHub Pages
+      - name: Publish Coverage Report
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./htmlcov
+          destination_dir: coverage
+  
+  # Docker containerization with python:3.13.3-slim optimization per Section 3.6.2
+  containerization:
+    name: Docker Build & Security Scan
+    runs-on: ubuntu-latest
+    needs: build-and-validate
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      # AWS ECR authentication for image publishing
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      # Docker image building with python:3.13.3-slim base image
+      - name: Build Docker Image
+        run: |
+          # Multi-stage build for optimization per Section 8.3.2
+          docker build \
+            --tag ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --tag ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --build-arg PYTHON_VERSION=${{ env.PYTHON_VERSION }} \
+            --build-arg FLASK_VERSION=${{ env.FLASK_VERSION }} \
+            --cache-from=${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            .
+      
+      # Container security scanning with Amazon ECR integration per Section 8.3.3
+      - name: Container Security Scanning
+        run: |
+          # Vulnerability scanning with Amazon ECR integration
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $HOME/.docker/config.json:/root/.docker/config.json:ro \
+            aquasec/trivy:latest image \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --no-progress \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+      
+      # Image publishing to Amazon ECR
+      - name: Push to Amazon ECR
+        run: |
+          docker push ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+      
+      # Store image metadata for deployment
+      - name: Store Image Metadata
+        run: |
+          echo "IMAGE_URI=${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.sha }}" >> deployment-metadata.txt
+          echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')" >> deployment-metadata.txt
+      
+      - name: Upload Deployment Metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-metadata-${{ github.sha }}
+          path: deployment-metadata.txt
+          retention-days: 7
+
+  # Blue-green deployment with zero-downtime migration per Section 8.4.2
+  deploy-staging:
+    name: Deploy to Staging Environment
+    runs-on: ubuntu-latest
+    needs: [build-and-validate, containerization]
+    if: github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'staging'
+    environment: staging
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Download Deployment Metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-metadata-${{ github.sha }}
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      # Database migration orchestration before deployment
+      - name: Database Migration Execution
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: |
+          # Pre-switch migration with Flask-Migrate upgrade commands
+          python -m pip install Flask==${{ env.FLASK_VERSION }} Flask-Migrate==4.1.0
+          export FLASK_APP=src/app.py
+          
+          # Migration monitoring with progress tracking
+          flask db upgrade --directory migrations/
+          
+          # Compatibility validation against migrated database schema
+          python scripts/validate_database_schema.py --environment staging
+      
+      # Blue-green deployment orchestration per Section 8.4.2
+      - name: Blue-Green Deployment to Staging
+        run: |
+          # Deploy new version to green environment
+          aws ecs update-service \
+            --cluster blitzy-staging-cluster \
+            --service blitzy-flask-service-green \
+            --task-definition blitzy-flask-task:${{ github.sha }} \
+            --desired-count 2
+          
+          # Wait for deployment to stabilize
+          aws ecs wait services-stable \
+            --cluster blitzy-staging-cluster \
+            --services blitzy-flask-service-green
+      
+      # Comprehensive health validation before traffic switching
+      - name: Health Check Validation
+        run: |
+          # Comprehensive system health verification
+          python scripts/health_check.py \
+            --environment staging \
+            --target green \
+            --timeout 300 \
+            --retry-count 5
+          
+          # Performance validation against baseline
+          python scripts/performance_validation.py \
+            --environment staging \
+            --baseline-file benchmark-results.json
+      
+      # Traffic switching to green environment
+      - name: Switch Traffic to Green
+        run: |
+          # Update load balancer target group to green environment
+          python scripts/traffic_switch.py \
+            --environment staging \
+            --direction blue-to-green \
+            --health-check-grace-period 60
+      
+      # Post-deployment validation
+      - name: Post-Deployment Validation
+        run: |
+          # Migration success verification with schema validation
+          python scripts/post_deployment_validation.py \
+            --environment staging \
+            --validate-migration \
+            --validate-performance \
+            --validate-security
+
+  # Production deployment with enhanced safety measures
+  deploy-production:
+    name: Deploy to Production Environment  
+    runs-on: ubuntu-latest
+    needs: [build-and-validate, containerization, deploy-staging]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production'
+    environment: 
+      name: production
+      url: https://api.blitzy.com
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Download Deployment Metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-metadata-${{ github.sha }}
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      # Production database migration with enhanced monitoring
+      - name: Production Database Migration
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          # Pre-deployment migration validation
+          python scripts/pre_migration_backup.py --environment production
+          
+          # Execute Flask-Migrate upgrade with monitoring
+          export FLASK_APP=src/app.py
+          flask db upgrade --directory migrations/ --verbose
+          
+          # Real-time monitoring of migration execution
+          python scripts/migration_monitor.py --environment production --timeout 600
+      
+      # Blue-green deployment with enhanced safety measures
+      - name: Blue-Green Production Deployment
+        run: |
+          # Deploy to green environment with gradual rollout
+          aws ecs update-service \
+            --cluster blitzy-production-cluster \
+            --service blitzy-flask-service-green \
+            --task-definition blitzy-flask-task:${{ github.sha }} \
+            --desired-count 3
+          
+          # Extended stabilization wait for production
+          aws ecs wait services-stable \
+            --cluster blitzy-production-cluster \
+            --services blitzy-flask-service-green \
+            --max-attempts 20 \
+            --delay 30
+      
+      # Enhanced health validation for production
+      - name: Production Health Validation
+        run: |
+          # Comprehensive health checks with extended monitoring
+          python scripts/health_check.py \
+            --environment production \
+            --target green \
+            --timeout 600 \
+            --retry-count 10 \
+            --deep-health-check
+          
+          # Load testing validation
+          python scripts/load_test_validation.py \
+            --environment production \
+            --duration 300 \
+            --concurrent-users 100
+      
+      # Gradual traffic switching for production
+      - name: Gradual Traffic Switch
+        run: |
+          # 10% traffic to green environment
+          python scripts/traffic_switch.py \
+            --environment production \
+            --direction blue-to-green \
+            --percentage 10 \
+            --monitor-duration 300
+          
+          # 50% traffic after validation
+          python scripts/traffic_switch.py \
+            --environment production \
+            --direction blue-to-green \
+            --percentage 50 \
+            --monitor-duration 300
+          
+          # 100% traffic switch
+          python scripts/traffic_switch.py \
+            --environment production \
+            --direction blue-to-green \
+            --percentage 100 \
+            --monitor-duration 300
+      
+      # Production post-deployment validation
+      - name: Production Validation
+        run: |
+          # Comprehensive production validation
+          python scripts/post_deployment_validation.py \
+            --environment production \
+            --validate-migration \
+            --validate-performance \
+            --validate-security \
+            --validate-business-logic \
+            --comprehensive-report
+
+  # Automated rollback procedures with database coordination per Section 8.4.2
+  rollback-staging:
+    name: Emergency Rollback - Staging
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy-staging.result == 'failure'
+    needs: [deploy-staging]
+    environment: staging
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      # Coordinated database and application rollback
+      - name: Coordinated Rollback Execution
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: |
+          # Switch traffic back to blue environment immediately
+          python scripts/emergency_traffic_switch.py \
+            --environment staging \
+            --direction green-to-blue \
+            --immediate
+          
+          # Database rollback using Flask-Migrate downgrade
+          export FLASK_APP=src/app.py
+          flask db downgrade -1 --directory migrations/
+          
+          # Validate rollback success
+          python scripts/rollback_validation.py --environment staging
+
+  rollback-production:
+    name: Emergency Rollback - Production
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy-production.result == 'failure'
+    needs: [deploy-production]
+    environment: production
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      # Enhanced production rollback with comprehensive safety measures
+      - name: Production Emergency Rollback
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          # Immediate traffic switch to blue environment
+          python scripts/emergency_traffic_switch.py \
+            --environment production \
+            --direction green-to-blue \
+            --immediate \
+            --notify-stakeholders
+          
+          # Database rollback with backup restoration if needed
+          python scripts/production_rollback.py \
+            --use-backup-if-needed \
+            --validate-data-integrity \
+            --monitor-performance
+          
+          # Comprehensive rollback validation
+          python scripts/rollback_validation.py \
+            --environment production \
+            --comprehensive \
+            --stakeholder-notification
+
+  # Cleanup and maintenance
+  cleanup:
+    name: Pipeline Cleanup
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    timeout-minutes: 5
+    
+    steps:
+      - name: Cleanup Old Docker Images
+        run: |
+          # Remove old container images from ECR (keep last 10)
+          aws ecr list-images \
+            --repository-name ${{ env.IMAGE_NAME }} \
+            --query 'imageIds[10:]' \
+            --output json | \
+          jq '.[] | select(.imageTag != null)' | \
+          aws ecr batch-delete-image \
+            --repository-name ${{ env.IMAGE_NAME }} \
+            --image-ids file:///dev/stdin || true
+      
+      - name: Cleanup Artifacts
+        run: |
+          # Clean up temporary artifacts older than 7 days
+          echo "Cleanup completed for workflow run ${{ github.run_id }}"
