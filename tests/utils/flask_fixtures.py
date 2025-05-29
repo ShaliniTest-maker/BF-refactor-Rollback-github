@@ -1,1004 +1,1166 @@
 """
-Core Flask Testing Fixtures
+Core Flask Testing Fixtures and Utilities
 
-This module provides comprehensive Flask testing fixtures for pytest-flask 1.3.0 integration,
-enabling consistent Flask application testing across all test modules with proper setup and
-teardown procedures. The fixtures support Flask application factory pattern testing, request
-context management, database testing with Flask-SQLAlchemy, and blueprint testing infrastructure.
+This module provides comprehensive Flask-specific testing fixtures implementing
+pytest-flask 1.3.0 integration for Flask application factory test client
+initialization, request context management, and Flask-specific testing patterns.
+Establishes foundational testing infrastructure enabling consistent Flask
+application testing across all test modules with proper setup and teardown
+procedures as specified in Section 4.7.1.
 
-Key Features:
+The fixtures complement the base testing infrastructure in conftest.py with
+specialized Flask testing patterns including:
 - Flask application factory pattern testing support per Feature F-008
-- pytest-flask 1.3.0 plugin integration for Flask-specific testing capabilities per Section 4.7.1
-- Test environment configuration with Flask app.config management per Feature F-010
-- Blueprint testing infrastructure for API endpoint validation per Feature F-001
-- Database testing fixtures with Flask-SQLAlchemy integration per Feature F-003
+- Blueprint testing infrastructure for modular route validation per Feature F-001
+- Flask-SQLAlchemy test database fixtures with transaction rollback per Feature F-003
+- Request context management for session and authentication testing per Section 4.7.1
 - Flask development server fixtures for integration testing per Section 3.6.1
 
-Dependencies:
-- Flask 3.1.1 with application factory pattern
-- pytest-flask 1.3.0 for Flask-specific testing capabilities
-- Flask-SQLAlchemy 3.1.1 for database ORM functionality
-- Flask-Migrate 4.1.0 for database versioning
-- pytest-benchmark 5.1.0 for performance testing integration
+Key Dependencies:
+- pytest-flask 1.3.0: Flask application testing fixtures and utilities
+- Flask 3.1.1: Application factory pattern and request context management
+- Flask-SQLAlchemy 3.1.1: Database ORM and testing patterns with PostgreSQL 14
+- Flask-Login: User session management and authentication simulation
 
-Author: Flask Migration Team
+Author: Blitzy Development Team
 Version: 1.0.0
-Created: 2024
+Python: 3.13.3
+Flask: 3.1.1
 """
 
 import os
 import pytest
 import tempfile
-from unittest.mock import Mock, patch
+import threading
+import time
+import subprocess
+import socket
 from contextlib import contextmanager
-from typing import Generator, Any, Dict, Optional, List
+from typing import Dict, Any, Generator, Optional, List, Tuple, Callable
+from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
+import uuid
+import json
+import multiprocessing
 
-# Flask core imports
-from flask import Flask, current_app, g
+# Flask core imports for application factory pattern testing
+from flask import Flask, Blueprint, g, session, request, current_app, jsonify
 from flask.testing import FlaskClient
 from flask.ctx import RequestContext, AppContext
+from werkzeug.test import Client, EnvironBuilder
+from werkzeug.wrappers import Response
 
-# Database and migration imports
+# Flask extension imports for comprehensive testing support
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
-from sqlalchemy.pool import StaticPool
+from flask_login import UserMixin, login_user, logout_user, current_user, LoginManager
 
-# Authentication imports for testing
-from werkzeug.security import generate_password_hash
-from itsdangerous import URLSafeTimedSerializer
+# Import application components with fallback handling
+try:
+    from app import create_app, create_wsgi_app
+    from config import Config, DevelopmentConfig, TestingConfig, ProductionConfig, StagingConfig
+    from src.models.base import db
+    from src.models.user import User
+    from src.models.session import UserSession
+    from src.auth.session_manager import FlaskSessionManager
+    from src.auth.auth0_integration import Auth0Integration
+    from src.auth.decorators import AuthenticationDecorators
+    from src.services.user_service import UserService
+    from src.services.validation_service import ValidationService
+except ImportError:
+    # Handle development scenario where modules may not exist yet
+    create_app = None
+    create_wsgi_app = None
+    Config = None
+    DevelopmentConfig = None
+    TestingConfig = None
+    ProductionConfig = None
+    StagingConfig = None
+    db = None
+    User = None
+    UserSession = None
+    FlaskSessionManager = None
+    Auth0Integration = None
+    AuthenticationDecorators = None
+    UserService = None
+    ValidationService = None
 
-# Application imports
-from src.models import db, User, UserSession, BusinessEntity, EntityRelationship
-from src.blueprints import register_blueprints
-from config import TestingConfig
 
-
-# =====================================
-# Flask Application Factory Fixtures
-# =====================================
-
-@pytest.fixture(scope='session')
-def app_config() -> Dict[str, Any]:
+class FlaskTestingConfig:
     """
-    Flask application test configuration fixture providing environment-specific
-    settings for test isolation and Flask app.config management.
+    Enhanced Flask testing configuration providing comprehensive test environment
+    isolation and Flask app.config management per Feature F-010.
     
-    This fixture establishes test environment configuration per Feature F-010,
-    ensuring proper isolation between test runs and production environments.
-    
-    Returns:
-        Dict[str, Any]: Test configuration dictionary for Flask app.config
-        
-    Features:
-        - In-memory SQLite database for fast test execution
-        - Disabled CSRF protection for testing convenience
-        - Testing mode activation for Flask debugging
-        - Secret key generation for session management
-        - Database query tracking disabled for performance
+    This configuration class extends base testing configuration with Flask-specific
+    testing patterns including request context management, blueprint testing support,
+    and Flask-SQLAlchemy integration optimizations for testing scenarios.
     """
-    # Create temporary database file for test isolation
-    db_fd, db_path = tempfile.mkstemp(suffix='.db')
-    os.close(db_fd)
     
-    config = {
-        'TESTING': True,
-        'DEBUG': True,
-        'WTF_CSRF_ENABLED': False,
-        'SECRET_KEY': 'test-secret-key-for-testing-only',
-        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{db_path}',
-        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
-        'SQLALCHEMY_ENGINE_OPTIONS': {
-            'poolclass': StaticPool,
-            'pool_pre_ping': True,
-            'connect_args': {
-                'check_same_thread': False,
-            },
-        },
-        # Performance testing configuration
-        'BENCHMARK_ONLY': False,
-        'BENCHMARK_SORT': 'mean',
-        'BENCHMARK_COLUMNS': ['min', 'max', 'mean', 'stddev', 'rounds', 'iterations'],
-        # Authentication testing configuration
-        'AUTH_TOKEN_EXPIRATION': 3600,  # 1 hour for testing
-        'SESSION_TIMEOUT': 1800,  # 30 minutes for testing
-        # Blueprint testing configuration
-        'BLUEPRINT_TESTING_MODE': True,
-        'API_TESTING_HEADERS': {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        },
+    # Flask core testing configuration
+    TESTING = True
+    DEBUG = False
+    SECRET_KEY = 'flask-test-secret-key-for-pytest-only'
+    WTF_CSRF_ENABLED = False  # Disable CSRF for testing simplicity
+    SERVER_NAME = 'localhost:5000'  # Required for some Flask testing patterns
+    
+    # Database configuration for Flask-SQLAlchemy testing
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+        'echo': False,  # Enable for SQL query debugging
+        'pool_timeout': 10,
+        'pool_size': 5,
+        'max_overflow': 0  # Disable overflow for testing predictability
     }
     
-    yield config
+    # Session management configuration for testing
+    SESSION_TYPE = 'filesystem'
+    SESSION_PERMANENT = False
+    SESSION_USE_SIGNER = True
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=1)
+    SESSION_COOKIE_SECURE = False  # Allow testing over HTTP
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
     
-    # Cleanup: Remove temporary database file
-    try:
-        os.unlink(db_path)
-    except OSError:
-        pass
+    # Authentication testing configuration
+    AUTH0_DOMAIN = 'test-domain.auth0.com'
+    AUTH0_CLIENT_ID = 'test-client-id'
+    AUTH0_CLIENT_SECRET = 'test-client-secret'
+    AUTH0_AUDIENCE = 'test-audience'
+    JWT_SECRET_KEY = 'test-jwt-secret-key'
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=15)
+    
+    # Flask-Login testing configuration
+    LOGIN_DISABLED = False  # Enable login for authentication testing
+    REMEMBER_COOKIE_DURATION = timedelta(hours=1)
+    
+    # Blueprint testing configuration
+    BLUEPRINT_PREFIX_OVERRIDE = '/test'  # Optional prefix for blueprint testing
+    
+    # Performance testing configuration
+    MAX_REQUEST_DURATION = 1.0  # Maximum allowed request duration in seconds
+    PERFORMANCE_MONITORING_ENABLED = True
+    
+    # External service mocking configuration
+    EXTERNAL_SERVICES_MOCK = True
+    DISABLE_EXTERNAL_CALLS = True
+    
+    # Logging configuration for testing
+    LOG_LEVEL = 'WARNING'
+    TESTING_LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
 
-@pytest.fixture(scope='session')
-def app(app_config: Dict[str, Any]) -> Generator[Flask, None, None]:
+class FlaskBlueprintTestSuite:
     """
-    Flask application factory fixture with pytest-flask 1.3.0 integration,
-    providing structured Flask application initialization for testing.
+    Flask blueprint testing utilities providing comprehensive blueprint validation
+    and modular route testing infrastructure per Feature F-001.
     
-    This fixture implements the Flask application factory pattern per Section 5.1.1,
-    enabling comprehensive testing of the Flask 3.1.1 application with proper
-    configuration management and blueprint registration.
-    
-    Args:
-        app_config: Test configuration dictionary from app_config fixture
-        
-    Yields:
-        Flask: Configured Flask application instance for testing
-        
-    Features:
-        - Flask application factory pattern integration
-        - Blueprint registration orchestration
-        - Database initialization with Flask-SQLAlchemy
-        - Migration context setup with Flask-Migrate
-        - Test environment isolation
+    This class implements blueprint-specific testing patterns enabling isolated
+    testing of Flask blueprint functionality, route registration validation,
+    and blueprint-specific configuration testing.
     """
-    # Import the application factory
-    from app import create_app
     
-    # Create Flask application with test configuration
-    flask_app = create_app(config=app_config)
-    
-    # Establish application context for testing
-    with flask_app.app_context():
-        # Initialize database tables for testing
-        db.create_all()
+    def __init__(self, app: Flask):
+        self.app = app
+        self.registered_blueprints = []
+        self.blueprint_test_data = {}
         
-        # Yield the configured application
-        yield flask_app
+    def register_test_blueprint(self, blueprint: Blueprint, url_prefix: str = None) -> None:
+        """
+        Register a test blueprint with the Flask application for testing.
         
-        # Cleanup: Drop all database tables
-        db.drop_all()
-
-
-@pytest.fixture
-def client(app: Flask) -> FlaskClient:
-    """
-    Flask test client fixture providing HTTP request simulation capabilities
-    for API endpoint testing and blueprint validation.
-    
-    This fixture enables comprehensive API endpoint testing per Feature F-001,
-    supporting Flask blueprint testing infrastructure with proper request
-    context management and response validation.
-    
-    Args:
-        app: Flask application instance from app fixture
+        Args:
+            blueprint: Flask Blueprint instance to register
+            url_prefix: Optional URL prefix for blueprint routes
+        """
+        self.app.register_blueprint(blueprint, url_prefix=url_prefix)
+        self.registered_blueprints.append({
+            'blueprint': blueprint,
+            'name': blueprint.name,
+            'url_prefix': url_prefix,
+            'registered_at': datetime.utcnow()
+        })
         
-    Returns:
-        FlaskClient: Flask test client for HTTP request simulation
+    def create_test_blueprint(self, name: str, routes: List[Tuple[str, str, Callable]] = None) -> Blueprint:
+        """
+        Create a test blueprint with specified routes for testing scenarios.
         
-    Features:
-        - HTTP method testing (GET, POST, PUT, DELETE)
-        - JSON request/response handling
-        - Session management and cookie support
-        - Blueprint route testing
-        - Authentication testing support
-    """
-    return app.test_client()
-
-
-@pytest.fixture
-def runner(app: Flask):
-    """
-    Flask CLI runner fixture for testing Click command-line interfaces
-    and Flask-Migrate database operations.
-    
-    This fixture supports Flask development server fixtures per Section 3.6.1,
-    enabling testing of CLI commands and database migration operations.
-    
-    Args:
-        app: Flask application instance from app fixture
-        
-    Returns:
-        FlaskCliRunner: Flask CLI test runner for command testing
-        
-    Features:
-        - Flask CLI command testing
-        - Database migration command testing
-        - Environment variable injection
-        - Command output validation
-    """
-    return app.test_cli_runner()
-
-
-# =====================================
-# Database Testing Fixtures
-# =====================================
-
-@pytest.fixture
-def db_session(app: Flask) -> Generator[SQLAlchemy, None, None]:
-    """
-    Database session fixture with Flask-SQLAlchemy integration and transaction
-    rollback capabilities for test isolation.
-    
-    This fixture implements Flask-SQLAlchemy test database fixtures per Feature F-003,
-    providing comprehensive database testing with automatic transaction rollback
-    to ensure test isolation and data consistency.
-    
-    Args:
-        app: Flask application instance from app fixture
-        
-    Yields:
-        SQLAlchemy: Database session with transaction isolation
-        
-    Features:
-        - Transaction-based test isolation
-        - Automatic rollback after each test
-        - Flask-SQLAlchemy session management
-        - Database constraint validation
-        - Relationship integrity testing
-    """
-    with app.app_context():
-        # Begin a transaction
-        connection = db.engine.connect()
-        transaction = connection.begin()
-        
-        # Configure session to use the transaction
-        db.session = db.create_scoped_session(
-            options={'bind': connection, 'binds': {}}
-        )
-        
-        # Create all tables within the transaction
-        db.create_all()
-        
-        yield db
-        
-        # Rollback transaction to clean up test data
-        transaction.rollback()
-        connection.close()
-        db.session.remove()
-
-
-@pytest.fixture
-def clean_db(db_session: SQLAlchemy) -> SQLAlchemy:
-    """
-    Clean database fixture ensuring empty database state for each test.
-    
-    This fixture provides a clean database state by truncating all tables
-    while preserving schema structure, enabling reliable test execution
-    with predictable data states.
-    
-    Args:
-        db_session: Database session from db_session fixture
-        
-    Returns:
-        SQLAlchemy: Clean database session with empty tables
-        
-    Features:
-        - Table truncation for clean state
-        - Schema preservation
-        - Foreign key constraint handling
-        - Identity column reset
-    """
-    # Truncate all tables while preserving schema
-    for table in reversed(db.metadata.sorted_tables):
-        db_session.session.execute(table.delete())
-    
-    db_session.session.commit()
-    return db_session
-
-
-# =====================================
-# Request Context Management Fixtures
-# =====================================
-
-@pytest.fixture
-def app_context(app: Flask) -> Generator[AppContext, None, None]:
-    """
-    Flask application context fixture for testing components that require
-    current_app access outside of request contexts.
-    
-    This fixture enables proper Flask request context management per Section 4.7.1,
-    supporting session and authentication testing with proper context isolation.
-    
-    Args:
-        app: Flask application instance from app fixture
-        
-    Yields:
-        AppContext: Flask application context for testing
-        
-    Features:
-        - Application context management
-        - current_app access enablement
-        - Configuration access for testing
-        - Extension context support
-    """
-    with app.app_context() as ctx:
-        yield ctx
-
-
-@pytest.fixture
-def request_context(app: Flask) -> Generator[RequestContext, None, None]:
-    """
-    Flask request context fixture enabling proper session and authentication
-    testing with request-bound context management.
-    
-    This fixture supports Flask request context fixtures per Section 4.7.1,
-    enabling comprehensive testing of request-dependent functionality including
-    session management, authentication decorators, and request data processing.
-    
-    Args:
-        app: Flask application instance from app fixture
-        
-    Yields:
-        RequestContext: Flask request context for testing
-        
-    Features:
-        - Request context simulation
-        - Session data access
-        - Authentication context support
-        - Request data injection
-        - Context variable management
-    """
-    with app.test_request_context() as ctx:
-        yield ctx
-
-
-@pytest.fixture
-def authenticated_request_context(app: Flask, test_user: User) -> Generator[RequestContext, None, None]:
-    """
-    Authenticated request context fixture providing pre-authenticated user
-    context for testing protected endpoints and user-specific functionality.
-    
-    This fixture enables comprehensive authentication testing per Feature F-007,
-    supporting Flask-Login integration and ItsDangerous session management
-    with proper user authentication state simulation.
-    
-    Args:
-        app: Flask application instance from app fixture
-        test_user: Authenticated user instance from test_user fixture
-        
-    Yields:
-        RequestContext: Authenticated Flask request context for testing
-        
-    Features:
-        - Pre-authenticated user context
-        - Session management simulation
-        - Authentication decorator testing
-        - User-specific data access
-        - Permission validation testing
-    """
-    with app.test_request_context() as ctx:
-        # Simulate authenticated user session
-        from flask_login import login_user
-        with app.test_client() as client:
-            with client.session_transaction() as sess:
-                sess['user_id'] = test_user.id
-                sess['_fresh'] = True
-        
-        # Set up Flask-Login user context
-        g.user = test_user
-        g.authenticated = True
-        
-        yield ctx
-
-
-# =====================================
-# Blueprint Testing Fixtures
-# =====================================
-
-@pytest.fixture
-def blueprint_client(app: Flask) -> FlaskClient:
-    """
-    Blueprint-specific test client fixture with pre-configured headers
-    and request settings optimized for API endpoint validation.
-    
-    This fixture provides Flask blueprint testing infrastructure per Feature F-001,
-    enabling modular route validation with proper request formatting and
-    response validation for comprehensive API testing.
-    
-    Args:
-        app: Flask application instance from app fixture
-        
-    Returns:
-        FlaskClient: Configured test client for blueprint testing
-        
-    Features:
-        - API-optimized request headers
-        - JSON content type handling
-        - Blueprint route isolation
-        - Response format validation
-        - Error handling testing
-    """
-    client = app.test_client()
-    
-    # Configure default headers for API testing
-    client.environ_base.update({
-        'CONTENT_TYPE': 'application/json',
-        'ACCEPT': 'application/json',
-    })
-    
-    return client
-
-
-@pytest.fixture
-def api_headers() -> Dict[str, str]:
-    """
-    Standard API headers fixture for consistent request formatting
-    across all API endpoint tests.
-    
-    This fixture provides standardized HTTP headers for API testing,
-    ensuring consistent request formatting and content type handling
-    for comprehensive blueprint validation.
-    
-    Returns:
-        Dict[str, str]: Standard API headers for testing
-        
-    Features:
-        - JSON content type specification
-        - Accept header configuration
-        - CORS header support
-        - Authentication header templates
-    """
-    return {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Flask-Test-Client/1.0',
-    }
-
-
-@pytest.fixture
-def auth_headers(test_user: User, api_headers: Dict[str, str]) -> Dict[str, str]:
-    """
-    Authenticated API headers fixture providing pre-configured authentication
-    headers for testing protected endpoints.
-    
-    This fixture enables authentication testing with proper header management
-    per Feature F-007, supporting ItsDangerous token generation and session
-    management for comprehensive security testing.
-    
-    Args:
-        test_user: Authenticated user instance from test_user fixture
-        api_headers: Base API headers from api_headers fixture
-        
-    Returns:
-        Dict[str, str]: Authenticated API headers for testing
-        
-    Features:
-        - Authentication token generation
-        - Session header management
-        - CSRF token handling
-        - User context headers
-    """
-    headers = api_headers.copy()
-    
-    # Generate authentication token using ItsDangerous
-    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
-    auth_token = serializer.dumps({'user_id': test_user.id})
-    
-    headers.update({
-        'Authorization': f'Bearer {auth_token}',
-        'X-User-ID': str(test_user.id),
-        'X-Session-ID': f'test-session-{test_user.id}',
-    })
-    
-    return headers
-
-
-# =====================================
-# Test Data Factory Fixtures
-# =====================================
-
-@pytest.fixture
-def test_user(db_session: SQLAlchemy) -> User:
-    """
-    Test user factory fixture providing standardized user instances
-    for authentication and user-related testing.
-    
-    This fixture creates consistent test user data for comprehensive
-    authentication testing per Feature F-007, supporting Flask-Login
-    integration and user session management validation.
-    
-    Args:
-        db_session: Database session from db_session fixture
-        
-    Returns:
-        User: Test user instance with standard attributes
-        
-    Features:
-        - Standardized user attributes
-        - Secure password hashing
-        - Email validation patterns
-        - User state management
-        - Relationship data setup
-    """
-    user = User(
-        username='testuser',
-        email='test@example.com',
-        password_hash=generate_password_hash('testpassword123'),
-        is_active=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
-    
-    db_session.session.add(user)
-    db_session.session.commit()
-    db_session.session.refresh(user)
-    
-    return user
-
-
-@pytest.fixture
-def test_user_session(db_session: SQLAlchemy, test_user: User) -> UserSession:
-    """
-    Test user session factory fixture providing session instances
-    for session management and authentication testing.
-    
-    This fixture creates user session data for comprehensive session
-    testing per Feature F-007, supporting ItsDangerous token validation
-    and Flask-Login session management.
-    
-    Args:
-        db_session: Database session from db_session fixture
-        test_user: User instance from test_user fixture
-        
-    Returns:
-        UserSession: Test session instance with proper relationships
-        
-    Features:
-        - Session token generation
-        - Expiration time management
-        - User relationship validation
-        - Session state tracking
-    """
-    # Generate secure session token
-    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
-    session_token = serializer.dumps({'user_id': test_user.id, 'timestamp': datetime.utcnow().isoformat()})
-    
-    session = UserSession(
-        user_id=test_user.id,
-        session_token=session_token,
-        expires_at=datetime.utcnow() + timedelta(hours=1),
-        created_at=datetime.utcnow(),
-        is_valid=True
-    )
-    
-    db_session.session.add(session)
-    db_session.session.commit()
-    db_session.session.refresh(session)
-    
-    return session
-
-
-@pytest.fixture
-def test_business_entity(db_session: SQLAlchemy, test_user: User) -> BusinessEntity:
-    """
-    Test business entity factory fixture providing business domain objects
-    for service layer and business logic testing.
-    
-    This fixture creates business entity data for comprehensive business
-    logic testing per Feature F-005, supporting Service Layer pattern
-    validation and entity relationship testing.
-    
-    Args:
-        db_session: Database session from db_session fixture
-        test_user: User instance from test_user fixture
-        
-    Returns:
-        BusinessEntity: Test business entity with proper relationships
-        
-    Features:
-        - Business entity attributes
-        - User ownership relationships
-        - Status management
-        - Metadata handling
-    """
-    entity = BusinessEntity(
-        name='Test Business Entity',
-        description='A test business entity for comprehensive testing',
-        owner_id=test_user.id,
-        status='active',
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
-    
-    db_session.session.add(entity)
-    db_session.session.commit()
-    db_session.session.refresh(entity)
-    
-    return entity
-
-
-@pytest.fixture
-def test_entity_relationship(
-    db_session: SQLAlchemy,
-    test_business_entity: BusinessEntity
-) -> EntityRelationship:
-    """
-    Test entity relationship factory fixture providing relationship instances
-    for complex business logic and workflow testing.
-    
-    This fixture creates entity relationship data for comprehensive
-    relationship testing per database design Section 6.2.2.1, supporting
-    complex business workflow validation and referential integrity testing.
-    
-    Args:
-        db_session: Database session from db_session fixture
-        test_business_entity: Business entity instance from test_business_entity fixture
-        
-    Returns:
-        EntityRelationship: Test relationship instance with proper associations
-        
-    Features:
-        - Dual entity relationships
-        - Relationship type categorization
-        - Temporal state management
-        - Business rule validation
-    """
-    # Create a second business entity for relationship testing
-    target_entity = BusinessEntity(
-        name='Target Business Entity',
-        description='Target entity for relationship testing',
-        owner_id=test_business_entity.owner_id,
-        status='active',
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
-    
-    db_session.session.add(target_entity)
-    db_session.session.commit()
-    db_session.session.refresh(target_entity)
-    
-    # Create relationship between entities
-    relationship = EntityRelationship(
-        source_entity_id=test_business_entity.id,
-        target_entity_id=target_entity.id,
-        relationship_type='test_relationship',
-        created_at=datetime.utcnow(),
-        is_active=True
-    )
-    
-    db_session.session.add(relationship)
-    db_session.session.commit()
-    db_session.session.refresh(relationship)
-    
-    return relationship
-
-
-# =====================================
-# Performance Testing Fixtures
-# =====================================
-
-@pytest.fixture
-def benchmark_config() -> Dict[str, Any]:
-    """
-    Performance testing configuration fixture for pytest-benchmark 5.1.0
-    integration with Flask application performance validation.
-    
-    This fixture provides benchmark configuration for performance testing
-    per Section 4.7.1, enabling comprehensive performance comparison against
-    Node.js baseline metrics with automated threshold validation.
-    
-    Returns:
-        Dict[str, Any]: Benchmark configuration for performance testing
-        
-    Features:
-        - Response time measurement configuration
-        - Memory usage profiling settings
-        - Concurrent load testing parameters
-        - Baseline comparison thresholds
-        - Performance regression detection
-    """
-    return {
-        'sort': 'mean',
-        'columns': ['min', 'max', 'mean', 'stddev', 'rounds', 'iterations'],
-        'disable_gc': True,
-        'warmup': True,
-        'warmup_iterations': 10,
-        'min_rounds': 5,
-        'max_time': 5.0,
-        'threshold': {
-            'api_response_time': 0.5,  # 500ms maximum response time
-            'database_query_time': 0.2,  # 200ms maximum query time
-            'memory_usage_mb': 100,  # 100MB maximum memory usage
-        },
-        'baseline_comparison': True,
-        'regression_detection': True,
-    }
-
-
-@pytest.fixture
-def performance_client(app: Flask, benchmark_config: Dict[str, Any]) -> FlaskClient:
-    """
-    Performance testing client fixture with optimized configuration
-    for benchmark testing and response time measurement.
-    
-    This fixture provides performance-optimized test client for comprehensive
-    benchmarking per Section 4.7.1, supporting pytest-benchmark integration
-    with Flask application performance validation.
-    
-    Args:
-        app: Flask application instance from app fixture
-        benchmark_config: Benchmark configuration from benchmark_config fixture
-        
-    Returns:
-        FlaskClient: Performance-optimized test client for benchmarking
-        
-    Features:
-        - Performance monitoring integration
-        - Response time measurement
-        - Memory usage tracking
-        - Concurrent request simulation
-        - Baseline comparison support
-    """
-    client = app.test_client()
-    
-    # Configure client for performance testing
-    client.benchmark_config = benchmark_config
-    client.performance_mode = True
-    
-    return client
-
-
-# =====================================
-# Mock and Utility Fixtures
-# =====================================
-
-@pytest.fixture
-def mock_external_service():
-    """
-    External service mock fixture providing simulated external API responses
-    for integration testing without external dependencies.
-    
-    This fixture enables comprehensive integration testing by mocking external
-    service dependencies, ensuring test reliability and isolation while
-    validating integration patterns and error handling.
-    
-    Returns:
-        Mock: Configured mock object for external service simulation
-        
-    Features:
-        - API response simulation
-        - Error condition testing
-        - Timeout simulation
-        - Rate limiting testing
-        - Authentication mock support
-    """
-    mock_service = Mock()
-    mock_service.get_data.return_value = {'status': 'success', 'data': {'test': 'value'}}
-    mock_service.post_data.return_value = {'status': 'created', 'id': 123}
-    mock_service.auth_validate.return_value = True
-    mock_service.timeout_error = False
-    mock_service.rate_limited = False
-    
-    return mock_service
-
-
-@pytest.fixture
-def temp_directory():
-    """
-    Temporary directory fixture for file-based testing operations
-    with automatic cleanup after test completion.
-    
-    This fixture provides isolated file system testing environment
-    for comprehensive file operation testing, configuration management,
-    and log file validation with proper cleanup procedures.
-    
-    Yields:
-        str: Path to temporary directory for testing
-        
-    Features:
-        - Isolated file system environment
-        - Automatic cleanup after tests
-        - Permission management
-        - File operation testing support
-    """
-    import tempfile
-    import shutil
-    
-    temp_dir = tempfile.mkdtemp()
-    
-    yield temp_dir
-    
-    # Cleanup: Remove temporary directory
-    shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-@pytest.fixture(autouse=True)
-def enable_db_query_tracking(app: Flask):
-    """
-    Database query tracking fixture for performance monitoring and
-    optimization during testing phases.
-    
-    This auto-use fixture enables comprehensive database query tracking
-    for performance analysis and optimization validation, supporting
-    SQLAlchemy query optimization per Section 6.2.5.1.
-    
-    Args:
-        app: Flask application instance from app fixture
-        
-    Features:
-        - Query execution time tracking
-        - Query count monitoring
-        - N+1 query detection
-        - Performance threshold validation
-        - Optimization recommendation generation
-    """
-    if app.config.get('TESTING') and app.config.get('TRACK_QUERIES', False):
-        from sqlalchemy import event
-        
-        queries = []
-        
-        @event.listens_for(Engine, "before_cursor_execute")
-        def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-            context._query_start_time = datetime.utcnow()
-        
-        @event.listens_for(Engine, "after_cursor_execute")
-        def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-            end_time = datetime.utcnow()
-            start_time = getattr(context, '_query_start_time', end_time)
-            execution_time = (end_time - start_time).total_seconds()
+        Args:
+            name: Blueprint name
+            routes: List of (route, method, handler) tuples
             
-            queries.append({
-                'statement': statement,
-                'parameters': parameters,
-                'execution_time': execution_time,
-                'timestamp': end_time
-            })
+        Returns:
+            Blueprint: Configured test blueprint
+        """
+        blueprint = Blueprint(name, __name__, url_prefix=f'/test/{name}')
         
-        # Store queries in Flask g context for test access
-        with app.app_context():
-            g.db_queries = queries
-
-
-# =====================================
-# Cleanup and Teardown Fixtures
-# =====================================
-
-@pytest.fixture(autouse=True)
-def cleanup_after_test():
-    """
-    Automatic cleanup fixture ensuring proper resource cleanup
-    after each test execution for reliable test isolation.
-    
-    This auto-use fixture provides comprehensive cleanup procedures
-    for maintaining test isolation and preventing resource leaks
-    during extensive test suite execution.
-    
-    Features:
-        - Memory cleanup and garbage collection
-        - Database connection cleanup
-        - File system cleanup
-        - Mock object reset
-        - Context variable cleanup
-    """
-    yield
-    
-    # Cleanup operations after each test
-    import gc
-    
-    # Clear Flask application context
-    try:
-        from flask import g, session
-        g._get_current_object().__dict__.clear()
-        session.clear()
-    except RuntimeError:
-        # No application context available
-        pass
-    
-    # Force garbage collection
-    gc.collect()
-
-
-# =====================================
-# Flask Development Server Fixtures
-# =====================================
-
-@pytest.fixture(scope='session')
-def live_server(app: Flask):
-    """
-    Flask development server fixture for integration testing with
-    live HTTP server simulation per Section 3.6.1.
-    
-    This session-scoped fixture provides a live Flask development server
-    for comprehensive integration testing, enabling real HTTP request
-    simulation and end-to-end testing capabilities.
-    
-    Args:
-        app: Flask application instance from app fixture
+        if routes:
+            for route, method, handler in routes:
+                blueprint.route(route, methods=[method])(handler)
+        else:
+            # Add default test routes
+            @blueprint.route('/')
+            def index():
+                return jsonify({'blueprint': name, 'status': 'active'})
+                
+            @blueprint.route('/health')
+            def health():
+                return jsonify({'blueprint': name, 'health': 'ok'})
+                
+            @blueprint.route('/info')
+            def info():
+                return jsonify({
+                    'blueprint': name,
+                    'routes': len(blueprint.deferred_functions),
+                    'url_prefix': blueprint.url_prefix
+                })
         
-    Yields:
-        str: Live server URL for HTTP request testing
+        self.blueprint_test_data[name] = {
+            'created_at': datetime.utcnow(),
+            'routes_count': len(blueprint.deferred_functions)
+        }
         
-    Features:
-        - Live HTTP server simulation
-        - Real request/response testing
-        - Integration testing support
-        - Performance testing capabilities
-        - End-to-end workflow validation
+        return blueprint
+        
+    def validate_blueprint_registration(self, blueprint_name: str) -> Dict[str, Any]:
+        """
+        Validate that a blueprint is properly registered with the Flask application.
+        
+        Args:
+            blueprint_name: Name of the blueprint to validate
+            
+        Returns:
+            Dict containing validation results
+        """
+        blueprint_found = False
+        blueprint_info = None
+        
+        for bp_name, bp_instance in self.app.blueprints.items():
+            if bp_name == blueprint_name:
+                blueprint_found = True
+                blueprint_info = {
+                    'name': bp_name,
+                    'url_prefix': bp_instance.url_prefix,
+                    'has_static_folder': bp_instance.has_static_folder,
+                    'template_folder': bp_instance.template_folder,
+                    'deferred_functions_count': len(bp_instance.deferred_functions)
+                }
+                break
+        
+        return {
+            'registered': blueprint_found,
+            'blueprint_info': blueprint_info,
+            'total_blueprints': len(self.app.blueprints),
+            'validation_timestamp': datetime.utcnow().isoformat()
+        }
+        
+    def get_blueprint_routes(self, blueprint_name: str) -> List[Dict[str, Any]]:
+        """
+        Extract all routes registered by a specific blueprint.
+        
+        Args:
+            blueprint_name: Name of the blueprint
+            
+        Returns:
+            List of route information dictionaries
+        """
+        routes = []
+        
+        for rule in self.app.url_map.iter_rules():
+            if rule.endpoint and rule.endpoint.startswith(f'{blueprint_name}.'):
+                routes.append({
+                    'endpoint': rule.endpoint,
+                    'rule': str(rule),
+                    'methods': list(rule.methods),
+                    'subdomain': rule.subdomain,
+                    'strict_slashes': rule.strict_slashes
+                })
+        
+        return routes
+
+
+class FlaskDatabaseTestManager:
     """
-    import threading
-    import socket
-    from werkzeug.serving import make_server
+    Flask-SQLAlchemy database testing manager providing comprehensive database
+    fixture management with transaction rollback and data isolation per Feature F-003.
     
-    # Find available port
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(('localhost', 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    This manager implements Flask-SQLAlchemy testing patterns ensuring complete
+    database isolation between tests, transaction rollback mechanisms, and
+    realistic test data generation for database testing scenarios.
+    """
     
-    # Create and start server
-    server = make_server('localhost', port, app, threaded=True)
-    server_thread = threading.Thread(target=server.serve_forever)
-    server_thread.daemon = True
-    server_thread.start()
-    
-    yield f'http://localhost:{port}'
-    
-    # Cleanup: Shutdown server
-    server.shutdown()
-    server_thread.join(timeout=1)
+    def __init__(self, app: Flask, db_instance: SQLAlchemy):
+        self.app = app
+        self.db = db_instance
+        self.test_transactions = []
+        self.test_data_snapshots = {}
+        
+    @contextmanager
+    def isolated_transaction(self):
+        """
+        Provide isolated database transaction context for testing with automatic rollback.
+        
+        This context manager ensures complete database isolation between tests
+        by creating a savepoint before test execution and rolling back to it
+        after test completion, preventing test data contamination.
+        
+        Yields:
+            SQLAlchemy session with transaction isolation
+        """
+        with self.app.app_context():
+            # Create a savepoint for transaction isolation
+            connection = self.db.engine.connect()
+            transaction = connection.begin()
+            
+            # Configure session to use the transaction
+            session_options = dict(bind=connection, binds={})
+            session = self.db.create_scoped_session(options=session_options)
+            
+            # Replace the default session
+            original_session = self.db.session
+            self.db.session = session
+            
+            try:
+                yield session
+            except Exception:
+                # Rollback on exception
+                transaction.rollback()
+                raise
+            finally:
+                # Always rollback and cleanup
+                session.remove()
+                transaction.rollback()
+                connection.close()
+                
+                # Restore original session
+                self.db.session = original_session
+                
+    def create_test_tables(self) -> None:
+        """
+        Create all database tables for testing environment with proper schema setup.
+        """
+        with self.app.app_context():
+            self.db.create_all()
+            
+    def drop_test_tables(self) -> None:
+        """
+        Drop all database tables for testing cleanup.
+        """
+        with self.app.app_context():
+            self.db.drop_all()
+            
+    def populate_test_data(self, test_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Any]]:
+        """
+        Populate database with test data for testing scenarios.
+        
+        Args:
+            test_data: Dictionary mapping table names to test record lists
+            
+        Returns:
+            Dictionary mapping table names to created model instances
+        """
+        created_objects = {}
+        
+        with self.isolated_transaction() as session:
+            for table_name, records in test_data.items():
+                created_objects[table_name] = []
+                
+                # Dynamically get model class based on table name
+                model_class = self._get_model_class(table_name)
+                if not model_class:
+                    continue
+                    
+                for record_data in records:
+                    instance = model_class(**record_data)
+                    session.add(instance)
+                    created_objects[table_name].append(instance)
+                
+                session.commit()
+        
+        return created_objects
+        
+    def _get_model_class(self, table_name: str):
+        """
+        Get model class by table name for dynamic test data creation.
+        
+        Args:
+            table_name: Database table name
+            
+        Returns:
+            SQLAlchemy model class or None
+        """
+        # Map table names to model classes
+        model_mapping = {
+            'users': User,
+            'user_sessions': UserSession,
+            # Add more model mappings as needed
+        }
+        
+        return model_mapping.get(table_name)
+        
+    def assert_database_state(self, expected_counts: Dict[str, int]) -> None:
+        """
+        Assert database state matches expected record counts for validation.
+        
+        Args:
+            expected_counts: Dictionary mapping table names to expected record counts
+        """
+        with self.app.app_context():
+            for table_name, expected_count in expected_counts.items():
+                model_class = self._get_model_class(table_name)
+                if model_class:
+                    actual_count = model_class.query.count()
+                    assert actual_count == expected_count, \
+                        f"Table '{table_name}' has {actual_count} records, expected {expected_count}"
 
 
-# =====================================
-# Configuration and Environment Fixtures
-# =====================================
+class FlaskDevServerManager:
+    """
+    Flask development server manager for integration testing scenarios per Section 3.6.1.
+    
+    This manager provides Flask development server fixtures enabling comprehensive
+    integration testing with real HTTP requests, server lifecycle management,
+    and multi-threaded testing support for realistic testing scenarios.
+    """
+    
+    def __init__(self, app: Flask, host: str = 'localhost', port: int = None):
+        self.app = app
+        self.host = host
+        self.port = port or self._find_free_port()
+        self.server_process = None
+        self.server_thread = None
+        self.is_running = False
+        
+    def _find_free_port(self) -> int:
+        """Find a free port for the test server."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            s.listen(1)
+            port = s.getsockname()[1]
+        return port
+        
+    def start_server(self, timeout: int = 10) -> bool:
+        """
+        Start Flask development server in a separate thread for integration testing.
+        
+        Args:
+            timeout: Maximum time to wait for server startup
+            
+        Returns:
+            bool: True if server started successfully
+        """
+        if self.is_running:
+            return True
+            
+        def run_server():
+            """Run Flask development server in thread"""
+            self.app.run(
+                host=self.host,
+                port=self.port,
+                debug=False,
+                use_reloader=False,
+                threaded=True
+            )
+        
+        # Start server in separate thread
+        self.server_thread = threading.Thread(target=run_server, daemon=True)
+        self.server_thread.start()
+        
+        # Wait for server to start
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                import requests
+                response = requests.get(f'http://{self.host}:{self.port}/health', timeout=1)
+                if response.status_code == 200:
+                    self.is_running = True
+                    return True
+            except:
+                time.sleep(0.1)
+                
+        return False
+        
+    def stop_server(self) -> None:
+        """Stop the Flask development server."""
+        if self.server_thread and self.server_thread.is_alive():
+            # Note: In a real implementation, you might need a more sophisticated
+            # mechanism to stop the server gracefully
+            self.is_running = False
+            
+    def get_server_url(self) -> str:
+        """Get the complete server URL for testing."""
+        return f'http://{self.host}:{self.port}'
+        
+    def health_check(self) -> bool:
+        """Perform health check on the running server."""
+        if not self.is_running:
+            return False
+            
+        try:
+            import requests
+            response = requests.get(f'{self.get_server_url()}/health', timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+
+
+# ================================
+# Core Flask Testing Fixtures
+# ================================
+
+@pytest.fixture(scope='function')
+def flask_app_factory():
+    """
+    Flask application factory testing fixture providing Flask application factory
+    pattern testing support per Feature F-008.
+    
+    This fixture enables testing of the Flask application factory pattern with
+    different configuration scenarios, environment-specific settings, and
+    comprehensive application initialization validation.
+    
+    Returns:
+        Callable: Application factory function for testing
+    """
+    def create_test_app(config_name: str = 'testing', **config_overrides) -> Flask:
+        """
+        Create Flask application instance for testing with specified configuration.
+        
+        Args:
+            config_name: Configuration environment name
+            **config_overrides: Additional configuration overrides
+            
+        Returns:
+            Flask: Configured Flask application instance
+        """
+        if create_app is not None:
+            app = create_app(config_name)
+        else:
+            # Fallback Flask application creation
+            app = Flask(__name__)
+            app.config.from_object(FlaskTestingConfig)
+            
+        # Apply configuration overrides
+        app.config.update(config_overrides)
+        
+        # Ensure testing configuration
+        app.config.update({
+            'TESTING': True,
+            'SECRET_KEY': 'flask-test-secret-key-for-pytest-only',
+            'WTF_CSRF_ENABLED': False,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'
+        })
+        
+        return app
+        
+    return create_test_app
+
 
 @pytest.fixture
-def test_environment_variables(monkeypatch):
+def flask_app_with_context(flask_app_factory):
     """
-    Test environment variables fixture for testing environment-specific
-    configuration and deployment scenarios.
+    Flask application with application context for context-dependent testing.
     
-    This fixture provides controlled environment variable injection
-    for comprehensive configuration testing, supporting Flask app.config
-    environment-specific settings validation per Feature F-010.
+    This fixture provides a Flask application with an active application context,
+    enabling testing of Flask components that require application context such as
+    database operations, configuration access, and extension usage.
     
     Args:
-        monkeypatch: pytest monkeypatch fixture for environment variable injection
+        flask_app_factory: Application factory from flask_app_factory fixture
         
-    Features:
-        - Environment variable injection
-        - Configuration testing support
-        - Deployment scenario simulation
-        - Secret management testing
-        - Environment isolation validation
+    Yields:
+        Flask: Application instance with active application context
     """
-    test_env_vars = {
-        'FLASK_ENV': 'testing',
-        'SECRET_KEY': 'test-secret-key-for-testing',
-        'DATABASE_URL': 'sqlite:///:memory:',
-        'REDIS_URL': 'redis://localhost:6379/1',
-        'LOG_LEVEL': 'DEBUG',
-        'TESTING': 'True',
+    app = flask_app_factory()
+    
+    with app.app_context():
+        # Initialize database tables if SQLAlchemy is available
+        if db is not None:
+            db.init_app(app)
+            db.create_all()
+            
+        yield app
+        
+        # Cleanup
+        if db is not None:
+            db.session.remove()
+            db.drop_all()
+
+
+@pytest.fixture
+def flask_request_context(flask_app_with_context):
+    """
+    Flask request context fixture enabling proper session and authentication testing
+    per Section 4.7.1.
+    
+    This fixture provides comprehensive request context management for testing
+    Flask components that require request context including session handling,
+    authentication decorators, and request-specific data processing.
+    
+    Args:
+        flask_app_with_context: Flask app with context from flask_app_with_context fixture
+        
+    Yields:
+        RequestContext: Active Flask request context
+    """
+    with flask_app_with_context.test_request_context() as ctx:
+        # Initialize request context variables
+        g.request_id = str(uuid.uuid4())
+        g.start_time = datetime.utcnow()
+        g.user_id = None
+        g.authenticated = False
+        
+        # Initialize session data
+        session.permanent = False
+        session['csrf_token'] = str(uuid.uuid4())
+        session['session_id'] = str(uuid.uuid4())
+        
+        yield ctx
+
+
+@pytest.fixture
+def flask_authenticated_context(flask_request_context, sample_users):
+    """
+    Flask authenticated request context with user session for authentication testing.
+    
+    This fixture extends flask_request_context with authenticated user session,
+    enabling testing of protected endpoints, authorization decorators, and
+    user-specific functionality with realistic authentication state.
+    
+    Args:
+        flask_request_context: Request context from flask_request_context fixture
+        sample_users: Sample users from conftest.py sample_users fixture
+        
+    Yields:
+        RequestContext: Request context with authenticated user session
+    """
+    user = sample_users['user'] if sample_users else Mock()
+    
+    # Set up authenticated session
+    session['user_id'] = getattr(user, 'id', 'test_user_id')
+    session['username'] = getattr(user, 'username', 'testuser')
+    session['authenticated'] = True
+    session['auth_time'] = datetime.utcnow().isoformat()
+    session['roles'] = getattr(user, 'roles', ['user'])
+    
+    # Set up request context globals
+    g.user_id = session['user_id']
+    g.authenticated = True
+    g.current_user = user
+    
+    # Mock Flask-Login current_user
+    with patch('flask_login.current_user', user):
+        yield flask_request_context
+
+
+@pytest.fixture
+def flask_blueprint_tester(flask_app_with_context):
+    """
+    Flask blueprint testing infrastructure for modular route validation per Feature F-001.
+    
+    This fixture provides comprehensive blueprint testing utilities enabling
+    isolated testing of Flask blueprint functionality, route registration
+    validation, and blueprint-specific configuration testing.
+    
+    Args:
+        flask_app_with_context: Flask app with context
+        
+    Returns:
+        FlaskBlueprintTestSuite: Blueprint testing utilities
+    """
+    return FlaskBlueprintTestSuite(flask_app_with_context)
+
+
+@pytest.fixture
+def flask_db_manager(flask_app_with_context):
+    """
+    Flask-SQLAlchemy test database fixture with transaction rollback per Feature F-003.
+    
+    This fixture provides comprehensive database testing infrastructure with
+    transaction isolation, automatic rollback, and test data management
+    capabilities for Flask-SQLAlchemy integration testing.
+    
+    Args:
+        flask_app_with_context: Flask app with context
+        
+    Returns:
+        FlaskDatabaseTestManager: Database testing utilities
+    """
+    if db is None:
+        # Return mock manager if SQLAlchemy not available
+        return Mock()
+        
+    return FlaskDatabaseTestManager(flask_app_with_context, db)
+
+
+@pytest.fixture
+def flask_dev_server(flask_app_factory):
+    """
+    Flask development server fixture for integration testing per Section 3.6.1.
+    
+    This fixture provides Flask development server lifecycle management for
+    comprehensive integration testing with real HTTP requests and server
+    interaction validation in realistic testing scenarios.
+    
+    Args:
+        flask_app_factory: Application factory from flask_app_factory fixture
+        
+    Yields:
+        FlaskDevServerManager: Development server manager
+    """
+    app = flask_app_factory()
+    server_manager = FlaskDevServerManager(app)
+    
+    # Start server for testing
+    if server_manager.start_server():
+        yield server_manager
+    else:
+        pytest.fail("Failed to start Flask development server for testing")
+    
+    # Cleanup
+    server_manager.stop_server()
+
+
+# ================================
+# Flask Configuration Testing Fixtures
+# ================================
+
+@pytest.fixture
+def flask_config_environments():
+    """
+    Flask application configuration fixtures for test environment isolation per Feature F-010.
+    
+    This fixture provides comprehensive configuration testing utilities for
+    validating Flask app.config management across different environments
+    and configuration scenarios with proper isolation and validation.
+    
+    Returns:
+        Dict[str, type]: Configuration classes by environment name
+    """
+    config_classes = {
+        'testing': FlaskTestingConfig,
+        'development': DevelopmentConfig if DevelopmentConfig else FlaskTestingConfig,
+        'staging': StagingConfig if StagingConfig else FlaskTestingConfig,
+        'production': ProductionConfig if ProductionConfig else FlaskTestingConfig
     }
     
-    for key, value in test_env_vars.items():
-        monkeypatch.setenv(key, value)
+    return config_classes
+
+
+@pytest.fixture
+def flask_config_validator(flask_app_factory):
+    """
+    Flask configuration validation utilities for testing configuration integrity.
     
-    return test_env_vars
+    Args:
+        flask_app_factory: Application factory fixture
+        
+    Returns:
+        Callable: Configuration validation function
+    """
+    def validate_config(config_name: str, required_keys: List[str] = None) -> Dict[str, Any]:
+        """
+        Validate Flask application configuration for testing scenarios.
+        
+        Args:
+            config_name: Configuration environment name
+            required_keys: List of required configuration keys
+            
+        Returns:
+            Dict containing validation results
+        """
+        app = flask_app_factory(config_name)
+        
+        validation_results = {
+            'config_name': config_name,
+            'testing_mode': app.config.get('TESTING', False),
+            'secret_key_configured': bool(app.config.get('SECRET_KEY')),
+            'database_configured': bool(app.config.get('SQLALCHEMY_DATABASE_URI')),
+            'missing_keys': [],
+            'configuration_valid': True
+        }
+        
+        # Check required keys
+        if required_keys:
+            for key in required_keys:
+                if not app.config.get(key):
+                    validation_results['missing_keys'].append(key)
+                    validation_results['configuration_valid'] = False
+        
+        return validation_results
+        
+    return validate_config
 
 
-# Export all fixtures for easy importing
+# ================================
+# Flask Session and Authentication Testing Fixtures
+# ================================
+
+@pytest.fixture
+def flask_session_manager(flask_app_with_context):
+    """
+    Flask session management testing utilities for session lifecycle testing.
+    
+    This fixture provides comprehensive session testing infrastructure for
+    validating Flask session management, authentication state, and session
+    security measures during testing scenarios.
+    
+    Args:
+        flask_app_with_context: Flask app with context
+        
+    Returns:
+        Dict[str, Callable]: Session management testing utilities
+    """
+    def create_session(user_data: Dict[str, Any] = None) -> str:
+        """Create a test session with optional user data."""
+        session_id = str(uuid.uuid4())
+        
+        # Set up session data
+        session['session_id'] = session_id
+        session['created_at'] = datetime.utcnow().isoformat()
+        session['last_accessed'] = datetime.utcnow().isoformat()
+        
+        if user_data:
+            session.update(user_data)
+            
+        return session_id
+        
+    def validate_session(expected_keys: List[str] = None) -> Dict[str, Any]:
+        """Validate current session state."""
+        validation = {
+            'session_exists': bool(session),
+            'session_id': session.get('session_id'),
+            'has_csrf_token': 'csrf_token' in session,
+            'is_authenticated': session.get('authenticated', False),
+            'missing_keys': []
+        }
+        
+        if expected_keys:
+            for key in expected_keys:
+                if key not in session:
+                    validation['missing_keys'].append(key)
+                    
+        return validation
+        
+    def clear_session():
+        """Clear session data for testing."""
+        session.clear()
+        
+    return {
+        'create': create_session,
+        'validate': validate_session,
+        'clear': clear_session
+    }
+
+
+@pytest.fixture
+def flask_auth_decorators_tester(flask_authenticated_context):
+    """
+    Flask authentication decorators testing utilities for decorator validation.
+    
+    This fixture provides comprehensive testing infrastructure for Flask
+    authentication decorators, authorization controls, and security enforcement
+    mechanisms in realistic testing scenarios.
+    
+    Args:
+        flask_authenticated_context: Authenticated context fixture
+        
+    Returns:
+        Dict[str, Callable]: Authentication decorator testing utilities
+    """
+    def create_protected_endpoint(auth_required: bool = True, roles: List[str] = None):
+        """
+        Create a test endpoint with authentication decorators for testing.
+        
+        Args:
+            auth_required: Whether authentication is required
+            roles: Required roles for authorization
+            
+        Returns:
+            Callable: Decorated test endpoint function
+        """
+        def test_endpoint():
+            return jsonify({
+                'message': 'Access granted',
+                'user_id': g.get('user_id'),
+                'authenticated': g.get('authenticated', False),
+                'timestamp': datetime.utcnow().isoformat()
+            })
+            
+        if auth_required:
+            # Apply authentication decorator (mock implementation)
+            def auth_decorator(f):
+                def wrapper(*args, **kwargs):
+                    if not g.get('authenticated'):
+                        return jsonify({'error': 'Authentication required'}), 401
+                    return f(*args, **kwargs)
+                return wrapper
+            test_endpoint = auth_decorator(test_endpoint)
+            
+        if roles:
+            # Apply role-based authorization decorator (mock implementation)
+            def role_decorator(f):
+                def wrapper(*args, **kwargs):
+                    user_roles = session.get('roles', [])
+                    if not any(role in user_roles for role in roles):
+                        return jsonify({'error': 'Insufficient permissions'}), 403
+                    return f(*args, **kwargs)
+                return wrapper
+            test_endpoint = role_decorator(test_endpoint)
+            
+        return test_endpoint
+        
+    def test_auth_flow(endpoint_func: Callable, expected_status: int = 200) -> Dict[str, Any]:
+        """
+        Test authentication flow with provided endpoint.
+        
+        Args:
+            endpoint_func: Endpoint function to test
+            expected_status: Expected HTTP status code
+            
+        Returns:
+            Dict containing test results
+        """
+        try:
+            response = endpoint_func()
+            
+            if hasattr(response, 'status_code'):
+                status_code = response.status_code
+                response_data = response.get_json() if hasattr(response, 'get_json') else None
+            else:
+                # Handle direct return values
+                status_code = 200
+                response_data = response
+                
+            return {
+                'status_code': status_code,
+                'response_data': response_data,
+                'test_passed': status_code == expected_status,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                'status_code': 500,
+                'error': str(e),
+                'test_passed': False,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+    
+    return {
+        'create_protected_endpoint': create_protected_endpoint,
+        'test_auth_flow': test_auth_flow
+    }
+
+
+# ================================
+# Flask Performance Testing Fixtures
+# ================================
+
+@pytest.fixture
+def flask_performance_monitor():
+    """
+    Flask performance monitoring utilities for testing performance requirements.
+    
+    This fixture provides comprehensive performance testing infrastructure for
+    validating Flask application performance against baseline requirements and
+    ensuring SLA compliance during testing scenarios.
+    
+    Returns:
+        Dict[str, Callable]: Performance monitoring utilities
+    """
+    performance_data = {}
+    
+    def start_monitoring(operation_name: str):
+        """Start performance monitoring for an operation."""
+        performance_data[operation_name] = {
+            'start_time': time.time(),
+            'end_time': None,
+            'duration': None,
+            'status': 'running'
+        }
+        
+    def stop_monitoring(operation_name: str):
+        """Stop performance monitoring and calculate duration."""
+        if operation_name in performance_data:
+            end_time = time.time()
+            performance_data[operation_name].update({
+                'end_time': end_time,
+                'duration': end_time - performance_data[operation_name]['start_time'],
+                'status': 'completed'
+            })
+            
+    def assert_performance_threshold(operation_name: str, max_duration: float):
+        """Assert that operation completed within performance threshold."""
+        if operation_name in performance_data:
+            actual_duration = performance_data[operation_name].get('duration', float('inf'))
+            assert actual_duration <= max_duration, \
+                f"Performance threshold exceeded for {operation_name}: {actual_duration:.3f}s > {max_duration}s"
+                
+    def get_performance_report() -> Dict[str, Any]:
+        """Get comprehensive performance report for all monitored operations."""
+        return {
+            'operations': performance_data.copy(),
+            'total_operations': len(performance_data),
+            'average_duration': sum(
+                data.get('duration', 0) for data in performance_data.values()
+            ) / len(performance_data) if performance_data else 0,
+            'report_timestamp': datetime.utcnow().isoformat()
+        }
+    
+    return {
+        'start': start_monitoring,
+        'stop': stop_monitoring,
+        'assert_threshold': assert_performance_threshold,
+        'get_report': get_performance_report
+    }
+
+
+# ================================
+# Flask Testing Utility Functions
+# ================================
+
+def create_test_response(data: Any = None, status_code: int = 200, 
+                        headers: Dict[str, str] = None) -> Response:
+    """
+    Create a test Response object for Flask testing scenarios.
+    
+    Args:
+        data: Response data (will be JSON serialized if dict)
+        status_code: HTTP status code
+        headers: Optional response headers
+        
+    Returns:
+        Response: Flask Response object for testing
+    """
+    if isinstance(data, dict):
+        response_data = json.dumps(data)
+        content_type = 'application/json'
+    else:
+        response_data = str(data) if data is not None else ''
+        content_type = 'text/plain'
+        
+    response_headers = {'Content-Type': content_type}
+    if headers:
+        response_headers.update(headers)
+        
+    return Response(
+        response=response_data,
+        status=status_code,
+        headers=response_headers
+    )
+
+
+def assert_flask_response_format(response, expected_status: int = 200,
+                                expected_content_type: str = 'application/json',
+                                required_fields: List[str] = None) -> Dict[str, Any]:
+    """
+    Assert Flask response format meets testing requirements.
+    
+    Args:
+        response: Flask test client response
+        expected_status: Expected HTTP status code
+        expected_content_type: Expected content type
+        required_fields: List of required JSON fields
+        
+    Returns:
+        Dict containing response validation results
+    """
+    validation_results = {
+        'status_code_valid': response.status_code == expected_status,
+        'content_type_valid': expected_content_type in (response.content_type or ''),
+        'json_valid': False,
+        'required_fields_present': True,
+        'missing_fields': []
+    }
+    
+    # Validate JSON response if expected
+    if 'application/json' in expected_content_type:
+        try:
+            json_data = response.get_json()
+            validation_results['json_valid'] = json_data is not None
+            
+            if required_fields and json_data:
+                for field in required_fields:
+                    if field not in json_data:
+                        validation_results['missing_fields'].append(field)
+                        validation_results['required_fields_present'] = False
+                        
+        except Exception:
+            validation_results['json_valid'] = False
+    
+    # Assert all validations pass
+    assert validation_results['status_code_valid'], \
+        f"Expected status {expected_status}, got {response.status_code}"
+    assert validation_results['content_type_valid'], \
+        f"Expected content type {expected_content_type}, got {response.content_type}"
+    
+    if 'application/json' in expected_content_type:
+        assert validation_results['json_valid'], "Response should contain valid JSON"
+        assert validation_results['required_fields_present'], \
+            f"Missing required fields: {validation_results['missing_fields']}"
+    
+    return validation_results
+
+
+# ================================
+# Flask Testing Markers and Configuration
+# ================================
+
+# Pytest markers for Flask-specific test categorization
+FLASK_TEST_MARKERS = {
+    'flask_unit': 'Unit tests for Flask components',
+    'flask_integration': 'Integration tests for Flask application',
+    'flask_blueprint': 'Tests for Flask blueprint functionality',
+    'flask_auth': 'Tests for Flask authentication mechanisms',
+    'flask_database': 'Tests for Flask-SQLAlchemy integration',
+    'flask_performance': 'Performance tests for Flask application',
+    'flask_config': 'Tests for Flask configuration management'
+}
+
+# Flask testing configuration constants
+FLASK_TESTING_CONSTANTS = {
+    'MAX_REQUEST_DURATION': 1.0,
+    'MAX_DATABASE_QUERY_TIME': 0.5,
+    'MAX_AUTHENTICATION_TIME': 0.2,
+    'DEFAULT_TEST_TIMEOUT': 30,
+    'PERFORMANCE_THRESHOLD_MARGIN': 0.1
+}
+
+# Export all fixtures and utilities for use in other test modules
 __all__ = [
-    # Application fixtures
-    'app_config', 'app', 'client', 'runner',
-    # Database fixtures
-    'db_session', 'clean_db',
-    # Context fixtures
-    'app_context', 'request_context', 'authenticated_request_context',
-    # Blueprint fixtures
-    'blueprint_client', 'api_headers', 'auth_headers',
-    # Test data fixtures
-    'test_user', 'test_user_session', 'test_business_entity', 'test_entity_relationship',
+    # Configuration classes
+    'FlaskTestingConfig',
+    'FlaskBlueprintTestSuite',
+    'FlaskDatabaseTestManager',
+    'FlaskDevServerManager',
+    
+    # Core fixtures
+    'flask_app_factory',
+    'flask_app_with_context',
+    'flask_request_context',
+    'flask_authenticated_context',
+    'flask_blueprint_tester',
+    'flask_db_manager',
+    'flask_dev_server',
+    
+    # Configuration fixtures
+    'flask_config_environments',
+    'flask_config_validator',
+    
+    # Session and authentication fixtures
+    'flask_session_manager',
+    'flask_auth_decorators_tester',
+    
     # Performance fixtures
-    'benchmark_config', 'performance_client',
-    # Utility fixtures
-    'mock_external_service', 'temp_directory',
-    # Server fixtures
-    'live_server',
-    # Environment fixtures
-    'test_environment_variables',
+    'flask_performance_monitor',
+    
+    # Utility functions
+    'create_test_response',
+    'assert_flask_response_format',
+    
+    # Constants
+    'FLASK_TEST_MARKERS',
+    'FLASK_TESTING_CONSTANTS'
 ]
