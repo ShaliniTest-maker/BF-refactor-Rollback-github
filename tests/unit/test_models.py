@@ -3,1698 +3,2419 @@ Comprehensive Unit Tests for Flask-SQLAlchemy Models
 
 This module provides comprehensive unit testing for all Flask-SQLAlchemy models including
 User, UserSession, BusinessEntity, EntityRelationship, and base model functionality.
-Tests validate model field constraints, relationships, validation rules, and database
-operations to ensure complete functional parity with original Node.js data layer.
+These tests validate model field constraints, relationships, validation rules, and
+database operations to ensure complete functional parity with original Node.js data
+layer during the Flask migration process.
 
-Key Test Coverage:
-- Unit testing for database model conversion from MongoDB schemas per Feature F-003
-- Flask-SQLAlchemy model validation and relationship testing per Section 6.2.2.1
-- User authentication model testing with Flask-Login integration per Feature F-007
-- Database constraint and validation rule preservation per Section 6.2.2.2
-- pytest-flask 1.3.0 testing framework integration per Section 4.7.1
-- 90% code coverage requirement for data layer per Feature F-009
+Key Testing Areas:
+- BaseModel functionality with timestamp and primary key validation
+- User model with Flask-Login UserMixin integration and authentication testing  
+- UserSession model with ItsDangerous token validation and security testing
+- BusinessEntity and EntityRelationship models with complex relationship validation
+- Database constraint enforcement and validation rule preservation
+- Model relationship integrity testing with foreign key constraints and cascade behavior
+- Business logic validation to ensure constraint preservation per Feature F-003
 
-Test Organization:
-- BaseModel: Common database field and functionality testing
-- User: Authentication, Flask-Login UserMixin, password hashing, relationships
-- UserSession: Session management, ItsDangerous token validation, expiration handling
-- BusinessEntity: Business domain objects, ownership relationships, workflow management
-- EntityRelationship: Complex entity associations and business logic validation
+Technical Specification References:
+- Feature F-003: Database Model Conversion from MongoDB schemas
+- Feature F-007: Authentication Mechanism Migration with Flask-Login integration
+- Feature F-009: Functionality Parity Validation with 90% code coverage requirement
+- Section 4.7.1: Testing and Validation Workflow with pytest-flask 1.3.0
+- Section 6.2.2.1: Entity Relationships and Data Models
+- Section 6.2.2.2: Database constraint and validation rule preservation
 
 Dependencies:
-- pytest-flask 1.3.0: Flask application testing fixtures and utilities
-- Flask-SQLAlchemy 3.1.1: Database ORM and testing patterns
-- Flask-Login: User session management and authentication simulation
-- ItsDangerous: Secure token generation and validation testing
+- pytest-flask 1.3.0: Flask application testing fixtures and database isolation
+- Flask-SQLAlchemy 3.1.1: Database ORM functionality and model testing
+- Flask-Login: User authentication testing with UserMixin integration
+- ItsDangerous: Secure session token validation testing
 - Werkzeug: Password hashing and security utilities testing
 """
 
 import pytest
-import uuid
-from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, Any, Optional
-import json
 import secrets
+import uuid
+from datetime import datetime, timezone, timedelta
+from unittest.mock import patch, Mock
+from typing import Dict, Any, List, Optional
 
-# Flask and SQLAlchemy imports
+# Flask and extension imports for testing
 from flask import Flask, current_app
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import UserMixin
-from sqlalchemy.exc import IntegrityError, StatementError
-from sqlalchemy.orm.exc import NoResultFound
 from werkzeug.security import check_password_hash
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from itsdangerous import URLSafeTimedSerializer
 
 # Import models for testing
-try:
-    from src.models.base import BaseModel, db
-    from src.models.user import User
-    from src.models.session import UserSession
-    from src.models.business_entity import BusinessEntity
-    from src.models.entity_relationship import EntityRelationship
-except ImportError:
-    # Handle case where models don't exist yet during development
-    BaseModel = None
-    User = None
-    UserSession = None
-    BusinessEntity = None
-    EntityRelationship = None
-    db = None
+from src.models.base import BaseModel, db
+from src.models.user import User
+from src.models.session import UserSession
+from src.models.business_entity import BusinessEntity
+from src.models.entity_relationship import EntityRelationship
 
-
-# Mark all tests in this module as unit tests
-pytestmark = pytest.mark.unit
+# Import testing utilities and fixtures
+from tests.conftest import MockUser
 
 
 class TestBaseModel:
     """
-    Comprehensive unit tests for BaseModel class functionality.
+    Comprehensive test suite for BaseModel functionality including timestamp management,
+    primary key patterns, and common utility methods. These tests ensure the foundation
+    for all model inheritance follows Flask-SQLAlchemy best practices.
     
-    Tests common database field patterns, timestamp management, primary key validation,
-    and base model utility methods to ensure consistent model behavior across all entities.
+    Testing coverage includes:
+    - Auto-incrementing primary key validation per Section 6.2.2.2
+    - Automatic timestamp population and management (created_at, updated_at)
+    - Common utility methods (to_dict, save, delete, create, etc.)
+    - Table name generation from class names using snake_case conversion
+    - PostgreSQL-optimized field patterns and constraints
     """
     
-    def test_base_model_abstract_table(self, app):
-        """Test BaseModel is abstract and doesn't create a table"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_base_model_abstract_table(self, app: Flask, db_session):
+        """
+        Test that BaseModel is properly configured as abstract base class.
         
+        Validates that BaseModel cannot be instantiated directly and serves
+        only as inheritance base for concrete model implementations.
+        """
         with app.app_context():
-            # BaseModel should be marked as abstract
+            # BaseModel should be abstract and not create a table
             assert BaseModel.__abstract__ is True
-            
-            # BaseModel should not appear in database metadata
-            table_names = [table.name for table in db.metadata.tables.values()]
-            assert 'base_model' not in table_names
-            assert BaseModel.__tablename__ not in table_names
+            assert not hasattr(BaseModel, '__table__')
     
-    def test_base_model_primary_key_field(self, app):
-        """Test BaseModel primary key field configuration"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_primary_key_configuration(self, app: Flask, db_session):
+        """
+        Test auto-incrementing primary key configuration per Section 6.2.2.2.
         
+        Validates that all models inherit proper primary key patterns with
+        auto-incrementing integers for optimal PostgreSQL join performance.
+        """
         with app.app_context():
-            # Check primary key column exists
-            assert hasattr(BaseModel, 'id')
-            id_column = BaseModel.__table__.columns.get('id')
+            # Create test user to validate primary key behavior
+            user = User(
+                username='test_pk_user',
+                email='pk_test@example.com',
+                password='TestPassword123!'
+            )
             
-            # Validate primary key properties
-            assert id_column.primary_key is True
-            assert id_column.autoincrement is True
-            assert id_column.nullable is False
-            assert str(id_column.type) == 'INTEGER'
+            # Primary key should be None before saving
+            assert user.id is None
+            
+            # Save and verify auto-increment behavior
+            user.save()
+            assert user.id is not None
+            assert isinstance(user.id, int)
+            assert user.id > 0
+            
+            # Create second user to verify increment
+            user2 = User(
+                username='test_pk_user2',
+                email='pk_test2@example.com',
+                password='TestPassword123!'
+            )
+            user2.save()
+            
+            assert user2.id > user.id
     
-    def test_base_model_timestamp_fields(self, app):
-        """Test BaseModel timestamp field configuration and automatic population"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_timestamp_auto_population(self, app: Flask, db_session):
+        """
+        Test automatic timestamp population per database design requirements.
         
+        Validates that created_at and updated_at fields are automatically
+        populated with UTC timestamps during model creation and updates.
+        """
         with app.app_context():
-            # Check timestamp columns exist
-            assert hasattr(BaseModel, 'created_at')
-            assert hasattr(BaseModel, 'updated_at')
+            # Record time before creation
+            before_creation = datetime.now(timezone.utc)
             
-            created_at_column = BaseModel.__table__.columns.get('created_at')
-            updated_at_column = BaseModel.__table__.columns.get('updated_at')
+            # Create user and verify timestamp population
+            user = User(
+                username='timestamp_test',
+                email='timestamp@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Validate timestamp properties
-            assert created_at_column.nullable is False
-            assert updated_at_column.nullable is False
-            assert created_at_column.server_default is not None
-            assert updated_at_column.server_default is not None
-            assert updated_at_column.onupdate is not None
+            after_creation = datetime.now(timezone.utc)
+            
+            # Verify created_at timestamp
+            assert user.created_at is not None
+            assert isinstance(user.created_at, datetime)
+            assert before_creation <= user.created_at <= after_creation
+            assert user.created_at.tzinfo is not None  # UTC timezone
+            
+            # Verify updated_at timestamp
+            assert user.updated_at is not None
+            assert isinstance(user.updated_at, datetime)
+            assert before_creation <= user.updated_at <= after_creation
+            
+            # Test timestamp update on modification
+            original_updated_at = user.updated_at
+            import time
+            time.sleep(0.01)  # Small delay to ensure timestamp difference
+            
+            user.first_name = 'Updated'
+            user.save()
+            
+            assert user.updated_at > original_updated_at
+            assert user.created_at != user.updated_at  # Should be different after update
     
-    def test_base_model_initialization(self, app):
-        """Test BaseModel initialization with kwargs and timestamp handling"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_model_string_representation(self, app: Flask, db_session):
+        """
+        Test model string representation for debugging and logging.
         
+        Validates that models provide consistent and informative string
+        representations for enterprise-grade debugging patterns.
+        """
         with app.app_context():
-            # Test initialization without timestamps
-            current_time = datetime.now(timezone.utc)
+            user = User(
+                username='repr_test',
+                email='repr@example.com', 
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Mock a concrete implementation for testing
-            class TestModel(BaseModel):
-                __tablename__ = 'test_model'
+            # Test __repr__ method
+            repr_str = repr(user)
+            assert '<User(' in repr_str
+            assert f'id={user.id}' in repr_str
+            assert 'username=\'repr_test\'' in repr_str
+            assert 'email=\'repr@example.com\'' in repr_str
             
-            model = TestModel()
-            
-            # Check timestamps are set automatically
-            assert model.created_at is not None
-            assert model.updated_at is not None
-            assert isinstance(model.created_at, datetime)
-            assert isinstance(model.updated_at, datetime)
-            
-            # Check timestamps are recent
-            time_diff = abs((current_time - model.created_at).total_seconds())
-            assert time_diff < 1  # Within 1 second
+            # Test __str__ method for display names
+            str_repr = str(user)
+            assert 'repr_test' in str_repr
     
-    def test_base_model_repr_method(self, app):
-        """Test BaseModel string representation for debugging"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_to_dict_serialization(self, app: Flask, db_session):
+        """
+        Test model-to-dictionary serialization for API responses.
         
+        Validates consistent serialization methods across all models with
+        proper datetime formatting and optional field inclusion control.
+        """
         with app.app_context():
-            class TestModel(BaseModel):
-                __tablename__ = 'test_model'
+            user = User(
+                username='dict_test',
+                email='dict@example.com',
+                password='TestPassword123!',
+                first_name='Dict',
+                last_name='Test'
+            )
+            user.save()
             
-            model = TestModel()
-            model.id = 123
+            # Test basic to_dict functionality
+            user_dict = user.to_dict()
             
-            repr_str = repr(model)
-            assert 'TestModel' in repr_str
-            assert '123' in repr_str
-            assert repr_str.startswith('<')
-            assert repr_str.endswith('>')
+            # Verify required fields
+            assert 'id' in user_dict
+            assert 'username' in user_dict
+            assert 'email' in user_dict
+            assert 'first_name' in user_dict
+            assert 'last_name' in user_dict
+            assert 'is_active' in user_dict
+            assert 'created_at' in user_dict
+            assert 'updated_at' in user_dict
+            
+            # Verify data types and values
+            assert user_dict['id'] == user.id
+            assert user_dict['username'] == 'dict_test'
+            assert user_dict['email'] == 'dict@example.com'
+            assert user_dict['is_active'] is True
+            
+            # Verify datetime serialization
+            assert isinstance(user_dict['created_at'], str)
+            assert isinstance(user_dict['updated_at'], str)
+            
+            # Test timestamp exclusion
+            base_dict = user.to_dict(include_timestamps=False)
+            assert 'created_at' not in base_dict
+            assert 'updated_at' not in base_dict
     
-    def test_base_model_to_dict_method(self, app):
-        """Test BaseModel to_dict method for serialization"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_update_from_dict_functionality(self, app: Flask, db_session):
+        """
+        Test model update from dictionary data with field validation.
         
+        Validates safe model updating with automatic timestamp updates
+        and field access control for security.
+        """
         with app.app_context():
-            class TestModel(BaseModel):
-                __tablename__ = 'test_model'
+            user = User(
+                username='update_test',
+                email='update@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            model = TestModel()
-            model.id = 456
+            original_updated_at = user.updated_at
+            original_created_at = user.created_at
             
-            # Test with timestamps
-            result_with_timestamps = model.to_dict(include_timestamps=True)
-            assert 'id' in result_with_timestamps
-            assert 'created_at' in result_with_timestamps
-            assert 'updated_at' in result_with_timestamps
-            assert result_with_timestamps['id'] == 456
+            # Test basic field updates
+            update_data = {
+                'first_name': 'Updated',
+                'last_name': 'User',
+                'is_active': False
+            }
             
-            # Test without timestamps
-            result_without_timestamps = model.to_dict(include_timestamps=False)
-            assert 'id' in result_without_timestamps
-            assert 'created_at' not in result_without_timestamps
-            assert 'updated_at' not in result_without_timestamps
+            import time
+            time.sleep(0.01)  # Ensure timestamp difference
+            user.update_from_dict(update_data)
+            
+            # Verify field updates
+            assert user.first_name == 'Updated'
+            assert user.last_name == 'User'
+            assert user.is_active is False
+            
+            # Verify timestamp behavior
+            assert user.updated_at > original_updated_at
+            assert user.created_at == original_created_at  # Should not change
+            
+            # Test restricted field updates
+            restricted_data = {
+                'id': 999,  # Should be ignored
+                'created_at': datetime.now(timezone.utc),  # Should be ignored
+                'first_name': 'Allowed'
+            }
+            
+            user.update_from_dict(restricted_data)
+            assert user.id != 999  # ID should not change
+            assert user.created_at == original_created_at  # Should not change
+            assert user.first_name == 'Allowed'  # Should be updated
+            
+            # Test allowed fields restriction
+            allowed_fields = {'last_name'}
+            user.update_from_dict({'first_name': 'Blocked', 'last_name': 'Allowed'}, allowed_fields)
+            assert user.first_name == 'Allowed'  # Should not change
+            assert user.last_name == 'Allowed'  # Should change
     
-    def test_base_model_update_from_dict_method(self, app):
-        """Test BaseModel update_from_dict method for safe field updates"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_model_save_and_delete_methods(self, app: Flask, db_session):
+        """
+        Test model persistence methods with transaction control.
         
+        Validates save and delete operations with optional commit control
+        and proper transaction boundary management.
+        """
         with app.app_context():
-            class TestModel(BaseModel):
-                __tablename__ = 'test_model'
-                name = db.Column(db.String(50))
+            user = User(
+                username='persist_test',
+                email='persist@example.com',
+                password='TestPassword123!'
+            )
             
-            model = TestModel()
-            original_created_at = model.created_at
-            original_updated_at = model.updated_at
+            # Test save without commit
+            user.save(commit=False)
+            assert user.id is not None  # Should have ID from session
             
-            # Test field update
-            update_data = {'name': 'test_name', 'id': 999}  # id should be ignored
-            model.update_from_dict(update_data)
+            # Verify not committed to database
+            db_user = User.query.filter_by(username='persist_test').first()
+            assert db_user is None  # Should not exist in committed state
             
-            assert model.name == 'test_name'
-            assert model.id != 999  # id should not be updated
-            assert model.created_at == original_created_at  # created_at preserved
-            assert model.updated_at > original_updated_at  # updated_at changed
+            # Commit and verify persistence
+            db.session.commit()
+            db_user = User.query.filter_by(username='persist_test').first()
+            assert db_user is not None
+            assert db_user.username == 'persist_test'
+            
+            # Test delete without commit
+            user.delete(commit=False)
+            db_user = User.query.filter_by(username='persist_test').first()
+            assert db_user is not None  # Should still exist before commit
+            
+            # Commit deletion
+            db.session.commit()
+            db_user = User.query.filter_by(username='persist_test').first()
+            assert db_user is None  # Should be deleted
     
-    def test_base_model_tablename_generation(self, app):
-        """Test automatic table name generation from class name"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_model_class_methods(self, app: Flask, db_session):
+        """
+        Test model class methods for instance creation and retrieval.
         
+        Validates create, get_by_id, and exists class methods for
+        consistent model access patterns across the application.
+        """
         with app.app_context():
-            class TestBusinessEntity(BaseModel):
-                __tablename__ = None  # Will be auto-generated
+            # Test create class method
+            user = User.create(
+                username='class_test',
+                email='class@example.com',
+                password='TestPassword123!'
+            )
             
-            # Manually trigger tablename generation
-            tablename = BaseModel.__tablename__.__func__(TestBusinessEntity)
-            expected_name = 'test_business_entity'
-            assert tablename == expected_name
+            assert user.id is not None
+            assert user.username == 'class_test'
+            
+            # Test get_by_id class method
+            retrieved_user = User.get_by_id(user.id)
+            assert retrieved_user is not None
+            assert retrieved_user.id == user.id
+            assert retrieved_user.username == 'class_test'
+            
+            # Test get_by_id with non-existent ID
+            non_existent = User.get_by_id(99999)
+            assert non_existent is None
+            
+            # Test exists class method
+            assert User.exists(user.id) is True
+            assert User.exists(99999) is False
+    
+    def test_table_name_generation(self, app: Flask, db_session):
+        """
+        Test automatic table name generation from class names.
+        
+        Validates snake_case conversion from CamelCase class names
+        following PostgreSQL naming conventions.
+        """
+        with app.app_context():
+            # Test various model table names
+            assert User.__tablename__ == 'users'
+            assert UserSession.__tablename__ == 'user_sessions'
+            assert BusinessEntity.__tablename__ == 'business_entities'
+            assert EntityRelationship.__tablename__ == 'entity_relationships'
 
 
 class TestUserModel:
     """
-    Comprehensive unit tests for User model functionality.
+    Comprehensive test suite for User model with Flask-Login UserMixin integration,
+    authentication functionality, and security features. These tests ensure complete
+    functional parity with original Node.js user authentication patterns.
     
-    Tests Flask-Login UserMixin integration, Werkzeug password hashing, user validation,
-    relationships, and authentication methods to ensure complete compatibility with
-    Flask authentication decorators and session management.
+    Testing coverage includes:
+    - Flask-Login UserMixin integration per Feature F-007
+    - Werkzeug password hashing and verification per Section 4.6.1
+    - User validation rules (username, email format validation)
+    - Account security features (account locking, password reset, email verification)
+    - User relationship mapping to UserSession and BusinessEntity models
+    - Authentication tracking and security monitoring
     """
     
-    def test_user_model_table_creation(self, app, db_session):
-        """Test User model table structure and constraints"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_user_creation_with_validation(self, app: Flask, db_session):
+        """
+        Test user creation with comprehensive field validation.
         
+        Validates username and email format validation, password requirements,
+        and proper model initialization with security defaults.
+        """
         with app.app_context():
-            # Check table exists
-            assert 'users' in db.metadata.tables
-            users_table = db.metadata.tables['users']
+            # Test successful user creation
+            user = User(
+                username='valid_user',
+                email='valid@example.com',
+                password='SecurePassword123!',
+                first_name='Valid',
+                last_name='User'
+            )
+            user.save()
             
-            # Validate required columns
-            required_columns = ['id', 'username', 'email', 'password_hash', 'is_active', 'created_at', 'updated_at']
-            for column_name in required_columns:
-                assert column_name in users_table.columns
-            
-            # Check unique constraints
-            username_column = users_table.columns['username']
-            email_column = users_table.columns['email']
-            assert username_column.unique is True
-            assert email_column.unique is True
-    
-    def test_user_model_flask_login_mixin(self, app, db_session):
-        """Test User model Flask-Login UserMixin integration"""
-        if User is None:
-            pytest.skip("User model not available")
-        
-        with app.app_context():
-            user = User(username='testuser', email='test@example.com', password='password123')
-            
-            # Test UserMixin methods
-            assert isinstance(user, UserMixin)
-            assert user.is_authenticated() is True
-            assert user.is_anonymous() is False
-            assert user.is_active is True  # Default value
-            
-            # Test get_id method for Flask-Login session management
-            user.id = 123
-            assert user.get_id() == '123'
-    
-    def test_user_model_password_hashing(self, app, db_session):
-        """Test secure password hashing with Werkzeug"""
-        if User is None:
-            pytest.skip("User model not available")
-        
-        with app.app_context():
-            password = 'test_password_123'
-            user = User(username='testuser', email='test@example.com', password=password)
-            
-            # Check password is hashed
-            assert user.password_hash != password
+            assert user.id is not None
+            assert user.username == 'valid_user'
+            assert user.email == 'valid@example.com'
+            assert user.first_name == 'Valid'
+            assert user.last_name == 'User'
+            assert user.is_active is True
+            assert user.is_verified is False  # Default value
+            assert user.is_admin is False  # Default value
+            assert user.failed_login_attempts == 0
             assert user.password_hash is not None
-            assert len(user.password_hash) > 50  # Hashed passwords are longer
-            
-            # Test password validation
-            assert user.check_password(password) is True
-            assert user.check_password('wrong_password') is False
-            assert user.check_password('') is False
-            assert user.check_password(None) is False
+            assert user.password_hash != 'SecurePassword123!'  # Should be hashed
     
-    def test_user_model_password_validation(self, app, db_session):
-        """Test password validation and security requirements"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_username_validation(self, app: Flask, db_session):
+        """
+        Test username validation rules per business requirements.
         
+        Validates username format, length constraints, character restrictions,
+        and reserved username prevention.
+        """
         with app.app_context():
-            # Test minimum password length requirement
-            with pytest.raises(ValueError, match="Password must be at least 8 characters"):
-                User(username='testuser', email='test@example.com', password='short')
+            # Test valid usernames
+            valid_usernames = [
+                'validuser',
+                'valid_user',
+                'valid-user',
+                'valid.user',
+                'user123',
+                'a1b2c3'
+            ]
+            
+            for username in valid_usernames:
+                try:
+                    user = User(
+                        username=username,
+                        email=f'{username}@example.com',
+                        password='TestPassword123!'
+                    )
+                    user.save()
+                    assert user.username == username.lower()  # Should be normalized
+                    user.delete()  # Cleanup
+                except Exception as e:
+                    pytest.fail(f"Valid username '{username}' should not raise exception: {e}")
+            
+            # Test invalid usernames
+            invalid_usernames = [
+                '',  # Empty
+                'ab',  # Too short
+                'a' * 81,  # Too long
+                'user@name',  # Invalid character
+                'user name',  # Space
+                '.username',  # Starts with period
+                'username.',  # Ends with period
+                'user..name',  # Consecutive periods
+                'admin',  # Reserved
+                'root',  # Reserved
+                'user#name',  # Invalid character
+            ]
+            
+            for username in invalid_usernames:
+                with pytest.raises(ValueError):
+                    User(
+                        username=username,
+                        email='test@example.com',
+                        password='TestPassword123!'
+                    )
+    
+    def test_email_validation(self, app: Flask, db_session):
+        """
+        Test email address validation per security requirements.
+        
+        Validates email format, length constraints, domain validation,
+        and email normalization patterns.
+        """
+        with app.app_context():
+            # Test valid email addresses
+            valid_emails = [
+                'user@example.com',
+                'user.name@example.com',
+                'user+tag@example.com',
+                'user123@example123.com',
+                'user@subdomain.example.com',
+                'test.email+tag@domain.co.uk'
+            ]
+            
+            for email in valid_emails:
+                try:
+                    user = User(
+                        username=f'user{hash(email) % 1000}',
+                        email=email,
+                        password='TestPassword123!'
+                    )
+                    user.save()
+                    assert user.email == email.lower()  # Should be normalized
+                    user.delete()  # Cleanup
+                except Exception as e:
+                    pytest.fail(f"Valid email '{email}' should not raise exception: {e}")
+            
+            # Test invalid email addresses
+            invalid_emails = [
+                '',  # Empty
+                'invalid',  # No @
+                '@example.com',  # No local part
+                'user@',  # No domain
+                'user@.com',  # Invalid domain
+                'user.@example.com',  # Ends with period
+                '.user@example.com',  # Starts with period
+                'user..name@example.com',  # Consecutive periods
+                'a' * 65 + '@example.com',  # Local part too long
+                'user@' + 'a' * 250 + '.com',  # Domain too long
+                'user@example',  # No TLD
+            ]
+            
+            for email in invalid_emails:
+                with pytest.raises(ValueError):
+                    User(
+                        username='testuser',
+                        email=email,
+                        password='TestPassword123!'
+                    )
+    
+    def test_password_hashing_and_verification(self, app: Flask, db_session):
+        """
+        Test password hashing with Werkzeug security utilities per Section 4.6.1.
+        
+        Validates PBKDF2-SHA256 password hashing, verification, and password
+        strength requirements for authentication security.
+        """
+        with app.app_context():
+            password = 'SecurePassword123!'
+            user = User(
+                username='password_test',
+                email='password@example.com',
+                password=password
+            )
+            user.save()
+            
+            # Verify password is hashed
+            assert user.password_hash is not None
+            assert user.password_hash != password
+            assert user.password_hash.startswith('pbkdf2:sha256:')
+            
+            # Test password verification
+            assert user.check_password(password) is True
+            assert user.check_password('WrongPassword') is False
+            assert user.check_password('') is False
             
             # Test password change
-            user = User(username='testuser', email='test@example.com', password='password123')
-            original_hash = user.password_hash
+            new_password = 'NewSecurePassword456!'
+            user.set_password(new_password)
             
-            user.set_password('new_password_456')
-            assert user.password_hash != original_hash
-            assert user.check_password('new_password_456') is True
-            assert user.check_password('password123') is False
+            assert user.check_password(password) is False  # Old password invalid
+            assert user.check_password(new_password) is True  # New password valid
+            
+            # Test password strength requirements
+            weak_passwords = [
+                '',  # Empty
+                'short',  # Too short
+                'a' * 130,  # Too long
+                'password',  # Too simple
+                'PASSWORD',  # No variety
+                '12345678',  # Only numbers
+                'abcdefgh',  # Only lowercase
+                'ABCDEFGH',  # Only uppercase
+                'Password1',  # Only 2 types
+                'password123',  # Common weak password
+            ]
+            
+            for weak_password in weak_passwords:
+                with pytest.raises(ValueError):
+                    user.set_password(weak_password)
     
-    def test_user_model_username_validation(self, app, db_session):
-        """Test username validation and constraints"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_flask_login_usermixin_integration(self, app: Flask, db_session):
+        """
+        Test Flask-Login UserMixin integration per Feature F-007.
         
+        Validates UserMixin properties and methods for Flask-Login
+        authentication decorator compatibility.
+        """
         with app.app_context():
-            # Test minimum username length
-            with pytest.raises(ValueError, match="Username must be at least 3 characters"):
-                User(username='ab', email='test@example.com', password='password123')
+            user = User(
+                username='login_test',
+                email='login@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Test username normalization (lowercase)
-            user = User(username='TestUser', email='test@example.com', password='password123')
-            assert user.username == 'testuser'
+            # Test UserMixin properties
+            assert user.is_authenticated is True
+            assert user.is_anonymous is False
+            assert user.is_active is True  # From model field
+            assert user.get_id() == str(user.id)
             
-            # Test empty username
-            with pytest.raises(ValueError):
-                User(username='', email='test@example.com', password='password123')
+            # Test with inactive user
+            inactive_user = User(
+                username='inactive_test',
+                email='inactive@example.com',
+                password='TestPassword123!',
+                is_active=False
+            )
+            inactive_user.save()
+            
+            assert inactive_user.is_authenticated is True  # Still authenticated if loaded
+            assert inactive_user.is_active is False  # But account is inactive
     
-    def test_user_model_email_validation(self, app, db_session):
-        """Test email validation and constraints"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_user_authentication_tracking(self, app: Flask, db_session):
+        """
+        Test user authentication with security tracking and monitoring.
         
+        Validates authentication attempt tracking, account locking,
+        and security monitoring per authentication requirements.
+        """
         with app.app_context():
-            # Test invalid email format
-            with pytest.raises(ValueError, match="Valid email address is required"):
-                User(username='testuser', email='invalid_email', password='password123')
+            user = User(
+                username='auth_test',
+                email='auth@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Test email normalization (lowercase)
-            user = User(username='testuser', email='Test@Example.com', password='password123')
-            assert user.email == 'test@example.com'
+            # Test successful authentication
+            assert user.authenticate('TestPassword123!', '192.168.1.1') is True
+            assert user.failed_login_attempts == 0
+            assert user.last_login_at is not None
+            assert user.last_login_ip == '192.168.1.1'
             
-            # Test empty email
-            with pytest.raises(ValueError):
-                User(username='testuser', email='', password='password123')
+            # Test failed authentication
+            original_attempts = user.failed_login_attempts
+            assert user.authenticate('WrongPassword', '192.168.1.1') is False
+            assert user.failed_login_attempts == original_attempts + 1
+            
+            # Test account locking after failed attempts
+            with patch.object(current_app, 'config', {'MAX_FAILED_LOGIN_ATTEMPTS': 3}):
+                user.failed_login_attempts = 2
+                user.save()
+                
+                # One more failure should lock account
+                assert user.authenticate('WrongPassword', '192.168.1.1') is False
+                assert user.failed_login_attempts == 3
+                assert user.is_account_locked is True
+                
+                # Should reject even correct password when locked
+                assert user.authenticate('TestPassword123!', '192.168.1.1') is False
+                
+                # Test account unlock
+                user.reset_failed_login_attempts()
+                assert user.failed_login_attempts == 0
+                assert user.is_account_locked is False
+                
+                # Should work after unlock
+                assert user.authenticate('TestPassword123!', '192.168.1.1') is True
     
-    def test_user_model_unique_constraints(self, app, db_session):
-        """Test username and email unique constraints"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_password_reset_functionality(self, app: Flask, db_session):
+        """
+        Test password reset token generation and validation.
         
+        Validates secure password reset workflows with token expiration
+        and proper security token management.
+        """
         with app.app_context():
-            # Create first user
-            user1 = User(username='testuser', email='test@example.com', password='password123')
-            db_session.add(user1)
-            db_session.commit()
+            user = User(
+                username='reset_test',
+                email='reset@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Test duplicate username
-            with pytest.raises(IntegrityError):
-                user2 = User(username='testuser', email='different@example.com', password='password123')
-                db_session.add(user2)
-                db_session.commit()
+            # Test token generation
+            token = user.generate_password_reset_token()
+            assert token is not None
+            assert len(token) >= 32  # Secure token length
+            assert user.password_reset_token == token
+            assert user.password_reset_expires is not None
             
-            db_session.rollback()
+            # Test token validation
+            assert user.verify_password_reset_token(token) is True
+            assert user.verify_password_reset_token('invalid_token') is False
+            assert user.verify_password_reset_token('') is False
             
-            # Test duplicate email
-            with pytest.raises(IntegrityError):
-                user3 = User(username='differentuser', email='test@example.com', password='password123')
-                db_session.add(user3)
-                db_session.commit()
+            # Test token expiration
+            user.password_reset_expires = datetime.now(timezone.utc) - timedelta(hours=1)
+            user.save()
+            assert user.verify_password_reset_token(token) is False
+            
+            # Test token clearing
+            user.generate_password_reset_token()  # Generate new token
+            assert user.password_reset_token is not None
+            
+            user.clear_password_reset_token()
+            assert user.password_reset_token is None
+            assert user.password_reset_expires is None
     
-    def test_user_model_find_by_username(self, app, db_session):
-        """Test User.find_by_username class method"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_email_verification_functionality(self, app: Flask, db_session):
+        """
+        Test email verification token generation and validation.
         
+        Validates email verification workflows with secure token management
+        and account verification status tracking.
+        """
         with app.app_context():
-            # Create test user
-            user = User(username='testuser', email='test@example.com', password='password123')
-            db_session.add(user)
-            db_session.commit()
+            user = User(
+                username='verify_test',
+                email='verify@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Test successful lookup
-            found_user = User.find_by_username('testuser')
+            # Should have verification token by default
+            assert user.email_verification_token is not None
+            assert user.email_verification_expires is not None
+            assert user.is_verified is False
+            
+            # Test token validation
+            token = user.email_verification_token
+            assert user.verify_email_verification_token(token) is True
+            assert user.verify_email_verification_token('invalid') is False
+            
+            # Test email verification completion
+            user.complete_email_verification()
+            assert user.is_verified is True
+            assert user.email_verification_token is None
+            assert user.email_verification_expires is None
+            
+            # Test token regeneration
+            user.is_verified = False
+            new_token = user.generate_email_verification_token()
+            assert new_token is not None
+            assert new_token != token  # Should be different
+            assert user.verify_email_verification_token(new_token) is True
+    
+    def test_user_account_management(self, app: Flask, db_session):
+        """
+        Test user account activation and deactivation functionality.
+        
+        Validates account lifecycle management with session invalidation
+        and proper state transitions.
+        """
+        with app.app_context():
+            user = User(
+                username='account_test',
+                email='account@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            assert user.is_active is True
+            
+            # Test account deactivation
+            user.deactivate_account()
+            assert user.is_active is False
+            
+            # Test account reactivation
+            user.failed_login_attempts = 5  # Set failed attempts
+            user.activate_account()
+            assert user.is_active is True
+            assert user.failed_login_attempts == 0  # Should reset
+    
+    def test_user_display_properties(self, app: Flask, db_session):
+        """
+        Test user display properties and name handling.
+        
+        Validates full name composition, display name generation,
+        and avatar URL generation for UI components.
+        """
+        with app.app_context():
+            # Test with both names
+            user1 = User(
+                username='display_test1',
+                email='display1@example.com',
+                password='TestPassword123!',
+                first_name='John',
+                last_name='Doe'
+            )
+            user1.save()
+            
+            assert user1.full_name == 'John Doe'
+            assert user1.display_name == 'John Doe'
+            
+            # Test with only first name
+            user2 = User(
+                username='display_test2',
+                email='display2@example.com',
+                password='TestPassword123!',
+                first_name='Jane'
+            )
+            user2.save()
+            
+            assert user2.full_name == 'Jane'
+            assert user2.display_name == 'Jane'
+            
+            # Test with no names
+            user3 = User(
+                username='display_test3',
+                email='display3@example.com',
+                password='TestPassword123!'
+            )
+            user3.save()
+            
+            assert user3.full_name == 'display_test3'
+            assert user3.display_name == 'display_test3'
+            
+            # Test avatar URL generation
+            avatar_url = user1.get_avatar_url()
+            assert 'gravatar.com/avatar' in avatar_url
+            assert avatar_url.endswith('?s=80&d=identicon')
+            
+            # Test custom avatar size
+            custom_avatar = user1.get_avatar_url(size=120, default='mp')
+            assert '?s=120&d=mp' in custom_avatar
+    
+    def test_user_class_methods(self, app: Flask, db_session):
+        """
+        Test User model class methods for user lookup and management.
+        
+        Validates user finder methods, admin user queries, and
+        utility methods for user management operations.
+        """
+        with app.app_context():
+            # Create test users
+            admin_user = User.create_user(
+                username='admin_test',
+                email='admin_test@example.com',
+                password='TestPassword123!',
+                is_admin=True,
+                auto_verify=True
+            )
+            
+            regular_user = User.create_user(
+                username='regular_test',
+                email='regular_test@example.com',
+                password='TestPassword123!'
+            )
+            
+            # Test find_by_username
+            found_user = User.find_by_username('admin_test')
             assert found_user is not None
-            assert found_user.username == 'testuser'
+            assert found_user.id == admin_user.id
             
-            # Test case insensitive lookup
-            found_user_case = User.find_by_username('TestUser')
-            assert found_user_case is not None
-            assert found_user_case.username == 'testuser'
-            
-            # Test user not found
-            not_found = User.find_by_username('nonexistent')
-            assert not_found is None
-            
-            # Test inactive user is not found
-            user.is_active = False
-            db_session.commit()
-            inactive_user = User.find_by_username('testuser')
-            assert inactive_user is None
-    
-    def test_user_model_find_by_email(self, app, db_session):
-        """Test User.find_by_email class method"""
-        if User is None:
-            pytest.skip("User model not available")
-        
-        with app.app_context():
-            # Create test user
-            user = User(username='testuser', email='test@example.com', password='password123')
-            db_session.add(user)
-            db_session.commit()
-            
-            # Test successful lookup
-            found_user = User.find_by_email('test@example.com')
+            # Test case insensitive search
+            found_user = User.find_by_username('ADMIN_TEST')
             assert found_user is not None
-            assert found_user.email == 'test@example.com'
+            assert found_user.id == admin_user.id
             
-            # Test case insensitive lookup
-            found_user_case = User.find_by_email('Test@Example.com')
-            assert found_user_case is not None
-            assert found_user_case.email == 'test@example.com'
+            # Test find_by_email
+            found_user = User.find_by_email('regular_test@example.com')
+            assert found_user is not None
+            assert found_user.id == regular_user.id
             
-            # Test user not found
-            not_found = User.find_by_email('nonexistent@example.com')
-            assert not_found is None
+            # Test find_by_username_or_email
+            found_user = User.find_by_username_or_email('admin_test')
+            assert found_user.id == admin_user.id
+            
+            found_user = User.find_by_username_or_email('regular_test@example.com')
+            assert found_user.id == regular_user.id
+            
+            # Test get_admin_users
+            admin_users = User.get_admin_users()
+            assert len(admin_users) == 1
+            assert admin_users[0].id == admin_user.id
+            
+            # Test create_user with duplicate username
+            with pytest.raises(ValueError):
+                User.create_user(
+                    username='admin_test',  # Duplicate
+                    email='new@example.com',
+                    password='TestPassword123!'
+                )
+            
+            # Test create_user with duplicate email
+            with pytest.raises(ValueError):
+                User.create_user(
+                    username='new_user',
+                    email='admin_test@example.com',  # Duplicate
+                    password='TestPassword123!'
+                )
     
-    def test_user_model_find_by_credentials(self, app, db_session):
-        """Test User.find_by_credentials authentication method"""
-        if User is None:
-            pytest.skip("User model not available")
+    def test_user_token_cleanup(self, app: Flask, db_session):
+        """
+        Test expired token cleanup functionality.
         
+        Validates automatic cleanup of expired password reset and
+        email verification tokens for security maintenance.
+        """
         with app.app_context():
-            # Create test user
-            user = User(username='testuser', email='test@example.com', password='password123')
-            db_session.add(user)
-            db_session.commit()
+            # Create users with expired tokens
+            user1 = User(
+                username='cleanup_test1',
+                email='cleanup1@example.com',
+                password='TestPassword123!'
+            )
+            user1.save()
             
-            # Test authentication with username
-            auth_user = User.find_by_credentials('testuser', 'password123')
-            assert auth_user is not None
-            assert auth_user.username == 'testuser'
+            user2 = User(
+                username='cleanup_test2',
+                email='cleanup2@example.com',
+                password='TestPassword123!'
+            )
+            user2.save()
             
-            # Test authentication with email
-            auth_user_email = User.find_by_credentials('test@example.com', 'password123')
-            assert auth_user_email is not None
-            assert auth_user_email.email == 'test@example.com'
+            # Set expired tokens
+            user1.generate_password_reset_token()
+            user1.password_reset_expires = datetime.now(timezone.utc) - timedelta(hours=1)
+            user1.save()
             
-            # Test invalid password
-            invalid_auth = User.find_by_credentials('testuser', 'wrong_password')
-            assert invalid_auth is None
+            user2.generate_email_verification_token()
+            user2.email_verification_expires = datetime.now(timezone.utc) - timedelta(hours=1)
+            user2.save()
             
-            # Test invalid username
-            invalid_user = User.find_by_credentials('nonexistent', 'password123')
-            assert invalid_user is None
-    
-    def test_user_model_session_management(self, app, db_session):
-        """Test User model session management methods"""
-        if User is None or UserSession is None:
-            pytest.skip("User or UserSession model not available")
-        
-        with app.app_context():
-            # Create test user
-            user = User(username='testuser', email='test@example.com', password='password123')
-            db_session.add(user)
-            db_session.commit()
+            # Verify tokens exist
+            assert user1.password_reset_token is not None
+            assert user2.email_verification_token is not None
             
-            # Test session invalidation (mock implementation)
-            user.invalidate_all_sessions()
-            # Since UserSession relationship may not be fully implemented,
-            # we just test that the method can be called without error
-            assert True  # Method executed successfully
-    
-    def test_user_model_to_dict_serialization(self, app, db_session):
-        """Test User model dictionary serialization"""
-        if User is None:
-            pytest.skip("User model not available")
-        
-        with app.app_context():
-            user = User(username='testuser', email='test@example.com', password='password123')
-            user.id = 123
+            # Run cleanup
+            cleanup_count = User.cleanup_expired_tokens()
+            assert cleanup_count == 2
             
-            # Test serialization without sensitive data
-            user_dict = user.to_dict(include_sensitive=False)
-            assert 'id' in user_dict
-            assert 'username' in user_dict
-            assert 'email' in user_dict
-            assert 'is_active' in user_dict
-            assert 'password_hash' not in user_dict
-            
-            # Test serialization with sensitive data
-            user_dict_sensitive = user.to_dict(include_sensitive=True)
-            assert 'password_hash' in user_dict_sensitive
-    
-    def test_user_model_string_representations(self, app, db_session):
-        """Test User model string representation methods"""
-        if User is None:
-            pytest.skip("User model not available")
-        
-        with app.app_context():
-            user = User(username='testuser', email='test@example.com', password='password123')
-            user.id = 123
-            
-            # Test __repr__ method
-            repr_str = repr(user)
-            assert 'User' in repr_str
-            assert 'testuser' in repr_str
-            assert 'test@example.com' in repr_str
-            
-            # Test __str__ method
-            str_repr = str(user)
-            assert 'testuser' in str_repr
-            assert 'test@example.com' in str_repr
+            # Verify tokens cleaned up
+            db.session.refresh(user1)
+            db.session.refresh(user2)
+            assert user1.password_reset_token is None
+            assert user2.email_verification_token is None
 
 
 class TestUserSessionModel:
     """
-    Comprehensive unit tests for UserSession model functionality.
+    Comprehensive test suite for UserSession model with ItsDangerous integration,
+    session management, and security features. These tests ensure Flask-Login
+    compatibility and secure session token handling.
     
-    Tests session management, ItsDangerous token validation, session expiration,
-    foreign key relationships, and Flask-Login integration to ensure secure
-    session handling for the Flask authentication system.
+    Testing coverage includes:
+    - ItsDangerous secure session token validation per Section 4.6.2
+    - Foreign key relationship with User model per Section 6.2.2.1
+    - Session expiration and validation patterns per Flask-Login requirements
+    - Session security tracking and fingerprinting
+    - Session cleanup and invalidation functionality
     """
     
-    def test_user_session_table_creation(self, app, db_session):
-        """Test UserSession model table structure and constraints"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
+    def test_user_session_creation(self, app: Flask, db_session):
+        """
+        Test UserSession creation with secure token generation.
         
+        Validates session token creation, ItsDangerous integration,
+        and proper foreign key relationships with User model.
+        """
         with app.app_context():
-            # Check table exists
-            assert 'user_sessions' in db.metadata.tables
-            sessions_table = db.metadata.tables['user_sessions']
+            # Create user for session testing
+            user = User(
+                username='session_test',
+                email='session@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Validate required columns
-            required_columns = ['id', 'user_id', 'session_token', 'expires_at', 'created_at', 'is_valid']
-            for column_name in required_columns:
-                assert column_name in sessions_table.columns
+            # Create user session
+            session = UserSession(
+                user_id=user.id,
+                ip_address='192.168.1.1',
+                user_agent='Test Browser',
+                remember_me=False
+            )
+            session.save()
             
-            # Check foreign key constraint
-            user_id_column = sessions_table.columns['user_id']
-            assert len(user_id_column.foreign_keys) > 0
-            
-            # Check unique constraint on session_token
-            session_token_column = sessions_table.columns['session_token']
-            assert session_token_column.unique is True
-    
-    def test_user_session_initialization(self, app, db_session):
-        """Test UserSession initialization with secure token generation"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            expires_at = datetime.utcnow() + timedelta(hours=24)
-            
-            # Mock Flask application context for token generation
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                session = UserSession(
-                    user_id=1,
-                    expires_at=expires_at,
-                    user_agent='Mozilla/5.0 Test Browser',
-                    ip_address='192.168.1.1'
-                )
-                
-                # Validate initialization
-                assert session.user_id == 1
-                assert session.expires_at == expires_at
-                assert session.user_agent == 'Mozilla/5.0 Test Browser'
-                assert session.ip_address == '192.168.1.1'
-                assert session.is_valid is True
-                assert session.session_token is not None
-                assert len(session.session_token) > 0
-    
-    def test_user_session_validation_errors(self, app, db_session):
-        """Test UserSession validation and error handling"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            # Test invalid user_id
-            with pytest.raises(ValueError, match="Invalid user_id"):
-                UserSession(
-                    user_id=0,  # Invalid user_id
-                    expires_at=datetime.utcnow() + timedelta(hours=24)
-                )
-            
-            # Test past expiration date
-            with pytest.raises(ValueError, match="cannot be in the past"):
-                UserSession(
-                    user_id=1,
-                    expires_at=datetime.utcnow() - timedelta(hours=1)  # Past date
-                )
-            
-            # Test invalid expires_at type
-            with pytest.raises(ValueError, match="Invalid expires_at"):
-                UserSession(
-                    user_id=1,
-                    expires_at="not_a_datetime"
-                )
-    
-    @patch('flask.current_app')
-    def test_user_session_token_generation(self, mock_app, app, db_session):
-        """Test secure token generation using ItsDangerous"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            # Configure mock Flask app
-            mock_app.config = {'SECRET_KEY': 'test-secret-key-for-testing'}
-            
-            expires_at = datetime.utcnow() + timedelta(hours=24)
-            session = UserSession(user_id=1, expires_at=expires_at)
-            
-            # Validate token properties
+            assert session.id is not None
+            assert session.user_id == user.id
             assert session.session_token is not None
-            assert isinstance(session.session_token, str)
-            assert len(session.session_token) > 50  # ItsDangerous tokens are long
+            assert len(session.session_token) >= 32  # Secure token length
+            assert session.signed_token is not None
+            assert session.expires_at is not None
+            assert session.is_valid is True
+            assert session.ip_address == '192.168.1.1'
+            assert session.user_agent == 'Test Browser'
+            assert session.remember_me is False
+            assert session.last_activity is not None
+    
+    def test_session_token_uniqueness(self, app: Flask, db_session):
+        """
+        Test session token uniqueness constraints.
+        
+        Validates that session tokens are unique across all sessions
+        and cannot be duplicated in the database.
+        """
+        with app.app_context():
+            user = User(
+                username='token_test',
+                email='token@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
             
-            # Test token uniqueness
-            session2 = UserSession(user_id=2, expires_at=expires_at)
-            assert session.session_token != session2.session_token
-    
-    def test_user_session_expiration_methods(self, app, db_session):
-        """Test session expiration validation methods"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                # Test non-expired session
-                future_time = datetime.utcnow() + timedelta(hours=24)
-                active_session = UserSession(user_id=1, expires_at=future_time)
-                
-                assert active_session.is_expired() is False
-                assert active_session.is_active() is True
-                
-                # Test expired session
-                past_time = datetime.utcnow() - timedelta(hours=1)
-                # Temporarily bypass validation for testing
-                expired_session = UserSession.__new__(UserSession)
-                expired_session.user_id = 1
-                expired_session.expires_at = past_time
-                expired_session.is_valid = True
-                expired_session.created_at = datetime.utcnow()
-                expired_session.last_accessed = datetime.utcnow()
-                
-                assert expired_session.is_expired() is True
-                assert expired_session.is_active() is False
-    
-    def test_user_session_extend_session(self, app, db_session):
-        """Test session extension functionality"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                # Create active session
-                original_expires = datetime.utcnow() + timedelta(hours=1)
-                session = UserSession(user_id=1, expires_at=original_expires)
-                
-                # Extend session
-                session.extend_session(hours=48)
-                
-                # Validate extension
-                assert session.expires_at > original_expires
-                time_diff = (session.expires_at - datetime.utcnow()).total_seconds()
-                assert time_diff > 47 * 3600  # At least 47 hours
-                assert time_diff < 49 * 3600  # Less than 49 hours
-                
-                # Test invalid extension parameters
-                with pytest.raises(ValueError):
-                    session.extend_session(hours=0)
-                
-                with pytest.raises(ValueError):
-                    session.extend_session(hours=-5)
-    
-    def test_user_session_invalidation(self, app, db_session):
-        """Test session invalidation functionality"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                # Create active session
-                session = UserSession(user_id=1, expires_at=datetime.utcnow() + timedelta(hours=24))
-                assert session.is_valid is True
-                
-                # Invalidate session
-                session.invalidate_session("User logged out")
-                assert session.is_valid is False
-                assert session.is_active() is False
-    
-    def test_user_session_update_last_accessed(self, app, db_session):
-        """Test last accessed timestamp updates"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                session = UserSession(user_id=1, expires_at=datetime.utcnow() + timedelta(hours=24))
-                original_last_accessed = session.last_accessed
-                
-                # Simulate time passing
-                import time
-                time.sleep(0.1)
-                
-                # Update last accessed
-                session.update_last_accessed()
-                assert session.last_accessed > original_last_accessed
-    
-    def test_user_session_to_dict_serialization(self, app, db_session):
-        """Test UserSession dictionary serialization"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                session = UserSession(
-                    user_id=1,
-                    expires_at=datetime.utcnow() + timedelta(hours=24),
-                    user_agent='Test Browser',
-                    ip_address='127.0.0.1'
-                )
-                session.id = 123
-                
-                session_dict = session.to_dict()
-                
-                # Validate serialization
-                assert 'id' in session_dict
-                assert 'user_id' in session_dict
-                assert 'session_token' in session_dict
-                assert 'expires_at' in session_dict
-                assert 'is_valid' in session_dict
-                assert 'is_expired' in session_dict
-                assert 'is_active' in session_dict
-                assert 'user_agent' in session_dict
-                assert 'ip_address' in session_dict
-                
-                assert session_dict['user_id'] == 1
-                assert session_dict['user_agent'] == 'Test Browser'
-                assert session_dict['ip_address'] == '127.0.0.1'
-    
-    @patch('flask.current_app')
-    def test_user_session_create_session_class_method(self, mock_app, app, db_session):
-        """Test UserSession.create_session class method"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            mock_app.config = {'SECRET_KEY': 'test-secret-key'}
+            # Create first session
+            session1 = UserSession(user_id=user.id)
+            session1.save()
             
-            # Mock database operations
-            with patch.object(db.session, 'add') as mock_add, \
-                 patch.object(db.session, 'commit') as mock_commit:
-                
-                session = UserSession.create_session(
-                    user_id=1,
-                    expires_in_hours=48,
-                    user_agent='Test Browser',
-                    ip_address='192.168.1.1'
-                )
-                
-                # Validate created session
-                assert isinstance(session, UserSession)
-                assert session.user_id == 1
-                assert session.user_agent == 'Test Browser'
-                assert session.ip_address == '192.168.1.1'
-                
-                # Validate database operations were called
-                mock_add.assert_called_once_with(session)
-                mock_commit.assert_called_once()
-    
-    @patch('flask.current_app')
-    def test_user_session_validate_session_class_method(self, mock_app, app, db_session):
-        """Test UserSession.validate_session class method"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
-        
-        with app.app_context():
-            mock_app.config = {'SECRET_KEY': 'test-secret-key'}
+            # Create second session 
+            session2 = UserSession(user_id=user.id)
+            session2.save()
             
-            # Create a session for testing
-            test_session = UserSession(user_id=1, expires_at=datetime.utcnow() + timedelta(hours=24))
-            test_session.id = 123
+            # Tokens should be different
+            assert session1.session_token != session2.session_token
+            assert session1.signed_token != session2.signed_token
             
-            # Mock database query
-            with patch.object(UserSession, 'query') as mock_query:
-                mock_query.filter_by.return_value.first.return_value = test_session
-                
-                # Test valid session
-                result = UserSession.validate_session(test_session.session_token)
-                assert result == test_session
-                
-                # Test invalid token
-                mock_query.filter_by.return_value.first.return_value = None
-                result = UserSession.validate_session('invalid_token')
-                assert result is None
+            # Verify uniqueness in database
+            all_tokens = db.session.query(UserSession.session_token).all()
+            token_values = [token[0] for token in all_tokens]
+            assert len(token_values) == len(set(token_values))  # All unique
     
-    def test_user_session_string_representations(self, app, db_session):
-        """Test UserSession string representation methods"""
-        if UserSession is None:
-            pytest.skip("UserSession model not available")
+    def test_session_expiration_handling(self, app: Flask, db_session):
+        """
+        Test session expiration validation and cleanup.
         
+        Validates session timeout handling, expired session detection,
+        and automatic session cleanup functionality.
+        """
         with app.app_context():
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                session = UserSession(user_id=1, expires_at=datetime.utcnow() + timedelta(hours=24))
-                session.id = 123
-                
-                # Test __repr__ method
-                repr_str = repr(session)
-                assert 'UserSession' in repr_str
-                assert '123' in repr_str
-                assert '1' in repr_str  # user_id
-                
-                # Test __str__ method
-                str_repr = str(session)
-                assert 'UserSession' in str_repr
-                assert 'User 1' in str_repr
+            user = User(
+                username='expiry_test',
+                email='expiry@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            # Create session with custom expiration
+            session = UserSession(user_id=user.id)
+            session.save()
+            
+            # Test active session
+            assert session.is_expired() is False
+            assert session.is_active_session() is True
+            
+            # Test expired session
+            session.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            session.save()
+            
+            assert session.is_expired() is True
+            assert session.is_active_session() is False
+            
+            # Test session with remember_me flag (longer expiration)
+            remember_session = UserSession(
+                user_id=user.id,
+                remember_me=True
+            )
+            remember_session.save()
+            
+            # Remember sessions should have longer expiration
+            regular_session = UserSession(
+                user_id=user.id,
+                remember_me=False
+            )
+            regular_session.save()
+            
+            assert remember_session.expires_at > regular_session.expires_at
+    
+    def test_session_activity_tracking(self, app: Flask, db_session):
+        """
+        Test session activity tracking and timeout management.
+        
+        Validates last activity updates, session timeout detection,
+        and activity-based session lifecycle management.
+        """
+        with app.app_context():
+            user = User(
+                username='activity_test',
+                email='activity@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            session = UserSession(user_id=user.id)
+            session.save()
+            
+            original_activity = session.last_activity
+            
+            # Test activity update
+            import time
+            time.sleep(0.01)  # Small delay
+            session.update_activity()
+            
+            assert session.last_activity > original_activity
+            
+            # Test session timeout check
+            assert session.is_session_timeout() is False
+            
+            # Set old activity time
+            session.last_activity = datetime.now(timezone.utc) - timedelta(hours=2)
+            session.save()
+            
+            with patch.object(current_app, 'config', {'SESSION_TIMEOUT_HOURS': 1}):
+                assert session.is_session_timeout() is True
+    
+    def test_session_security_features(self, app: Flask, db_session):
+        """
+        Test session security features and fingerprinting.
+        
+        Validates IP address tracking, user agent fingerprinting,
+        and session security validation for fraud detection.
+        """
+        with app.app_context():
+            user = User(
+                username='security_test',
+                email='security@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            session = UserSession(
+                user_id=user.id,
+                ip_address='192.168.1.100',
+                user_agent='Mozilla/5.0 Test Browser'
+            )
+            session.save()
+            
+            # Test security validation
+            assert session.validate_security_context('192.168.1.100', 'Mozilla/5.0 Test Browser') is True
+            assert session.validate_security_context('192.168.1.200', 'Mozilla/5.0 Test Browser') is False
+            assert session.validate_security_context('192.168.1.100', 'Different Browser') is False
+            
+            # Test loose security validation (IP only)
+            assert session.validate_ip_address('192.168.1.100') is True
+            assert session.validate_ip_address('192.168.1.200') is False
+            
+            # Test session fingerprint generation
+            fingerprint = session.generate_fingerprint()
+            assert fingerprint is not None
+            assert isinstance(fingerprint, str)
+            assert len(fingerprint) > 0
+    
+    def test_session_invalidation(self, app: Flask, db_session):
+        """
+        Test session invalidation and cleanup functionality.
+        
+        Validates individual session invalidation, bulk user session cleanup,
+        and proper session state management for security.
+        """
+        with app.app_context():
+            user = User(
+                username='invalidate_test',
+                email='invalidate@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            # Create multiple sessions
+            session1 = UserSession(user_id=user.id)
+            session1.save()
+            
+            session2 = UserSession(user_id=user.id)
+            session2.save()
+            
+            session3 = UserSession(user_id=user.id)
+            session3.save()
+            
+            # Test individual session invalidation
+            session1.invalidate()
+            assert session1.is_valid is False
+            assert session1.is_active_session() is False
+            
+            # Test bulk user session invalidation
+            active_count = UserSession.invalidate_user_sessions(user.id, exclude_session_id=session2.id)
+            assert active_count == 1  # session3 should be invalidated
+            
+            db.session.refresh(session2)
+            db.session.refresh(session3)
+            assert session2.is_valid is True  # Excluded
+            assert session3.is_valid is False  # Invalidated
+    
+    def test_session_relationship_with_user(self, app: Flask, db_session):
+        """
+        Test UserSession relationship with User model.
+        
+        Validates foreign key constraints, relationship loading,
+        and cascade behavior per Section 6.2.2.1.
+        """
+        with app.app_context():
+            user = User(
+                username='relationship_test',
+                email='relationship@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            # Create sessions
+            session1 = UserSession(user_id=user.id)
+            session1.save()
+            
+            session2 = UserSession(user_id=user.id)
+            session2.save()
+            
+            # Test relationship loading
+            assert session1.user is not None
+            assert session1.user.id == user.id
+            assert session1.user.username == 'relationship_test'
+            
+            # Test reverse relationship
+            user_sessions = user.sessions.all()
+            assert len(user_sessions) == 2
+            assert session1 in user_sessions
+            assert session2 in user_sessions
+            
+            # Test session count
+            assert user.get_active_session_count() == 2
+            
+            # Test cascade deletion
+            user.delete()
+            
+            # Sessions should be deleted due to cascade
+            remaining_sessions = UserSession.query.filter_by(user_id=user.id).all()
+            assert len(remaining_sessions) == 0
+    
+    def test_session_class_methods(self, app: Flask, db_session):
+        """
+        Test UserSession class methods for session management.
+        
+        Validates session finder methods, cleanup utilities,
+        and bulk session management operations.
+        """
+        with app.app_context():
+            user1 = User(
+                username='session_class_test1',
+                email='session1@example.com',
+                password='TestPassword123!'
+            )
+            user1.save()
+            
+            user2 = User(
+                username='session_class_test2',
+                email='session2@example.com',
+                password='TestPassword123!'
+            )
+            user2.save()
+            
+            # Create sessions
+            session1 = UserSession(user_id=user1.id)
+            session1.save()
+            
+            session2 = UserSession(user_id=user1.id)
+            session2.save()
+            
+            session3 = UserSession(user_id=user2.id)
+            session3.save()
+            
+            # Test find_by_token
+            found_session = UserSession.find_by_token(session1.session_token)
+            assert found_session is not None
+            assert found_session.id == session1.id
+            
+            # Test find_by_user
+            user1_sessions = UserSession.find_by_user(user1.id)
+            assert len(user1_sessions) == 2
+            
+            user1_active_sessions = UserSession.find_by_user(user1.id, active_only=True)
+            assert len(user1_active_sessions) == 2
+            
+            # Invalidate one session and test active filter
+            session1.invalidate()
+            user1_active_sessions = UserSession.find_by_user(user1.id, active_only=True)
+            assert len(user1_active_sessions) == 1
+            
+            # Test cleanup expired sessions
+            session2.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            session2.save()
+            
+            cleanup_count = UserSession.cleanup_expired_sessions()
+            assert cleanup_count == 1
+            
+            remaining_sessions = UserSession.find_by_user(user1.id, active_only=True)
+            assert len(remaining_sessions) == 0
 
 
 class TestBusinessEntityModel:
     """
-    Comprehensive unit tests for BusinessEntity model functionality.
+    Comprehensive test suite for BusinessEntity model with user ownership
+    relationships and business metadata management. These tests ensure
+    proper business logic preservation and entity management functionality.
     
-    Tests business domain object management, ownership relationships with Users,
-    metadata handling, and business workflow integration to ensure proper
-    business logic preservation during the Flask migration.
+    Testing coverage includes:
+    - Business entity metadata fields and validation
+    - Foreign key relationship with User model for ownership
+    - Status management and business workflow support
+    - Entity relationship foundations per ER diagram requirements
     """
     
-    def test_business_entity_table_creation(self, app, db_session):
-        """Test BusinessEntity model table structure"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
+    def test_business_entity_creation(self, app: Flask, db_session):
+        """
+        Test BusinessEntity creation with user ownership.
         
+        Validates business entity initialization with proper user relationships,
+        metadata field handling, and status management.
+        """
         with app.app_context():
-            # Check table exists
-            assert 'business_entities' in db.metadata.tables
-            entities_table = db.metadata.tables['business_entities']
+            # Create owner user
+            owner = User(
+                username='entity_owner',
+                email='owner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
             
-            # Validate required columns
-            required_columns = ['id', 'name', 'description', 'owner_id', 'status']
-            for column_name in required_columns:
-                assert column_name in entities_table.columns
-            
-            # Check foreign key to users table
-            owner_id_column = entities_table.columns['owner_id']
-            assert len(owner_id_column.foreign_keys) > 0
-            
-            # Check indexes
-            name_column = entities_table.columns['name']
-            assert name_column.index is True
-    
-    def test_business_entity_initialization(self, app, db_session):
-        """Test BusinessEntity initialization and field validation"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
-        
-        with app.app_context():
+            # Create business entity
             entity = BusinessEntity(
-                name='Test Entity',
+                name='Test Business',
                 description='A test business entity',
-                owner_id=1,
+                owner_id=owner.id,
                 status='active'
             )
+            entity.save()
             
-            # Validate initialization
-            assert entity.name == 'Test Entity'
+            assert entity.id is not None
+            assert entity.name == 'Test Business'
             assert entity.description == 'A test business entity'
-            assert entity.owner_id == 1
+            assert entity.owner_id == owner.id
             assert entity.status == 'active'
             assert entity.created_at is not None
             assert entity.updated_at is not None
     
-    def test_business_entity_owner_relationship(self, app, db_session):
-        """Test BusinessEntity relationship with User model"""
-        if BusinessEntity is None or User is None:
-            pytest.skip("BusinessEntity or User model not available")
+    def test_business_entity_user_relationship(self, app: Flask, db_session):
+        """
+        Test BusinessEntity relationship with User model.
         
+        Validates foreign key constraints, relationship loading,
+        and ownership patterns for business entity access control.
+        """
         with app.app_context():
-            # Create test user
-            user = User(username='owner', email='owner@example.com', password='password123')
-            db_session.add(user)
-            db_session.flush()  # Get user ID without committing
-            
-            # Create business entity with owner relationship
-            entity = BusinessEntity(
-                name='Owned Entity',
-                description='Entity owned by user',
-                owner_id=user.id,
-                status='active'
+            owner = User(
+                username='business_owner',
+                email='business@example.com',
+                password='TestPassword123!'
             )
-            db_session.add(entity)
-            db_session.commit()
+            owner.save()
             
-            # Test relationship access
-            assert entity.owner == user
-            assert entity in user.business_entities.all()
+            # Create multiple entities
+            entity1 = BusinessEntity(
+                name='Business One',
+                description='First business',
+                owner_id=owner.id
+            )
+            entity1.save()
+            
+            entity2 = BusinessEntity(
+                name='Business Two',
+                description='Second business',
+                owner_id=owner.id
+            )
+            entity2.save()
+            
+            # Test forward relationship
+            assert entity1.owner is not None
+            assert entity1.owner.id == owner.id
+            assert entity1.owner.username == 'business_owner'
+            
+            # Test reverse relationship
+            owner_entities = owner.business_entities.all()
+            assert len(owner_entities) == 2
+            assert entity1 in owner_entities
+            assert entity2 in owner_entities
+            
+            # Test entity count method
+            assert owner.get_business_entity_count() == 2
     
-    def test_business_entity_cascade_delete(self, app, db_session):
-        """Test CASCADE delete behavior when owner is deleted"""
-        if BusinessEntity is None or User is None:
-            pytest.skip("BusinessEntity or User model not available")
+    def test_business_entity_validation(self, app: Flask, db_session):
+        """
+        Test BusinessEntity field validation and constraints.
         
+        Validates business name requirements, description handling,
+        and status field validation for business workflow support.
+        """
         with app.app_context():
-            # Create test user and entity
-            user = User(username='testowner', email='testowner@example.com', password='password123')
-            db_session.add(user)
-            db_session.flush()
+            owner = User(
+                username='validation_owner',
+                email='validation@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
             
-            entity = BusinessEntity(
-                name='Test Entity',
-                description='Test entity for cascade delete',
-                owner_id=user.id,
+            # Test successful creation with valid data
+            valid_entity = BusinessEntity(
+                name='Valid Business Name',
+                description='A valid description',
+                owner_id=owner.id,
                 status='active'
             )
-            db_session.add(entity)
-            db_session.commit()
+            valid_entity.save()
+            assert valid_entity.id is not None
             
-            entity_id = entity.id
-            
-            # Delete user - should cascade to business entity
-            db_session.delete(user)
-            db_session.commit()
-            
-            # Verify business entity was deleted
-            deleted_entity = BusinessEntity.query.get(entity_id)
-            assert deleted_entity is None
-    
-    def test_business_entity_status_management(self, app, db_session):
-        """Test business entity status field and workflow management"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
-        
-        with app.app_context():
-            entity = BusinessEntity(
-                name='Status Test Entity',
-                description='Entity for status testing',
-                owner_id=1,
-                status='draft'
-            )
-            
-            # Test status updates
-            assert entity.status == 'draft'
-            
-            entity.status = 'active'
-            assert entity.status == 'active'
-            
-            entity.status = 'inactive'
-            assert entity.status == 'inactive'
-            
-            entity.status = 'archived'
-            assert entity.status == 'archived'
-    
-    def test_business_entity_metadata_fields(self, app, db_session):
-        """Test business entity metadata field handling"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
-        
-        with app.app_context():
-            # Test with description
-            entity_with_desc = BusinessEntity(
-                name='Entity with Description',
-                description='This is a detailed description of the business entity.',
-                owner_id=1,
-                status='active'
-            )
-            assert entity_with_desc.description is not None
-            assert len(entity_with_desc.description) > 0
-            
-            # Test without description (nullable)
-            entity_no_desc = BusinessEntity(
-                name='Entity without Description',
-                description=None,
-                owner_id=1,
-                status='active'
-            )
-            assert entity_no_desc.description is None
-    
-    def test_business_entity_name_constraints(self, app, db_session):
-        """Test business entity name field constraints and validation"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
-        
-        with app.app_context():
-            # Test valid name
-            entity = BusinessEntity(
-                name='Valid Entity Name',
-                owner_id=1,
-                status='active'
-            )
-            assert entity.name == 'Valid Entity Name'
-            
-            # Test empty name should be handled by database constraints
-            # The actual constraint validation happens at database level
-            try:
-                entity_empty_name = BusinessEntity(
-                    name='',
-                    owner_id=1,
-                    status='active'
+            # Test name validation
+            with pytest.raises(ValueError):
+                BusinessEntity(
+                    name='',  # Empty name
+                    owner_id=owner.id
                 )
-                db_session.add(entity_empty_name)
-                db_session.commit()
-                # If no exception, the empty name was allowed
-                assert entity_empty_name.name == ''
-            except IntegrityError:
-                # Empty name not allowed - this is expected behavior
-                db_session.rollback()
-                assert True
-    
-    def test_business_entity_queries_and_filtering(self, app, db_session):
-        """Test business entity query methods and filtering"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
-        
-        with app.app_context():
-            # Create test entities with different statuses
-            entities_data = [
-                ('Active Entity 1', 'active'),
-                ('Active Entity 2', 'active'),
-                ('Draft Entity', 'draft'),
-                ('Inactive Entity', 'inactive')
-            ]
             
-            for name, status in entities_data:
+            with pytest.raises(ValueError):
+                BusinessEntity(
+                    name='a' * 256,  # Too long
+                    owner_id=owner.id
+                )
+            
+            # Test status validation
+            invalid_statuses = ['invalid_status', '', None]
+            for status in invalid_statuses:
                 entity = BusinessEntity(
-                    name=name,
-                    description=f'Description for {name}',
-                    owner_id=1,
+                    name='Test Entity',
+                    owner_id=owner.id,
                     status=status
                 )
-                db_session.add(entity)
-            
-            db_session.commit()
-            
-            # Test filtering by status
-            active_entities = BusinessEntity.query.filter_by(status='active').all()
-            assert len(active_entities) == 2
-            
-            draft_entities = BusinessEntity.query.filter_by(status='draft').all()
-            assert len(draft_entities) == 1
-            
-            # Test filtering by owner
-            owner_entities = BusinessEntity.query.filter_by(owner_id=1).all()
-            assert len(owner_entities) == 4
+                if status is None:
+                    # Should use default
+                    entity.save()
+                    assert entity.status == 'draft'  # Default status
+                    entity.delete()
+                else:
+                    with pytest.raises(ValueError):
+                        entity.validate_status()
     
-    def test_business_entity_timestamp_behavior(self, app, db_session):
-        """Test automatic timestamp management for business entities"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
+    def test_business_entity_status_management(self, app: Flask, db_session):
+        """
+        Test business entity status lifecycle management.
         
+        Validates status transitions, workflow support, and proper
+        business state management for entity lifecycle.
+        """
         with app.app_context():
-            entity = BusinessEntity(
-                name='Timestamp Test Entity',
-                description='Entity for timestamp testing',
-                owner_id=1,
-                status='active'
+            owner = User(
+                username='status_owner',
+                email='status@example.com',
+                password='TestPassword123!'
             )
+            owner.save()
             
-            # Check initial timestamps
-            assert entity.created_at is not None
+            entity = BusinessEntity(
+                name='Status Test Entity',
+                owner_id=owner.id,
+                status='draft'
+            )
+            entity.save()
+            
+            # Test status transitions
+            assert entity.status == 'draft'
+            assert entity.is_active() is False
+            
+            entity.activate()
+            assert entity.status == 'active'
+            assert entity.is_active() is True
+            
+            entity.deactivate()
+            assert entity.status == 'inactive'
+            assert entity.is_active() is False
+            
+            entity.archive()
+            assert entity.status == 'archived'
+            assert entity.is_archived() is True
+            
+            # Test status history tracking
             assert entity.updated_at is not None
-            assert isinstance(entity.created_at, datetime)
-            assert isinstance(entity.updated_at, datetime)
-            
-            original_created_at = entity.created_at
-            original_updated_at = entity.updated_at
-            
-            db_session.add(entity)
-            db_session.commit()
-            
-            # Simulate time passing and update
-            import time
-            time.sleep(0.1)
-            
-            entity.description = 'Updated description'
-            db_session.commit()
-            
-            # created_at should not change, updated_at should change
-            assert entity.created_at == original_created_at
-            assert entity.updated_at > original_updated_at
     
-    def test_business_entity_string_representations(self, app, db_session):
-        """Test BusinessEntity string representation methods"""
-        if BusinessEntity is None:
-            pytest.skip("BusinessEntity model not available")
+    def test_business_entity_relationship_foundations(self, app: Flask, db_session):
+        """
+        Test BusinessEntity foundations for EntityRelationship model.
         
+        Validates that BusinessEntity properly supports relationship
+        mappings and provides foundation for complex business workflows.
+        """
         with app.app_context():
-            entity = BusinessEntity(
-                name='Test Entity for Repr',
-                description='Entity for testing string representations',
-                owner_id=1,
+            owner = User(
+                username='relationship_owner',
+                email='relowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            # Create entities for relationship testing
+            source_entity = BusinessEntity(
+                name='Source Entity',
+                description='Source for relationships',
+                owner_id=owner.id,
                 status='active'
             )
-            entity.id = 456
+            source_entity.save()
             
-            # Test __repr__ method if implemented
-            if hasattr(entity, '__repr__'):
-                repr_str = repr(entity)
-                assert 'BusinessEntity' in repr_str or 'Test Entity for Repr' in repr_str
+            target_entity = BusinessEntity(
+                name='Target Entity',
+                description='Target for relationships',
+                owner_id=owner.id,
+                status='active'
+            )
+            target_entity.save()
             
-            # Test __str__ method if implemented
-            if hasattr(entity, '__str__'):
-                str_repr = str(entity)
-                assert 'Test Entity for Repr' in str_repr
+            # Test that entities can serve as relationship endpoints
+            assert source_entity.can_create_relationships() is True
+            assert target_entity.can_accept_relationships() is True
+            
+            # Test entity metadata for relationships
+            source_dict = source_entity.to_dict()
+            assert 'id' in source_dict
+            assert 'name' in source_dict
+            assert 'status' in source_dict
+            assert 'owner_id' in source_dict
+    
+    def test_business_entity_class_methods(self, app: Flask, db_session):
+        """
+        Test BusinessEntity class methods for entity management.
+        
+        Validates entity finder methods, status filtering,
+        and bulk entity management operations.
+        """
+        with app.app_context():
+            owner1 = User(
+                username='entity_owner1',
+                email='owner1@example.com',
+                password='TestPassword123!'
+            )
+            owner1.save()
+            
+            owner2 = User(
+                username='entity_owner2',
+                email='owner2@example.com',
+                password='TestPassword123!'
+            )
+            owner2.save()
+            
+            # Create entities with different statuses
+            active_entity = BusinessEntity(
+                name='Active Entity',
+                owner_id=owner1.id,
+                status='active'
+            )
+            active_entity.save()
+            
+            inactive_entity = BusinessEntity(
+                name='Inactive Entity',
+                owner_id=owner1.id,
+                status='inactive'
+            )
+            inactive_entity.save()
+            
+            archived_entity = BusinessEntity(
+                name='Archived Entity',
+                owner_id=owner2.id,
+                status='archived'
+            )
+            archived_entity.save()
+            
+            # Test find_by_owner
+            owner1_entities = BusinessEntity.find_by_owner(owner1.id)
+            assert len(owner1_entities) == 2
+            
+            # Test find_by_status
+            active_entities = BusinessEntity.find_by_status('active')
+            assert len(active_entities) == 1
+            assert active_entities[0].id == active_entity.id
+            
+            # Test find_active_entities
+            active_entities = BusinessEntity.find_active_entities()
+            assert len(active_entities) == 1
+            
+            # Test search by name
+            search_results = BusinessEntity.search_by_name('Active')
+            assert len(search_results) == 1
+            assert search_results[0].id == active_entity.id
 
 
 class TestEntityRelationshipModel:
     """
-    Comprehensive unit tests for EntityRelationship model functionality.
+    Comprehensive test suite for EntityRelationship model with complex business
+    entity associations, relationship type categorization, and temporal management.
+    These tests ensure sophisticated business logic workflows through many-to-many
+    entity relationships with proper referential integrity.
     
-    Tests complex business entity associations, source and target entity mapping,
-    relationship type categorization, and business workflow integration to ensure
-    proper relationship management during the Flask migration.
+    Testing coverage includes:
+    - Complex business entity relationship mapping per Section 6.2.2.1
+    - Dual foreign key relationships for source and target entities
+    - Relationship type categorization and validation
+    - Temporal state management and lifecycle tracking
+    - Composite indexing and performance optimization
     """
     
-    def test_entity_relationship_table_creation(self, app, db_session):
-        """Test EntityRelationship model table structure"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
+    def test_entity_relationship_creation(self, app: Flask, db_session):
+        """
+        Test EntityRelationship creation with dual foreign keys.
         
+        Validates relationship creation between business entities with
+        proper foreign key constraints and metadata management.
+        """
         with app.app_context():
-            # Check table exists
-            if 'entity_relationships' in db.metadata.tables:
-                relationships_table = db.metadata.tables['entity_relationships']
-                
-                # Validate required columns
-                expected_columns = ['id', 'source_entity_id', 'target_entity_id', 'relationship_type']
-                for column_name in expected_columns:
-                    if column_name in relationships_table.columns:
-                        assert True  # Column exists
-                    else:
-                        pytest.skip(f"Column {column_name} not found in EntityRelationship table")
-            else:
-                pytest.skip("EntityRelationship table not found")
-    
-    def test_entity_relationship_initialization(self, app, db_session):
-        """Test EntityRelationship initialization and field validation"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            try:
-                relationship = EntityRelationship(
-                    source_entity_id=1,
-                    target_entity_id=2,
-                    relationship_type='depends_on',
-                    is_active=True
-                )
-                
-                # Validate initialization
-                assert relationship.source_entity_id == 1
-                assert relationship.target_entity_id == 2
-                assert relationship.relationship_type == 'depends_on'
-                assert relationship.is_active is True
-                
-            except Exception as e:
-                pytest.skip(f"EntityRelationship initialization failed: {e}")
-    
-    def test_entity_relationship_types(self, app, db_session):
-        """Test different relationship types and categorization"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            relationship_types = [
-                'depends_on',
-                'part_of',
-                'related_to',
-                'manages',
-                'contains',
-                'follows'
-            ]
+            # Create owner and entities
+            owner = User(
+                username='rel_owner',
+                email='relowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
             
-            for rel_type in relationship_types:
-                try:
-                    relationship = EntityRelationship(
-                        source_entity_id=1,
-                        target_entity_id=2,
-                        relationship_type=rel_type,
-                        is_active=True
-                    )
-                    assert relationship.relationship_type == rel_type
-                except Exception as e:
-                    pytest.skip(f"Relationship type {rel_type} not supported: {e}")
-    
-    def test_entity_relationship_bidirectional_constraints(self, app, db_session):
-        """Test entity relationship bidirectional constraints and validation"""
-        if EntityRelationship is None or BusinessEntity is None:
-            pytest.skip("EntityRelationship or BusinessEntity model not available")
-        
-        with app.app_context():
-            try:
-                # Create business entities for testing
-                entity1 = BusinessEntity(name='Entity 1', owner_id=1, status='active')
-                entity2 = BusinessEntity(name='Entity 2', owner_id=1, status='active')
-                db_session.add_all([entity1, entity2])
-                db_session.flush()
-                
-                # Create relationship
-                relationship = EntityRelationship(
-                    source_entity_id=entity1.id,
-                    target_entity_id=entity2.id,
-                    relationship_type='depends_on',
-                    is_active=True
-                )
-                db_session.add(relationship)
-                db_session.commit()
-                
-                # Test relationship exists
-                assert relationship.source_entity_id == entity1.id
-                assert relationship.target_entity_id == entity2.id
-                
-            except Exception as e:
-                pytest.skip(f"Bidirectional relationship test failed: {e}")
-    
-    def test_entity_relationship_self_reference_validation(self, app, db_session):
-        """Test validation for self-referencing relationships"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            try:
-                # Attempt to create self-referencing relationship
-                relationship = EntityRelationship(
-                    source_entity_id=1,
-                    target_entity_id=1,  # Same as source
-                    relationship_type='self_reference',
-                    is_active=True
-                )
-                
-                # Depending on implementation, this might be allowed or not
-                # Test that the object can be created
-                assert relationship.source_entity_id == relationship.target_entity_id
-                
-            except Exception as e:
-                # If self-references are not allowed, this is expected
-                assert "self" in str(e).lower() or "same" in str(e).lower()
-    
-    def test_entity_relationship_cascade_behavior(self, app, db_session):
-        """Test cascade delete behavior for entity relationships"""
-        if EntityRelationship is None or BusinessEntity is None:
-            pytest.skip("EntityRelationship or BusinessEntity model not available")
-        
-        with app.app_context():
-            try:
-                # Create business entities
-                entity1 = BusinessEntity(name='Source Entity', owner_id=1, status='active')
-                entity2 = BusinessEntity(name='Target Entity', owner_id=1, status='active')
-                db_session.add_all([entity1, entity2])
-                db_session.flush()
-                
-                # Create relationship
-                relationship = EntityRelationship(
-                    source_entity_id=entity1.id,
-                    target_entity_id=entity2.id,
-                    relationship_type='manages',
-                    is_active=True
-                )
-                db_session.add(relationship)
-                db_session.commit()
-                
-                relationship_id = relationship.id
-                
-                # Delete source entity
-                db_session.delete(entity1)
-                db_session.commit()
-                
-                # Check if relationship was cascade deleted
-                deleted_relationship = EntityRelationship.query.get(relationship_id)
-                # Depending on cascade configuration, relationship might be deleted
-                if deleted_relationship is None:
-                    assert True  # Cascade delete worked
-                else:
-                    # If not cascade deleted, check if foreign key is handled properly
-                    assert deleted_relationship.source_entity_id is None or deleted_relationship.source_entity_id == entity1.id
-                
-            except Exception as e:
-                pytest.skip(f"Cascade behavior test failed: {e}")
-    
-    def test_entity_relationship_active_state_management(self, app, db_session):
-        """Test entity relationship active state and soft deletion"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            try:
-                relationship = EntityRelationship(
-                    source_entity_id=1,
-                    target_entity_id=2,
-                    relationship_type='collaborates_with',
-                    is_active=True
-                )
-                
-                # Test initial active state
-                assert relationship.is_active is True
-                
-                # Test deactivation (soft delete)
-                relationship.is_active = False
-                assert relationship.is_active is False
-                
-                # Test reactivation
-                relationship.is_active = True
-                assert relationship.is_active is True
-                
-            except Exception as e:
-                pytest.skip(f"Active state management test failed: {e}")
-    
-    def test_entity_relationship_querying_and_filtering(self, app, db_session):
-        """Test entity relationship querying and filtering methods"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            try:
-                # Create multiple relationships for testing
-                relationships_data = [
-                    (1, 2, 'depends_on', True),
-                    (1, 3, 'manages', True),
-                    (2, 3, 'collaborates_with', False),
-                    (3, 1, 'reports_to', True)
-                ]
-                
-                for source_id, target_id, rel_type, is_active in relationships_data:
-                    relationship = EntityRelationship(
-                        source_entity_id=source_id,
-                        target_entity_id=target_id,
-                        relationship_type=rel_type,
-                        is_active=is_active
-                    )
-                    db_session.add(relationship)
-                
-                db_session.commit()
-                
-                # Test filtering by source entity
-                source_relationships = EntityRelationship.query.filter_by(source_entity_id=1).all()
-                assert len(source_relationships) >= 2
-                
-                # Test filtering by relationship type
-                depends_relationships = EntityRelationship.query.filter_by(relationship_type='depends_on').all()
-                assert len(depends_relationships) >= 1
-                
-                # Test filtering by active state
-                active_relationships = EntityRelationship.query.filter_by(is_active=True).all()
-                assert len(active_relationships) >= 3
-                
-                inactive_relationships = EntityRelationship.query.filter_by(is_active=False).all()
-                assert len(inactive_relationships) >= 1
-                
-            except Exception as e:
-                pytest.skip(f"Querying and filtering test failed: {e}")
-    
-    def test_entity_relationship_timestamp_management(self, app, db_session):
-        """Test automatic timestamp management for entity relationships"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            try:
-                relationship = EntityRelationship(
-                    source_entity_id=1,
-                    target_entity_id=2,
-                    relationship_type='works_with',
-                    is_active=True
-                )
-                
-                # Check timestamp fields exist and are set
-                if hasattr(relationship, 'created_at'):
-                    assert relationship.created_at is not None
-                    assert isinstance(relationship.created_at, datetime)
-                
-                if hasattr(relationship, 'updated_at'):
-                    assert relationship.updated_at is not None
-                    assert isinstance(relationship.updated_at, datetime)
-                
-            except Exception as e:
-                pytest.skip(f"Timestamp management test failed: {e}")
-    
-    def test_entity_relationship_string_representations(self, app, db_session):
-        """Test EntityRelationship string representation methods"""
-        if EntityRelationship is None:
-            pytest.skip("EntityRelationship model not available")
-        
-        with app.app_context():
-            try:
-                relationship = EntityRelationship(
-                    source_entity_id=1,
-                    target_entity_id=2,
-                    relationship_type='manages',
-                    is_active=True
-                )
-                relationship.id = 789
-                
-                # Test __repr__ method if implemented
-                if hasattr(relationship, '__repr__'):
-                    repr_str = repr(relationship)
-                    assert ('EntityRelationship' in repr_str or 
-                            'manages' in repr_str or 
-                            '789' in repr_str)
-                
-                # Test __str__ method if implemented
-                if hasattr(relationship, '__str__'):
-                    str_repr = str(relationship)
-                    assert ('manages' in str_repr or 
-                            '1' in str_repr or 
-                            '2' in str_repr)
-                
-            except Exception as e:
-                pytest.skip(f"String representation test failed: {e}")
-
-
-class TestModelIntegration:
-    """
-    Integration tests for model relationships and cross-model functionality.
-    
-    Tests the complete model ecosystem including User-UserSession relationships,
-    User-BusinessEntity ownership, BusinessEntity-EntityRelationship associations,
-    and end-to-end workflow scenarios to ensure proper model integration.
-    """
-    
-    def test_user_session_relationship_integration(self, app, db_session):
-        """Test User and UserSession relationship integration"""
-        if User is None or UserSession is None:
-            pytest.skip("User or UserSession model not available")
-        
-        with app.app_context():
-            # Create user
-            user = User(username='testuser', email='test@example.com', password='password123')
-            db_session.add(user)
-            db_session.flush()
-            
-            with patch('flask.current_app') as mock_app:
-                mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                
-                # Create session for user
-                session = UserSession(
-                    user_id=user.id,
-                    expires_at=datetime.utcnow() + timedelta(hours=24)
-                )
-                db_session.add(session)
-                db_session.commit()
-                
-                # Test relationship access
-                assert session.user == user
-                assert session in user.sessions.all()
-    
-    def test_user_business_entity_ownership(self, app, db_session):
-        """Test User and BusinessEntity ownership relationship"""
-        if User is None or BusinessEntity is None:
-            pytest.skip("User or BusinessEntity model not available")
-        
-        with app.app_context():
-            # Create user
-            user = User(username='owner', email='owner@example.com', password='password123')
-            db_session.add(user)
-            db_session.flush()
-            
-            # Create business entities owned by user
-            entity1 = BusinessEntity(
-                name='Entity 1',
-                description='First entity',
-                owner_id=user.id,
+            source_entity = BusinessEntity(
+                name='Source Entity',
+                owner_id=owner.id,
                 status='active'
             )
-            entity2 = BusinessEntity(
-                name='Entity 2',
-                description='Second entity',
-                owner_id=user.id,
-                status='draft'
+            source_entity.save()
+            
+            target_entity = BusinessEntity(
+                name='Target Entity',
+                owner_id=owner.id,
+                status='active'
             )
-            db_session.add_all([entity1, entity2])
-            db_session.commit()
+            target_entity.save()
             
-            # Test ownership relationships
-            assert entity1.owner == user
-            assert entity2.owner == user
-            assert len(user.business_entities.all()) == 2
+            # Create relationship
+            relationship = EntityRelationship(
+                source_entity_id=source_entity.id,
+                target_entity_id=target_entity.id,
+                relationship_type='parent_child',
+                is_active=True
+            )
+            relationship.save()
             
-            # Test filtering user's active entities
-            active_entities = user.business_entities.filter_by(status='active').all()
-            assert len(active_entities) == 1
-            assert active_entities[0] == entity1
+            assert relationship.id is not None
+            assert relationship.source_entity_id == source_entity.id
+            assert relationship.target_entity_id == target_entity.id
+            assert relationship.relationship_type == 'parent_child'
+            assert relationship.is_active is True
+            assert relationship.created_at is not None
     
-    def test_business_entity_relationship_associations(self, app, db_session):
-        """Test BusinessEntity and EntityRelationship associations"""
-        if BusinessEntity is None or EntityRelationship is None:
-            pytest.skip("BusinessEntity or EntityRelationship model not available")
+    def test_entity_relationship_foreign_keys(self, app: Flask, db_session):
+        """
+        Test EntityRelationship foreign key relationships.
         
+        Validates source and target entity relationships with proper
+        constraint enforcement and relationship loading.
+        """
         with app.app_context():
-            try:
-                # Create business entities
-                entity1 = BusinessEntity(name='Parent Entity', owner_id=1, status='active')
-                entity2 = BusinessEntity(name='Child Entity', owner_id=1, status='active')
-                entity3 = BusinessEntity(name='Related Entity', owner_id=1, status='active')
-                db_session.add_all([entity1, entity2, entity3])
-                db_session.flush()
-                
-                # Create relationships
-                rel1 = EntityRelationship(
+            owner = User(
+                username='fk_owner',
+                email='fkowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            entity1 = BusinessEntity(
+                name='Entity One',
+                owner_id=owner.id
+            )
+            entity1.save()
+            
+            entity2 = BusinessEntity(
+                name='Entity Two',
+                owner_id=owner.id
+            )
+            entity2.save()
+            
+            relationship = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='partnership'
+            )
+            relationship.save()
+            
+            # Test forward relationships
+            assert relationship.source_entity is not None
+            assert relationship.source_entity.id == entity1.id
+            assert relationship.source_entity.name == 'Entity One'
+            
+            assert relationship.target_entity is not None
+            assert relationship.target_entity.id == entity2.id
+            assert relationship.target_entity.name == 'Entity Two'
+            
+            # Test reverse relationships
+            source_relationships = entity1.source_relationships.all()
+            assert len(source_relationships) == 1
+            assert source_relationships[0].id == relationship.id
+            
+            target_relationships = entity2.target_relationships.all()
+            assert len(target_relationships) == 1
+            assert target_relationships[0].id == relationship.id
+    
+    def test_relationship_type_validation(self, app: Flask, db_session):
+        """
+        Test relationship type categorization and validation.
+        
+        Validates relationship type constraints, business rule enforcement,
+        and proper categorization for workflow support.
+        """
+        with app.app_context():
+            owner = User(
+                username='type_owner',
+                email='typeowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            entity1 = BusinessEntity(name='Entity 1', owner_id=owner.id)
+            entity1.save()
+            
+            entity2 = BusinessEntity(name='Entity 2', owner_id=owner.id)
+            entity2.save()
+            
+            # Test valid relationship types
+            valid_types = [
+                'parent_child',
+                'partnership',
+                'supplier_customer',
+                'subsidiary',
+                'collaboration',
+                'dependency'
+            ]
+            
+            for rel_type in valid_types:
+                relationship = EntityRelationship(
                     source_entity_id=entity1.id,
                     target_entity_id=entity2.id,
-                    relationship_type='manages',
-                    is_active=True
+                    relationship_type=rel_type
                 )
-                rel2 = EntityRelationship(
-                    source_entity_id=entity2.id,
-                    target_entity_id=entity3.id,
-                    relationship_type='collaborates_with',
-                    is_active=True
+                relationship.save()
+                assert relationship.relationship_type == rel_type
+                relationship.delete()  # Cleanup
+            
+            # Test invalid relationship type
+            with pytest.raises(ValueError):
+                EntityRelationship(
+                    source_entity_id=entity1.id,
+                    target_entity_id=entity2.id,
+                    relationship_type='invalid_type'
                 )
-                db_session.add_all([rel1, rel2])
-                db_session.commit()
-                
-                # Test relationship queries
-                entity1_relationships = EntityRelationship.query.filter_by(
-                    source_entity_id=entity1.id
-                ).all()
-                assert len(entity1_relationships) == 1
-                assert entity1_relationships[0].target_entity_id == entity2.id
-                
-            except Exception as e:
-                pytest.skip(f"Business entity relationship test failed: {e}")
     
-    def test_complete_workflow_scenario(self, app, db_session):
-        """Test complete workflow scenario with all models"""
-        if not all([User, UserSession, BusinessEntity, EntityRelationship]):
-            pytest.skip("Not all models available for integration test")
+    def test_relationship_temporal_management(self, app: Flask, db_session):
+        """
+        Test relationship temporal state management and lifecycle.
         
+        Validates relationship activation, deactivation, and temporal
+        tracking for business workflow and lifecycle management.
+        """
         with app.app_context():
-            try:
-                # 1. Create user and authenticate
-                user = User(username='workflow_user', email='workflow@example.com', password='password123')
-                db_session.add(user)
-                db_session.flush()
-                
-                with patch('flask.current_app') as mock_app:
-                    mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-                    
-                    # 2. Create user session
-                    session = UserSession(
-                        user_id=user.id,
-                        expires_at=datetime.utcnow() + timedelta(hours=24)
-                    )
-                    db_session.add(session)
-                    db_session.flush()
-                    
-                    # 3. Create business entities
-                    project = BusinessEntity(
-                        name='Important Project',
-                        description='A critical business project',
-                        owner_id=user.id,
-                        status='active'
-                    )
-                    task1 = BusinessEntity(
-                        name='Task 1',
-                        description='First task of the project',
-                        owner_id=user.id,
-                        status='active'
-                    )
-                    task2 = BusinessEntity(
-                        name='Task 2',
-                        description='Second task of the project',
-                        owner_id=user.id,
-                        status='draft'
-                    )
-                    db_session.add_all([project, task1, task2])
-                    db_session.flush()
-                    
-                    # 4. Create relationships between entities
-                    rel1 = EntityRelationship(
-                        source_entity_id=project.id,
-                        target_entity_id=task1.id,
-                        relationship_type='contains',
-                        is_active=True
-                    )
-                    rel2 = EntityRelationship(
-                        source_entity_id=project.id,
-                        target_entity_id=task2.id,
-                        relationship_type='contains',
-                        is_active=True
-                    )
-                    rel3 = EntityRelationship(
-                        source_entity_id=task1.id,
-                        target_entity_id=task2.id,
-                        relationship_type='depends_on',
-                        is_active=True
-                    )
-                    db_session.add_all([rel1, rel2, rel3])
-                    db_session.commit()
-                    
-                    # 5. Validate complete workflow
-                    # User has active session
-                    assert session.is_active()
-                    assert session.user == user
-                    
-                    # User owns all entities
-                    user_entities = user.business_entities.all()
-                    assert len(user_entities) == 3
-                    assert project in user_entities
-                    assert task1 in user_entities
-                    assert task2 in user_entities
-                    
-                    # Project has relationships to tasks
-                    project_relationships = EntityRelationship.query.filter_by(
-                        source_entity_id=project.id
-                    ).all()
-                    assert len(project_relationships) == 2
-                    
-                    # Task dependencies exist
-                    task_dependencies = EntityRelationship.query.filter_by(
-                        source_entity_id=task1.id,
-                        target_entity_id=task2.id
-                    ).all()
-                    assert len(task_dependencies) == 1
-                    
-                    # 6. Test workflow state changes
-                    # Activate draft task
-                    task2.status = 'active'
-                    db_session.commit()
-                    
-                    active_tasks = user.business_entities.filter_by(status='active').all()
-                    assert len(active_tasks) == 3  # project + task1 + task2
-                    
-                    # 7. Test session and entity cleanup
-                    session.invalidate_session("Workflow complete")
-                    assert session.is_valid is False
-                    
-                    # Deactivate project relationships
-                    for rel in project_relationships:
-                        rel.is_active = False
-                    db_session.commit()
-                    
-                    active_relationships = EntityRelationship.query.filter_by(
-                        source_entity_id=project.id,
-                        is_active=True
-                    ).all()
-                    assert len(active_relationships) == 0
-                    
-            except Exception as e:
-                pytest.skip(f"Complete workflow test failed: {e}")
+            owner = User(
+                username='temporal_owner',
+                email='temporalowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            entity1 = BusinessEntity(name='Temporal Entity 1', owner_id=owner.id)
+            entity1.save()
+            
+            entity2 = BusinessEntity(name='Temporal Entity 2', owner_id=owner.id)
+            entity2.save()
+            
+            relationship = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='partnership',
+                is_active=True
+            )
+            relationship.save()
+            
+            # Test active state
+            assert relationship.is_active is True
+            assert relationship.is_relationship_active() is True
+            
+            # Test deactivation
+            relationship.deactivate()
+            assert relationship.is_active is False
+            assert relationship.is_relationship_active() is False
+            
+            # Test reactivation
+            relationship.activate()
+            assert relationship.is_active is True
+            assert relationship.is_relationship_active() is True
+            
+            # Test temporal tracking
+            original_updated = relationship.updated_at
+            import time
+            time.sleep(0.01)
+            relationship.deactivate()
+            assert relationship.updated_at > original_updated
     
-    def test_model_inheritance_and_base_functionality(self, app, db_session):
-        """Test that all models properly inherit from BaseModel"""
-        if BaseModel is None:
-            pytest.skip("BaseModel not available")
+    def test_relationship_business_logic_validation(self, app: Flask, db_session):
+        """
+        Test relationship business logic and constraint validation.
         
+        Validates business rules, self-relationship prevention,
+        and duplicate relationship detection for data integrity.
+        """
         with app.app_context():
-            models_to_test = []
+            owner = User(
+                username='logic_owner',
+                email='logicowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
             
-            if User is not None:
-                models_to_test.append((User, {'username': 'test', 'email': 'test@example.com', 'password': 'password123'}))
+            entity1 = BusinessEntity(name='Logic Entity 1', owner_id=owner.id)
+            entity1.save()
             
-            if BusinessEntity is not None:
-                models_to_test.append((BusinessEntity, {'name': 'Test Entity', 'owner_id': 1, 'status': 'active'}))
+            entity2 = BusinessEntity(name='Logic Entity 2', owner_id=owner.id)
+            entity2.save()
             
-            for model_class, init_kwargs in models_to_test:
-                # Test inheritance
-                assert issubclass(model_class, BaseModel) or hasattr(model_class, 'id')
-                
-                # Test instance creation
-                instance = model_class(**init_kwargs)
-                
-                # Test base model fields exist
-                if hasattr(instance, 'id'):
-                    assert hasattr(instance, 'created_at')
-                    assert hasattr(instance, 'updated_at')
-                
-                # Test base model methods exist
-                if hasattr(instance, 'to_dict'):
-                    result = instance.to_dict()
-                    assert isinstance(result, dict)
+            # Test self-relationship prevention
+            with pytest.raises(ValueError):
+                EntityRelationship(
+                    source_entity_id=entity1.id,
+                    target_entity_id=entity1.id,  # Same entity
+                    relationship_type='partnership'
+                )
+            
+            # Create valid relationship
+            relationship1 = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='partnership'
+            )
+            relationship1.save()
+            
+            # Test duplicate relationship detection
+            with pytest.raises(ValueError):
+                EntityRelationship(
+                    source_entity_id=entity1.id,
+                    target_entity_id=entity2.id,
+                    relationship_type='partnership'  # Same relationship
+                )
+            
+            # Test reverse relationship (should be allowed)
+            relationship2 = EntityRelationship(
+                source_entity_id=entity2.id,
+                target_entity_id=entity1.id,
+                relationship_type='partnership'
+            )
+            relationship2.save()
+            assert relationship2.id is not None
+    
+    def test_relationship_cascade_behavior(self, app: Flask, db_session):
+        """
+        Test EntityRelationship cascade behavior with entity deletion.
+        
+        Validates proper cascade deletion and referential integrity
+        when business entities are deleted.
+        """
+        with app.app_context():
+            owner = User(
+                username='cascade_owner',
+                email='cascadeowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            entity1 = BusinessEntity(name='Cascade Entity 1', owner_id=owner.id)
+            entity1.save()
+            
+            entity2 = BusinessEntity(name='Cascade Entity 2', owner_id=owner.id)
+            entity2.save()
+            
+            entity3 = BusinessEntity(name='Cascade Entity 3', owner_id=owner.id)
+            entity3.save()
+            
+            # Create relationships
+            rel1 = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='partnership'
+            )
+            rel1.save()
+            
+            rel2 = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity3.id,
+                relationship_type='supplier_customer'
+            )
+            rel2.save()
+            
+            # Verify relationships exist
+            assert EntityRelationship.query.filter_by(source_entity_id=entity1.id).count() == 2
+            
+            # Delete source entity
+            entity1.delete()
+            
+            # Relationships should be deleted due to cascade
+            remaining_rels = EntityRelationship.query.filter_by(source_entity_id=entity1.id).all()
+            assert len(remaining_rels) == 0
+    
+    def test_relationship_query_methods(self, app: Flask, db_session):
+        """
+        Test EntityRelationship query and finder methods.
+        
+        Validates relationship lookup methods, filtering capabilities,
+        and complex query patterns for business workflow support.
+        """
+        with app.app_context():
+            owner = User(
+                username='query_owner',
+                email='queryowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            # Create entities
+            entities = []
+            for i in range(4):
+                entity = BusinessEntity(
+                    name=f'Query Entity {i+1}',
+                    owner_id=owner.id
+                )
+                entity.save()
+                entities.append(entity)
+            
+            # Create various relationships
+            relationships = [
+                EntityRelationship(
+                    source_entity_id=entities[0].id,
+                    target_entity_id=entities[1].id,
+                    relationship_type='partnership',
+                    is_active=True
+                ),
+                EntityRelationship(
+                    source_entity_id=entities[0].id,
+                    target_entity_id=entities[2].id,
+                    relationship_type='supplier_customer',
+                    is_active=True
+                ),
+                EntityRelationship(
+                    source_entity_id=entities[1].id,
+                    target_entity_id=entities[3].id,
+                    relationship_type='partnership',
+                    is_active=False
+                )
+            ]
+            
+            for rel in relationships:
+                rel.save()
+            
+            # Test find_by_source_entity
+            source_rels = EntityRelationship.find_by_source_entity(entities[0].id)
+            assert len(source_rels) == 2
+            
+            # Test find_by_target_entity
+            target_rels = EntityRelationship.find_by_target_entity(entities[1].id)
+            assert len(target_rels) == 1
+            
+            # Test find_by_type
+            partnership_rels = EntityRelationship.find_by_type('partnership')
+            assert len(partnership_rels) == 2
+            
+            # Test find_active_relationships
+            active_rels = EntityRelationship.find_active_relationships()
+            assert len(active_rels) == 2
+            
+            # Test find_relationships_between
+            between_rels = EntityRelationship.find_relationships_between(
+                entities[0].id, entities[1].id
+            )
+            assert len(between_rels) == 1
+            
+            # Test get_entity_relationship_count
+            entity0_count = EntityRelationship.get_entity_relationship_count(entities[0].id)
+            assert entity0_count == 2  # As source
+    
+    def test_relationship_performance_indexing(self, app: Flask, db_session):
+        """
+        Test EntityRelationship composite indexing for performance.
+        
+        Validates that composite indexes are properly configured
+        for efficient relationship queries and business logic performance.
+        """
+        with app.app_context():
+            # This test validates that indexes exist and queries are efficient
+            # In a real scenario, you would use EXPLAIN ANALYZE on queries
+            
+            owner = User(
+                username='perf_owner',
+                email='perfowner@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            # Create entities for performance testing
+            entities = []
+            for i in range(10):
+                entity = BusinessEntity(
+                    name=f'Performance Entity {i+1}',
+                    owner_id=owner.id
+                )
+                entity.save()
+                entities.append(entity)
+            
+            # Create many relationships for performance testing
+            for i in range(len(entities)):
+                for j in range(i+1, len(entities)):
+                    if i != j:  # Avoid self-relationships
+                        relationship = EntityRelationship(
+                            source_entity_id=entities[i].id,
+                            target_entity_id=entities[j].id,
+                            relationship_type='partnership',
+                            is_active=(i + j) % 2 == 0  # Mix of active/inactive
+                        )
+                        relationship.save()
+            
+            # Test query performance with indexed fields
+            # These queries should use indexes for efficiency
+            
+            # Query by source entity (should use source_entity_id index)
+            source_rels = EntityRelationship.query.filter_by(
+                source_entity_id=entities[0].id
+            ).all()
+            assert len(source_rels) > 0
+            
+            # Query by relationship type and active status (should use composite index)
+            active_partnerships = EntityRelationship.query.filter_by(
+                relationship_type='partnership',
+                is_active=True
+            ).all()
+            assert len(active_partnerships) > 0
+            
+            # Query by active status (should use is_active index)
+            all_active = EntityRelationship.query.filter_by(is_active=True).all()
+            assert len(all_active) > 0
 
 
-# Performance and coverage markers for test categorization
+class TestModelRelationshipsAndConstraints:
+    """
+    Integration tests for model relationships, database constraints, and
+    referential integrity across all models. These tests ensure proper
+    foreign key behavior, cascade operations, and constraint enforcement.
+    
+    Testing coverage includes:
+    - Cross-model relationship integrity testing
+    - Database constraint enforcement validation
+    - Cascade behavior testing for data consistency
+    - Unique constraint validation across models
+    - Complex query patterns across related models
+    """
+    
+    def test_user_session_cascade_behavior(self, app: Flask, db_session):
+        """
+        Test User to UserSession cascade deletion behavior.
+        
+        Validates that user deletion properly cascades to sessions
+        and maintains referential integrity.
+        """
+        with app.app_context():
+            user = User(
+                username='cascade_user',
+                email='cascade@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            # Create multiple sessions
+            sessions = []
+            for i in range(3):
+                session = UserSession(
+                    user_id=user.id,
+                    ip_address=f'192.168.1.{i+1}'
+                )
+                session.save()
+                sessions.append(session)
+            
+            session_ids = [s.id for s in sessions]
+            
+            # Verify sessions exist
+            assert UserSession.query.filter_by(user_id=user.id).count() == 3
+            
+            # Delete user
+            user.delete()
+            
+            # Sessions should be deleted
+            for session_id in session_ids:
+                assert UserSession.query.get(session_id) is None
+    
+    def test_user_business_entity_cascade_behavior(self, app: Flask, db_session):
+        """
+        Test User to BusinessEntity cascade deletion behavior.
+        
+        Validates that user deletion properly cascades to business entities
+        and maintains data integrity.
+        """
+        with app.app_context():
+            user = User(
+                username='entity_owner',
+                email='entityowner@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            # Create business entities
+            entities = []
+            for i in range(2):
+                entity = BusinessEntity(
+                    name=f'Test Entity {i+1}',
+                    owner_id=user.id
+                )
+                entity.save()
+                entities.append(entity)
+            
+            entity_ids = [e.id for e in entities]
+            
+            # Verify entities exist
+            assert BusinessEntity.query.filter_by(owner_id=user.id).count() == 2
+            
+            # Delete user
+            user.delete()
+            
+            # Entities should be deleted
+            for entity_id in entity_ids:
+                assert BusinessEntity.query.get(entity_id) is None
+    
+    def test_business_entity_relationship_cascade(self, app: Flask, db_session):
+        """
+        Test BusinessEntity to EntityRelationship cascade behavior.
+        
+        Validates that entity deletion properly cascades to relationships
+        and maintains referential integrity across the relationship graph.
+        """
+        with app.app_context():
+            owner = User(
+                username='rel_cascade_owner',
+                email='relcascade@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            # Create entities
+            entity1 = BusinessEntity(name='Entity 1', owner_id=owner.id)
+            entity1.save()
+            
+            entity2 = BusinessEntity(name='Entity 2', owner_id=owner.id)
+            entity2.save()
+            
+            entity3 = BusinessEntity(name='Entity 3', owner_id=owner.id)
+            entity3.save()
+            
+            # Create relationships
+            rel1 = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='partnership'
+            )
+            rel1.save()
+            
+            rel2 = EntityRelationship(
+                source_entity_id=entity2.id,
+                target_entity_id=entity3.id,
+                relationship_type='supplier_customer'
+            )
+            rel2.save()
+            
+            rel3 = EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity3.id,
+                relationship_type='collaboration'
+            )
+            rel3.save()
+            
+            relationship_ids = [rel1.id, rel2.id, rel3.id]
+            
+            # Delete entity1
+            entity1.delete()
+            
+            # Relationships involving entity1 should be deleted
+            assert EntityRelationship.query.get(rel1.id) is None  # entity1 -> entity2
+            assert EntityRelationship.query.get(rel3.id) is None  # entity1 -> entity3
+            assert EntityRelationship.query.get(rel2.id) is not None  # entity2 -> entity3 (should remain)
+    
+    def test_unique_constraint_enforcement(self, app: Flask, db_session):
+        """
+        Test unique constraint enforcement across all models.
+        
+        Validates that unique constraints are properly enforced
+        for usernames, emails, session tokens, and other unique fields.
+        """
+        with app.app_context():
+            # Test User unique constraints
+            user1 = User(
+                username='unique_test',
+                email='unique@example.com',
+                password='TestPassword123!'
+            )
+            user1.save()
+            
+            # Duplicate username should fail
+            with pytest.raises(Exception):  # Could be IntegrityError or similar
+                user2 = User(
+                    username='unique_test',  # Duplicate
+                    email='different@example.com',
+                    password='TestPassword123!'
+                )
+                user2.save()
+                db.session.commit()
+            
+            db.session.rollback()  # Reset after error
+            
+            # Duplicate email should fail
+            with pytest.raises(Exception):
+                user3 = User(
+                    username='different_user',
+                    email='unique@example.com',  # Duplicate
+                    password='TestPassword123!'
+                )
+                user3.save()
+                db.session.commit()
+            
+            db.session.rollback()  # Reset after error
+            
+            # Test UserSession unique token constraint
+            session1 = UserSession(user_id=user1.id)
+            session1.save()
+            
+            # Manually setting same token should fail
+            with pytest.raises(Exception):
+                session2 = UserSession(user_id=user1.id)
+                session2.session_token = session1.session_token  # Duplicate token
+                session2.save()
+                db.session.commit()
+    
+    def test_foreign_key_constraint_enforcement(self, app: Flask, db_session):
+        """
+        Test foreign key constraint enforcement across models.
+        
+        Validates that foreign key relationships are properly enforced
+        and prevent orphaned records.
+        """
+        with app.app_context():
+            # Test UserSession foreign key constraint
+            with pytest.raises(Exception):  # Foreign key violation
+                invalid_session = UserSession(
+                    user_id=99999,  # Non-existent user
+                    ip_address='192.168.1.1'
+                )
+                invalid_session.save()
+                db.session.commit()
+            
+            db.session.rollback()  # Reset after error
+            
+            # Test BusinessEntity foreign key constraint
+            with pytest.raises(Exception):
+                invalid_entity = BusinessEntity(
+                    name='Invalid Entity',
+                    owner_id=99999  # Non-existent user
+                )
+                invalid_entity.save()
+                db.session.commit()
+            
+            db.session.rollback()  # Reset after error
+            
+            # Test EntityRelationship foreign key constraints
+            user = User(
+                username='fk_test_user',
+                email='fktest@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            entity = BusinessEntity(
+                name='FK Test Entity',
+                owner_id=user.id
+            )
+            entity.save()
+            
+            # Invalid source entity
+            with pytest.raises(Exception):
+                invalid_rel1 = EntityRelationship(
+                    source_entity_id=99999,  # Non-existent
+                    target_entity_id=entity.id,
+                    relationship_type='partnership'
+                )
+                invalid_rel1.save()
+                db.session.commit()
+            
+            db.session.rollback()
+            
+            # Invalid target entity
+            with pytest.raises(Exception):
+                invalid_rel2 = EntityRelationship(
+                    source_entity_id=entity.id,
+                    target_entity_id=99999,  # Non-existent
+                    relationship_type='partnership'
+                )
+                invalid_rel2.save()
+                db.session.commit()
+    
+    def test_complex_cross_model_queries(self, app: Flask, db_session):
+        """
+        Test complex queries across multiple related models.
+        
+        Validates that relationships enable efficient cross-model
+        queries for business logic and reporting requirements.
+        """
+        with app.app_context():
+            # Create test data structure
+            owner = User(
+                username='complex_owner',
+                email='complex@example.com',
+                password='TestPassword123!'
+            )
+            owner.save()
+            
+            # Create multiple sessions
+            for i in range(3):
+                session = UserSession(
+                    user_id=owner.id,
+                    ip_address=f'192.168.1.{i+10}'
+                )
+                session.save()
+            
+            # Create business entities
+            entities = []
+            for i in range(4):
+                entity = BusinessEntity(
+                    name=f'Complex Entity {i+1}',
+                    owner_id=owner.id,
+                    status='active' if i % 2 == 0 else 'inactive'
+                )
+                entity.save()
+                entities.append(entity)
+            
+            # Create relationships
+            for i in range(len(entities) - 1):
+                relationship = EntityRelationship(
+                    source_entity_id=entities[i].id,
+                    target_entity_id=entities[i+1].id,
+                    relationship_type='partnership',
+                    is_active=True
+                )
+                relationship.save()
+            
+            # Test: Find all active business entities for users with active sessions
+            from sqlalchemy import and_
+            
+            query = db.session.query(BusinessEntity).join(User).join(UserSession).filter(
+                and_(
+                    BusinessEntity.status == 'active',
+                    UserSession.is_valid == True,
+                    User.is_active == True
+                )
+            ).distinct()
+            
+            results = query.all()
+            assert len(results) > 0
+            
+            # Test: Find all relationships involving entities owned by specific user
+            relationship_query = db.session.query(EntityRelationship).join(
+                BusinessEntity, EntityRelationship.source_entity_id == BusinessEntity.id
+            ).filter(BusinessEntity.owner_id == owner.id)
+            
+            rel_results = relationship_query.all()
+            assert len(rel_results) > 0
+            
+            # Test: Count entities by owner with relationship counts
+            entity_counts = db.session.query(
+                User.username,
+                db.func.count(BusinessEntity.id).label('entity_count'),
+                db.func.count(EntityRelationship.id).label('relationship_count')
+            ).join(BusinessEntity).outerjoin(
+                EntityRelationship, BusinessEntity.id == EntityRelationship.source_entity_id
+            ).group_by(User.id, User.username).all()
+            
+            assert len(entity_counts) > 0
+            for username, entity_count, rel_count in entity_counts:
+                assert entity_count > 0
+    
+    def test_database_constraint_validation_coverage(self, app: Flask, db_session):
+        """
+        Test comprehensive database constraint validation coverage.
+        
+        Validates that all defined database constraints are properly
+        enforced and provide appropriate validation feedback.
+        """
+        with app.app_context():
+            # Test User model constraints
+            user = User(
+                username='constraint_test',
+                email='constraint@example.com',
+                password='TestPassword123!'
+            )
+            user.save()
+            
+            # Test username length constraints
+            with pytest.raises(ValueError):
+                User._validate_username('ab')  # Too short
+            
+            with pytest.raises(ValueError):
+                User._validate_username('a' * 81)  # Too long
+            
+            # Test email length constraints
+            with pytest.raises(ValueError):
+                User._validate_email('a@b.c')  # Too short
+            
+            with pytest.raises(ValueError):
+                User._validate_email('a' * 116 + '@b.com')  # Too long
+            
+            # Test failed login attempts constraint (should be non-negative)
+            user.failed_login_attempts = -1
+            with pytest.raises(Exception):
+                user.save()
+                db.session.commit()
+            
+            db.session.rollback()
+            
+            # Test BusinessEntity name constraints
+            with pytest.raises(ValueError):
+                BusinessEntity(
+                    name='',  # Empty name
+                    owner_id=user.id
+                )
+            
+            # Test EntityRelationship constraints
+            entity1 = BusinessEntity(name='Entity 1', owner_id=user.id)
+            entity1.save()
+            
+            # Self-relationship should be prevented
+            with pytest.raises(ValueError):
+                EntityRelationship(
+                    source_entity_id=entity1.id,
+                    target_entity_id=entity1.id,  # Same entity
+                    relationship_type='partnership'
+                )
+
+
+# Pytest marks for test categorization per conftest.py markers
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.database,
@@ -1702,62 +2423,6 @@ pytestmark = [
 ]
 
 
-# Test configuration and utilities for model testing
-class ModelTestUtils:
-    """Utility class for model testing helpers and common operations"""
-    
-    @staticmethod
-    def create_test_user(db_session, username="testuser", email="test@example.com"):
-        """Create a test user for model testing"""
-        if User is None:
-            return None
-        
-        user = User(username=username, email=email, password="password123")
-        db_session.add(user)
-        db_session.flush()
-        return user
-    
-    @staticmethod
-    def create_test_session(db_session, user_id, hours=24):
-        """Create a test session for model testing"""
-        if UserSession is None:
-            return None
-        
-        with patch('flask.current_app') as mock_app:
-            mock_app.config = {'SECRET_KEY': 'test-secret-key'}
-            
-            session = UserSession(
-                user_id=user_id,
-                expires_at=datetime.utcnow() + timedelta(hours=hours)
-            )
-            db_session.add(session)
-            db_session.flush()
-            return session
-    
-    @staticmethod
-    def create_test_business_entity(db_session, owner_id, name="Test Entity", status="active"):
-        """Create a test business entity for model testing"""
-        if BusinessEntity is None:
-            return None
-        
-        entity = BusinessEntity(
-            name=name,
-            description=f"Description for {name}",
-            owner_id=owner_id,
-            status=status
-        )
-        db_session.add(entity)
-        db_session.flush()
-        return entity
-
-
-# Export test utilities for use in other test modules
-__all__ = [
-    'TestBaseModel',
-    'TestUserModel', 
-    'TestUserSessionModel',
-    'TestBusinessEntityModel',
-    'TestEntityRelationshipModel',
-    'TestModelIntegration',
-    'ModelTestUtils'
-]
+if __name__ == '__main__':
+    # Allow running tests directly with python -m pytest tests/unit/test_models.py
+    pytest.main([__file__, '-v', '--tb=short'])
