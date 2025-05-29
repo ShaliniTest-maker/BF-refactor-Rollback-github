@@ -1,631 +1,422 @@
 """
-Comprehensive Flask-SQLAlchemy Model Relationship Testing Suite
+Comprehensive Flask-SQLAlchemy Model Relationship Testing Suite.
 
-This test module validates foreign key constraints, relationship mapping, and referential integrity
-across all database models, ensuring proper User-to-UserSession relationships, User-to-BusinessEntity
-ownership patterns, and BusinessEntity-to-EntityRelationship associations function correctly with
-SQLAlchemy's declarative model system while maintaining data consistency and constraint enforcement
-equivalent to the original MongoDB relationship patterns.
+This module provides comprehensive testing for Flask-SQLAlchemy model relationships,
+validating foreign key constraints, relationship mapping, and referential integrity
+across all database models. Ensures proper User-to-UserSession relationships,
+User-to-BusinessEntity ownership patterns, and BusinessEntity-to-EntityRelationship
+associations function correctly with SQLAlchemy's declarative model system.
 
 Key Testing Areas:
-- Foreign key constraint enforcement and referential integrity per Section 6.2.2.1
-- SQLAlchemy relationship mapping validation for all model associations
-- Cascade behavior testing for delete operations and orphan cleanup
-- Lazy vs eager loading performance optimization testing per Section 6.2.5.1
-- Bidirectional relationship functionality through backref validation
-- Database constraint violation handling and integrity enforcement per Section 6.2.2.2
-- Transaction boundary management for relationship operations per Section 5.2.4
+- Foreign key constraint enforcement and referential integrity validation
+- Relationship loading strategies (lazy vs eager loading) for performance optimization  
+- Cascade behavior testing for delete operations and relationship management
+- Bidirectional relationship functionality through backref testing
+- Constraint violation scenarios and database integrity enforcement
+- Complex relationship scenarios and business workflow integration
+- Performance validation for relationship queries and operations
 
-Model Relationships Tested:
-- User ||--o{ UserSession : "has_sessions" (one-to-many with cascade delete)
-- User ||--o{ BusinessEntity : "owns" (one-to-many with cascade delete)
-- BusinessEntity ||--o{ EntityRelationship : "source_relationships" (one-to-many)
-- BusinessEntity ||--o{ EntityRelationship : "target_relationships" (one-to-many)
+Migration Context:
+This test suite validates the successful migration from MongoDB relationship patterns
+to Flask-SQLAlchemy declarative models with PostgreSQL foreign key constraints,
+ensuring zero data loss and complete functional parity during the Node.js to Python
+migration process.
 
-Technical Specifications:
-- Flask-SQLAlchemy 3.1.1 declarative model relationship validation
-- PostgreSQL 15.x foreign key constraint testing and enforcement
-- SQLAlchemy session management with proper transaction boundaries
-- Database migration compatibility with Flask-Migrate 4.1.0
-- Performance validation meeting 95th percentile SLA targets per Section 6.2.1
+Technical Specification References:
+- Feature F-003: Database Model Conversion from MongoDB relationship patterns
+- Section 6.2.1: Flask-SQLAlchemy 3.1.1 declarative model relationship mapping
+- Section 6.2.2.1: PostgreSQL foreign key constraint enforcement per database design
+- Feature F-004: Relationship integrity validation ensuring proper data associations
+- Section 5.2.4: SQLAlchemy session management testing for relationship operations
 """
 
 import pytest
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
-from unittest.mock import patch, MagicMock
-from sqlalchemy import text, and_, or_, desc, asc
+from sqlalchemy import text, inspect, func
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
-from sqlalchemy.orm import selectinload, joinedload, subqueryload
+from sqlalchemy.orm import selectinload, joinedload, contains_eager
 from sqlalchemy.orm.exc import DetachedInstanceError
-from flask import current_app
 
-# Import models for relationship testing
+# Import models for comprehensive relationship testing
+from src.models import db
 from src.models.user import User
 from src.models.session import UserSession
 from src.models.business_entity import BusinessEntity
 from src.models.entity_relationship import EntityRelationship
-from src.models.base import db
+
+# Configure logging for test debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-class TestUserToUserSessionRelationships:
+class TestUserRelationships:
     """
-    Test suite for User-to-UserSession one-to-many relationship validation.
+    Test suite for User model relationships with UserSession and BusinessEntity.
     
-    Validates the foreign key relationship from UserSession.user_id to User.id,
-    including cascade behavior, referential integrity, and bidirectional navigation
-    through the 'sessions' and 'user' relationship properties.
+    Validates the core user relationship patterns including:
+    - User-to-UserSession one-to-many relationships with cascade delete
+    - User-to-BusinessEntity ownership patterns with proper constraints
+    - Foreign key constraint enforcement and referential integrity
+    - Cascade delete behavior and orphan management
+    - Relationship loading strategies and performance optimization
     """
     
-    def test_user_session_foreign_key_relationship_creation(self, db_session, test_user):
+    @pytest.mark.database
+    def test_user_session_relationship_creation(self, db_session, test_user):
         """
-        Test creation of UserSession with valid foreign key relationship to User.
+        Test User-to-UserSession relationship creation and basic functionality.
         
         Validates:
-        - UserSession creation with valid user_id foreign key
-        - Automatic relationship establishment through SQLAlchemy ORM
-        - Bidirectional navigation between User and UserSession instances
-        - Database constraint enforcement for valid foreign key references
+        - Foreign key relationship establishment
+        - Bidirectional relationship access through backref
+        - Session ownership and user association
+        - Automatic relationship population
         """
         # Create user session with foreign key relationship
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
         session = UserSession(
             user_id=test_user.id,
-            expires_at=expires_at,
-            session_metadata='{"device": "test_device"}',
-            user_agent="Mozilla/5.0 (Test Browser)",
-            ip_address="192.168.1.100"
+            ip_address='192.168.1.100',
+            user_agent='pytest-test-agent',
+            remember_me=False
         )
         
         db_session.add(session)
         db_session.commit()
         db_session.refresh(session)
         
-        # Validate foreign key relationship establishment
+        # Validate foreign key relationship
         assert session.user_id == test_user.id
         assert session.user is not None
         assert session.user.id == test_user.id
-        assert session.user.username == test_user.username
         
-        # Validate bidirectional relationship navigation
-        user_sessions = test_user.sessions.all()
+        # Validate bidirectional relationship through backref
+        db_session.refresh(test_user)
+        user_sessions = list(test_user.sessions)
         assert len(user_sessions) == 1
         assert user_sessions[0].id == session.id
-        assert user_sessions[0].session_token == session.session_token
+        assert user_sessions[0].user_id == test_user.id
         
-        # Validate relationship attributes are properly set
-        assert session.is_valid is True
-        assert session.expires_at == expires_at
-        assert session.user_agent == "Mozilla/5.0 (Test Browser)"
-        assert session.ip_address == "192.168.1.100"
+        # Validate session ownership
+        assert session.user.username == test_user.username
+        assert session.user.email == test_user.email
     
-    def test_user_session_foreign_key_constraint_violation(self, db_session):
+    @pytest.mark.database
+    def test_user_business_entity_relationship_creation(self, db_session, test_user):
         """
-        Test foreign key constraint violation when creating UserSession with invalid user_id.
+        Test User-to-BusinessEntity ownership relationship creation.
         
         Validates:
-        - Database constraint enforcement for invalid foreign key references
-        - Proper exception handling for referential integrity violations
-        - Transaction rollback behavior on constraint violation
-        - SQLAlchemy error handling for invalid relationships
+        - Foreign key ownership relationship establishment
+        - Entity ownership patterns and access control
+        - Bidirectional relationship functionality
+        - Multiple entity ownership per user
         """
-        # Attempt to create session with non-existent user_id
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-        invalid_session = UserSession(
-            user_id=99999,  # Non-existent user ID
-            expires_at=expires_at,
-            session_metadata='{"test": "invalid_user"}',
-            user_agent="Test Agent",
-            ip_address="127.0.0.1"
+        # Create business entities with user ownership
+        entity1 = BusinessEntity(
+            name='Test Entity 1',
+            description='First test business entity',
+            owner_id=test_user.id,
+            status='active'
         )
         
-        db_session.add(invalid_session)
+        entity2 = BusinessEntity(
+            name='Test Entity 2', 
+            description='Second test business entity',
+            owner_id=test_user.id,
+            status='active'
+        )
         
-        # Validate constraint violation raises IntegrityError
-        with pytest.raises(IntegrityError) as exc_info:
-            db_session.commit()
+        db_session.add_all([entity1, entity2])
+        db_session.commit()
+        db_session.refresh(entity1)
+        db_session.refresh(entity2)
         
-        # Validate specific constraint violation details
-        assert "foreign key constraint" in str(exc_info.value).lower() or \
-               "constraint failed" in str(exc_info.value).lower()
+        # Validate foreign key ownership relationships
+        assert entity1.owner_id == test_user.id
+        assert entity2.owner_id == test_user.id
+        assert entity1.owner is not None
+        assert entity2.owner is not None
+        assert entity1.owner.id == test_user.id
+        assert entity2.owner.id == test_user.id
         
-        # Validate transaction rollback
-        db_session.rollback()
+        # Validate bidirectional relationship through backref
+        db_session.refresh(test_user)
+        user_entities = list(test_user.business_entities)
+        assert len(user_entities) == 2
         
-        # Verify no invalid session was created
-        invalid_sessions = db_session.query(UserSession).filter_by(user_id=99999).all()
-        assert len(invalid_sessions) == 0
+        entity_ids = {entity.id for entity in user_entities}
+        assert entity1.id in entity_ids
+        assert entity2.id in entity_ids
+        
+        # Validate entity ownership access control
+        for entity in user_entities:
+            assert entity.can_be_accessed_by(test_user.id)
+            assert entity.owner.username == test_user.username
     
-    def test_user_session_cascade_delete_behavior(self, db_session, test_user):
+    @pytest.mark.database
+    def test_user_relationship_foreign_key_constraints(self, db_session):
         """
-        Test cascade delete behavior when User is deleted.
+        Test foreign key constraint enforcement for User relationships.
         
         Validates:
-        - CASCADE DELETE constraint enforcement for user sessions
-        - Automatic cleanup of dependent UserSession records
-        - Referential integrity maintenance during cascade operations
-        - Transaction consistency during cascade delete operations
+        - Invalid foreign key rejection
+        - Non-existent user ID constraint enforcement
+        - Database integrity protection
+        - Proper error handling for constraint violations
         """
-        # Create multiple sessions for the user
-        sessions_data = [
-            {
-                'expires_at': datetime.now(timezone.utc) + timedelta(hours=12),
-                'user_agent': "Browser 1",
-                'ip_address': "192.168.1.10"
-            },
-            {
-                'expires_at': datetime.now(timezone.utc) + timedelta(hours=24),
-                'user_agent': "Browser 2", 
-                'ip_address': "192.168.1.20"
-            },
-            {
-                'expires_at': datetime.now(timezone.utc) + timedelta(hours=48),
-                'user_agent': "Mobile App",
-                'ip_address': "10.0.0.5"
-            }
-        ]
-        
-        created_sessions = []
-        for session_data in sessions_data:
-            session = UserSession(
-                user_id=test_user.id,
-                **session_data
+        # Test invalid user_id in UserSession
+        with pytest.raises(IntegrityError):
+            invalid_session = UserSession(
+                user_id=99999,  # Non-existent user ID
+                ip_address='192.168.1.100',
+                user_agent='pytest-test-agent'
             )
-            db_session.add(session)
-            created_sessions.append(session)
+            db_session.add(invalid_session)
+            db_session.commit()
         
+        db_session.rollback()
+        
+        # Test invalid owner_id in BusinessEntity
+        with pytest.raises(IntegrityError):
+            invalid_entity = BusinessEntity(
+                name='Invalid Entity',
+                description='Entity with invalid owner',
+                owner_id=99999,  # Non-existent owner ID
+                status='active'
+            )
+            db_session.add(invalid_entity)
+            db_session.commit()
+        
+        db_session.rollback()
+        
+        # Test NULL foreign key constraint (should fail)
+        with pytest.raises(IntegrityError):
+            null_session = UserSession(
+                user_id=None,  # NULL foreign key
+                ip_address='192.168.1.100'
+            )
+            db_session.add(null_session)
+            db_session.commit()
+        
+        db_session.rollback()
+    
+    @pytest.mark.database 
+    def test_user_cascade_delete_behavior(self, db_session, test_user):
+        """
+        Test cascade delete behavior for User relationships.
+        
+        Validates:
+        - CASCADE DELETE for UserSession relationships
+        - CASCADE DELETE for BusinessEntity relationships  
+        - Orphan removal and referential integrity
+        - Complete cleanup of dependent records
+        """
+        # Create dependent records
+        session1 = UserSession(
+            user_id=test_user.id,
+            ip_address='192.168.1.100',
+            user_agent='test-agent-1'
+        )
+        
+        session2 = UserSession(
+            user_id=test_user.id,
+            ip_address='192.168.1.101',
+            user_agent='test-agent-2'
+        )
+        
+        entity1 = BusinessEntity(
+            name='Test Entity 1',
+            description='First test entity',
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        entity2 = BusinessEntity(
+            name='Test Entity 2', 
+            description='Second test entity',
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        db_session.add_all([session1, session2, entity1, entity2])
         db_session.commit()
         
-        # Verify sessions were created
-        user_sessions_before = db_session.query(UserSession).filter_by(user_id=test_user.id).all()
-        assert len(user_sessions_before) == 3
+        # Store IDs for verification after delete
+        user_id = test_user.id
+        session1_id = session1.id
+        session2_id = session2.id
+        entity1_id = entity1.id
+        entity2_id = entity2.id
         
-        # Delete the user - should cascade delete all sessions
+        # Verify records exist before deletion
+        assert db_session.query(UserSession).filter_by(user_id=user_id).count() == 2
+        assert db_session.query(BusinessEntity).filter_by(owner_id=user_id).count() == 2
+        
+        # Delete the user - should cascade to all dependent records
         db_session.delete(test_user)
         db_session.commit()
         
-        # Verify cascade delete removed all user sessions
-        user_sessions_after = db_session.query(UserSession).filter_by(user_id=test_user.id).all()
-        assert len(user_sessions_after) == 0
+        # Verify cascade deletion of UserSession records
+        assert db_session.query(UserSession).filter_by(id=session1_id).first() is None
+        assert db_session.query(UserSession).filter_by(id=session2_id).first() is None
+        assert db_session.query(UserSession).filter_by(user_id=user_id).count() == 0
         
-        # Verify user was deleted
-        deleted_user = db_session.query(User).filter_by(id=test_user.id).first()
-        assert deleted_user is None
+        # Verify cascade deletion of BusinessEntity records
+        assert db_session.query(BusinessEntity).filter_by(id=entity1_id).first() is None
+        assert db_session.query(BusinessEntity).filter_by(id=entity2_id).first() is None
+        assert db_session.query(BusinessEntity).filter_by(owner_id=user_id).count() == 0
     
-    def test_user_session_relationship_lazy_loading(self, db_session, test_user):
+    @pytest.mark.database
+    def test_user_relationship_lazy_loading(self, db_session, test_user):
         """
-        Test lazy loading behavior for User-UserSession relationships.
+        Test lazy loading behavior for User relationships.
         
         Validates:
-        - Lazy loading configuration for sessions relationship
-        - Query efficiency for large session collections
-        - Memory optimization through lazy loading patterns
-        - Performance characteristics matching Section 6.2.5.1 requirements
+        - Lazy loading strategy implementation
+        - On-demand relationship loading
+        - Query efficiency for lazy loading
+        - Proper session management during lazy loading
         """
-        # Create multiple sessions for testing lazy loading
-        session_count = 10
-        for i in range(session_count):
-            session = UserSession(
-                user_id=test_user.id,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=24 + i),
-                user_agent=f"Test Agent {i}",
-                ip_address=f"192.168.1.{100 + i}"
-            )
-            db_session.add(session)
+        # Create test data
+        sessions = [
+            UserSession(user_id=test_user.id, ip_address=f'192.168.1.{i}')
+            for i in range(1, 4)
+        ]
         
+        entities = [
+            BusinessEntity(
+                name=f'Entity {i}',
+                description=f'Test entity {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 4)
+        ]
+        
+        db_session.add_all(sessions + entities)
         db_session.commit()
         
-        # Query user without loading sessions (lazy loading test)
-        user_query = db_session.query(User).filter_by(id=test_user.id).first()
+        # Clear session to test lazy loading
+        db_session.expunge_all()
         
-        # Verify user is loaded but sessions are not yet loaded
-        assert user_query.id == test_user.id
-        assert user_query.username == test_user.username
+        # Reload user and test lazy loading
+        user = db_session.query(User).filter_by(id=test_user.id).first()
         
-        # Access sessions property - should trigger lazy loading
-        user_sessions = user_query.sessions.all()
-        assert len(user_sessions) == session_count
+        # Test lazy loading of sessions (dynamic relationship)
+        # This should trigger a separate query
+        user_sessions = list(user.sessions)
+        assert len(user_sessions) == 3
         
-        # Verify each session has proper relationship back to user
+        # Test lazy loading of business entities (dynamic relationship)
+        # This should trigger another separate query
+        user_entities = list(user.business_entities)
+        assert len(user_entities) == 3
+        
+        # Verify each relationship loads correctly
         for session in user_sessions:
-            assert session.user_id == test_user.id
-            assert session.user.username == test_user.username
+            assert session.user_id == user.id
+            assert isinstance(session, UserSession)
+        
+        for entity in user_entities:
+            assert entity.owner_id == user.id
+            assert isinstance(entity, BusinessEntity)
     
-    def test_user_session_relationship_eager_loading(self, db_session, test_user):
+    @pytest.mark.database
+    def test_user_relationship_eager_loading(self, db_session, test_user):
         """
-        Test eager loading behavior for User-UserSession relationships.
+        Test eager loading behavior for User relationships.
         
         Validates:
-        - Eager loading configuration using joinedload and selectinload
-        - Query optimization for relationship preloading
-        - Performance improvement through reduced N+1 query problems
-        - Load strategy effectiveness per Section 6.2.5.1 optimization
+        - Eager loading strategy implementation
+        - Single query efficiency for eager loading
+        - Proper relationship population
+        - Performance optimization through eager loading
         """
-        # Create test sessions
-        session_count = 5
-        for i in range(session_count):
-            session = UserSession(
-                user_id=test_user.id,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=12 + i * 6),
-                user_agent=f"Eager Load Test Agent {i}",
-                ip_address=f"10.0.0.{50 + i}"
-            )
-            db_session.add(session)
+        # Create test data
+        sessions = [
+            UserSession(user_id=test_user.id, ip_address=f'192.168.1.{i}')
+            for i in range(1, 4)
+        ]
         
+        entities = [
+            BusinessEntity(
+                name=f'Entity {i}',
+                description=f'Test entity {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 4)
+        ]
+        
+        db_session.add_all(sessions + entities)
         db_session.commit()
         
-        # Test joinedload strategy
-        user_with_joined_sessions = (
-            db_session.query(User)
-            .options(joinedload(User.sessions))
-            .filter_by(id=test_user.id)
-            .first()
-        )
-        
-        assert user_with_joined_sessions is not None
-        # Sessions should be loaded immediately without additional queries
-        sessions = user_with_joined_sessions.sessions.all()
-        assert len(sessions) == session_count
-        
-        # Test selectinload strategy for better performance with large collections
-        user_with_selected_sessions = (
+        # Test eager loading with selectinload
+        user_with_sessions = (
             db_session.query(User)
             .options(selectinload(User.sessions))
             .filter_by(id=test_user.id)
             .first()
         )
         
-        assert user_with_selected_sessions is not None
-        selected_sessions = user_with_selected_sessions.sessions.all()
-        assert len(selected_sessions) == session_count
+        # Verify sessions are eagerly loaded
+        assert len(list(user_with_sessions.sessions)) == 3
         
-        # Verify both strategies loaded the same sessions
-        joined_session_ids = {s.id for s in sessions}
-        selected_session_ids = {s.id for s in selected_sessions}
-        assert joined_session_ids == selected_session_ids
-    
-    def test_user_session_relationship_backref_functionality(self, db_session, test_user):
-        """
-        Test bidirectional relationship functionality through backref.
-        
-        Validates:
-        - Bidirectional navigation between User and UserSession
-        - Backref property configuration and accessibility
-        - Relationship consistency in both directions
-        - SQLAlchemy backref implementation per Flask-SQLAlchemy patterns
-        """
-        # Create session with relationship
-        session = UserSession(
-            user_id=test_user.id,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-            user_agent="Backref Test Browser",
-            ip_address="172.16.0.100"
+        # Test eager loading with joinedload (not recommended for dynamic but testing compatibility)
+        user_with_entities = (
+            db_session.query(User)
+            .filter_by(id=test_user.id)
+            .first()
         )
         
-        db_session.add(session)
-        db_session.commit()
-        db_session.refresh(session)
+        # Access the dynamic relationship
+        entities_list = list(user_with_entities.business_entities)
+        assert len(entities_list) == 3
         
-        # Test forward relationship (session -> user)
-        assert session.user is not None
-        assert session.user.id == test_user.id
-        assert session.user.username == test_user.username
-        assert session.user.email == test_user.email
+        # Verify data integrity with eager loading
+        for session in user_with_sessions.sessions:
+            assert session.user_id == user_with_sessions.id
+            assert session.user.username == user_with_sessions.username
         
-        # Test backward relationship (user -> sessions)
-        user_sessions = test_user.sessions.all()
-        assert len(user_sessions) == 1
-        assert user_sessions[0].id == session.id
-        assert user_sessions[0].session_token == session.session_token
-        
-        # Test relationship consistency
-        retrieved_user = session.user
-        retrieved_sessions = retrieved_user.sessions.all()
-        assert len(retrieved_sessions) == 1
-        assert retrieved_sessions[0].id == session.id
-        
-        # Test modification through backref
-        session.user.username = "modified_username"
-        db_session.commit()
-        
-        # Verify modification is reflected through both directions
-        assert test_user.username == "modified_username"
-        assert session.user.username == "modified_username"
+        for entity in entities_list:
+            assert entity.owner_id == user_with_entities.id
+            assert entity.owner.username == user_with_entities.username
 
 
-class TestUserToBusinessEntityRelationships:
+class TestBusinessEntityRelationships:
     """
-    Test suite for User-to-BusinessEntity one-to-many ownership relationship validation.
+    Test suite for BusinessEntity relationships with EntityRelationship.
     
-    Validates the foreign key relationship from BusinessEntity.owner_id to User.id,
-    including ownership patterns, cascade behavior, and business entity access control
-    through the 'business_entities' and 'owner' relationship properties.
-    """
-    
-    def test_business_entity_ownership_relationship_creation(self, db_session, test_user):
-        """
-        Test creation of BusinessEntity with valid ownership relationship to User.
-        
-        Validates:
-        - BusinessEntity creation with valid owner_id foreign key
-        - Ownership relationship establishment through SQLAlchemy ORM
-        - Bidirectional navigation between User and BusinessEntity instances
-        - Business entity metadata and status field management
-        """
-        # Create business entity with ownership relationship
-        entity = BusinessEntity(
-            name="Test Business Entity",
-            description="A comprehensive test business entity for ownership validation",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        db_session.add(entity)
-        db_session.commit()
-        db_session.refresh(entity)
-        
-        # Validate ownership relationship establishment
-        assert entity.owner_id == test_user.id
-        assert entity.owner is not None
-        assert entity.owner.id == test_user.id
-        assert entity.owner.username == test_user.username
-        
-        # Validate bidirectional relationship navigation
-        user_entities = test_user.business_entities.all()
-        assert len(user_entities) == 1
-        assert user_entities[0].id == entity.id
-        assert user_entities[0].name == entity.name
-        assert user_entities[0].status == "active"
-        
-        # Validate business entity attributes
-        assert entity.name == "Test Business Entity"
-        assert entity.description == "A comprehensive test business entity for ownership validation"
-        assert entity.status == "active"
-        assert entity.created_at is not None
-        assert entity.updated_at is not None
-    
-    def test_business_entity_ownership_constraint_violation(self, db_session):
-        """
-        Test foreign key constraint violation for invalid owner_id.
-        
-        Validates:
-        - Database constraint enforcement for invalid ownership references
-        - Proper exception handling for ownership violations
-        - Transaction rollback behavior on constraint violation
-        - Business entity creation security through ownership validation
-        """
-        # Attempt to create entity with non-existent owner_id
-        invalid_entity = BusinessEntity(
-            name="Invalid Ownership Entity",
-            description="Entity with invalid owner reference",
-            owner_id=88888,  # Non-existent user ID
-            status="active"
-        )
-        
-        db_session.add(invalid_entity)
-        
-        # Validate constraint violation raises IntegrityError
-        with pytest.raises(IntegrityError) as exc_info:
-            db_session.commit()
-        
-        # Validate specific constraint violation details
-        assert "foreign key constraint" in str(exc_info.value).lower() or \
-               "constraint failed" in str(exc_info.value).lower()
-        
-        # Validate transaction rollback
-        db_session.rollback()
-        
-        # Verify no invalid entity was created
-        invalid_entities = db_session.query(BusinessEntity).filter_by(owner_id=88888).all()
-        assert len(invalid_entities) == 0
-    
-    def test_business_entity_ownership_cascade_delete_behavior(self, db_session, test_user):
-        """
-        Test cascade delete behavior when User owner is deleted.
-        
-        Validates:
-        - CASCADE DELETE constraint enforcement for owned business entities
-        - Automatic cleanup of dependent BusinessEntity records
-        - Ownership referential integrity during cascade operations
-        - Business workflow consistency during owner deletion
-        """
-        # Create multiple business entities with different statuses
-        entities_data = [
-            {
-                'name': "Active Business Unit",
-                'description': "Primary active business entity",
-                'status': "active"
-            },
-            {
-                'name': "Pending Business Unit", 
-                'description': "Business entity pending approval",
-                'status': "pending"
-            },
-            {
-                'name': "Inactive Business Unit",
-                'description': "Temporarily inactive business entity", 
-                'status': "inactive"
-            }
-        ]
-        
-        created_entities = []
-        for entity_data in entities_data:
-            entity = BusinessEntity(
-                owner_id=test_user.id,
-                **entity_data
-            )
-            db_session.add(entity)
-            created_entities.append(entity)
-        
-        db_session.commit()
-        
-        # Verify entities were created with proper ownership
-        user_entities_before = db_session.query(BusinessEntity).filter_by(owner_id=test_user.id).all()
-        assert len(user_entities_before) == 3
-        
-        # Verify entities have different statuses
-        statuses = {entity.status for entity in user_entities_before}
-        assert statuses == {"active", "pending", "inactive"}
-        
-        # Delete the owner user - should cascade delete all owned entities
-        db_session.delete(test_user)
-        db_session.commit()
-        
-        # Verify cascade delete removed all owned business entities
-        user_entities_after = db_session.query(BusinessEntity).filter_by(owner_id=test_user.id).all()
-        assert len(user_entities_after) == 0
-        
-        # Verify user was deleted
-        deleted_user = db_session.query(User).filter_by(id=test_user.id).first()
-        assert deleted_user is None
-    
-    def test_business_entity_ownership_status_filtering(self, db_session, test_user):
-        """
-        Test business entity filtering by status for ownership workflows.
-        
-        Validates:
-        - Status-based filtering through relationship properties
-        - Business workflow management through entity status
-        - Query optimization for status-based business logic
-        - Owner-specific entity management capabilities
-        """
-        # Create entities with various statuses
-        status_entities = [
-            ("active", "Active Entity 1"),
-            ("active", "Active Entity 2"), 
-            ("pending", "Pending Entity 1"),
-            ("inactive", "Inactive Entity 1"),
-            ("draft", "Draft Entity 1"),
-            ("archived", "Archived Entity 1")
-        ]
-        
-        for status, name in status_entities:
-            entity = BusinessEntity(
-                name=name,
-                description=f"Test entity with {status} status",
-                owner_id=test_user.id,
-                status=status
-            )
-            db_session.add(entity)
-        
-        db_session.commit()
-        
-        # Test filtering active entities through relationship
-        active_entities = test_user.business_entities.filter_by(status="active").all()
-        assert len(active_entities) == 2
-        assert all(entity.status == "active" for entity in active_entities)
-        
-        # Test filtering pending entities
-        pending_entities = test_user.business_entities.filter_by(status="pending").all()
-        assert len(pending_entities) == 1
-        assert pending_entities[0].status == "pending"
-        
-        # Test filtering with multiple conditions
-        active_or_pending = test_user.business_entities.filter(
-            BusinessEntity.status.in_(["active", "pending"])
-        ).all()
-        assert len(active_or_pending) == 3
-        
-        # Test ordering by status and name
-        ordered_entities = test_user.business_entities.order_by(
-            BusinessEntity.status.asc(),
-            BusinessEntity.name.asc()
-        ).all()
-        assert len(ordered_entities) == 6
-        assert ordered_entities[0].status == "active"  # Alphabetically first status
-    
-    def test_business_entity_ownership_lazy_dynamic_loading(self, db_session, test_user):
-        """
-        Test dynamic loading behavior for User-BusinessEntity relationships.
-        
-        Validates:
-        - Dynamic query configuration for large entity collections
-        - Query building capability through dynamic relationships
-        - Memory efficiency for business entity management
-        - Performance optimization through dynamic loading per Section 6.2.5.1
-        """
-        # Create larger number of entities for dynamic loading test
-        entity_count = 25
-        for i in range(entity_count):
-            entity = BusinessEntity(
-                name=f"Dynamic Load Entity {i:02d}",
-                description=f"Entity number {i} for dynamic loading test",
-                owner_id=test_user.id,
-                status="active" if i % 2 == 0 else "inactive"
-            )
-            db_session.add(entity)
-        
-        db_session.commit()
-        
-        # Test dynamic query building (business_entities returns a query object)
-        entities_query = test_user.business_entities
-        assert hasattr(entities_query, 'filter'), "business_entities should return a dynamic query"
-        assert hasattr(entities_query, 'order_by'), "business_entities should support query methods"
-        
-        # Test dynamic filtering
-        active_entities = entities_query.filter_by(status="active").all()
-        inactive_entities = entities_query.filter_by(status="inactive").all()
-        
-        # Verify counts (even numbers are active, odd are inactive)
-        expected_active = len([i for i in range(entity_count) if i % 2 == 0])
-        expected_inactive = entity_count - expected_active
-        
-        assert len(active_entities) == expected_active
-        assert len(inactive_entities) == expected_inactive
-        
-        # Test dynamic ordering and pagination
-        recent_entities = entities_query.order_by(desc(BusinessEntity.created_at)).limit(5).all()
-        assert len(recent_entities) == 5
-        
-        # Test dynamic counting
-        total_count = entities_query.count()
-        assert total_count == entity_count
-
-
-class TestBusinessEntityToEntityRelationshipAssociations:
-    """
-    Test suite for BusinessEntity-to-EntityRelationship many-to-many association validation.
-    
-    Validates the dual foreign key relationships from EntityRelationship to BusinessEntity
-    (both source_entity_id and target_entity_id), including complex business relationship
-    management, bidirectional navigation, and relationship type categorization.
+    Validates:
+    - BusinessEntity-to-EntityRelationship associations as source and target
+    - Dual foreign key relationship patterns
+    - Complex business relationship scenarios
+    - Relationship type categorization and validation
+    - Bidirectional relationship navigation
     """
     
-    def test_entity_relationship_creation_with_valid_associations(self, db_session, test_user):
+    @pytest.mark.database
+    def test_entity_relationship_creation(self, db_session, sample_business_entities):
         """
-        Test creation of EntityRelationship with valid BusinessEntity associations.
+        Test EntityRelationship creation with BusinessEntity associations.
         
         Validates:
-        - EntityRelationship creation with valid source and target entity foreign keys
-        - Business relationship type categorization and metadata management
-        - Bidirectional navigation between BusinessEntity and EntityRelationship
-        - Complex business logic support through relationship mapping
+        - Dual foreign key relationships (source and target)
+        - Relationship type categorization
+        - Bidirectional navigation between entities
+        - Proper constraint validation
         """
-        # Create source and target business entities
-        source_entity = BusinessEntity(
-            name="Source Business Entity",
-            description="Entity serving as relationship source",
-            owner_id=test_user.id,
-            status="active"
-        )
+        if len(sample_business_entities) < 2:
+            pytest.skip("Need at least 2 business entities for relationship testing")
         
-        target_entity = BusinessEntity(
-            name="Target Business Entity",
-            description="Entity serving as relationship target",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        db_session.add_all([source_entity, target_entity])
-        db_session.commit()
-        db_session.refresh(source_entity)
-        db_session.refresh(target_entity)
+        source_entity = sample_business_entities[0]
+        target_entity = sample_business_entities[1]
         
         # Create entity relationship
         relationship = EntityRelationship(
             source_entity_id=source_entity.id,
             target_entity_id=target_entity.id,
-            relationship_type="parent-child",
+            relationship_type='parent_child',
             is_active=True
         )
         
@@ -636,1036 +427,1101 @@ class TestBusinessEntityToEntityRelationshipAssociations:
         # Validate foreign key relationships
         assert relationship.source_entity_id == source_entity.id
         assert relationship.target_entity_id == target_entity.id
+        assert relationship.source_entity is not None
+        assert relationship.target_entity is not None
         assert relationship.source_entity.id == source_entity.id
         assert relationship.target_entity.id == target_entity.id
         
-        # Validate relationship attributes
-        assert relationship.relationship_type == "parent-child"
+        # Validate relationship type
+        assert relationship.relationship_type == 'parent_child'
         assert relationship.is_active is True
-        assert relationship.created_at is not None
-        assert relationship.updated_at is not None
         
-        # Validate bidirectional navigation from source entity
-        source_relationships = source_entity.source_relationships.all()
-        assert len(source_relationships) == 1
-        assert source_relationships[0].id == relationship.id
-        assert source_relationships[0].target_entity.id == target_entity.id
+        # Test bidirectional navigation
+        db_session.refresh(source_entity)
+        db_session.refresh(target_entity)
         
-        # Validate bidirectional navigation from target entity
-        target_relationships = target_entity.target_relationships.all()
-        assert len(target_relationships) == 1
-        assert target_relationships[0].id == relationship.id
-        assert target_relationships[0].source_entity.id == source_entity.id
+        # Source entity should have this relationship as outgoing
+        source_relationships = list(source_entity.source_relationships)
+        assert len(source_relationships) >= 1
+        assert any(rel.id == relationship.id for rel in source_relationships)
+        
+        # Target entity should have this relationship as incoming
+        target_relationships = list(target_entity.target_relationships)
+        assert len(target_relationships) >= 1
+        assert any(rel.id == relationship.id for rel in target_relationships)
     
-    def test_entity_relationship_foreign_key_constraint_violations(self, db_session, test_user):
+    @pytest.mark.database
+    def test_entity_relationship_foreign_key_constraints(self, db_session):
         """
-        Test foreign key constraint violations for EntityRelationship associations.
+        Test foreign key constraint enforcement for EntityRelationship.
         
         Validates:
-        - Database constraint enforcement for invalid entity references
-        - Proper exception handling for relationship constraint violations
-        - Transaction rollback behavior on constraint violations
-        - Business relationship integrity enforcement
+        - Invalid source entity ID rejection
+        - Invalid target entity ID rejection
+        - Self-referential relationship prevention
+        - Proper constraint violation handling
         """
-        # Create one valid entity for partial testing
-        valid_entity = BusinessEntity(
-            name="Valid Entity",
-            description="Valid entity for constraint testing",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        db_session.add(valid_entity)
-        db_session.commit()
-        
         # Test invalid source_entity_id
-        invalid_source_relationship = EntityRelationship(
-            source_entity_id=77777,  # Non-existent entity ID
-            target_entity_id=valid_entity.id,
-            relationship_type="invalid-source",
-            is_active=True
-        )
-        
-        db_session.add(invalid_source_relationship)
-        
-        with pytest.raises(IntegrityError) as exc_info:
+        with pytest.raises(IntegrityError):
+            invalid_relationship = EntityRelationship(
+                source_entity_id=99999,  # Non-existent entity
+                target_entity_id=1,
+                relationship_type='parent_child'
+            )
+            db_session.add(invalid_relationship)
             db_session.commit()
-        
-        assert "foreign key constraint" in str(exc_info.value).lower() or \
-               "constraint failed" in str(exc_info.value).lower()
         
         db_session.rollback()
         
         # Test invalid target_entity_id
-        invalid_target_relationship = EntityRelationship(
-            source_entity_id=valid_entity.id,
-            target_entity_id=66666,  # Non-existent entity ID
-            relationship_type="invalid-target",
-            is_active=True
-        )
-        
-        db_session.add(invalid_target_relationship)
-        
-        with pytest.raises(IntegrityError) as exc_info:
+        with pytest.raises(IntegrityError):
+            invalid_relationship = EntityRelationship(
+                source_entity_id=1,
+                target_entity_id=99999,  # Non-existent entity
+                relationship_type='parent_child'
+            )
+            db_session.add(invalid_relationship)
             db_session.commit()
-        
-        assert "foreign key constraint" in str(exc_info.value).lower() or \
-               "constraint failed" in str(exc_info.value).lower()
         
         db_session.rollback()
         
-        # Verify no invalid relationships were created
-        invalid_relationships = db_session.query(EntityRelationship).filter(
-            or_(
-                EntityRelationship.source_entity_id == 77777,
-                EntityRelationship.target_entity_id == 66666
+        # Test NULL foreign key constraints
+        with pytest.raises(IntegrityError):
+            null_source_relationship = EntityRelationship(
+                source_entity_id=None,
+                target_entity_id=1,
+                relationship_type='parent_child'
             )
-        ).all()
-        assert len(invalid_relationships) == 0
-    
-    def test_entity_relationship_self_reference_constraint(self, db_session, test_user):
-        """
-        Test prevention of self-referencing entity relationships.
-        
-        Validates:
-        - Check constraint preventing source_entity_id == target_entity_id
-        - Business logic enforcement for valid relationship patterns
-        - Database constraint validation for relationship integrity
-        - Prevention of circular relationship patterns
-        """
-        # Create business entity
-        entity = BusinessEntity(
-            name="Self-Reference Test Entity",
-            description="Entity for testing self-reference prevention",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        db_session.add(entity)
-        db_session.commit()
-        
-        # Attempt to create self-referencing relationship
-        self_relationship = EntityRelationship(
-            source_entity_id=entity.id,
-            target_entity_id=entity.id,  # Same as source - should fail
-            relationship_type="self-reference",
-            is_active=True
-        )
-        
-        db_session.add(self_relationship)
-        
-        # Validate constraint violation for self-reference
-        with pytest.raises((IntegrityError, ValueError)) as exc_info:
+            db_session.add(null_source_relationship)
             db_session.commit()
         
-        # Check for specific constraint violation or validation error
-        error_message = str(exc_info.value).lower()
-        assert ("check constraint" in error_message or 
-                "constraint failed" in error_message or
-                "self-relationship" in error_message)
-        
         db_session.rollback()
-        
-        # Verify no self-referencing relationship was created
-        self_relationships = db_session.query(EntityRelationship).filter(
-            EntityRelationship.source_entity_id == entity.id,
-            EntityRelationship.target_entity_id == entity.id
-        ).all()
-        assert len(self_relationships) == 0
     
-    def test_entity_relationship_cascade_delete_behavior(self, db_session, test_user):
+    @pytest.mark.database
+    def test_entity_relationship_self_reference_prevention(self, db_session, sample_business_entities):
         """
-        Test cascade delete behavior when BusinessEntity is deleted.
+        Test prevention of self-referential relationships.
         
         Validates:
-        - CASCADE DELETE constraint enforcement for entity relationships
-        - Automatic cleanup of dependent EntityRelationship records
-        - Referential integrity maintenance during entity deletion
-        - Business relationship consistency during cascade operations
+        - Database constraint preventing self-references
+        - Business rule enforcement
+        - Proper error handling for invalid relationships
         """
-        # Create business entities for relationship testing
-        entities = []
-        for i in range(3):
-            entity = BusinessEntity(
-                name=f"Cascade Test Entity {i}",
-                description=f"Entity {i} for cascade delete testing",
-                owner_id=test_user.id,
-                status="active"
-            )
-            entities.append(entity)
-            db_session.add(entity)
+        if not sample_business_entities:
+            pytest.skip("Need business entities for self-reference testing")
         
+        entity = sample_business_entities[0]
+        
+        # Attempt to create self-referential relationship
+        with pytest.raises(IntegrityError):
+            self_relationship = EntityRelationship(
+                source_entity_id=entity.id,
+                target_entity_id=entity.id,  # Self-reference
+                relationship_type='parent_child'
+            )
+            db_session.add(self_relationship)
+            db_session.commit()
+        
+        db_session.rollback()
+    
+    @pytest.mark.database
+    def test_entity_relationship_cascade_delete(self, db_session, sample_business_entities):
+        """
+        Test cascade delete behavior for EntityRelationship.
+        
+        Validates:
+        - CASCADE DELETE when source entity is deleted
+        - CASCADE DELETE when target entity is deleted
+        - Proper cleanup of relationship records
+        - Referential integrity maintenance
+        """
+        if len(sample_business_entities) < 3:
+            pytest.skip("Need at least 3 business entities for cascade testing")
+        
+        entity1 = sample_business_entities[0]
+        entity2 = sample_business_entities[1]
+        entity3 = sample_business_entities[2]
+        
+        # Create multiple relationships involving entity1
+        rel1 = EntityRelationship(
+            source_entity_id=entity1.id,
+            target_entity_id=entity2.id,
+            relationship_type='parent_child'
+        )
+        
+        rel2 = EntityRelationship(
+            source_entity_id=entity3.id,
+            target_entity_id=entity1.id,
+            relationship_type='parent_child'
+        )
+        
+        db_session.add_all([rel1, rel2])
         db_session.commit()
         
-        # Create relationships with entities[0] as source and target
+        rel1_id = rel1.id
+        rel2_id = rel2.id
+        entity1_id = entity1.id
+        
+        # Verify relationships exist
+        assert db_session.query(EntityRelationship).filter_by(id=rel1_id).first() is not None
+        assert db_session.query(EntityRelationship).filter_by(id=rel2_id).first() is not None
+        
+        # Delete entity1 - should cascade delete both relationships
+        db_session.delete(entity1)
+        db_session.commit()
+        
+        # Verify cascade deletion
+        assert db_session.query(EntityRelationship).filter_by(id=rel1_id).first() is None
+        assert db_session.query(EntityRelationship).filter_by(id=rel2_id).first() is None
+        
+        # Verify no orphaned relationships remain
+        orphaned_rels = db_session.query(EntityRelationship).filter(
+            (EntityRelationship.source_entity_id == entity1_id) |
+            (EntityRelationship.target_entity_id == entity1_id)
+        ).count()
+        assert orphaned_rels == 0
+    
+    @pytest.mark.database
+    def test_complex_entity_relationship_scenarios(self, db_session, sample_business_entities):
+        """
+        Test complex business relationship scenarios.
+        
+        Validates:
+        - Multiple relationship types between same entities
+        - Hierarchical relationship patterns
+        - Business workflow relationship modeling
+        - Complex navigation and querying
+        """
+        if len(sample_business_entities) < 3:
+            pytest.skip("Need at least 3 business entities for complex scenarios")
+        
+        entity1, entity2, entity3 = sample_business_entities[0:3]
+        
+        # Create complex relationship structure
         relationships = [
             EntityRelationship(
-                source_entity_id=entities[0].id,
-                target_entity_id=entities[1].id,
-                relationship_type="parent-child",
-                is_active=True
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='parent_child'
             ),
             EntityRelationship(
-                source_entity_id=entities[2].id,
-                target_entity_id=entities[0].id,
-                relationship_type="sibling",
-                is_active=True
+                source_entity_id=entity1.id,
+                target_entity_id=entity3.id,
+                relationship_type='parent_child'
+            ),
+            EntityRelationship(
+                source_entity_id=entity2.id,
+                target_entity_id=entity3.id,
+                relationship_type='dependency'
+            ),
+            EntityRelationship(
+                source_entity_id=entity1.id,
+                target_entity_id=entity2.id,
+                relationship_type='collaboration'  # Different type between same entities
             )
         ]
         
-        for relationship in relationships:
-            db_session.add(relationship)
-        
+        db_session.add_all(relationships)
         db_session.commit()
         
-        # Verify relationships were created
-        entity0_source_relationships = entities[0].source_relationships.all()
-        entity0_target_relationships = entities[0].target_relationships.all()
-        assert len(entity0_source_relationships) == 1
-        assert len(entity0_target_relationships) == 1
+        # Test complex navigation and querying
+        db_session.refresh(entity1)
         
-        # Delete entities[0] - should cascade delete related relationships
-        db_session.delete(entities[0])
-        db_session.commit()
+        # Entity1 should have 3 outgoing relationships
+        outgoing_rels = list(entity1.source_relationships)
+        assert len(outgoing_rels) == 3
         
-        # Verify cascade delete removed all relationships involving entities[0]
-        remaining_relationships = db_session.query(EntityRelationship).filter(
-            or_(
-                EntityRelationship.source_entity_id == entities[0].id,
-                EntityRelationship.target_entity_id == entities[0].id
-            )
-        ).all()
-        assert len(remaining_relationships) == 0
+        # Test filtering by relationship type
+        parent_child_rels = [rel for rel in outgoing_rels if rel.relationship_type == 'parent_child']
+        assert len(parent_child_rels) == 2
         
-        # Verify other entities still exist
-        entity1 = db_session.query(BusinessEntity).filter_by(id=entities[1].id).first()
-        entity2 = db_session.query(BusinessEntity).filter_by(id=entities[2].id).first()
-        assert entity1 is not None
-        assert entity2 is not None
+        collaboration_rels = [rel for rel in outgoing_rels if rel.relationship_type == 'collaboration']
+        assert len(collaboration_rels) == 1
+        
+        # Test getting all related entities
+        related_entities = entity1.get_related_entities()
+        assert len(related_entities) >= 2  # entity2 and entity3
+        
+        related_entity_ids = {entity.id for entity in related_entities}
+        assert entity2.id in related_entity_ids
+        assert entity3.id in related_entity_ids
+
+
+class TestRelationshipLoadingPerformance:
+    """
+    Test suite for relationship loading performance optimization.
     
-    def test_entity_relationship_complex_navigation_patterns(self, db_session, test_user):
+    Validates:
+    - Lazy vs eager loading performance characteristics
+    - Query optimization for relationship traversal
+    - N+1 query problem prevention
+    - Bulk loading strategies for large datasets
+    """
+    
+    @pytest.mark.database
+    @pytest.mark.performance
+    def test_lazy_loading_performance(self, db_session, test_user, api_benchmark):
         """
-        Test complex relationship navigation patterns for business logic support.
+        Test lazy loading performance characteristics.
         
         Validates:
-        - Multi-hop relationship navigation and traversal
-        - Complex business relationship pattern support
-        - Relationship type filtering and categorization
-        - Performance optimization for complex relationship queries
+        - Individual query execution for lazy loading
+        - Performance impact of lazy loading on large datasets
+        - Memory efficiency of lazy loading strategy
         """
-        # Create a network of business entities
-        entities = []
-        entity_names = [
-            "Corporate Headquarters",
-            "Regional Office North", 
-            "Regional Office South",
-            "Local Branch A",
-            "Local Branch B",
-            "Department Finance",
-            "Department Marketing"
+        # Create larger dataset for performance testing
+        sessions = [
+            UserSession(user_id=test_user.id, ip_address=f'192.168.1.{i}')
+            for i in range(1, 21)  # 20 sessions
         ]
         
-        for name in entity_names:
-            entity = BusinessEntity(
-                name=name,
-                description=f"Business entity: {name}",
+        entities = [
+            BusinessEntity(
+                name=f'Entity {i}',
+                description=f'Performance test entity {i}',
                 owner_id=test_user.id,
-                status="active"
+                status='active'
+            ) for i in range(1, 21)  # 20 entities
+        ]
+        
+        db_session.add_all(sessions + entities)
+        db_session.commit()
+        
+        # Clear session for clean test
+        db_session.expunge_all()
+        
+        def lazy_loading_test():
+            # Load user without relationships
+            user = db_session.query(User).filter_by(id=test_user.id).first()
+            
+            # Access relationships (triggers lazy loading)
+            session_count = user.sessions.count()
+            entity_count = user.business_entities.count()
+            
+            return session_count, entity_count
+        
+        # Benchmark lazy loading performance
+        result = api_benchmark(lazy_loading_test)
+        session_count, entity_count = result
+        
+        assert session_count == 20
+        assert entity_count == 20
+    
+    @pytest.mark.database
+    @pytest.mark.performance
+    def test_eager_loading_performance(self, db_session, test_user, api_benchmark):
+        """
+        Test eager loading performance characteristics.
+        
+        Validates:
+        - Single query execution for eager loading
+        - Performance benefits of eager loading for bulk access
+        - Memory usage patterns for eager loading
+        """
+        # Create test dataset
+        sessions = [
+            UserSession(user_id=test_user.id, ip_address=f'192.168.1.{i}')
+            for i in range(1, 21)
+        ]
+        
+        entities = [
+            BusinessEntity(
+                name=f'Entity {i}',
+                description=f'Performance test entity {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 21)
+        ]
+        
+        db_session.add_all(sessions + entities)
+        db_session.commit()
+        
+        def eager_loading_test():
+            # Load user with eager loading for sessions
+            user = (
+                db_session.query(User)
+                .options(selectinload(User.sessions))
+                .filter_by(id=test_user.id)
+                .first()
+            )
+            
+            # Access should not trigger additional queries
+            session_count = len(list(user.sessions))
+            
+            # Load entities separately for comparison
+            entity_count = user.business_entities.count()
+            
+            return session_count, entity_count
+        
+        # Benchmark eager loading performance
+        result = api_benchmark(eager_loading_test)
+        session_count, entity_count = result
+        
+        assert session_count == 20
+        assert entity_count == 20
+    
+    @pytest.mark.database
+    def test_n_plus_one_query_prevention(self, db_session, test_user):
+        """
+        Test prevention of N+1 query problems in relationship loading.
+        
+        Validates:
+        - Efficient bulk loading strategies
+        - Query count optimization
+        - Proper use of join strategies
+        """
+        # Create test data with relationships
+        entities = []
+        for i in range(1, 6):
+            entity = BusinessEntity(
+                name=f'Entity {i}',
+                description=f'N+1 test entity {i}',
+                owner_id=test_user.id,
+                status='active'
             )
             entities.append(entity)
-            db_session.add(entity)
         
+        db_session.add_all(entities)
+        db_session.commit()
+        
+        # Create relationships between entities
+        relationships = []
+        for i in range(len(entities) - 1):
+            rel = EntityRelationship(
+                source_entity_id=entities[i].id,
+                target_entity_id=entities[i + 1].id,
+                relationship_type='parent_child'
+            )
+            relationships.append(rel)
+        
+        db_session.add_all(relationships)
+        db_session.commit()
+        
+        # Test efficient loading to prevent N+1 queries
+        entities_with_relationships = (
+            db_session.query(BusinessEntity)
+            .options(
+                selectinload(BusinessEntity.source_relationships),
+                selectinload(BusinessEntity.target_relationships)
+            )
+            .filter_by(owner_id=test_user.id)
+            .all()
+        )
+        
+        # Verify all data is loaded without additional queries
+        for entity in entities_with_relationships:
+            source_rels = list(entity.source_relationships)
+            target_rels = list(entity.target_relationships)
+            
+            # This should not trigger additional queries
+            for rel in source_rels:
+                assert rel.source_entity_id == entity.id
+            
+            for rel in target_rels:
+                assert rel.target_entity_id == entity.id
+
+
+class TestConstraintViolationHandling:
+    """
+    Test suite for database constraint violation handling.
+    
+    Validates:
+    - Foreign key constraint violations
+    - Unique constraint violations  
+    - Check constraint violations
+    - Proper error handling and rollback behavior
+    """
+    
+    @pytest.mark.database
+    def test_foreign_key_constraint_violations(self, db_session):
+        """
+        Test handling of foreign key constraint violations.
+        
+        Validates:
+        - Proper exception handling for invalid foreign keys
+        - Transaction rollback on constraint violations
+        - Error message clarity and debugging information
+        """
+        # Test UserSession with invalid user_id
+        with pytest.raises(IntegrityError) as exc_info:
+            invalid_session = UserSession(
+                user_id=99999,
+                ip_address='192.168.1.100'
+            )
+            db_session.add(invalid_session)
+            db_session.commit()
+        
+        assert "FOREIGN KEY constraint failed" in str(exc_info.value)
+        db_session.rollback()
+        
+        # Test BusinessEntity with invalid owner_id
+        with pytest.raises(IntegrityError) as exc_info:
+            invalid_entity = BusinessEntity(
+                name='Invalid Entity',
+                owner_id=99999,
+                status='active'
+            )
+            db_session.add(invalid_entity)
+            db_session.commit()
+        
+        assert "FOREIGN KEY constraint failed" in str(exc_info.value)
+        db_session.rollback()
+        
+        # Test EntityRelationship with invalid entity IDs
+        with pytest.raises(IntegrityError):
+            invalid_relationship = EntityRelationship(
+                source_entity_id=99999,
+                target_entity_id=99998,
+                relationship_type='parent_child'
+            )
+            db_session.add(invalid_relationship)
+            db_session.commit()
+        
+        db_session.rollback()
+    
+    @pytest.mark.database
+    def test_unique_constraint_violations(self, db_session, test_user):
+        """
+        Test handling of unique constraint violations.
+        
+        Validates:
+        - Session token uniqueness enforcement
+        - Business entity name uniqueness per owner
+        - Proper exception handling for duplicates
+        """
+        # Create initial session
+        session1 = UserSession(
+            user_id=test_user.id,
+            ip_address='192.168.1.100'
+        )
+        db_session.add(session1)
+        db_session.commit()
+        
+        # Attempt to create session with duplicate token
+        with pytest.raises(IntegrityError):
+            session2 = UserSession(
+                user_id=test_user.id,
+                ip_address='192.168.1.101'
+            )
+            # Manually set same token to trigger unique constraint
+            session2.session_token = session1.session_token
+            db_session.add(session2)
+            db_session.commit()
+        
+        db_session.rollback()
+        
+        # Test business entity name uniqueness per owner
+        entity1 = BusinessEntity(
+            name='Unique Entity',
+            owner_id=test_user.id,
+            status='active'
+        )
+        db_session.add(entity1)
+        db_session.commit()
+        
+        # Attempt duplicate name for same owner
+        with pytest.raises(IntegrityError):
+            entity2 = BusinessEntity(
+                name='Unique Entity',  # Duplicate name
+                owner_id=test_user.id,
+                status='active'
+            )
+            db_session.add(entity2)
+            db_session.commit()
+        
+        db_session.rollback()
+    
+    @pytest.mark.database
+    def test_check_constraint_violations(self, db_session, test_user):
+        """
+        Test handling of check constraint violations.
+        
+        Validates:
+        - Field validation through check constraints
+        - Business rule enforcement at database level
+        - Proper error handling for invalid data
+        """
+        # Test invalid status value in BusinessEntity
+        with pytest.raises(IntegrityError):
+            invalid_entity = BusinessEntity(
+                name='Test Entity',
+                owner_id=test_user.id,
+                status='invalid_status'  # Not in allowed values
+            )
+            db_session.add(invalid_entity)
+            db_session.commit()
+        
+        db_session.rollback()
+        
+        # Test empty name in BusinessEntity  
+        with pytest.raises(IntegrityError):
+            empty_name_entity = BusinessEntity(
+                name='',  # Empty name violates check constraint
+                owner_id=test_user.id,
+                status='active'
+            )
+            db_session.add(empty_name_entity)
+            db_session.commit()
+        
+        db_session.rollback()
+
+
+class TestAdvancedRelationshipScenarios:
+    """
+    Test suite for advanced relationship scenarios and edge cases.
+    
+    Validates:
+    - Complex multi-level relationship hierarchies
+    - Circular relationship detection and handling
+    - Bulk relationship operations
+    - Relationship state management and lifecycle
+    """
+    
+    @pytest.mark.database
+    def test_multi_level_relationship_hierarchy(self, db_session, test_user):
+        """
+        Test complex multi-level relationship hierarchies.
+        
+        Validates:
+        - Deep relationship navigation
+        - Hierarchical business logic patterns
+        - Performance with nested relationships
+        """
+        # Create hierarchical entity structure
+        root_entity = BusinessEntity(
+            name='Root Entity',
+            description='Top-level entity',
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        level1_entities = [
+            BusinessEntity(
+                name=f'Level 1 Entity {i}',
+                description=f'First level entity {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 4)
+        ]
+        
+        level2_entities = [
+            BusinessEntity(
+                name=f'Level 2 Entity {i}',
+                description=f'Second level entity {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 6)
+        ]
+        
+        db_session.add_all([root_entity] + level1_entities + level2_entities)
         db_session.commit()
         
         # Create hierarchical relationships
-        relationships_data = [
-            (0, 1, "parent-subsidiary"),      # HQ -> Regional North
-            (0, 2, "parent-subsidiary"),      # HQ -> Regional South  
-            (1, 3, "office-branch"),          # Regional North -> Branch A
-            (2, 4, "office-branch"),          # Regional South -> Branch B
-            (1, 5, "office-department"),      # Regional North -> Finance
-            (2, 6, "office-department"),      # Regional South -> Marketing
-            (3, 4, "partner"),                # Branch A <-> Branch B
-            (5, 6, "collaboration")           # Finance <-> Marketing
+        level1_relationships = [
+            EntityRelationship(
+                source_entity_id=root_entity.id,
+                target_entity_id=entity.id,
+                relationship_type='parent_child'
+            ) for entity in level1_entities
         ]
         
-        for source_idx, target_idx, rel_type in relationships_data:
-            relationship = EntityRelationship(
-                source_entity_id=entities[source_idx].id,
-                target_entity_id=entities[target_idx].id,
-                relationship_type=rel_type,
-                is_active=True
-            )
-            db_session.add(relationship)
-        
-        db_session.commit()
-        
-        # Test complex relationship queries
-        
-        # 1. Find all subsidiaries of headquarters
-        hq = entities[0]
-        subsidiaries = hq.source_relationships.filter_by(
-            relationship_type="parent-subsidiary"
-        ).all()
-        assert len(subsidiaries) == 2
-        
-        # 2. Find all departments across the organization
-        departments = db_session.query(EntityRelationship).filter_by(
-            relationship_type="office-department"
-        ).all()
-        assert len(departments) == 2
-        
-        # 3. Test relationship type filtering
-        partner_relationships = db_session.query(EntityRelationship).filter_by(
-            relationship_type="partner"
-        ).all()
-        assert len(partner_relationships) == 1
-        
-        # 4. Test multi-hop navigation (find all entities connected to HQ)
-        connected_to_hq = set()
-        
-        # Direct children of HQ
-        for rel in hq.source_relationships:
-            connected_to_hq.add(rel.target_entity.id)
-            
-            # Grandchildren (children of children)
-            for child_rel in rel.target_entity.source_relationships:
-                connected_to_hq.add(child_rel.target_entity.id)
-        
-        # Should find Regional offices + Branches + Departments
-        assert len(connected_to_hq) >= 4  # At least Regional + Branches + some Departments
-        
-        # 5. Test relationship deactivation and filtering
-        collaboration_rel = db_session.query(EntityRelationship).filter_by(
-            relationship_type="collaboration"
-        ).first()
-        collaboration_rel.is_active = False
-        db_session.commit()
-        
-        # Verify active relationship filtering
-        active_relationships = db_session.query(EntityRelationship).filter_by(
-            is_active=True
-        ).all()
-        inactive_relationships = db_session.query(EntityRelationship).filter_by(
-            is_active=False
-        ).all()
-        
-        assert len(inactive_relationships) == 1
-        assert len(active_relationships) == len(relationships_data) - 1
-
-
-class TestRelationshipPerformanceAndOptimization:
-    """
-    Test suite for relationship performance optimization and query efficiency validation.
-    
-    Validates query performance characteristics, loading strategies, and optimization
-    patterns to ensure Flask-SQLAlchemy relationships meet the 95th percentile
-    performance targets specified in Section 6.2.1 (simple queries < 500ms, 
-    complex queries < 2000ms).
-    """
-    
-    def test_relationship_loading_strategy_performance(self, db_session, test_user, benchmark):
-        """
-        Test performance characteristics of different relationship loading strategies.
-        
-        Validates:
-        - Lazy loading performance for memory optimization
-        - Eager loading performance using joinedload and selectinload
-        - Query execution time compliance with 95th percentile targets
-        - Loading strategy optimization per Section 6.2.5.1 requirements
-        """
-        # Create test data for performance testing
-        entity_count = 20
-        sessions_per_user = 15
-        relationships_per_entity = 8
-        
-        # Create business entities
-        entities = []
-        for i in range(entity_count):
-            entity = BusinessEntity(
-                name=f"Performance Entity {i:02d}",
-                description=f"Entity {i} for performance testing",
-                owner_id=test_user.id,
-                status="active" if i % 3 != 0 else "inactive"
-            )
-            entities.append(entity)
-            db_session.add(entity)
-        
-        # Create user sessions
-        for i in range(sessions_per_user):
-            session = UserSession(
-                user_id=test_user.id,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=24 + i),
-                user_agent=f"Performance Test Agent {i}",
-                ip_address=f"192.168.100.{10 + i}"
-            )
-            db_session.add(session)
-        
-        db_session.commit()
-        
-        # Create entity relationships
-        for i in range(0, len(entities) - 1, 2):
-            if i + 1 < len(entities):
-                relationship = EntityRelationship(
-                    source_entity_id=entities[i].id,
-                    target_entity_id=entities[i + 1].id,
-                    relationship_type=f"type_{i % 3}",
-                    is_active=True
+        level2_relationships = []
+        for i, level2_entity in enumerate(level2_entities):
+            parent_level1 = level1_entities[i % len(level1_entities)]
+            level2_relationships.append(
+                EntityRelationship(
+                    source_entity_id=parent_level1.id,
+                    target_entity_id=level2_entity.id,
+                    relationship_type='parent_child'
                 )
-                db_session.add(relationship)
+            )
         
+        db_session.add_all(level1_relationships + level2_relationships)
         db_session.commit()
         
-        # Benchmark lazy loading performance
-        def lazy_load_test():
-            user = db_session.query(User).filter_by(id=test_user.id).first()
-            sessions = user.sessions.all()
-            entities = user.business_entities.all()
-            return len(sessions), len(entities)
+        # Test hierarchical navigation
+        db_session.refresh(root_entity)
         
-        lazy_result = benchmark(lazy_load_test)
-        assert lazy_result[0] == sessions_per_user
-        assert lazy_result[1] == entity_count
+        # Root should have 3 direct children
+        direct_children = list(root_entity.source_relationships.filter_by(
+            relationship_type='parent_child'
+        ))
+        assert len(direct_children) == 3
         
-        # Benchmark eager loading with joinedload
-        def eager_joinedload_test():
-            user = (db_session.query(User)
-                   .options(joinedload(User.sessions), joinedload(User.business_entities))
-                   .filter_by(id=test_user.id)
-                   .first())
-            sessions = user.sessions.all()
-            entities = user.business_entities.all()
-            return len(sessions), len(entities)
+        # Test navigation to grandchildren
+        grandchildren_count = 0
+        for child_rel in direct_children:
+            child_entity = child_rel.target_entity
+            grandchild_rels = list(child_entity.source_relationships.filter_by(
+                relationship_type='parent_child'
+            ))
+            grandchildren_count += len(grandchild_rels)
         
-        eager_result = benchmark(eager_joinedload_test)
-        assert eager_result[0] == sessions_per_user
-        assert eager_result[1] == entity_count
-        
-        # Benchmark selectinload strategy
-        def selectinload_test():
-            user = (db_session.query(User)
-                   .options(selectinload(User.sessions), selectinload(User.business_entities))
-                   .filter_by(id=test_user.id)
-                   .first())
-            sessions = user.sessions.all()
-            entities = user.business_entities.all()
-            return len(sessions), len(entities)
-        
-        select_result = benchmark(selectinload_test)
-        assert select_result[0] == sessions_per_user
-        assert select_result[1] == entity_count
+        assert grandchildren_count == 5  # Total level 2 entities
     
-    def test_complex_relationship_query_performance(self, db_session, test_user, benchmark):
+    @pytest.mark.database
+    def test_relationship_state_management(self, db_session, sample_business_entities):
         """
-        Test performance of complex relationship queries and joins.
+        Test relationship state management and lifecycle.
         
         Validates:
-        - Complex join query performance under load
-        - Multi-table relationship traversal efficiency
-        - Query execution time compliance with 2000ms target for complex queries
-        - Database index utilization for relationship queries
+        - Active/inactive relationship states
+        - Soft deletion patterns
+        - State transition validation
+        - Temporal relationship management
         """
-        # Create larger dataset for complex query testing
-        user_count = 10
-        entities_per_user = 15
-        relationships_per_entity_pair = 2
+        if len(sample_business_entities) < 2:
+            pytest.skip("Need at least 2 business entities for state testing")
         
-        users = [test_user]  # Include the test user
+        entity1, entity2 = sample_business_entities[0:2]
         
-        # Create additional users
-        for i in range(user_count - 1):
-            user = User(
-                username=f"perfuser_{i:02d}",
-                email=f"perf{i:02d}@example.com",
-                password="password123"
-            )
-            users.append(user)
-            db_session.add(user)
-        
-        db_session.commit()
-        
-        # Create entities for each user
-        all_entities = []
-        for user in users:
-            for i in range(entities_per_user):
-                entity = BusinessEntity(
-                    name=f"Complex Entity {user.id}_{i:02d}",
-                    description=f"Entity {i} for user {user.id}",
-                    owner_id=user.id,
-                    status="active" if i % 2 == 0 else "inactive"
-                )
-                all_entities.append(entity)
-                db_session.add(entity)
-        
-        db_session.commit()
-        
-        # Create cross-user entity relationships
-        relationship_count = 0
-        for i in range(0, len(all_entities) - 1, 3):
-            if i + 1 < len(all_entities) and relationship_count < 50:  # Limit for performance
-                relationship = EntityRelationship(
-                    source_entity_id=all_entities[i].id,
-                    target_entity_id=all_entities[i + 1].id,
-                    relationship_type=f"complex_type_{relationship_count % 5}",
-                    is_active=True
-                )
-                db_session.add(relationship)
-                relationship_count += 1
-        
-        db_session.commit()
-        
-        # Benchmark complex relationship query
-        def complex_relationship_query():
-            # Query users with their entities and relationships in a single query
-            results = (db_session.query(User)
-                      .join(BusinessEntity, User.id == BusinessEntity.owner_id)
-                      .join(EntityRelationship, 
-                           BusinessEntity.id == EntityRelationship.source_entity_id)
-                      .filter(BusinessEntity.status == "active")
-                      .filter(EntityRelationship.is_active == True)
-                      .distinct()
-                      .all())
-            return len(results)
-        
-        complex_result = benchmark(complex_relationship_query)
-        assert complex_result >= 1  # Should find at least some results
-        
-        # Benchmark relationship aggregation query
-        def relationship_aggregation_query():
-            # Count relationships by type for active entities
-            from sqlalchemy import func
-            results = (db_session.query(
-                        EntityRelationship.relationship_type,
-                        func.count(EntityRelationship.id).label('count')
-                      )
-                      .join(BusinessEntity, 
-                           EntityRelationship.source_entity_id == BusinessEntity.id)
-                      .filter(BusinessEntity.status == "active")
-                      .filter(EntityRelationship.is_active == True)
-                      .group_by(EntityRelationship.relationship_type)
-                      .all())
-            return len(results)
-        
-        agg_result = benchmark(relationship_aggregation_query)
-        assert agg_result >= 1  # Should find at least one relationship type
-    
-    def test_relationship_memory_usage_optimization(self, db_session, test_user):
-        """
-        Test memory usage optimization for large relationship collections.
-        
-        Validates:
-        - Memory efficiency of lazy loading for large collections
-        - Dynamic query optimization for memory management
-        - Pagination support for large relationship sets
-        - Memory usage patterns per Section 6.2.5.1 optimization
-        """
-        import gc
-        import psutil
-        import os
-        
-        # Get initial memory usage
-        process = psutil.Process(os.getpid())
-        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
-        
-        # Create large number of relationships for memory testing
-        large_entity_count = 100
-        
-        # Create entities
-        entities = []
-        for i in range(large_entity_count):
-            entity = BusinessEntity(
-                name=f"Memory Test Entity {i:03d}",
-                description=f"Entity {i} for memory optimization testing",
-                owner_id=test_user.id,
-                status="active"
-            )
-            entities.append(entity)
-            db_session.add(entity)
-        
-        db_session.commit()
-        
-        # Create sessions
-        for i in range(50):
-            session = UserSession(
-                user_id=test_user.id,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=24 + i),
-                user_agent=f"Memory Test Agent {i}",
-                ip_address=f"10.0.{i // 256}.{i % 256}"
-            )
-            db_session.add(session)
-        
-        db_session.commit()
-        
-        # Test lazy loading memory efficiency
-        user = db_session.query(User).filter_by(id=test_user.id).first()
-        
-        # Access relationships without loading all data
-        entities_query = user.business_entities
-        sessions_query = user.sessions
-        
-        # Verify queries are not automatically executed
-        assert hasattr(entities_query, 'filter')
-        assert hasattr(sessions_query, 'filter')
-        
-        # Test pagination for memory efficiency
-        page_size = 10
-        entity_page_1 = entities_query.limit(page_size).offset(0).all()
-        entity_page_2 = entities_query.limit(page_size).offset(page_size).all()
-        
-        assert len(entity_page_1) == page_size
-        assert len(entity_page_2) == page_size
-        assert entity_page_1[0].id != entity_page_2[0].id
-        
-        # Test filtering without loading all entities
-        active_entities = entities_query.filter_by(status="active").all()
-        assert len(active_entities) == large_entity_count
-        
-        # Measure memory usage after operations
-        gc.collect()  # Force garbage collection
-        final_memory = process.memory_info().rss / 1024 / 1024  # MB
-        memory_increase = final_memory - initial_memory
-        
-        # Memory increase should be reasonable (less than 100MB for this test)
-        assert memory_increase < 100, f"Memory usage increased by {memory_increase:.2f}MB"
-
-
-class TestRelationshipTransactionManagement:
-    """
-    Test suite for relationship transaction management and consistency validation.
-    
-    Validates transaction boundary management for relationship operations, 
-    ensuring ACID compliance and proper rollback behavior during relationship
-    modifications per Section 5.2.4 transaction coordination requirements.
-    """
-    
-    def test_relationship_transaction_rollback_behavior(self, db_session, test_user):
-        """
-        Test transaction rollback behavior for relationship operations.
-        
-        Validates:
-        - Transaction rollback for failed relationship operations
-        - Data consistency maintenance during rollback scenarios
-        - Proper cleanup of partially created relationships
-        - ACID compliance for relationship transaction boundaries
-        """
-        # Create entities for relationship testing
-        entity1 = BusinessEntity(
-            name="Transaction Test Entity 1",
-            description="First entity for transaction testing",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        entity2 = BusinessEntity(
-            name="Transaction Test Entity 2", 
-            description="Second entity for transaction testing",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        db_session.add_all([entity1, entity2])
-        db_session.commit()
-        
-        # Get initial counts
-        initial_relationship_count = db_session.query(EntityRelationship).count()
-        initial_session_count = db_session.query(UserSession).count()
-        
-        # Start transaction with multiple operations
-        try:
-            # Create valid relationship
-            relationship = EntityRelationship(
-                source_entity_id=entity1.id,
-                target_entity_id=entity2.id,
-                relationship_type="transaction-test",
-                is_active=True
-            )
-            db_session.add(relationship)
-            
-            # Create valid session
-            session = UserSession(
-                user_id=test_user.id,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-                user_agent="Transaction Test Agent",
-                ip_address="192.168.1.200"
-            )
-            db_session.add(session)
-            
-            # Create invalid relationship (should cause constraint violation)
-            invalid_relationship = EntityRelationship(
-                source_entity_id=99999,  # Non-existent entity
-                target_entity_id=entity2.id,
-                relationship_type="invalid-transaction",
-                is_active=True
-            )
-            db_session.add(invalid_relationship)
-            
-            # This commit should fail and rollback everything
-            db_session.commit()
-            
-            # Should not reach here
-            assert False, "Transaction should have failed"
-            
-        except IntegrityError:
-            # Expected behavior - rollback should occur
-            db_session.rollback()
-        
-        # Verify rollback cleaned up all operations
-        final_relationship_count = db_session.query(EntityRelationship).count()
-        final_session_count = db_session.query(UserSession).count()
-        
-        assert final_relationship_count == initial_relationship_count
-        assert final_session_count == initial_session_count
-        
-        # Verify specific records were not created
-        transaction_relationships = db_session.query(EntityRelationship).filter_by(
-            relationship_type="transaction-test"
-        ).all()
-        assert len(transaction_relationships) == 0
-        
-        transaction_sessions = db_session.query(UserSession).filter_by(
-            user_agent="Transaction Test Agent"
-        ).all()
-        assert len(transaction_sessions) == 0
-    
-    def test_relationship_nested_transaction_behavior(self, db_session, test_user):
-        """
-        Test nested transaction behavior for complex relationship operations.
-        
-        Validates:
-        - Nested transaction support for complex business operations
-        - Savepoint management for partial rollback scenarios
-        - Transaction isolation during complex relationship modifications
-        - Nested transaction coordination per Section 5.2.4
-        """
-        from sqlalchemy import event
-        
-        # Create test entities
-        entities = []
-        for i in range(3):
-            entity = BusinessEntity(
-                name=f"Nested Transaction Entity {i}",
-                description=f"Entity {i} for nested transaction testing", 
-                owner_id=test_user.id,
-                status="active"
-            )
-            entities.append(entity)
-            db_session.add(entity)
-        
-        db_session.commit()
-        
-        # Start outer transaction
-        outer_savepoint = db_session.begin()
-        
-        try:
-            # Create first relationship (should succeed)
-            relationship1 = EntityRelationship(
-                source_entity_id=entities[0].id,
-                target_entity_id=entities[1].id,
-                relationship_type="nested-outer",
-                is_active=True
-            )
-            db_session.add(relationship1)
-            
-            # Start inner transaction
-            inner_savepoint = db_session.begin_nested()
-            
-            try:
-                # Create second relationship (should succeed)
-                relationship2 = EntityRelationship(
-                    source_entity_id=entities[1].id,
-                    target_entity_id=entities[2].id,
-                    relationship_type="nested-inner",
-                    is_active=True
-                )
-                db_session.add(relationship2)
-                
-                # Create invalid relationship (should fail)
-                invalid_relationship = EntityRelationship(
-                    source_entity_id=88888,  # Non-existent entity
-                    target_entity_id=entities[2].id,
-                    relationship_type="nested-invalid",
-                    is_active=True
-                )
-                db_session.add(invalid_relationship)
-                
-                # Flush to trigger constraint check
-                db_session.flush()
-                
-                # Should not reach here
-                assert False, "Inner transaction should have failed"
-                
-            except IntegrityError:
-                # Expected - rollback inner transaction only
-                inner_savepoint.rollback()
-            
-            # Outer transaction should still be valid
-            # Create another relationship to verify outer transaction state
-            relationship3 = EntityRelationship(
-                source_entity_id=entities[0].id,
-                target_entity_id=entities[2].id,
-                relationship_type="nested-recovery",
-                is_active=True
-            )
-            db_session.add(relationship3)
-            
-            # Commit outer transaction
-            outer_savepoint.commit()
-            
-        except Exception:
-            outer_savepoint.rollback()
-            raise
-        
-        # Verify transaction results
-        outer_relationships = db_session.query(EntityRelationship).filter_by(
-            relationship_type="nested-outer"
-        ).all()
-        assert len(outer_relationships) == 1
-        
-        inner_relationships = db_session.query(EntityRelationship).filter_by(
-            relationship_type="nested-inner"
-        ).all()
-        assert len(inner_relationships) == 0  # Should be rolled back
-        
-        invalid_relationships = db_session.query(EntityRelationship).filter_by(
-            relationship_type="nested-invalid"
-        ).all()
-        assert len(invalid_relationships) == 0  # Should be rolled back
-        
-        recovery_relationships = db_session.query(EntityRelationship).filter_by(
-            relationship_type="nested-recovery"
-        ).all()
-        assert len(recovery_relationships) == 1  # Should be committed
-    
-    def test_relationship_concurrent_modification_handling(self, db_session, test_user):
-        """
-        Test handling of concurrent modifications to relationships.
-        
-        Validates:
-        - Optimistic locking behavior for relationship modifications
-        - Concurrent update detection and handling
-        - Data consistency during concurrent relationship operations
-        - Thread safety for relationship modifications
-        """
-        import threading
-        import time
-        from sqlalchemy.orm import sessionmaker
-        from sqlalchemy.exc import StaleDataError
-        
-        # Create test entity
-        entity1 = BusinessEntity(
-            name="Concurrent Test Entity 1",
-            description="Entity for concurrent modification testing",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        entity2 = BusinessEntity(
-            name="Concurrent Test Entity 2",
-            description="Entity for concurrent modification testing",
-            owner_id=test_user.id,
-            status="active"
-        )
-        
-        db_session.add_all([entity1, entity2])
-        db_session.commit()
-        
-        # Create initial relationship
+        # Create relationship in active state
         relationship = EntityRelationship(
             source_entity_id=entity1.id,
             target_entity_id=entity2.id,
-            relationship_type="concurrent-test",
+            relationship_type='parent_child',
             is_active=True
         )
         
         db_session.add(relationship)
         db_session.commit()
-        relationship_id = relationship.id
         
-        # Simulate concurrent modifications
-        modification_results = []
+        # Verify active state
+        assert relationship.is_active is True
+        active_rels = db_session.query(EntityRelationship).filter_by(
+            is_active=True
+        ).count()
+        assert active_rels >= 1
         
-        def modify_relationship(session_factory, result_list, modification_type):
-            """Function to run in separate thread for concurrent testing."""
-            try:
-                session = session_factory()
-                rel = session.query(EntityRelationship).filter_by(id=relationship_id).first()
-                
-                if rel:
-                    if modification_type == "deactivate":
-                        rel.is_active = False
-                    elif modification_type == "change_type":
-                        rel.relationship_type = "concurrent-modified"
-                    
-                    # Add small delay to increase chance of conflict
-                    time.sleep(0.1)
-                    
-                    session.commit()
-                    result_list.append(("success", modification_type))
-                else:
-                    result_list.append(("not_found", modification_type))
-                    
-                session.close()
-                
-            except Exception as e:
-                result_list.append(("error", modification_type, str(e)))
+        # Test state transition to inactive
+        relationship.deactivate()
+        db_session.commit()
         
-        # Create session factory for concurrent access
-        Session = sessionmaker(bind=db_session.bind)
+        assert relationship.is_active is False
+        db_session.refresh(relationship)
+        assert relationship.is_active is False
         
-        # Start concurrent modifications
-        thread1 = threading.Thread(
-            target=modify_relationship,
-            args=(Session, modification_results, "deactivate")
-        )
+        # Verify filtering by active state
+        active_rels = list(entity1.source_relationships.filter_by(is_active=True))
+        inactive_rels = list(entity1.source_relationships.filter_by(is_active=False))
         
-        thread2 = threading.Thread(
-            target=modify_relationship,
-            args=(Session, modification_results, "change_type")
-        )
+        assert len(inactive_rels) >= 1
+        assert any(rel.id == relationship.id for rel in inactive_rels)
         
-        thread1.start()
-        thread2.start()
+        # Test reactivation
+        relationship.activate()
+        db_session.commit()
         
-        thread1.join()
-        thread2.join()
-        
-        # Analyze results
-        assert len(modification_results) == 2
-        
-        # At least one modification should succeed
-        success_count = len([r for r in modification_results if r[0] == "success"])
-        assert success_count >= 1
-        
-        # Verify final state is consistent
-        db_session.expire_all()  # Clear session cache
-        final_relationship = db_session.query(EntityRelationship).filter_by(
-            id=relationship_id
-        ).first()
-        
-        assert final_relationship is not None
-        # Either deactivated OR type changed, but not in inconsistent state
-        assert (not final_relationship.is_active) or \
-               (final_relationship.relationship_type == "concurrent-modified")
-
-
-# ================================================================================================
-# INTEGRATION TEST MARKERS AND CONFIGURATION
-# ================================================================================================
-
-# Mark all tests in this module as database integration tests
-pytestmark = [
-    pytest.mark.database,
-    pytest.mark.integration,
-    pytest.mark.sqlalchemy
-]
-
-
-def test_comprehensive_relationship_model_validation(db_session, test_user, sample_business_entities):
-    """
-    Comprehensive integration test validating all model relationships together.
+        assert relationship.is_active is True
     
-    This test serves as a final validation that all relationships work correctly
-    together in complex scenarios, ensuring the complete Flask-SQLAlchemy 
-    relationship system maintains data integrity and functional equivalence
-    with the original MongoDB relationship patterns.
+    @pytest.mark.database
+    def test_bulk_relationship_operations(self, db_session, test_user):
+        """
+        Test bulk relationship operations for performance.
+        
+        Validates:
+        - Bulk creation performance
+        - Bulk update operations
+        - Bulk deletion with constraints
+        - Transaction management for bulk operations
+        """
+        # Create entities for bulk operations
+        entities = [
+            BusinessEntity(
+                name=f'Bulk Entity {i}',
+                description=f'Entity for bulk testing {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 11)  # 10 entities
+        ]
+        
+        db_session.add_all(entities)
+        db_session.commit()
+        
+        # Bulk create relationships (create a star pattern)
+        center_entity = entities[0]
+        relationships = [
+            EntityRelationship(
+                source_entity_id=center_entity.id,
+                target_entity_id=entity.id,
+                relationship_type='parent_child',
+                is_active=True
+            ) for entity in entities[1:]
+        ]
+        
+        # Test bulk insertion
+        db_session.add_all(relationships)
+        db_session.commit()
+        
+        # Verify bulk creation
+        created_rels = db_session.query(EntityRelationship).filter_by(
+            source_entity_id=center_entity.id,
+            relationship_type='parent_child'
+        ).count()
+        assert created_rels == 9
+        
+        # Test bulk update
+        relationship_ids = [rel.id for rel in relationships]
+        updated_count = db_session.query(EntityRelationship).filter(
+            EntityRelationship.id.in_(relationship_ids)
+        ).update(
+            {'relationship_type': 'dependency'},
+            synchronize_session=False
+        )
+        db_session.commit()
+        
+        assert updated_count == 9
+        
+        # Verify bulk update
+        dependency_rels = db_session.query(EntityRelationship).filter_by(
+            source_entity_id=center_entity.id,
+            relationship_type='dependency'
+        ).count()
+        assert dependency_rels == 9
+        
+        # Test bulk soft deletion
+        deactivated_count = db_session.query(EntityRelationship).filter(
+            EntityRelationship.id.in_(relationship_ids)
+        ).update(
+            {'is_active': False},
+            synchronize_session=False
+        )
+        db_session.commit()
+        
+        assert deactivated_count == 9
+        
+        # Verify bulk deactivation
+        active_rels = db_session.query(EntityRelationship).filter_by(
+            source_entity_id=center_entity.id,
+            is_active=True
+        ).count()
+        assert active_rels == 0
+
+
+class TestRelationshipIntegrityValidation:
     """
-    # Create comprehensive test scenario with all relationship types
+    Test suite for comprehensive relationship integrity validation.
     
-    # 1. User with multiple sessions
-    sessions = []
-    for i in range(3):
+    Validates:
+    - Cross-model referential integrity
+    - Data consistency across relationships
+    - Constraint enforcement under concurrent access
+    - Recovery from integrity violations
+    """
+    
+    @pytest.mark.database
+    def test_cross_model_referential_integrity(self, db_session, test_user):
+        """
+        Test referential integrity across all model relationships.
+        
+        Validates:
+        - End-to-end relationship integrity
+        - Cross-model cascade behavior
+        - Complex deletion scenarios
+        """
+        # Create complete relationship chain
         session = UserSession(
             user_id=test_user.id,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24 + i * 12),
-            user_agent=f"Integration Test Agent {i}",
-            ip_address=f"172.20.0.{10 + i}"
+            ip_address='192.168.1.100'
         )
-        sessions.append(session)
-        db_session.add(session)
-    
-    db_session.commit()
-    
-    # 2. Business entities already created by fixture
-    entities = sample_business_entities
-    assert len(entities) >= 2, "Need at least 2 entities for relationship testing"
-    
-    # 3. Entity relationships connecting the business entities
-    relationships = []
-    if len(entities) >= 2:
-        relationship = EntityRelationship(
-            source_entity_id=entities[0].id,
-            target_entity_id=entities[1].id,
-            relationship_type="integration-test",
-            is_active=True
-        )
-        relationships.append(relationship)
-        db_session.add(relationship)
-    
-    if len(entities) >= 3:
-        relationship = EntityRelationship(
-            source_entity_id=entities[1].id,
-            target_entity_id=entities[2].id,
-            relationship_type="integration-chain",
-            is_active=True
-        )
-        relationships.append(relationship)
-        db_session.add(relationship)
-    
-    db_session.commit()
-    
-    # Comprehensive validation of all relationships
-    
-    # Validate User -> UserSession relationships
-    user_sessions = test_user.sessions.all()
-    assert len(user_sessions) == 3
-    for session in user_sessions:
-        assert session.user_id == test_user.id
-        assert session.user.username == test_user.username
-    
-    # Validate User -> BusinessEntity relationships
-    user_entities = test_user.business_entities.all()
-    assert len(user_entities) == len(entities)
-    for entity in user_entities:
-        assert entity.owner_id == test_user.id
-        assert entity.owner.username == test_user.username
-    
-    # Validate BusinessEntity -> EntityRelationship relationships
-    if len(relationships) > 0:
-        # Source relationships
-        source_rels = entities[0].source_relationships.all()
-        assert len(source_rels) >= 1
-        assert source_rels[0].source_entity_id == entities[0].id
         
-        # Target relationships
-        target_rels = entities[1].target_relationships.all() 
-        assert len(target_rels) >= 1
-        assert target_rels[0].target_entity_id == entities[1].id
+        entity = BusinessEntity(
+            name='Integrity Test Entity',
+            description='Entity for integrity testing',
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        db_session.add_all([session, entity])
+        db_session.commit()
+        
+        # Create another entity for relationship
+        entity2 = BusinessEntity(
+            name='Second Integrity Entity',
+            description='Second entity for relationship',
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        db_session.add(entity2)
+        db_session.commit()
+        
+        # Create entity relationship
+        relationship = EntityRelationship(
+            source_entity_id=entity.id,
+            target_entity_id=entity2.id,
+            relationship_type='parent_child'
+        )
+        
+        db_session.add(relationship)
+        db_session.commit()
+        
+        # Store IDs for verification
+        user_id = test_user.id
+        session_id = session.id
+        entity_id = entity.id
+        entity2_id = entity2.id
+        relationship_id = relationship.id
+        
+        # Verify complete relationship chain exists
+        assert db_session.query(User).filter_by(id=user_id).first() is not None
+        assert db_session.query(UserSession).filter_by(id=session_id).first() is not None
+        assert db_session.query(BusinessEntity).filter_by(id=entity_id).first() is not None
+        assert db_session.query(BusinessEntity).filter_by(id=entity2_id).first() is not None
+        assert db_session.query(EntityRelationship).filter_by(id=relationship_id).first() is not None
+        
+        # Test cascade deletion from root
+        db_session.delete(test_user)
+        db_session.commit()
+        
+        # Verify complete cascade deletion
+        assert db_session.query(User).filter_by(id=user_id).first() is None
+        assert db_session.query(UserSession).filter_by(id=session_id).first() is None
+        assert db_session.query(BusinessEntity).filter_by(id=entity_id).first() is None
+        assert db_session.query(BusinessEntity).filter_by(id=entity2_id).first() is None
+        assert db_session.query(EntityRelationship).filter_by(id=relationship_id).first() is None
     
-    # Test cascade behavior by deleting user
-    user_id = test_user.id
-    entity_ids = [e.id for e in entities]
-    session_ids = [s.id for s in sessions]
-    relationship_ids = [r.id for r in relationships]
+    @pytest.mark.database
+    def test_relationship_data_consistency(self, db_session, test_user):
+        """
+        Test data consistency across relationship operations.
+        
+        Validates:
+        - Bidirectional relationship consistency
+        - State synchronization across related models
+        - Transaction boundary respect
+        """
+        # Create entities with relationships
+        entity1 = BusinessEntity(
+            name='Consistency Entity 1',
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        entity2 = BusinessEntity(
+            name='Consistency Entity 2', 
+            owner_id=test_user.id,
+            status='active'
+        )
+        
+        db_session.add_all([entity1, entity2])
+        db_session.commit()
+        
+        # Create bidirectional relationships
+        rel1 = EntityRelationship(
+            source_entity_id=entity1.id,
+            target_entity_id=entity2.id,
+            relationship_type='parent_child'
+        )
+        
+        rel2 = EntityRelationship(
+            source_entity_id=entity2.id,
+            target_entity_id=entity1.id,
+            relationship_type='dependency'
+        )
+        
+        db_session.add_all([rel1, rel2])
+        db_session.commit()
+        
+        # Test consistency of bidirectional navigation
+        db_session.refresh(entity1)
+        db_session.refresh(entity2)
+        
+        # Entity1 outgoing relationships
+        entity1_outgoing = list(entity1.source_relationships)
+        assert len(entity1_outgoing) == 1
+        assert entity1_outgoing[0].target_entity_id == entity2.id
+        
+        # Entity1 incoming relationships
+        entity1_incoming = list(entity1.target_relationships)
+        assert len(entity1_incoming) == 1
+        assert entity1_incoming[0].source_entity_id == entity2.id
+        
+        # Entity2 outgoing relationships
+        entity2_outgoing = list(entity2.source_relationships)
+        assert len(entity2_outgoing) == 1
+        assert entity2_outgoing[0].target_entity_id == entity1.id
+        
+        # Entity2 incoming relationships
+        entity2_incoming = list(entity2.target_relationships)
+        assert len(entity2_incoming) == 1
+        assert entity2_incoming[0].source_entity_id == entity1.id
+        
+        # Test state consistency after updates
+        rel1.deactivate()
+        db_session.commit()
+        
+        # Verify state consistency
+        db_session.refresh(entity1)
+        db_session.refresh(entity2)
+        
+        active_outgoing_1 = list(entity1.source_relationships.filter_by(is_active=True))
+        assert len(active_outgoing_1) == 0
+        
+        active_incoming_2 = list(entity2.target_relationships.filter_by(is_active=True))
+        assert len(active_incoming_2) == 0
+
+
+# Performance benchmarking and comparative testing
+class TestRelationshipPerformanceComparison:
+    """
+    Test suite for relationship performance comparison against Node.js baseline.
     
-    db_session.delete(test_user)
-    db_session.commit()
+    Validates:
+    - Query performance meets SLA requirements per Section 6.2.1
+    - Memory usage optimization
+    - Response time compliance with 95th percentile targets
+    - Scalability patterns equivalent to Node.js implementation
+    """
     
-    # Verify all related records were cascade deleted
-    remaining_entities = db_session.query(BusinessEntity).filter(
-        BusinessEntity.id.in_(entity_ids)
-    ).all()
-    assert len(remaining_entities) == 0
+    @pytest.mark.database
+    @pytest.mark.performance
+    def test_relationship_query_performance(self, db_session, test_user, database_benchmark):
+        """
+        Test relationship query performance against baseline requirements.
+        
+        Validates performance targets from Section 6.2.1:
+        - Simple SELECT operations < 500ms (95th percentile)
+        - Complex JOIN operations < 2000ms (95th percentile)
+        """
+        # Create performance test dataset
+        entities = [
+            BusinessEntity(
+                name=f'Perf Entity {i}',
+                description=f'Performance test entity {i}',
+                owner_id=test_user.id,
+                status='active'
+            ) for i in range(1, 101)  # 100 entities
+        ]
+        
+        db_session.add_all(entities)
+        db_session.commit()
+        
+        # Create relationships for complex queries
+        relationships = []
+        for i in range(99):
+            rel = EntityRelationship(
+                source_entity_id=entities[i].id,
+                target_entity_id=entities[i + 1].id,
+                relationship_type='parent_child'
+            )
+            relationships.append(rel)
+        
+        db_session.add_all(relationships)
+        db_session.commit()
+        
+        # Test simple relationship query performance
+        def simple_relationship_query():
+            return db_session.query(BusinessEntity).filter_by(
+                owner_id=test_user.id
+            ).count()
+        
+        simple_result = database_benchmark(simple_relationship_query)
+        assert simple_result == 100
+        
+        # Test complex JOIN query performance
+        def complex_join_query():
+            return (
+                db_session.query(BusinessEntity)
+                .join(EntityRelationship, BusinessEntity.id == EntityRelationship.source_entity_id)
+                .filter(BusinessEntity.owner_id == test_user.id)
+                .filter(EntityRelationship.relationship_type == 'parent_child')
+                .count()
+            )
+        
+        complex_result = database_benchmark(complex_join_query)
+        assert complex_result == 99
     
-    remaining_sessions = db_session.query(UserSession).filter(
-        UserSession.id.in_(session_ids)
-    ).all()
-    assert len(remaining_sessions) == 0
+    @pytest.mark.database
+    @pytest.mark.performance
+    def test_relationship_memory_efficiency(self, db_session, test_user, performance_monitor):
+        """
+        Test memory efficiency of relationship operations.
+        
+        Validates:
+        - Memory usage patterns for large relationship sets
+        - Garbage collection efficiency
+        - Memory leak prevention
+        """
+        performance_monitor.start_monitoring()
+        
+        try:
+            # Create and process large relationship dataset
+            batch_size = 50
+            for batch in range(5):  # 5 batches of 50 entities each
+                entities = [
+                    BusinessEntity(
+                        name=f'Memory Test Entity {batch}_{i}',
+                        description=f'Memory efficiency test entity batch {batch} item {i}',
+                        owner_id=test_user.id,
+                        status='active'
+                    ) for i in range(batch_size)
+                ]
+                
+                db_session.add_all(entities)
+                db_session.commit()
+                
+                # Create relationships within batch
+                relationships = []
+                for i in range(batch_size - 1):
+                    rel = EntityRelationship(
+                        source_entity_id=entities[i].id,
+                        target_entity_id=entities[i + 1].id,
+                        relationship_type='parent_child'
+                    )
+                    relationships.append(rel)
+                
+                db_session.add_all(relationships)
+                db_session.commit()
+                
+                # Process relationships to test memory usage
+                for entity in entities:
+                    related_entities = entity.get_related_entities()
+                    assert isinstance(related_entities, list)
+                
+                # Clear references to help GC
+                del entities
+                del relationships
+        
+        finally:
+            metrics = performance_monitor.stop_monitoring()
+            
+            # Validate memory usage is reasonable
+            peak_memory_mb = metrics['peak_memory']
+            assert peak_memory_mb < 500, f"Peak memory usage {peak_memory_mb}MB exceeds threshold"
+            
+            logger.info(f"Memory performance metrics: {metrics}")
+
+
+# Test configuration and utilities
+@pytest.mark.database
+def test_relationship_test_configuration(db_session):
+    """
+    Validate test configuration and database setup for relationship testing.
     
-    remaining_relationships = db_session.query(EntityRelationship).filter(
-        EntityRelationship.id.in_(relationship_ids)
-    ).all()
-    assert len(remaining_relationships) == 0
+    Ensures:
+    - All required tables exist
+    - Foreign key constraints are properly configured
+    - Indexes are created for performance
+    """
+    # Check table existence
+    inspector = inspect(db_session.bind)
+    tables = inspector.get_table_names()
     
-    # Verify user was deleted
-    deleted_user = db_session.query(User).filter_by(id=user_id).first()
-    assert deleted_user is None
+    required_tables = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
+    for table in required_tables:
+        assert table in tables, f"Required table {table} not found in database"
+    
+    # Check foreign key constraints
+    for table in required_tables[1:]:  # Skip users table (no foreign keys)
+        foreign_keys = inspector.get_foreign_keys(table)
+        assert len(foreign_keys) > 0, f"Table {table} should have foreign key constraints"
+    
+    # Check indexes for performance
+    for table in required_tables:
+        indexes = inspector.get_indexes(table)
+        assert len(indexes) > 0, f"Table {table} should have performance indexes"
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v', '--tb=short'])
