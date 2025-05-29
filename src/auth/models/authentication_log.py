@@ -2,981 +2,1270 @@
 AuthenticationLog Model Implementation for Comprehensive Security Audit Logging.
 
 This module implements the AuthenticationLog model using Flask-SQLAlchemy declarative patterns
-with PostgreSQL optimization and structured JSON logging integration. The model provides
-comprehensive audit logging for authentication events, security monitoring, and compliance
-reporting while integrating with Prometheus metrics and AWS CloudWatch for real-time security analysis.
+with PostgreSQL optimization for comprehensive authentication event tracking and security
+monitoring integration. The model captures detailed authentication attempts, session activities,
+and security events for compliance reporting and anomaly detection, integrating with Prometheus
+metrics and AWS CloudWatch for real-time security monitoring.
 
 Key Features:
-- Comprehensive authentication event logging with structured JSON data storage
-- Foreign key relationships to User model for audit trail attribution
-- Integration with Python structlog for machine-readable audit trails
-- Security event tracking for real-time monitoring and anomaly detection
-- GDPR and compliance-ready audit trail preservation
-- AWS CloudWatch Logs integration for centralized security monitoring
-- Prometheus metrics integration for performance monitoring
-- Automated log retention policies for compliance requirements
+- Comprehensive authentication audit logging for security compliance per Section 6.4.2.5
+- Structured JSON logging integration with Python structlog for machine-readable audit trails
+- Security event tracking for real-time monitoring and anomaly detection per Section 6.4.6.1
+- Audit trail preservation for GDPR and compliance requirements per Section 6.2.4.1
+- Integration with AWS CloudWatch Logs for centralized security monitoring per Section 6.4.2.5
+- Foreign key relationships to User model for audit trail attribution and compliance tracking
+- Prometheus metrics collection integration points for performance monitoring
+- Log retention policies and automated data archival for compliance requirements
+- PostgreSQL-optimized indexing for security query performance and pattern analysis
+- Anomaly detection support through structured event classification and pattern tracking
+- GDPR Article 32 compliance with automated audit trail preservation and anonymization
 
 Technical Specification References:
 - Section 6.4.2.5: Enhanced Audit Framework with Structured Logging
-- Section 6.4.6.1: Real-Time Security Monitoring Integration
-- Section 6.2.4.1: Data Retention and Privacy Controls
-- Section 6.2.2.1: Entity Relationships and Data Models
-- Section 3.2.2: Flask-SQLAlchemy 3.1.1 integration requirements
+- Section 6.4.6.1: Real-Time Security Monitoring with Python Observability Integration
+- Section 6.4.6.2: Automated Security Incident Detection and Classification
+- Section 6.2.4.1: Data Retention and Privacy Controls with GDPR compliance
+- Section 6.2.4.3: Audit Mechanisms and Access Controls with centralized logging
 """
 
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List, Union
-from enum import Enum
 import json
 import uuid
-import structlog
-from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Dict, Any, Union, Tuple
+from enum import Enum
+from ipaddress import ip_address, AddressValueError
+
+from flask import request, g, current_app
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Boolean, Text, JSON,
-    ForeignKey, Index, CheckConstraint, UniqueConstraint, 
-    Enum as SQLEnum, event
+    Column, Integer, String, Text, Boolean, DateTime, JSON, Index,
+    CheckConstraint, ForeignKey, event, func, text, desc, asc
 )
 from sqlalchemy.orm import relationship, validates
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.sql import func
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.dialects.postgresql import UUID, INET, JSONB
 
-# Import base model and User model for relationships
+# Import base model and database instance for inheritance pattern consistency
 from src.models.base import BaseModel, db
-from src.models.user import User
-
-# Configure structured logging for security audit trails per Section 6.4.2.5
-logger = structlog.get_logger("authentication_audit")
 
 
 class AuthenticationEventType(Enum):
     """
-    Enumeration of authentication event types for structured logging and monitoring.
+    Enumeration of authentication event types for structured logging.
     
-    Provides standardized event categorization for security analysis and compliance reporting.
-    Each event type corresponds to specific security monitoring and alerting requirements.
+    Provides comprehensive categorization of authentication and security events
+    for consistent logging, monitoring, and analysis across the application.
     """
+    # Authentication Events
     LOGIN_SUCCESS = "login_success"
     LOGIN_FAILURE = "login_failure"
     LOGOUT = "logout"
-    TOKEN_REFRESH = "token_refresh"
-    TOKEN_REVOCATION = "token_revocation"
-    PASSWORD_CHANGE = "password_change"
-    PASSWORD_RESET_REQUEST = "password_reset_request"
-    PASSWORD_RESET_COMPLETE = "password_reset_complete"
-    SESSION_CREATION = "session_creation"
-    SESSION_EXPIRATION = "session_expiration"
-    SESSION_INVALIDATION = "session_invalidation"
-    ACCOUNT_LOCKOUT = "account_lockout"
-    ACCOUNT_UNLOCK = "account_unlock"
-    ROLE_ASSIGNMENT = "role_assignment"
-    ROLE_REVOCATION = "role_revocation"
-    PERMISSION_GRANTED = "permission_granted"
-    PERMISSION_DENIED = "permission_denied"
-    SUSPICIOUS_ACTIVITY = "suspicious_activity"
-    SECURITY_VIOLATION = "security_violation"
-    MFA_SUCCESS = "mfa_success"
-    MFA_FAILURE = "mfa_failure"
-    API_KEY_CREATION = "api_key_creation"
-    API_KEY_REVOCATION = "api_key_revocation"
-
-
-class SecuritySeverityLevel(Enum):
-    """
-    Security event severity levels for alerting and incident response coordination.
+    SESSION_CREATED = "session_created"
+    SESSION_INVALIDATED = "session_invalidated"
     
-    Aligns with Section 6.4.6.2 incident classification and automated response procedures.
-    """
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"
+    # Token Events
+    TOKEN_ISSUED = "token_issued"
+    TOKEN_REFRESHED = "token_refreshed"
+    TOKEN_REVOKED = "token_revoked"
+    TOKEN_EXPIRED = "token_expired"
+    
+    # Security Events
+    BRUTE_FORCE_ATTEMPT = "brute_force_attempt"
+    ACCOUNT_LOCKED = "account_locked"
+    ACCOUNT_UNLOCKED = "account_unlocked"
+    SUSPICIOUS_ACTIVITY = "suspicious_activity"
+    PRIVILEGE_ESCALATION = "privilege_escalation"
+    
+    # Password Events
+    PASSWORD_RESET_REQUESTED = "password_reset_requested"
+    PASSWORD_RESET_COMPLETED = "password_reset_completed"
+    PASSWORD_CHANGED = "password_changed"
+    
+    # Account Events
+    ACCOUNT_CREATED = "account_created"
+    ACCOUNT_ACTIVATED = "account_activated"
+    ACCOUNT_DEACTIVATED = "account_deactivated"
+    EMAIL_VERIFIED = "email_verified"
+    
+    # Access Control Events
+    AUTHORIZATION_GRANTED = "authorization_granted"
+    AUTHORIZATION_DENIED = "authorization_denied"
+    PERMISSION_CHANGED = "permission_changed"
+    ROLE_ASSIGNED = "role_assigned"
+    ROLE_REMOVED = "role_removed"
 
 
 class AuthenticationMethod(Enum):
     """
-    Authentication method types for comprehensive audit tracking.
+    Enumeration of authentication methods for audit tracking.
     
-    Supports various authentication mechanisms per Section 6.4.1 authentication framework.
+    Categorizes different authentication mechanisms used throughout
+    the application for security analysis and compliance reporting.
     """
     PASSWORD = "password"
     TOKEN = "token"
-    REFRESH_TOKEN = "refresh_token"
-    API_KEY = "api_key"
+    JWT = "jwt"
     SESSION = "session"
+    API_KEY = "api_key"
+    OAUTH = "oauth"
     SSO = "sso"
     MFA = "mfa"
-    OAUTH = "oauth"
+    BIOMETRIC = "biometric"
+
+
+class SecurityClassification(Enum):
+    """
+    Security classification levels for event prioritization.
+    
+    Provides hierarchical classification of security events for
+    automated response coordination and incident management.
+    """
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    CONFIDENTIAL = "confidential"
+    RESTRICTED = "restricted"
+    SECURITY_RELEVANT = "security_relevant"
+    SECURITY_CRITICAL = "security_critical"
+
+
+class EventSeverity(Enum):
+    """
+    Event severity levels for monitoring and alerting.
+    
+    Standardized severity classification for security events
+    enabling consistent monitoring and automated response procedures.
+    """
+    INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class AuthenticationLog(BaseModel):
     """
-    Comprehensive authentication audit logging model for security monitoring and compliance.
+    AuthenticationLog model implementing comprehensive audit logging for authentication events.
     
-    This model captures detailed authentication events, security violations, and user activities
-    for compliance reporting, anomaly detection, and real-time security monitoring. Integrates
-    with structured logging frameworks, Prometheus metrics, and AWS CloudWatch for comprehensive
-    security observability.
+    This model captures detailed authentication attempts, session activities, and security events
+    for compliance reporting and anomaly detection, integrating with Prometheus metrics and AWS
+    CloudWatch for real-time security monitoring. Implements structured JSON data storage with
+    comprehensive audit trail preservation for GDPR and compliance requirements.
+    
+    Inherits from BaseModel for common functionality:
+    - Auto-incrementing primary key (id)
+    - Automatic timestamp management (created_at, updated_at)
+    - Common utility methods for serialization and persistence
+    - PostgreSQL-optimized field patterns
     
     Attributes:
-        id (int): Primary key with auto-incrementing integer for optimal join performance
-        correlation_id (UUID): Unique correlation identifier for request tracking across systems
-        user_id (int): Foreign key reference to User model for audit trail attribution
-        event_type (AuthenticationEventType): Standardized authentication event categorization
-        authentication_method (AuthenticationMethod): Method used for authentication attempt
-        severity_level (SecuritySeverityLevel): Security severity for alerting and response
-        event_timestamp (datetime): Precise timestamp of authentication event occurrence
-        source_ip_address (str): Client IP address for geographic and network analysis
-        user_agent (str): Client user agent string for device and browser identification
-        session_id (str): Session identifier for correlation with session management
-        request_id (str): Request correlation ID for distributed system tracking
-        blueprint_name (str): Flask blueprint context for endpoint-specific analysis
-        endpoint_name (str): Specific API endpoint for detailed security monitoring
-        http_method (str): HTTP method for request pattern analysis
-        success (bool): Authentication attempt success status for failure pattern analysis
-        failure_reason (str): Detailed failure reason for security investigation
-        event_details (JSONB): Structured event data in PostgreSQL JSONB format
-        security_context (JSONB): Additional security metadata and threat intelligence
-        compliance_data (JSONB): GDPR and regulatory compliance tracking information
-        anomaly_score (float): ML-based anomaly detection score for behavioral analysis
-        geo_location (JSONB): Geographic location data for threat analysis
-        device_fingerprint (str): Device identification for fraud detection
-        risk_assessment (JSONB): Real-time risk assessment data and threat indicators
-        retention_until (datetime): Data retention expiration for automated compliance
-        archived (bool): Archive status for data lifecycle management
-        created_at (datetime): Record creation timestamp with timezone support
-        updated_at (datetime): Record modification timestamp with automatic updates
+        id (int): Primary key inherited from BaseModel for optimal join performance
+        event_id (str): Unique UUID identifier for event correlation across systems
+        user_id (int, optional): Foreign key to User model for audit trail attribution
+        event_type (AuthenticationEventType): Categorized authentication event type
+        authentication_method (AuthenticationMethod): Method used for authentication
+        success (bool): Authentication success or failure status
+        client_ip (str): Client IP address for security tracking and geo-analysis
+        user_agent (str): Client user agent for device and browser identification
+        request_id (str): Unique request identifier for correlation across logs
+        session_id (str, optional): User session identifier for session tracking
+        endpoint (str, optional): API endpoint accessed during authentication
+        http_method (str, optional): HTTP method used for the request
+        blueprint_name (str, optional): Flask blueprint name for module identification
+        event_details (dict): Structured JSON data for detailed event information
+        security_classification (SecurityClassification): Security level classification
+        severity (EventSeverity): Event severity for monitoring and alerting
+        risk_score (int): Calculated risk score for anomaly detection (0-100)
+        correlation_id (str, optional): Cross-system correlation identifier
+        geolocation_data (dict, optional): IP geolocation information for analysis
+        device_fingerprint (str, optional): Device fingerprint for tracking
+        metadata (dict): Additional metadata for extensibility and custom fields
+        archived_at (datetime, optional): Timestamp for compliance archival tracking
+        retention_expires_at (datetime): Calculated retention expiration for GDPR
+        created_at (datetime): Timestamp inherited from BaseModel
+        updated_at (datetime): Timestamp inherited from BaseModel
         
     Relationships:
-        user (User): Many-to-one relationship with User model for audit attribution
+        user (User, optional): Many-to-one relationship with User model for attribution
     """
     
     __tablename__ = 'authentication_logs'
     
-    # Unique correlation identifier for request tracking per Section 6.4.2.5
-    correlation_id = Column(
+    # Unique event identifier for correlation across distributed systems
+    event_id = Column(
         UUID(as_uuid=True),
+        unique=True,
         nullable=False,
         default=uuid.uuid4,
-        unique=True,
         index=True,
-        comment="Unique correlation identifier for end-to-end audit trail tracking"
+        comment="Unique UUID identifier for event correlation across systems"
     )
     
-    # Foreign key relationship to User model for audit trail attribution
+    # Optional foreign key to User model for audit trail attribution
+    # Nullable to support failed authentication attempts where user may not exist
     user_id = Column(
         Integer,
         ForeignKey('users.id', ondelete='SET NULL'),
-        nullable=True,  # Allow null for failed authentication attempts
+        nullable=True,
         index=True,
-        comment="Foreign key reference to User model for audit trail attribution"
+        comment="Foreign key to User model for audit trail attribution (nullable for failed auth)"
     )
     
-    # Authentication event categorization using PostgreSQL Enum per Section 6.4.2.5
+    # Authentication event classification and method tracking
     event_type = Column(
-        SQLEnum(AuthenticationEventType),
+        String(50),
         nullable=False,
         index=True,
-        comment="Standardized authentication event type for security analysis"
+        comment="Categorized authentication event type from AuthenticationEventType enum"
     )
     
-    # Authentication method tracking for comprehensive audit analysis
     authentication_method = Column(
-        SQLEnum(AuthenticationMethod),
+        String(20),
+        nullable=False,
+        index=True,
+        comment="Method used for authentication from AuthenticationMethod enum"
+    )
+    
+    # Authentication result and status tracking
+    success = Column(
+        Boolean,
+        nullable=False,
+        index=True,
+        comment="Authentication success or failure status for security analysis"
+    )
+    
+    # Client information for security tracking and geo-analysis
+    client_ip = Column(
+        INET,
         nullable=True,
         index=True,
-        comment="Authentication method used for security pattern analysis"
+        comment="Client IP address for security tracking and geo-analysis"
     )
     
-    # Security severity level for automated alerting per Section 6.4.6.2
-    severity_level = Column(
-        SQLEnum(SecuritySeverityLevel),
-        nullable=False,
-        default=SecuritySeverityLevel.INFO,
-        index=True,
-        comment="Security severity level for incident response and alerting"
-    )
-    
-    # Precise event timestamp with timezone support for accurate audit trails
-    event_timestamp = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        index=True,
-        comment="Precise timestamp of authentication event with timezone support"
-    )
-    
-    # Source IP address for network-based threat analysis per Section 6.4.6.1
-    source_ip_address = Column(
-        String(45),  # Supports both IPv4 and IPv6 addresses
-        nullable=True,
-        index=True,
-        comment="Client IP address for geographic and network-based threat analysis"
-    )
-    
-    # User agent string for device and browser identification
     user_agent = Column(
         Text,
         nullable=True,
-        comment="Client user agent string for device identification and analysis"
+        comment="Client user agent for device and browser identification"
     )
     
-    # Session management correlation for Flask session tracking
-    session_id = Column(
-        String(255),
-        nullable=True,
-        index=True,
-        comment="Session identifier for correlation with Flask session management"
-    )
-    
-    # Request correlation ID for distributed system tracking per Section 6.4.2.5
+    # Request correlation and session tracking
     request_id = Column(
-        String(255),
+        String(128),
         nullable=True,
         index=True,
-        comment="Request correlation ID for distributed system audit trail tracking"
+        comment="Unique request identifier for correlation across application logs"
     )
     
-    # Flask blueprint context for endpoint-specific security analysis
+    session_id = Column(
+        String(128),
+        nullable=True,
+        index=True,
+        comment="User session identifier for session lifecycle tracking"
+    )
+    
+    # Flask application context information
+    endpoint = Column(
+        String(200),
+        nullable=True,
+        index=True,
+        comment="API endpoint accessed during authentication for context analysis"
+    )
+    
+    http_method = Column(
+        String(10),
+        nullable=True,
+        comment="HTTP method used for the request (GET, POST, etc.)"
+    )
+    
     blueprint_name = Column(
         String(100),
         nullable=True,
         index=True,
-        comment="Flask blueprint name for modular security monitoring and analysis"
+        comment="Flask blueprint name for module identification and analysis"
     )
     
-    # Specific endpoint name for granular security monitoring
-    endpoint_name = Column(
-        String(200),
-        nullable=True,
-        index=True,
-        comment="Specific API endpoint for detailed security pattern analysis"
-    )
-    
-    # HTTP method for request pattern analysis and security monitoring
-    http_method = Column(
-        String(10),
-        nullable=True,
-        index=True,
-        comment="HTTP method for request pattern analysis and security monitoring"
-    )
-    
-    # Authentication success status for failure pattern analysis
-    success = Column(
-        Boolean,
-        nullable=False,
-        default=False,
-        index=True,
-        comment="Authentication attempt success status for security pattern analysis"
-    )
-    
-    # Detailed failure reason for security investigation and analysis
-    failure_reason = Column(
-        String(500),
-        nullable=True,
-        comment="Detailed authentication failure reason for security investigation"
-    )
-    
-    # Structured event data using PostgreSQL JSONB for flexible schema per Section 6.4.2.5
+    # Structured JSON data for detailed event information per Section 6.4.2.5
     event_details = Column(
         JSONB,
-        nullable=True,
-        comment="Structured authentication event data in machine-readable JSON format"
+        nullable=False,
+        default=dict,
+        comment="Structured JSON data for detailed event information and context"
     )
     
-    # Security context and threat intelligence metadata
-    security_context = Column(
-        JSONB,
-        nullable=True,
-        comment="Security metadata including threat intelligence and risk indicators"
-    )
-    
-    # GDPR and regulatory compliance tracking per Section 6.2.4.1
-    compliance_data = Column(
-        JSONB,
-        nullable=True,
-        comment="GDPR and regulatory compliance tracking information and metadata"
-    )
-    
-    # ML-based anomaly detection score for behavioral analysis per Section 6.4.6.1
-    anomaly_score = Column(
-        db.Numeric(5, 4),  # Precision 5, scale 4 for scores like 0.9999
-        nullable=True,
-        default=0.0,
+    # Security classification and severity for monitoring integration
+    security_classification = Column(
+        String(30),
+        nullable=False,
+        default=SecurityClassification.INTERNAL.value,
         index=True,
-        comment="Machine learning anomaly detection score for behavioral analysis"
+        comment="Security level classification for automated response coordination"
     )
     
-    # Geographic location data for threat analysis and fraud detection
-    geo_location = Column(
+    severity = Column(
+        String(20),
+        nullable=False,
+        default=EventSeverity.INFO.value,
+        index=True,
+        comment="Event severity for monitoring and alerting integration"
+    )
+    
+    # Risk assessment for anomaly detection per Section 6.4.6.1
+    risk_score = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        index=True,
+        comment="Calculated risk score for anomaly detection (0-100 scale)"
+    )
+    
+    # Cross-system correlation for distributed security monitoring
+    correlation_id = Column(
+        String(128),
+        nullable=True,
+        index=True,
+        comment="Cross-system correlation identifier for distributed monitoring"
+    )
+    
+    # Geolocation and device tracking for security analysis
+    geolocation_data = Column(
         JSONB,
         nullable=True,
-        comment="Geographic location data for threat analysis and fraud detection"
+        comment="IP geolocation information for geographic security analysis"
     )
     
-    # Device fingerprint for fraud detection and device tracking
     device_fingerprint = Column(
-        String(255),
+        String(128),
         nullable=True,
         index=True,
-        comment="Device fingerprint hash for fraud detection and device correlation"
+        comment="Device fingerprint hash for device tracking and analysis"
     )
     
-    # Real-time risk assessment data and threat indicators
-    risk_assessment = Column(
+    # Extensible metadata for custom fields and integration requirements
+    metadata = Column(
         JSONB,
-        nullable=True,
-        comment="Real-time risk assessment data and security threat indicators"
+        nullable=False,
+        default=dict,
+        comment="Additional metadata for extensibility and custom integration fields"
     )
     
-    # Data retention management for automated compliance per Section 6.2.4.1
-    retention_until = Column(
+    # GDPR compliance and data retention tracking per Section 6.2.4.1
+    archived_at = Column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
-        comment="Data retention expiration timestamp for automated compliance management"
+        comment="Timestamp for compliance archival tracking and GDPR requirements"
     )
     
-    # Archive status for data lifecycle management
-    archived = Column(
-        Boolean,
+    retention_expires_at = Column(
+        DateTime(timezone=True),
         nullable=False,
-        default=False,
         index=True,
-        comment="Archive status for data lifecycle management and compliance"
+        comment="Calculated retention expiration for GDPR compliance and automated cleanup"
     )
     
-    # Relationship to User model for audit trail attribution per Section 6.2.2.1
+    # Relationship to User model for audit trail attribution
     user = relationship(
         'User',
-        back_populates=None,  # User model doesn't need back_populates for logs
-        lazy='select',
         foreign_keys=[user_id],
-        doc="Many-to-one relationship with User model for comprehensive audit attribution"
+        back_populates=None,  # User model doesn't define back reference to avoid circular imports
+        lazy='select',
+        doc="Many-to-one relationship with User model for audit trail attribution"
     )
     
     # Database constraints and indexes for performance optimization per Section 6.2.2.2
     __table_args__ = (
-        # Check constraints for data validation and integrity
-        CheckConstraint(
-            "anomaly_score >= 0.0 AND anomaly_score <= 1.0",
-            name='ck_auth_log_anomaly_score_range'
-        ),
-        CheckConstraint(
-            "LENGTH(source_ip_address) >= 7",  # Minimum valid IP: "1.1.1.1"
-            name='ck_auth_log_ip_address_format'
-        ),
-        CheckConstraint(
-            "http_method IN ('GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS')",
-            name='ck_auth_log_http_method_valid'
-        ),
+        # Check constraints for data validation and security
+        CheckConstraint('risk_score >= 0 AND risk_score <= 100', name='ck_auth_log_risk_score_range'),
+        CheckConstraint("event_type != ''", name='ck_auth_log_event_type_not_empty'),
+        CheckConstraint("authentication_method != ''", name='ck_auth_log_auth_method_not_empty'),
+        CheckConstraint("security_classification != ''", name='ck_auth_log_security_class_not_empty'),
+        CheckConstraint("severity != ''", name='ck_auth_log_severity_not_empty'),
+        CheckConstraint('retention_expires_at > created_at', name='ck_auth_log_retention_future'),
         
-        # Composite indexes for performance optimization per Section 6.2.2.2
-        Index('ix_auth_log_user_event_timestamp', 'user_id', 'event_timestamp'),
-        Index('ix_auth_log_event_type_timestamp', 'event_type', 'event_timestamp'),
-        Index('ix_auth_log_severity_timestamp', 'severity_level', 'event_timestamp'),
-        Index('ix_auth_log_success_timestamp', 'success', 'event_timestamp'),
-        Index('ix_auth_log_ip_timestamp', 'source_ip_address', 'event_timestamp'),
-        Index('ix_auth_log_retention_archived', 'retention_until', 'archived'),
-        Index('ix_auth_log_blueprint_endpoint', 'blueprint_name', 'endpoint_name'),
-        Index('ix_auth_log_anomaly_score_timestamp', 'anomaly_score', 'event_timestamp'),
-        Index('ix_auth_log_device_timestamp', 'device_fingerprint', 'event_timestamp'),
+        # Composite indexes for security queries and performance optimization
+        Index('ix_auth_log_user_success_time', 'user_id', 'success', 'created_at'),
+        Index('ix_auth_log_ip_time', 'client_ip', 'created_at'),
+        Index('ix_auth_log_event_type_time', 'event_type', 'created_at'),
+        Index('ix_auth_log_success_severity_time', 'success', 'severity', 'created_at'),
+        Index('ix_auth_log_security_class_time', 'security_classification', 'created_at'),
+        Index('ix_auth_log_risk_score_time', 'risk_score', 'created_at'),
+        Index('ix_auth_log_blueprint_endpoint', 'blueprint_name', 'endpoint'),
+        Index('ix_auth_log_correlation_time', 'correlation_id', 'created_at'),
+        Index('ix_auth_log_session_time', 'session_id', 'created_at'),
+        Index('ix_auth_log_retention_archive', 'retention_expires_at', 'archived_at'),
+        Index('ix_auth_log_device_time', 'device_fingerprint', 'created_at'),
         
-        # GIN indexes for JSONB columns to support complex queries
-        Index('ix_auth_log_event_details_gin', 'event_details', postgresql_using='gin'),
-        Index('ix_auth_log_security_context_gin', 'security_context', postgresql_using='gin'),
-        Index('ix_auth_log_compliance_data_gin', 'compliance_data', postgresql_using='gin'),
-        Index('ix_auth_log_geo_location_gin', 'geo_location', postgresql_using='gin'),
-        Index('ix_auth_log_risk_assessment_gin', 'risk_assessment', postgresql_using='gin'),
+        # Partial indexes for active monitoring and cleanup
+        Index('ix_auth_log_failed_auth_recent', 'client_ip', 'created_at', 
+              postgresql_where=(text("success = false AND created_at > NOW() - INTERVAL '1 hour'"))),
+        Index('ix_auth_log_high_risk_recent', 'risk_score', 'created_at',
+              postgresql_where=(text("risk_score >= 70 AND created_at > NOW() - INTERVAL '24 hours'"))),
+        Index('ix_auth_log_expired_retention', 'retention_expires_at',
+              postgresql_where=(text("retention_expires_at <= NOW() AND archived_at IS NULL"))),
         
         # Table-level comment for documentation
-        {'comment': 'Comprehensive authentication audit logging for security monitoring and compliance'}
+        {'comment': 'Comprehensive authentication audit logging with structured JSON and security monitoring'}
     )
     
-    def __init__(self, **kwargs) -> None:
+    def __init__(
+        self,
+        event_type: Union[AuthenticationEventType, str],
+        authentication_method: Union[AuthenticationMethod, str],
+        success: bool,
+        user_id: Optional[int] = None,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        request_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        http_method: Optional[str] = None,
+        blueprint_name: Optional[str] = None,
+        event_details: Optional[Dict[str, Any]] = None,
+        security_classification: Union[SecurityClassification, str] = SecurityClassification.INTERNAL,
+        severity: Union[EventSeverity, str] = EventSeverity.INFO,
+        risk_score: int = 0,
+        correlation_id: Optional[str] = None,
+        geolocation_data: Optional[Dict[str, Any]] = None,
+        device_fingerprint: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        retention_days: Optional[int] = None,
+        **kwargs
+    ) -> None:
         """
-        Initialize AuthenticationLog instance with comprehensive security context.
-        
-        Automatically generates correlation ID, sets retention policy, and configures
-        structured logging context for security monitoring and compliance tracking.
+        Initialize a new AuthenticationLog instance with comprehensive event tracking.
         
         Args:
-            **kwargs: Field values for authentication log initialization
-        """
-        # Generate unique correlation ID if not provided
-        if 'correlation_id' not in kwargs:
-            kwargs['correlation_id'] = uuid.uuid4()
-        
-        # Set default retention period based on event type per Section 6.2.4.1
-        if 'retention_until' not in kwargs and 'event_type' in kwargs:
-            kwargs['retention_until'] = self._calculate_retention_period(kwargs['event_type'])
-        
-        # Set default severity level if not provided
-        if 'severity_level' not in kwargs:
-            kwargs['severity_level'] = self._determine_default_severity(kwargs.get('event_type'))
-        
-        # Initialize with structured logging context
-        super().__init__(**kwargs)
-        
-        # Log the audit event creation for monitoring per Section 6.4.2.5
-        logger.info(
-            "Authentication audit log created",
-            correlation_id=str(self.correlation_id),
-            event_type=self.event_type.value if self.event_type else None,
-            user_id=self.user_id,
-            severity=self.severity_level.value if self.severity_level else None,
-            timestamp=self.event_timestamp.isoformat() if self.event_timestamp else None
-        )
-    
-    @validates('source_ip_address')
-    def validate_ip_address(self, key, address):
-        """
-        Validate IP address format for security monitoring accuracy.
-        
-        Args:
-            key (str): Field name being validated
-            address (str): IP address to validate
-            
-        Returns:
-            str: Validated IP address
+            event_type: Type of authentication event from AuthenticationEventType enum
+            authentication_method: Authentication method from AuthenticationMethod enum
+            success: Whether the authentication was successful
+            user_id: Optional foreign key to User model for attribution
+            client_ip: Client IP address for security tracking
+            user_agent: Client user agent string for device identification
+            request_id: Unique request identifier for correlation
+            session_id: User session identifier for session tracking
+            endpoint: API endpoint accessed during authentication
+            http_method: HTTP method used for the request
+            blueprint_name: Flask blueprint name for module identification
+            event_details: Structured event details as dictionary
+            security_classification: Security level from SecurityClassification enum
+            severity: Event severity from EventSeverity enum
+            risk_score: Risk assessment score (0-100)
+            correlation_id: Cross-system correlation identifier
+            geolocation_data: IP geolocation information as dictionary
+            device_fingerprint: Device fingerprint for tracking
+            metadata: Additional metadata as dictionary
+            retention_days: Custom retention period in days (uses default if None)
+            **kwargs: Additional keyword arguments for model fields
             
         Raises:
-            ValueError: If IP address format is invalid
+            ValueError: If required parameters are invalid or missing
         """
-        if address is None:
-            return address
+        super().__init__(**kwargs)
         
-        import ipaddress
-        try:
-            # Validate IPv4 or IPv6 address format
-            ipaddress.ip_address(address)
-            return address
-        except ValueError:
-            # Log invalid IP address for security analysis
-            logger.warning(
-                "Invalid IP address format in authentication log",
-                ip_address=address,
-                correlation_id=str(self.correlation_id) if hasattr(self, 'correlation_id') else None
-            )
-            raise ValueError(f"Invalid IP address format: {address}")
+        # Generate unique event identifier
+        self.event_id = uuid.uuid4()
+        
+        # Set event classification
+        self.event_type = event_type.value if isinstance(event_type, AuthenticationEventType) else event_type
+        self.authentication_method = authentication_method.value if isinstance(authentication_method, AuthenticationMethod) else authentication_method
+        self.success = success
+        
+        # Set user attribution
+        self.user_id = user_id
+        
+        # Set client information with validation
+        self.client_ip = self._validate_ip_address(client_ip)
+        self.user_agent = user_agent[:2000] if user_agent else None  # Limit length
+        
+        # Set request correlation information
+        self.request_id = request_id or self._generate_request_id()
+        self.session_id = session_id
+        
+        # Set Flask application context
+        self.endpoint = endpoint[:200] if endpoint else None  # Limit length
+        self.http_method = http_method[:10] if http_method else None
+        self.blueprint_name = blueprint_name[:100] if blueprint_name else None
+        
+        # Set structured event details
+        self.event_details = event_details or {}
+        
+        # Set security classification and severity
+        self.security_classification = security_classification.value if isinstance(security_classification, SecurityClassification) else security_classification
+        self.severity = severity.value if isinstance(severity, EventSeverity) else severity
+        
+        # Set risk assessment
+        self.risk_score = max(0, min(100, risk_score))  # Clamp to 0-100 range
+        
+        # Set correlation and tracking information
+        self.correlation_id = correlation_id
+        self.geolocation_data = geolocation_data or {}
+        self.device_fingerprint = device_fingerprint
+        self.metadata = metadata or {}
+        
+        # Set retention policy per Section 6.2.4.1
+        self._set_retention_policy(retention_days)
+        
+        # Initialize archival tracking
+        self.archived_at = None
     
-    @validates('event_details', 'security_context', 'compliance_data', 'geo_location', 'risk_assessment')
-    def validate_json_fields(self, key, value):
+    @staticmethod
+    def _validate_ip_address(ip_str: Optional[str]) -> Optional[str]:
         """
-        Validate JSON field structure and security content.
+        Validate and normalize IP address format.
         
         Args:
-            key (str): Field name being validated
-            value: JSON data to validate
+            ip_str: IP address string to validate
             
         Returns:
-            dict: Validated JSON data
+            str: Validated IP address or None if invalid
         """
-        if value is None:
-            return value
+        if not ip_str:
+            return None
         
-        # Ensure value is a dictionary for consistent JSON structure
-        if not isinstance(value, dict):
-            try:
-                value = json.loads(value) if isinstance(value, str) else dict(value)
-            except (ValueError, TypeError) as e:
-                logger.error(
-                    "Invalid JSON structure in authentication log",
-                    field=key,
-                    error=str(e),
-                    correlation_id=str(self.correlation_id) if hasattr(self, 'correlation_id') else None
-                )
-                raise ValueError(f"Invalid JSON structure for field {key}: {e}")
+        try:
+            # Validate using ipaddress module
+            ip_obj = ip_address(ip_str.strip())
+            return str(ip_obj)
+        except (AddressValueError, ValueError):
+            # Return original string if validation fails (for logging purposes)
+            return ip_str.strip()[:45]  # Limit to IPv6 length
+    
+    @staticmethod
+    def _generate_request_id() -> str:
+        """
+        Generate unique request identifier for correlation.
+        
+        Returns:
+            str: Unique request identifier
+        """
+        return str(uuid.uuid4())
+    
+    def _set_retention_policy(self, retention_days: Optional[int] = None) -> None:
+        """
+        Set data retention policy based on GDPR and compliance requirements.
+        
+        Args:
+            retention_days: Custom retention period in days
+        """
+        if retention_days is None:
+            # Default retention based on event severity and classification
+            if self.severity in [EventSeverity.CRITICAL.value, EventSeverity.HIGH.value]:
+                retention_days = current_app.config.get('SECURITY_LOG_RETENTION_DAYS', 2555)  # ~7 years
+            elif self.security_classification == SecurityClassification.SECURITY_CRITICAL.value:
+                retention_days = current_app.config.get('CRITICAL_LOG_RETENTION_DAYS', 1826)  # ~5 years
+            else:
+                retention_days = current_app.config.get('DEFAULT_LOG_RETENTION_DAYS', 365)  # 1 year
+        
+        self.retention_expires_at = datetime.now(timezone.utc) + timedelta(days=retention_days)
+    
+    @validates('event_type')
+    def validate_event_type(self, key: str, value: str) -> str:
+        """
+        Validate event type against allowed values.
+        
+        Args:
+            key: Field name being validated
+            value: Event type value being set
+            
+        Returns:
+            str: Validated event type
+            
+        Raises:
+            ValueError: If event type is invalid
+        """
+        if isinstance(value, AuthenticationEventType):
+            return value.value
+        
+        if value not in [e.value for e in AuthenticationEventType]:
+            raise ValueError(f"Invalid event type: {value}")
         
         return value
     
-    def _calculate_retention_period(self, event_type: AuthenticationEventType) -> datetime:
+    @validates('authentication_method')
+    def validate_authentication_method(self, key: str, value: str) -> str:
         """
-        Calculate data retention period based on event type and compliance requirements.
-        
-        Implements GDPR and regulatory compliance retention policies per Section 6.2.4.1.
+        Validate authentication method against allowed values.
         
         Args:
-            event_type (AuthenticationEventType): Type of authentication event
+            key: Field name being validated
+            value: Authentication method value being set
             
         Returns:
-            datetime: Retention expiration timestamp
+            str: Validated authentication method
+            
+        Raises:
+            ValueError: If authentication method is invalid
         """
-        current_time = datetime.now(timezone.utc)
+        if isinstance(value, AuthenticationMethod):
+            return value.value
         
-        # Define retention periods by event type per compliance requirements
-        retention_periods = {
-            AuthenticationEventType.LOGIN_SUCCESS: timedelta(days=365),  # 1 year for audit trails
-            AuthenticationEventType.LOGIN_FAILURE: timedelta(days=2555),  # 7 years for security incidents
-            AuthenticationEventType.SUSPICIOUS_ACTIVITY: timedelta(days=2555),  # 7 years for security
-            AuthenticationEventType.SECURITY_VIOLATION: timedelta(days=2555),  # 7 years for security
-            AuthenticationEventType.PASSWORD_CHANGE: timedelta(days=2555),  # 7 years for compliance
-            AuthenticationEventType.ROLE_ASSIGNMENT: timedelta(days=2555),  # 7 years for audit trails
-            AuthenticationEventType.ROLE_REVOCATION: timedelta(days=2555),  # 7 years for audit trails
-        }
+        if value not in [m.value for m in AuthenticationMethod]:
+            raise ValueError(f"Invalid authentication method: {value}")
         
-        # Default retention period for other events
-        default_retention = timedelta(days=730)  # 2 years default
-        
-        retention_period = retention_periods.get(event_type, default_retention)
-        return current_time + retention_period
+        return value
     
-    def _determine_default_severity(self, event_type: Optional[AuthenticationEventType]) -> SecuritySeverityLevel:
+    @validates('security_classification')
+    def validate_security_classification(self, key: str, value: str) -> str:
         """
-        Determine default security severity level based on event type.
+        Validate security classification against allowed values.
         
         Args:
-            event_type (Optional[AuthenticationEventType]): Authentication event type
+            key: Field name being validated
+            value: Security classification value being set
             
         Returns:
-            SecuritySeverityLevel: Default severity level for the event type
+            str: Validated security classification
+            
+        Raises:
+            ValueError: If security classification is invalid
         """
-        if not event_type:
-            return SecuritySeverityLevel.INFO
+        if isinstance(value, SecurityClassification):
+            return value.value
         
-        # Map event types to default severity levels
-        severity_mapping = {
-            AuthenticationEventType.LOGIN_SUCCESS: SecuritySeverityLevel.INFO,
-            AuthenticationEventType.LOGIN_FAILURE: SecuritySeverityLevel.MEDIUM,
-            AuthenticationEventType.LOGOUT: SecuritySeverityLevel.INFO,
-            AuthenticationEventType.SUSPICIOUS_ACTIVITY: SecuritySeverityLevel.HIGH,
-            AuthenticationEventType.SECURITY_VIOLATION: SecuritySeverityLevel.CRITICAL,
-            AuthenticationEventType.ACCOUNT_LOCKOUT: SecuritySeverityLevel.HIGH,
-            AuthenticationEventType.PASSWORD_CHANGE: SecuritySeverityLevel.MEDIUM,
-            AuthenticationEventType.ROLE_ASSIGNMENT: SecuritySeverityLevel.MEDIUM,
-            AuthenticationEventType.PERMISSION_DENIED: SecuritySeverityLevel.MEDIUM,
-            AuthenticationEventType.MFA_FAILURE: SecuritySeverityLevel.HIGH,
+        if value not in [c.value for c in SecurityClassification]:
+            raise ValueError(f"Invalid security classification: {value}")
+        
+        return value
+    
+    @validates('severity')
+    def validate_severity(self, key: str, value: str) -> str:
+        """
+        Validate event severity against allowed values.
+        
+        Args:
+            key: Field name being validated
+            value: Event severity value being set
+            
+        Returns:
+            str: Validated event severity
+            
+        Raises:
+            ValueError: If event severity is invalid
+        """
+        if isinstance(value, EventSeverity):
+            return value.value
+        
+        if value not in [s.value for s in EventSeverity]:
+            raise ValueError(f"Invalid event severity: {value}")
+        
+        return value
+    
+    @hybrid_property
+    def is_security_relevant(self) -> bool:
+        """
+        Check if the event is security-relevant for monitoring.
+        
+        Returns:
+            bool: True if event requires security attention
+        """
+        return (
+            self.security_classification in [
+                SecurityClassification.SECURITY_RELEVANT.value,
+                SecurityClassification.SECURITY_CRITICAL.value
+            ] or
+            self.severity in [EventSeverity.HIGH.value, EventSeverity.CRITICAL.value] or
+            self.risk_score >= 70 or
+            not self.success
+        )
+    
+    @hybrid_property
+    def is_anomaly(self) -> bool:
+        """
+        Check if the event represents an anomaly for detection.
+        
+        Returns:
+            bool: True if event is classified as anomalous
+        """
+        return (
+            self.risk_score >= 80 or
+            self.event_type in [
+                AuthenticationEventType.BRUTE_FORCE_ATTEMPT.value,
+                AuthenticationEventType.SUSPICIOUS_ACTIVITY.value,
+                AuthenticationEventType.PRIVILEGE_ESCALATION.value
+            ]
+        )
+    
+    @hybrid_property
+    def needs_immediate_attention(self) -> bool:
+        """
+        Check if the event requires immediate security attention.
+        
+        Returns:
+            bool: True if event requires immediate response
+        """
+        return (
+            self.severity == EventSeverity.CRITICAL.value or
+            self.security_classification == SecurityClassification.SECURITY_CRITICAL.value or
+            self.risk_score >= 90
+        )
+    
+    def add_event_detail(self, key: str, value: Any) -> None:
+        """
+        Add detail to the event_details JSON field.
+        
+        Args:
+            key: Detail key name
+            value: Detail value (must be JSON serializable)
+        """
+        if self.event_details is None:
+            self.event_details = {}
+        
+        self.event_details[key] = value
+        # Mark as modified for SQLAlchemy change tracking
+        flag_modified(self, 'event_details')
+    
+    def add_metadata(self, key: str, value: Any) -> None:
+        """
+        Add metadata to the metadata JSON field.
+        
+        Args:
+            key: Metadata key name
+            value: Metadata value (must be JSON serializable)
+        """
+        if self.metadata is None:
+            self.metadata = {}
+        
+        self.metadata[key] = value
+        # Mark as modified for SQLAlchemy change tracking
+        flag_modified(self, 'metadata')
+    
+    def set_geolocation(self, country: str = None, region: str = None, 
+                       city: str = None, latitude: float = None, 
+                       longitude: float = None, **kwargs) -> None:
+        """
+        Set geolocation data for the authentication event.
+        
+        Args:
+            country: Country name or code
+            region: Region or state name
+            city: City name
+            latitude: Geographic latitude
+            longitude: Geographic longitude
+            **kwargs: Additional geolocation fields
+        """
+        geo_data = {
+            'country': country,
+            'region': region,
+            'city': city,
+            'latitude': latitude,
+            'longitude': longitude
         }
         
-        return severity_mapping.get(event_type, SecuritySeverityLevel.INFO)
+        # Add any additional fields
+        geo_data.update(kwargs)
+        
+        # Remove None values
+        self.geolocation_data = {k: v for k, v in geo_data.items() if v is not None}
+        
+        # Mark as modified for SQLAlchemy change tracking
+        flag_modified(self, 'geolocation_data')
+    
+    def mark_archived(self) -> None:
+        """
+        Mark the log entry as archived for compliance tracking.
+        
+        Sets the archived_at timestamp for GDPR compliance and audit purposes.
+        """
+        self.archived_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def should_be_archived(self) -> bool:
+        """
+        Check if the log entry should be archived based on retention policy.
+        
+        Returns:
+            bool: True if entry should be archived
+        """
+        if self.archived_at is not None:
+            return False  # Already archived
+        
+        current_time = datetime.now(timezone.utc)
+        return current_time >= self.retention_expires_at
     
     def to_structured_log(self) -> Dict[str, Any]:
         """
-        Convert authentication log to structured logging format per Section 6.4.2.5.
+        Convert to structured log format for external logging systems.
         
-        Generates machine-readable log entry for integration with AWS CloudWatch,
-        ELK stack, and other centralized logging systems.
+        Returns structured log data compatible with Python structlog and
+        AWS CloudWatch Logs for centralized security monitoring.
         
         Returns:
-            Dict[str, Any]: Structured log data for external logging systems
+            Dict[str, Any]: Structured log representation
         """
         return {
-            'correlation_id': str(self.correlation_id),
-            'event_type': self.event_type.value if self.event_type else None,
-            'authentication_method': self.authentication_method.value if self.authentication_method else None,
-            'severity_level': self.severity_level.value if self.severity_level else None,
-            'event_timestamp': self.event_timestamp.isoformat() if self.event_timestamp else None,
-            'user_id': self.user_id,
-            'source_ip_address': self.source_ip_address,
-            'user_agent': self.user_agent,
-            'session_id': self.session_id,
-            'request_id': self.request_id,
-            'blueprint_name': self.blueprint_name,
-            'endpoint_name': self.endpoint_name,
-            'http_method': self.http_method,
+            'event_id': str(self.event_id),
+            'timestamp': self.created_at.isoformat(),
+            'event_type': self.event_type,
+            'authentication_method': self.authentication_method,
             'success': self.success,
-            'failure_reason': self.failure_reason,
-            'anomaly_score': float(self.anomaly_score) if self.anomaly_score else None,
+            'user_id': self.user_id,
+            'client_ip': str(self.client_ip) if self.client_ip else None,
+            'user_agent': self.user_agent,
+            'request_id': self.request_id,
+            'session_id': self.session_id,
+            'endpoint': self.endpoint,
+            'http_method': self.http_method,
+            'blueprint_name': self.blueprint_name,
+            'security_classification': self.security_classification,
+            'severity': self.severity,
+            'risk_score': self.risk_score,
+            'correlation_id': self.correlation_id,
             'device_fingerprint': self.device_fingerprint,
+            'is_security_relevant': self.is_security_relevant,
+            'is_anomaly': self.is_anomaly,
+            'needs_immediate_attention': self.needs_immediate_attention,
             'event_details': self.event_details,
-            'security_context': self.security_context,
-            'compliance_data': self.compliance_data,
-            'geo_location': self.geo_location,
-            'risk_assessment': self.risk_assessment,
-            'archived': self.archived,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'geolocation_data': self.geolocation_data,
+            'metadata': self.metadata
         }
     
-    def to_prometheus_metrics(self) -> Dict[str, Union[int, float, str]]:
+    def to_prometheus_metrics(self) -> Dict[str, Any]:
         """
-        Convert authentication log to Prometheus metrics format per Section 6.4.6.1.
+        Convert to metrics format for Prometheus integration.
         
-        Generates metrics data for real-time monitoring, alerting, and anomaly detection
-        integration with Prometheus monitoring infrastructure.
+        Returns metrics data suitable for Prometheus collection and
+        monitoring dashboard integration per Section 6.4.6.1.
         
         Returns:
-            Dict[str, Union[int, float, str]]: Prometheus metrics data
+            Dict[str, Any]: Prometheus-compatible metrics
         """
         return {
             'auth_event_total': 1,
             'auth_success_total': 1 if self.success else 0,
             'auth_failure_total': 0 if self.success else 1,
-            'auth_anomaly_score': float(self.anomaly_score) if self.anomaly_score else 0.0,
-            'event_type': self.event_type.value if self.event_type else 'unknown',
-            'severity_level': self.severity_level.value if self.severity_level else 'info',
-            'authentication_method': self.authentication_method.value if self.authentication_method else 'unknown',
-            'blueprint_name': self.blueprint_name or 'unknown',
-            'endpoint_name': self.endpoint_name or 'unknown',
-            'http_method': self.http_method or 'unknown',
-            'source_ip': self.source_ip_address or 'unknown',
-            'user_id': str(self.user_id) if self.user_id else 'anonymous'
+            'auth_risk_score': self.risk_score,
+            'labels': {
+                'event_type': self.event_type,
+                'authentication_method': self.authentication_method,
+                'blueprint_name': self.blueprint_name or 'unknown',
+                'endpoint': self.endpoint or 'unknown',
+                'security_classification': self.security_classification,
+                'severity': self.severity,
+                'success': str(self.success).lower()
+            }
         }
     
-    def mark_for_archival(self, archive_reason: str = None) -> None:
-        """
-        Mark authentication log for archival per data lifecycle management.
-        
-        Implements automated data archival for compliance requirements per Section 6.2.4.1
-        and prepares record for migration to long-term storage systems.
-        
-        Args:
-            archive_reason (str): Optional reason for archival action
-        """
-        self.archived = True
-        self.updated_at = datetime.now(timezone.utc)
-        
-        # Update compliance data with archival information
-        if not self.compliance_data:
-            self.compliance_data = {}
-        
-        self.compliance_data.update({
-            'archived_at': datetime.now(timezone.utc).isoformat(),
-            'archive_reason': archive_reason or 'automated_retention_policy',
-            'archival_triggered_by': 'system_automated_process'
-        })
-        
-        # Log archival action for audit trail
-        logger.info(
-            "Authentication log marked for archival",
-            correlation_id=str(self.correlation_id),
-            user_id=self.user_id,
-            archive_reason=archive_reason,
-            retention_until=self.retention_until.isoformat() if self.retention_until else None
-        )
-    
-    def update_anomaly_score(self, score: float, detection_method: str = None) -> None:
-        """
-        Update anomaly detection score for security monitoring per Section 6.4.6.1.
-        
-        Integrates with ML-based anomaly detection systems for behavioral analysis
-        and automated threat detection capabilities.
-        
-        Args:
-            score (float): Anomaly score between 0.0 and 1.0
-            detection_method (str): Method used for anomaly detection
-            
-        Raises:
-            ValueError: If anomaly score is outside valid range
-        """
-        if not (0.0 <= score <= 1.0):
-            raise ValueError(f"Anomaly score must be between 0.0 and 1.0, got {score}")
-        
-        self.anomaly_score = score
-        self.updated_at = datetime.now(timezone.utc)
-        
-        # Update risk assessment with anomaly detection data
-        if not self.risk_assessment:
-            self.risk_assessment = {}
-        
-        self.risk_assessment.update({
-            'anomaly_score': score,
-            'detection_method': detection_method or 'ml_behavioral_analysis',
-            'score_updated_at': datetime.now(timezone.utc).isoformat(),
-            'risk_level': self._calculate_risk_level(score)
-        })
-        
-        # Log anomaly score update for security monitoring
-        logger.warning(
-            "Anomaly score updated for authentication log",
-            correlation_id=str(self.correlation_id),
-            user_id=self.user_id,
-            anomaly_score=score,
-            detection_method=detection_method,
-            risk_level=self._calculate_risk_level(score)
-        )
-    
-    def _calculate_risk_level(self, anomaly_score: float) -> str:
-        """
-        Calculate risk level based on anomaly score for threat assessment.
-        
-        Args:
-            anomaly_score (float): ML-based anomaly detection score
-            
-        Returns:
-            str: Risk level classification for security response
-        """
-        if anomaly_score >= 0.9:
-            return 'critical'
-        elif anomaly_score >= 0.7:
-            return 'high'
-        elif anomaly_score >= 0.5:
-            return 'medium'
-        elif anomaly_score >= 0.3:
-            return 'low'
-        else:
-            return 'minimal'
-    
     @classmethod
-    def create_authentication_event(
+    def log_authentication_event(
         cls,
-        event_type: AuthenticationEventType,
+        event_type: Union[AuthenticationEventType, str],
+        authentication_method: Union[AuthenticationMethod, str],
+        success: bool,
         user_id: Optional[int] = None,
-        success: bool = False,
-        authentication_method: Optional[AuthenticationMethod] = None,
-        source_ip: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        session_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        blueprint_name: Optional[str] = None,
-        endpoint_name: Optional[str] = None,
-        http_method: Optional[str] = None,
-        failure_reason: Optional[str] = None,
-        event_details: Optional[Dict[str, Any]] = None,
-        security_context: Optional[Dict[str, Any]] = None,
+        auto_capture_context: bool = True,
         **kwargs
     ) -> 'AuthenticationLog':
         """
-        Factory method for creating authentication log entries with comprehensive context.
+        Create and save an authentication log entry with automatic context capture.
         
-        Provides a convenient interface for creating structured authentication logs
-        with automatic validation, correlation ID generation, and structured logging.
+        Convenience method for creating authentication log entries with automatic
+        capture of Flask request context and security information.
         
         Args:
-            event_type (AuthenticationEventType): Type of authentication event
-            user_id (Optional[int]): User ID for audit trail attribution
-            success (bool): Authentication attempt success status
-            authentication_method (Optional[AuthenticationMethod]): Authentication method used
-            source_ip (Optional[str]): Client IP address
-            user_agent (Optional[str]): Client user agent string
-            session_id (Optional[str]): Session identifier
-            request_id (Optional[str]): Request correlation ID
-            blueprint_name (Optional[str]): Flask blueprint name
-            endpoint_name (Optional[str]): API endpoint name
-            http_method (Optional[str]): HTTP method
-            failure_reason (Optional[str]): Authentication failure reason
-            event_details (Optional[Dict[str, Any]]): Additional event data
-            security_context (Optional[Dict[str, Any]]): Security metadata
-            **kwargs: Additional authentication log fields
+            event_type: Type of authentication event
+            authentication_method: Authentication method used
+            success: Whether authentication was successful
+            user_id: Optional user ID for attribution
+            auto_capture_context: Whether to automatically capture Flask request context
+            **kwargs: Additional parameters for AuthenticationLog constructor
             
         Returns:
-            AuthenticationLog: Created and saved authentication log instance
+            AuthenticationLog: Created and saved log entry
         """
-        # Create authentication log instance
-        auth_log = cls(
+        # Capture Flask request context if available and requested
+        if auto_capture_context and request:
+            kwargs.setdefault('client_ip', request.remote_addr)
+            kwargs.setdefault('user_agent', request.headers.get('User-Agent'))
+            kwargs.setdefault('endpoint', request.endpoint)
+            kwargs.setdefault('http_method', request.method)
+            kwargs.setdefault('request_id', getattr(g, 'request_id', None))
+            kwargs.setdefault('session_id', getattr(g, 'session_id', None))
+            kwargs.setdefault('blueprint_name', request.blueprint)
+            kwargs.setdefault('correlation_id', getattr(g, 'correlation_id', None))
+        
+        # Create log entry
+        log_entry = cls(
             event_type=event_type,
-            user_id=user_id,
-            success=success,
             authentication_method=authentication_method,
-            source_ip_address=source_ip,
-            user_agent=user_agent,
-            session_id=session_id,
-            request_id=request_id,
-            blueprint_name=blueprint_name,
-            endpoint_name=endpoint_name,
-            http_method=http_method,
-            failure_reason=failure_reason,
-            event_details=event_details or {},
-            security_context=security_context or {},
+            success=success,
+            user_id=user_id,
             **kwargs
         )
         
-        # Save to database and return instance
-        return auth_log.save()
+        # Save to database
+        log_entry.save()
+        
+        return log_entry
+    
+    @classmethod
+    def get_failed_attempts_by_ip(
+        cls,
+        ip_address: str,
+        time_window_hours: int = 1,
+        max_attempts: Optional[int] = None
+    ) -> List['AuthenticationLog']:
+        """
+        Get failed authentication attempts from specific IP within time window.
+        
+        Used for brute force detection and IP-based security analysis.
+        
+        Args:
+            ip_address: IP address to search for
+            time_window_hours: Time window in hours to search (default: 1)
+            max_attempts: Maximum number of attempts to return
+            
+        Returns:
+            List[AuthenticationLog]: Failed authentication attempts
+        """
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=time_window_hours)
+        
+        query = cls.query.filter(
+            cls.client_ip == ip_address,
+            cls.success == False,
+            cls.created_at >= time_threshold
+        ).order_by(desc(cls.created_at))
+        
+        if max_attempts:
+            query = query.limit(max_attempts)
+        
+        return query.all()
     
     @classmethod
     def get_user_authentication_history(
         cls,
         user_id: int,
-        limit: int = 100,
-        event_types: Optional[List[AuthenticationEventType]] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        limit: int = 50,
+        include_failed: bool = True
     ) -> List['AuthenticationLog']:
         """
-        Retrieve user authentication history for security analysis and audit trails.
+        Get authentication history for a specific user.
         
         Args:
-            user_id (int): User ID for history retrieval
-            limit (int): Maximum number of records to return
-            event_types (Optional[List[AuthenticationEventType]]): Filter by event types
-            start_date (Optional[datetime]): Start date for history range
-            end_date (Optional[datetime]): End date for history range
+            user_id: User ID to search for
+            limit: Maximum number of entries to return
+            include_failed: Whether to include failed attempts
             
         Returns:
-            List[AuthenticationLog]: User authentication history records
+            List[AuthenticationLog]: User authentication history
         """
         query = cls.query.filter(cls.user_id == user_id)
         
-        # Apply event type filter if specified
-        if event_types:
-            query = query.filter(cls.event_type.in_(event_types))
+        if not include_failed:
+            query = query.filter(cls.success == True)
         
-        # Apply date range filter if specified
-        if start_date:
-            query = query.filter(cls.event_timestamp >= start_date)
-        if end_date:
-            query = query.filter(cls.event_timestamp <= end_date)
-        
-        # Order by timestamp and limit results
-        return query.order_by(cls.event_timestamp.desc()).limit(limit).all()
+        return query.order_by(desc(cls.created_at)).limit(limit).all()
     
     @classmethod
-    def get_security_events_by_severity(
+    def get_security_events(
         cls,
-        severity_level: SecuritySeverityLevel,
-        hours: int = 24,
-        limit: int = 1000
+        hours_back: int = 24,
+        min_risk_score: int = 70,
+        include_successful: bool = False
     ) -> List['AuthenticationLog']:
         """
-        Retrieve security events by severity level for incident response per Section 6.4.6.2.
+        Get security-relevant events for monitoring and analysis.
         
         Args:
-            severity_level (SecuritySeverityLevel): Minimum severity level to retrieve
-            hours (int): Time window in hours for event retrieval
-            limit (int): Maximum number of records to return
+            hours_back: Hours to look back from current time
+            min_risk_score: Minimum risk score to include
+            include_successful: Whether to include successful authentications
             
         Returns:
-            List[AuthenticationLog]: Security events matching criteria
+            List[AuthenticationLog]: Security events
         """
-        # Calculate time window
-        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         
-        # Define severity level ordering for filtering
-        severity_order = {
-            SecuritySeverityLevel.INFO: 0,
-            SecuritySeverityLevel.LOW: 1,
-            SecuritySeverityLevel.MEDIUM: 2,
-            SecuritySeverityLevel.HIGH: 3,
-            SecuritySeverityLevel.CRITICAL: 4
-        }
+        query = cls.query.filter(
+            cls.created_at >= time_threshold,
+            cls.risk_score >= min_risk_score
+        )
         
-        # Get severity levels to include (current level and higher)
-        min_severity_value = severity_order[severity_level]
-        included_severities = [
-            level for level, value in severity_order.items()
-            if value >= min_severity_value
-        ]
+        if not include_successful:
+            query = query.filter(cls.success == False)
         
-        return cls.query.filter(
-            cls.severity_level.in_(included_severities),
-            cls.event_timestamp >= start_time,
-            cls.archived == False
-        ).order_by(cls.event_timestamp.desc()).limit(limit).all()
+        return query.order_by(desc(cls.created_at)).all()
     
     @classmethod
     def get_anomalous_events(
         cls,
-        anomaly_threshold: float = 0.7,
-        hours: int = 24,
-        limit: int = 500
+        hours_back: int = 24,
+        min_severity: str = EventSeverity.MEDIUM.value
     ) -> List['AuthenticationLog']:
         """
-        Retrieve anomalous authentication events for security analysis per Section 6.4.6.1.
+        Get anomalous events for security analysis.
         
         Args:
-            anomaly_threshold (float): Minimum anomaly score threshold
-            hours (int): Time window in hours for event retrieval
-            limit (int): Maximum number of records to return
+            hours_back: Hours to look back from current time
+            min_severity: Minimum severity level to include
             
         Returns:
-            List[AuthenticationLog]: Anomalous authentication events
+            List[AuthenticationLog]: Anomalous events
         """
-        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+        
+        severity_levels = [s.value for s in EventSeverity]
+        min_index = severity_levels.index(min_severity)
+        relevant_severities = severity_levels[min_index:]
         
         return cls.query.filter(
-            cls.anomaly_score >= anomaly_threshold,
-            cls.event_timestamp >= start_time,
-            cls.archived == False
-        ).order_by(cls.anomaly_score.desc(), cls.event_timestamp.desc()).limit(limit).all()
+            cls.created_at >= time_threshold,
+            cls.severity.in_(relevant_severities),
+            cls.risk_score >= 80
+        ).order_by(desc(cls.created_at)).all()
     
     @classmethod
-    def archive_expired_logs(cls) -> int:
+    def get_authentication_statistics(
+        cls,
+        hours_back: int = 24,
+        group_by_hour: bool = True
+    ) -> Dict[str, Any]:
         """
-        Archive expired authentication logs per data retention policies.
+        Get authentication statistics for monitoring dashboards.
         
-        Implements automated data archival for compliance requirements per Section 6.2.4.1
-        and returns the number of logs marked for archival.
-        
+        Args:
+            hours_back: Hours to look back from current time
+            group_by_hour: Whether to group statistics by hour
+            
         Returns:
-            int: Number of logs marked for archival
+            Dict[str, Any]: Authentication statistics
+        """
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+        
+        # Base query for time period
+        base_query = cls.query.filter(cls.created_at >= time_threshold)
+        
+        # Overall statistics
+        total_attempts = base_query.count()
+        successful_attempts = base_query.filter(cls.success == True).count()
+        failed_attempts = base_query.filter(cls.success == False).count()
+        unique_users = base_query.filter(cls.user_id.isnot(None)).distinct(cls.user_id).count()
+        unique_ips = base_query.filter(cls.client_ip.isnot(None)).distinct(cls.client_ip).count()
+        
+        # Security statistics
+        high_risk_events = base_query.filter(cls.risk_score >= 70).count()
+        security_relevant = base_query.filter(
+            cls.security_classification.in_([
+                SecurityClassification.SECURITY_RELEVANT.value,
+                SecurityClassification.SECURITY_CRITICAL.value
+            ])
+        ).count()
+        
+        statistics = {
+            'period': {
+                'hours_back': hours_back,
+                'start_time': time_threshold.isoformat(),
+                'end_time': datetime.now(timezone.utc).isoformat()
+            },
+            'totals': {
+                'total_attempts': total_attempts,
+                'successful_attempts': successful_attempts,
+                'failed_attempts': failed_attempts,
+                'success_rate': (successful_attempts / total_attempts * 100) if total_attempts > 0 else 0,
+                'unique_users': unique_users,
+                'unique_ips': unique_ips,
+                'high_risk_events': high_risk_events,
+                'security_relevant_events': security_relevant
+            }
+        }
+        
+        # Group by hour if requested
+        if group_by_hour:
+            hourly_stats = db.session.query(
+                func.date_trunc('hour', cls.created_at).label('hour'),
+                func.count(cls.id).label('total'),
+                func.sum(func.cast(cls.success, Integer)).label('successful'),
+                func.avg(cls.risk_score).label('avg_risk_score')
+            ).filter(
+                cls.created_at >= time_threshold
+            ).group_by(
+                func.date_trunc('hour', cls.created_at)
+            ).order_by('hour').all()
+            
+            statistics['hourly'] = [
+                {
+                    'hour': stat.hour.isoformat(),
+                    'total_attempts': stat.total,
+                    'successful_attempts': stat.successful,
+                    'failed_attempts': stat.total - stat.successful,
+                    'average_risk_score': float(stat.avg_risk_score) if stat.avg_risk_score else 0
+                }
+                for stat in hourly_stats
+            ]
+        
+        return statistics
+    
+    @classmethod
+    def cleanup_expired_logs(cls, batch_size: int = 1000) -> int:
+        """
+        Clean up expired log entries based on retention policy.
+        
+        Implements automated data archival for compliance requirements per Section 6.2.4.1.
+        
+        Args:
+            batch_size: Number of records to process in each batch
+            
+        Returns:
+            int: Number of records cleaned up
         """
         current_time = datetime.now(timezone.utc)
         
-        # Find logs that have exceeded their retention period
+        # Find expired logs that haven't been archived
         expired_logs = cls.query.filter(
-            cls.retention_until <= current_time,
-            cls.archived == False
-        ).all()
+            cls.retention_expires_at <= current_time,
+            cls.archived_at.is_(None)
+        ).limit(batch_size).all()
         
-        # Mark logs for archival
-        archived_count = 0
-        for log in expired_logs:
-            log.mark_for_archival("automated_retention_policy_expiration")
-            archived_count += 1
+        count = 0
+        for log_entry in expired_logs:
+            # Mark as archived instead of deleting for compliance
+            log_entry.mark_archived()
+            count += 1
         
-        # Commit changes to database
-        db.session.commit()
+        if count > 0:
+            db.session.commit()
         
-        # Log archival operation for audit trail
-        logger.info(
-            "Automated authentication log archival completed",
-            archived_count=archived_count,
-            execution_time=current_time.isoformat()
-        )
+        return count
+    
+    @classmethod
+    def anonymize_user_data(cls, user_id: int) -> int:
+        """
+        Anonymize authentication logs for a specific user (GDPR compliance).
         
-        return archived_count
+        Removes personally identifiable information while preserving
+        security and analytics value of the logs.
+        
+        Args:
+            user_id: User ID to anonymize data for
+            
+        Returns:
+            int: Number of records anonymized
+        """
+        logs = cls.query.filter(cls.user_id == user_id).all()
+        count = 0
+        
+        for log_entry in logs:
+            # Clear user attribution
+            log_entry.user_id = None
+            
+            # Anonymize IP address (keep network portion for geo-analysis)
+            if log_entry.client_ip:
+                try:
+                    ip_obj = ip_address(str(log_entry.client_ip))
+                    if ip_obj.version == 4:
+                        # IPv4: Keep first 3 octets, zero last octet
+                        parts = str(ip_obj).split('.')
+                        parts[3] = '0'
+                        log_entry.client_ip = '.'.join(parts)
+                    else:
+                        # IPv6: Keep first 64 bits, zero the rest
+                        log_entry.client_ip = str(ip_obj)[:19] + '::0'
+                except (AddressValueError, ValueError):
+                    log_entry.client_ip = None
+            
+            # Clear session ID
+            log_entry.session_id = None
+            
+            # Remove PII from event details and metadata
+            if log_entry.event_details:
+                # Remove common PII fields
+                pii_fields = ['email', 'phone', 'name', 'username']
+                for field in pii_fields:
+                    log_entry.event_details.pop(field, None)
+                flag_modified(log_entry, 'event_details')
+            
+            if log_entry.metadata:
+                # Remove PII from metadata
+                for field in pii_fields:
+                    log_entry.metadata.pop(field, None)
+                flag_modified(log_entry, 'metadata')
+            
+            # Add anonymization marker
+            log_entry.add_metadata('anonymized_at', datetime.now(timezone.utc).isoformat())
+            log_entry.add_metadata('anonymized_for_gdpr', True)
+            
+            count += 1
+        
+        if count > 0:
+            db.session.commit()
+        
+        return count
     
     def __repr__(self) -> str:
         """
-        String representation of AuthenticationLog for debugging and logging.
+        String representation of AuthenticationLog instance for debugging.
         
         Returns:
-            str: Human-readable representation of authentication log
+            str: String representation showing key event information
         """
         return (
-            f"<AuthenticationLog(id={self.id}, correlation_id='{self.correlation_id}', "
-            f"event_type='{self.event_type.value if self.event_type else None}', "
-            f"user_id={self.user_id}, success={self.success}, "
-            f"timestamp='{self.event_timestamp}')>"
+            f"<AuthenticationLog(id={self.id}, event_id='{self.event_id}', "
+            f"event_type='{self.event_type}', success={self.success}, "
+            f"user_id={self.user_id}, client_ip='{self.client_ip}', "
+            f"created_at='{self.created_at}')>"
         )
+    
+    def __str__(self) -> str:
+        """
+        Human-readable string representation of AuthenticationLog instance.
+        
+        Returns:
+            str: User-friendly string representation
+        """
+        status = "SUCCESS" if self.success else "FAILURE"
+        return f"{self.event_type} {status} from {self.client_ip} at {self.created_at}"
 
 
-# SQLAlchemy event listeners for automated logging and monitoring per Section 6.4.2.5
+# Database event listeners for additional functionality per Section 6.2.4.3
+@event.listens_for(AuthenticationLog, 'before_insert')
+def auth_log_before_insert(mapper, connection, target):
+    """
+    Database event listener for AuthenticationLog creation processing.
+    
+    Args:
+        mapper: SQLAlchemy mapper object
+        connection: Database connection
+        target: AuthenticationLog instance being inserted
+    """
+    # Ensure event_id is set
+    if not target.event_id:
+        target.event_id = uuid.uuid4()
+    
+    # Set timestamps if not already set
+    current_time = datetime.now(timezone.utc)
+    if not target.created_at:
+        target.created_at = current_time
+    target.updated_at = current_time
+    
+    # Set retention policy if not set
+    if not target.retention_expires_at:
+        target._set_retention_policy()
+
 
 @event.listens_for(AuthenticationLog, 'after_insert')
-def log_authentication_event_created(mapper, connection, target):
+def auth_log_after_insert(mapper, connection, target):
     """
-    SQLAlchemy event listener for logging authentication event creation.
+    Database event listener for post-creation processing.
     
-    Automatically generates structured logs for new authentication events
-    to support real-time monitoring and security analysis.
+    Args:
+        mapper: SQLAlchemy mapper object
+        connection: Database connection
+        target: AuthenticationLog instance that was inserted
     """
-    logger.info(
-        "Authentication log record created",
-        correlation_id=str(target.correlation_id),
-        event_type=target.event_type.value if target.event_type else None,
-        user_id=target.user_id,
-        success=target.success,
-        severity=target.severity_level.value if target.severity_level else None,
-        source_ip=target.source_ip_address,
-        anomaly_score=float(target.anomaly_score) if target.anomaly_score else None
-    )
+    # This could trigger additional processing like:
+    # - Sending to external SIEM systems
+    # - Updating real-time metrics
+    # - Triggering security alerts
+    # Implementation would depend on specific monitoring requirements
+    pass
 
 
-@event.listens_for(AuthenticationLog, 'after_update')
-def log_authentication_event_updated(mapper, connection, target):
-    """
-    SQLAlchemy event listener for logging authentication event updates.
-    
-    Captures changes to authentication log records for audit trail integrity
-    and security monitoring purposes.
-    """
-    logger.info(
-        "Authentication log record updated",
-        correlation_id=str(target.correlation_id),
-        event_type=target.event_type.value if target.event_type else None,
-        user_id=target.user_id,
-        anomaly_score=float(target.anomaly_score) if target.anomaly_score else None,
-        archived=target.archived,
-        updated_at=target.updated_at.isoformat() if target.updated_at else None
-    )
+# Required import for SQLAlchemy flag_modified function
+from sqlalchemy.orm.attributes import flag_modified
 
 
-# Export the model and enums for use throughout the authentication module
+# Export the AuthenticationLog model and enums for use throughout the application
 __all__ = [
     'AuthenticationLog',
     'AuthenticationEventType',
-    'SecuritySeverityLevel',
-    'AuthenticationMethod'
+    'AuthenticationMethod',
+    'SecurityClassification',
+    'EventSeverity'
 ]
