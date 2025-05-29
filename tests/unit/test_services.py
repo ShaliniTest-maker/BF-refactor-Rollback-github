@@ -1,62 +1,82 @@
 """
 Comprehensive Unit Tests for Service Layer Business Logic Components
 
-This test module validates all Service Layer business logic components including UserService,
-BusinessEntityService, ValidationService, and WorkflowOrchestrator. Tests ensure business rule
-preservation, workflow orchestration, transaction boundary management, and service composition
-patterns maintain 100% functional equivalence with original Node.js business logic during
-the Flask migration.
+This module provides complete unit test coverage for all Service Layer business logic
+components including UserService, BusinessEntityService, ValidationService, and
+WorkflowOrchestrator. These tests validate business rule preservation, workflow
+orchestration, transaction boundary management, and service composition patterns to
+ensure 100% functional equivalence with original Node.js business logic during the
+Flask migration.
 
 Test Coverage:
-- UserService business logic preservation per Feature F-005
-- BusinessEntityService complex workflow validation per Section 5.2.3  
-- ValidationService dataclasses and type hint validation per Section 4.5.1
-- WorkflowOrchestrator service composition patterns per Section 5.2.3
-- Transaction boundary management with Flask-SQLAlchemy per Section 4.5.2
-- Service dependency injection with Flask-Injector per Section 4.5.1
-- Error handling and retry mechanisms per Section 4.5.3
+- UserService: User management workflows, authentication, registration, profile management
+- BusinessEntityService: Entity creation, relationship management, lifecycle operations
+- ValidationService: Data validation, business rule enforcement, constraint checking
+- WorkflowOrchestrator: Service composition patterns, workflow orchestration
+- BaseService: Transaction boundary management, retry mechanisms, error handling
 
-Requirements Validated:
-- Service Layer pattern unit testing for business logic preservation per Feature F-005
+Technical Requirements:
+- pytest-flask 1.3.0 service layer testing integration per Section 4.7.1
 - 90% code coverage requirement for service layer per Feature F-006
 - Business workflow orchestration validation per Section 5.2.3 component details
 - Transaction boundary management testing per Section 4.5.2
 - Service composition and dependency injection testing per Section 4.5.1
 - Business rule enforcement validation per Section 4.12.1 validation checkpoints
-- pytest-flask 1.3.0 service layer testing integration per Section 4.7.1
+
+Architecture Integration:
+- Flask application context fixtures for isolated testing environments
+- Database transaction rollback capabilities for clean test state management
+- Mock object integration for external dependency testing
+- Service Layer pattern validation for workflow orchestration
+- Dependency injection testing with Flask-Injector integration
 """
 
 import pytest
 import uuid
-from datetime import datetime, timedelta
-from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock, call, ANY
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
-import json
 import time
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from unittest.mock import Mock, MagicMock, patch, call
+from typing import Dict, Any, List, Optional
 
-# Flask and testing imports
-from flask import Flask, current_app, g, session
+# Flask and Flask extensions
+from flask import Flask, g, current_app, request_started, request_finished
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import current_user
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError, OperationalError, DatabaseError
+from flask_login import UserMixin, login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import BadRequest, InternalServerError
+from injector import Injector
 
-# Import service layer components for testing
+# SQLAlchemy exceptions for testing error handling
+from sqlalchemy.exc import (
+    IntegrityError, 
+    SQLAlchemyError, 
+    OperationalError, 
+    DatabaseError
+)
+
+# Import services to test
+from src.services.base import (
+    BaseService, 
+    ServiceError, 
+    ValidationError, 
+    TransactionError, 
+    ConcurrencyError,
+    retry_on_failure,
+    require_app_context
+)
 from src.services.user_service import (
     UserService, 
-    UserStatus, 
-    RegistrationStatus,
-    UserRegistrationData,
-    UserAuthenticationData
+    UserRegistrationError, 
+    UserAuthenticationError, 
+    UserProfileError, 
+    UserSessionError
 )
 from src.services.business_entity_service import (
     BusinessEntityService,
-    EntityCreationRequest,
-    EntityRelationshipRequest, 
-    EntityUpdateRequest
+    EntityCreationError,
+    EntityRelationshipError,
+    EntityLifecycleError
 )
 from src.services.validation_service import (
     ValidationService,
@@ -66,1740 +86,2468 @@ from src.services.validation_service import (
 )
 from src.services.workflow_orchestrator import (
     WorkflowOrchestrator,
-    WorkflowStatus,
-    WorkflowStepStatus,
-    WorkflowStep
+    WorkflowExecutionError,
+    ServiceCompositionError,
+    WorkflowStepError
 )
-from src.services.base import BaseService, ServiceError
 
-# Import database models for testing
+# Import models for testing
 from src.models.user import User
 from src.models.session import UserSession
 from src.models.business_entity import BusinessEntity
 from src.models.entity_relationship import EntityRelationship
+from src.models.base import BaseModel
 
-# Import utility modules for comprehensive testing
-from src.utils.error_handling import (
-    UserServiceError, ValidationError, AuthenticationError,
-    UserNotFoundError, DuplicateUserError, SessionError,
-    BusinessLogicError, DataIntegrityError, DatabaseConstraintError
-)
-from src.utils.logging import StructuredLogger
+
+class TestBaseService:
+    """
+    Unit tests for BaseService abstract class validating Service Layer pattern
+    implementation, transaction boundary management, and service composition.
+    
+    Tests the foundational service layer architecture as specified in Section 5.2.3
+    with comprehensive validation of transaction management, error handling, retry
+    mechanisms, and Flask application context integration.
+    """
+    
+    @pytest.fixture
+    def mock_service(self, app, db):
+        """
+        Create a concrete implementation of BaseService for testing.
+        
+        Args:
+            app: Flask application fixture
+            db: SQLAlchemy database fixture
+        
+        Returns:
+            ConcreteTestService: Test implementation of BaseService
+        """
+        class ConcreteTestService(BaseService):
+            def validate_business_rules(self, data: Dict[str, Any]) -> bool:
+                """Test implementation of abstract business rule validation."""
+                return True
+        
+        with app.app_context():
+            service = ConcreteTestService(db=db)
+            return service
+    
+    def test_base_service_initialization(self, mock_service, app, db):
+        """
+        Test BaseService initialization with Flask-SQLAlchemy integration.
+        
+        Validates service initialization requirements per Section 5.2.3 including
+        database session access, logging configuration, and Flask application
+        context integration.
+        """
+        # Test service initialization
+        assert mock_service.db == db
+        assert hasattr(mock_service, 'session')
+        assert hasattr(mock_service, 'logger')
+        assert hasattr(mock_service, '_session_cache')
+        assert hasattr(mock_service, '_composition_services')
+        
+        # Test session property access
+        assert mock_service.session == db.session
+        
+        # Test logger configuration
+        assert mock_service.logger.name == mock_service.__class__.__module__
+    
+    def test_transaction_boundary_success(self, mock_service, app, db):
+        """
+        Test successful transaction boundary management.
+        
+        Validates transaction boundary control as specified in Section 4.5.2
+        with proper commit behavior and session management.
+        """
+        with app.app_context():
+            # Create test data within transaction boundary
+            with mock_service.transaction_boundary() as session:
+                user = User(
+                    username='test_user',
+                    email='test@example.com',
+                    password='TestPassword123!'
+                )
+                session.add(user)
+                # Transaction should commit automatically
+            
+            # Verify data was committed
+            saved_user = User.query.filter_by(username='test_user').first()
+            assert saved_user is not None
+            assert saved_user.email == 'test@example.com'
+    
+    def test_transaction_boundary_rollback(self, mock_service, app, db):
+        """
+        Test transaction boundary rollback on exception.
+        
+        Validates automatic rollback behavior when exceptions occur within
+        transaction boundaries as specified in Section 4.5.2.
+        """
+        with app.app_context():
+            with pytest.raises(TransactionError):
+                with mock_service.transaction_boundary() as session:
+                    user = User(
+                        username='rollback_user',
+                        email='rollback@example.com',
+                        password='TestPassword123!'
+                    )
+                    session.add(user)
+                    # Force an exception to trigger rollback
+                    raise Exception("Test exception for rollback")
+            
+            # Verify data was not committed
+            rollback_user = User.query.filter_by(username='rollback_user').first()
+            assert rollback_user is None
+    
+    def test_nested_transaction_boundary(self, mock_service, app, db):
+        """
+        Test nested transaction boundary with savepoint management.
+        
+        Validates nested transaction support with savepoint creation and
+        rollback capabilities for complex business operations.
+        """
+        with app.app_context():
+            with mock_service.transaction_boundary() as outer_session:
+                # Create outer transaction data
+                user1 = User(
+                    username='outer_user',
+                    email='outer@example.com',
+                    password='TestPassword123!'
+                )
+                outer_session.add(user1)
+                
+                # Test nested transaction with rollback
+                with pytest.raises(TransactionError):
+                    with mock_service.transaction_boundary(nested=True) as inner_session:
+                        user2 = User(
+                            username='inner_user',
+                            email='inner@example.com',
+                            password='TestPassword123!'
+                        )
+                        inner_session.add(user2)
+                        # Force rollback of nested transaction only
+                        raise Exception("Nested transaction rollback")
+                
+                # Outer transaction should still be valid
+                outer_session.flush()
+            
+            # Verify outer transaction committed, inner rolled back
+            outer_user = User.query.filter_by(username='outer_user').first()
+            inner_user = User.query.filter_by(username='inner_user').first()
+            assert outer_user is not None
+            assert inner_user is None
+    
+    def test_retry_mechanism_success(self, mock_service, app):
+        """
+        Test retry mechanism with successful operation.
+        
+        Validates retry decorator behavior with successful operations
+        as specified in Section 4.5.3 for resilient operation support.
+        """
+        call_count = 0
+        
+        def successful_operation():
+            nonlocal call_count
+            call_count += 1
+            return "success"
+        
+        with app.app_context():
+            result = mock_service.execute_with_retry(successful_operation, "test operation")
+            
+            assert result == "success"
+            assert call_count == 1
+    
+    def test_retry_mechanism_with_failures(self, mock_service, app):
+        """
+        Test retry mechanism with multiple failures before success.
+        
+        Validates retry logic with exponential backoff and eventual success
+        for operations that fail initially but succeed on retry.
+        """
+        call_count = 0
+        
+        def failing_then_success_operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise OperationalError("Temporary failure", None, None)
+            return "eventual_success"
+        
+        with app.app_context():
+            with patch('time.sleep'):  # Mock sleep to speed up test
+                result = mock_service.execute_with_retry(
+                    failing_then_success_operation,
+                    "retry test operation"
+                )
+                
+                assert result == "eventual_success"
+                assert call_count == 3
+    
+    def test_retry_mechanism_max_retries_exceeded(self, mock_service, app):
+        """
+        Test retry mechanism when max retries are exceeded.
+        
+        Validates that ServiceError is raised when operations continue
+        to fail beyond the maximum retry limit.
+        """
+        call_count = 0
+        
+        def always_failing_operation():
+            nonlocal call_count
+            call_count += 1
+            raise OperationalError("Persistent failure", None, None)
+        
+        with app.app_context():
+            with patch('time.sleep'):  # Mock sleep to speed up test
+                with pytest.raises(ServiceError) as exc_info:
+                    mock_service.execute_with_retry(
+                        always_failing_operation,
+                        "max retries test"
+                    )
+                
+                assert "Operation failed after" in str(exc_info.value)
+                assert exc_info.value.retry_count == 3
+                assert call_count == 4  # Initial attempt + 3 retries
+    
+    def test_input_validation_success(self, mock_service, app):
+        """
+        Test successful input validation with required fields.
+        
+        Validates input validation functionality with proper data sanitization
+        and required field checking.
+        """
+        with app.app_context():
+            input_data = {
+                'username': 'test_user',
+                'email': 'test@example.com',
+                'password': 'TestPassword123!',
+                'optional_field': 'optional_value',
+                'empty_field': '',
+                'none_field': None
+            }
+            
+            required_fields = ['username', 'email', 'password']
+            validated_data = mock_service.validate_input(input_data, required_fields)
+            
+            # Check required fields preserved
+            assert validated_data['username'] == 'test_user'
+            assert validated_data['email'] == 'test@example.com'
+            assert validated_data['password'] == 'TestPassword123!'
+            
+            # Check optional field preserved
+            assert validated_data['optional_field'] == 'optional_value'
+            
+            # Check empty and None fields removed
+            assert 'empty_field' not in validated_data
+            assert 'none_field' not in validated_data
+    
+    def test_input_validation_missing_required_fields(self, mock_service, app):
+        """
+        Test input validation with missing required fields.
+        
+        Validates that ValidationError is raised when required fields
+        are missing from input data.
+        """
+        with app.app_context():
+            input_data = {
+                'username': 'test_user',
+                # Missing email and password
+            }
+            
+            required_fields = ['username', 'email', 'password']
+            
+            with pytest.raises(ValidationError) as exc_info:
+                mock_service.validate_input(input_data, required_fields)
+            
+            assert "Required fields missing" in str(exc_info.value)
+            assert "email" in str(exc_info.value)
+            assert "password" in str(exc_info.value)
+    
+    def test_service_composition(self, mock_service, app):
+        """
+        Test service composition functionality for complex workflows.
+        
+        Validates service composition patterns as specified in Section 5.2.3
+        enabling coordination of multiple services for complex business operations.
+        """
+        with app.app_context():
+            # Mock another service for composition
+            class MockComposedService(BaseService):
+                def validate_business_rules(self, data: Dict[str, Any]) -> bool:
+                    return True
+                
+                def composed_operation(self):
+                    return "composed_result"
+            
+            # Register the service with the injector
+            injector = current_app.injector
+            injector.binder.bind(MockComposedService, MockComposedService(db=mock_service.db))
+            
+            # Test service composition
+            composed_service = mock_service.compose_service(MockComposedService)
+            
+            assert isinstance(composed_service, MockComposedService)
+            assert composed_service.composed_operation() == "composed_result"
+            
+            # Test caching of composed service
+            composed_service_2 = mock_service.compose_service(MockComposedService)
+            assert composed_service is composed_service_2
+    
+    def test_integrity_error_handling(self, mock_service, app):
+        """
+        Test database integrity error handling with proper error translation.
+        
+        Validates that database integrity constraints are properly translated
+        to ValidationError exceptions with meaningful messages.
+        """
+        with app.app_context():
+            # Test unique constraint violation
+            unique_error = IntegrityError(
+                "duplicate key value violates unique constraint",
+                "DETAIL: Key (username)=(test_user) already exists.",
+                "23505"
+            )
+            
+            with pytest.raises(ValidationError) as exc_info:
+                mock_service.handle_integrity_error(unique_error, "user creation")
+            
+            assert "Duplicate value" in str(exc_info.value)
+            
+            # Test foreign key constraint violation
+            fk_error = IntegrityError(
+                "insert or update on table violates foreign key constraint",
+                "DETAIL: Key (user_id)=(999) is not present in table users.",
+                "23503"
+            )
+            
+            with pytest.raises(ValidationError) as exc_info:
+                mock_service.handle_integrity_error(fk_error, "entity creation")
+            
+            assert "Referenced entity does not exist" in str(exc_info.value)
+            
+            # Test not null constraint violation
+            null_error = IntegrityError(
+                "null value in column violates not-null constraint",
+                "DETAIL: Failing row contains (null).",
+                "23502"
+            )
+            
+            with pytest.raises(ValidationError) as exc_info:
+                mock_service.handle_integrity_error(null_error, "data insertion")
+            
+            assert "Required field" in str(exc_info.value)
+    
+    def test_caching_functionality(self, mock_service, app):
+        """
+        Test service-level caching for performance optimization.
+        
+        Validates caching functionality with TTL support and cache invalidation
+        for improved service performance.
+        """
+        with app.app_context():
+            # Test cache storage and retrieval
+            cache_key = "test_key"
+            cache_value = {"data": "test_value", "timestamp": time.time()}
+            
+            mock_service.cache_result(cache_key, cache_value, ttl=60)
+            retrieved_value = mock_service.get_cached_result(cache_key)
+            
+            assert retrieved_value == cache_value
+            
+            # Test cache expiration
+            mock_service.cache_result("expired_key", "expired_value", ttl=0)
+            time.sleep(0.1)  # Wait for expiration
+            expired_value = mock_service.get_cached_result("expired_key")
+            
+            assert expired_value is None
+            
+            # Test cache clearing
+            mock_service.clear_cache()
+            cleared_value = mock_service.get_cached_result(cache_key)
+            
+            assert cleared_value is None
+    
+    def test_current_user_context(self, mock_service, app):
+        """
+        Test current user context access for authentication integration.
+        
+        Validates Flask-Login integration and user context management
+        within service operations.
+        """
+        with app.app_context():
+            # Test without user context
+            user_id = mock_service.get_current_user_id()
+            assert user_id is None
+            
+            # Test with user context in Flask g
+            g.user_id = 123
+            user_id = mock_service.get_current_user_id()
+            assert user_id == 123
+            
+            # Test with current_user object
+            mock_user = Mock()
+            mock_user.id = 456
+            g.current_user = mock_user
+            
+            user_id = mock_service.get_current_user_id()
+            assert user_id == 456
+    
+    def test_logging_functionality(self, mock_service, app):
+        """
+        Test service operation logging with data sanitization.
+        
+        Validates consistent logging across service operations with
+        sensitive data filtering for security compliance.
+        """
+        with app.app_context():
+            with patch.object(mock_service.logger, 'info') as mock_logger:
+                # Test logging without sensitive data
+                operation_data = {
+                    'username': 'test_user',
+                    'email': 'test@example.com',
+                    'action': 'user_creation'
+                }
+                
+                mock_service.log_service_operation(
+                    "User registration",
+                    operation_data,
+                    level="info"
+                )
+                
+                mock_logger.assert_called_once()
+                log_call = mock_logger.call_args[0][0]
+                assert "User registration" in log_call
+                assert "test_user" in log_call
+                
+                # Test logging with sensitive data filtering
+                mock_logger.reset_mock()
+                sensitive_data = {
+                    'username': 'test_user',
+                    'password': 'secret_password',
+                    'token': 'secret_token',
+                    'api_key': 'secret_key'
+                }
+                
+                mock_service.log_service_operation(
+                    "Authentication attempt",
+                    sensitive_data,
+                    level="warning"
+                )
+                
+                log_call = mock_logger.call_args[0][0]
+                assert "password" not in log_call
+                assert "token" not in log_call
+                assert "api_key" not in log_call
+                assert "test_user" in log_call
 
 
 class TestUserService:
     """
-    Comprehensive unit tests for UserService business logic preservation.
+    Unit tests for UserService business logic preservation and functionality.
     
-    Tests validate user management workflows, authentication logic, profile operations,
-    and session management while ensuring 100% functional equivalence with original 
-    Node.js business rules during the Flask migration.
-    
-    Coverage Areas:
-    - User registration workflow testing with validation rules
-    - Authentication mechanism validation with security preservation  
-    - Profile management business logic verification
-    - Session lifecycle management and security validation
-    - Error handling and edge case business rule enforcement
-    - Transaction boundary management for user operations
+    Tests comprehensive user management workflows including registration,
+    authentication, profile management, and user entity operations to ensure
+    100% functional equivalence with original Node.js business logic as
+    specified in Feature F-005 and F-006.
     """
     
     @pytest.fixture
-    def user_service(self, app, db_session):
-        """Create UserService instance with proper Flask application context."""
+    def user_service(self, app, db):
+        """
+        Create UserService instance for testing.
+        
+        Args:
+            app: Flask application fixture
+            db: SQLAlchemy database fixture
+        
+        Returns:
+            UserService: Configured user service instance
+        """
         with app.app_context():
-            service = UserService(db=db_session)
-            yield service
+            return UserService(db=db)
     
     @pytest.fixture
-    def sample_user_data(self):
-        """Sample user data for registration testing scenarios."""
-        return UserRegistrationData(
-            username="testuser123",
-            email="test@example.com", 
-            password="SecurePassword123!",
-            first_name="Test",
-            last_name="User",
-            profile_data={"preferences": {"theme": "dark"}}
-        )
-    
-    @pytest.fixture
-    def sample_auth_data(self):
-        """Sample authentication data for login testing scenarios."""
-        return UserAuthenticationData(
-            identifier="testuser123",
-            password="SecurePassword123!",
-            remember_me=False,
-            device_info={"browser": "Chrome", "os": "Linux"}
-        )
-    
-    def test_user_service_initialization(self, user_service):
-        """Test UserService proper initialization with dependency injection."""
-        assert user_service is not None
-        assert isinstance(user_service, UserService)
-        assert hasattr(user_service, 'db')
-        assert hasattr(user_service, 'session_manager')
-        assert hasattr(user_service, 'password_utils')
-    
-    def test_user_registration_success(self, user_service, sample_user_data, db_session):
+    def valid_user_data(self):
         """
-        Test successful user registration workflow with business rule validation.
+        Provide valid user registration data for testing.
         
-        Validates:
-        - User data validation and sanitization
-        - Password hashing and security requirements
-        - Database transaction boundary management
-        - Business rule enforcement for unique constraints
-        - Successful user creation with proper data persistence
+        Returns:
+            Dict[str, Any]: Valid user data meeting all business rules
         """
-        # Mock database operations for isolation
-        with patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit') as mock_commit, \
-             patch.object(db_session, 'rollback') as mock_rollback:
-            
-            # Mock user lookup to simulate no existing user
-            with patch.object(user_service, '_find_user_by_email', return_value=None), \
-                 patch.object(user_service, '_find_user_by_username', return_value=None):
-                
-                # Execute user registration
-                result = user_service.register_user(sample_user_data)
-                
-                # Validate registration success
-                assert result['status'] == RegistrationStatus.SUCCESS
-                assert result['user_id'] is not None
-                assert 'user' in result
-                assert result['user']['username'] == sample_user_data.username
-                assert result['user']['email'] == sample_user_data.email
-                
-                # Verify database operations were called
-                mock_add.assert_called_once()
-                mock_commit.assert_called_once()
-                mock_rollback.assert_not_called()
-    
-    def test_user_registration_duplicate_email(self, user_service, sample_user_data, db_session):
-        """
-        Test user registration failure due to duplicate email constraint.
-        
-        Validates business rule enforcement for unique email addresses
-        and proper error handling without database corruption.
-        """
-        # Mock existing user with same email
-        existing_user = Mock(spec=User)
-        existing_user.email = sample_user_data.email
-        
-        with patch.object(user_service, '_find_user_by_email', return_value=existing_user):
-            result = user_service.register_user(sample_user_data)
-            
-            # Validate proper duplicate handling
-            assert result['status'] == RegistrationStatus.EMAIL_EXISTS
-            assert 'error' in result
-            assert 'email' in result['error'].lower()
-    
-    def test_user_registration_duplicate_username(self, user_service, sample_user_data, db_session):
-        """
-        Test user registration failure due to duplicate username constraint.
-        
-        Validates business rule enforcement for unique usernames
-        and consistent error response patterns.
-        """
-        # Mock existing user with same username
-        existing_user = Mock(spec=User)
-        existing_user.username = sample_user_data.username
-        
-        with patch.object(user_service, '_find_user_by_email', return_value=None), \
-             patch.object(user_service, '_find_user_by_username', return_value=existing_user):
-            
-            result = user_service.register_user(sample_user_data)
-            
-            # Validate proper duplicate handling
-            assert result['status'] == RegistrationStatus.USERNAME_EXISTS
-            assert 'error' in result
-            assert 'username' in result['error'].lower()
-    
-    def test_user_authentication_success(self, user_service, sample_auth_data, db_session):
-        """
-        Test successful user authentication with proper session management.
-        
-        Validates:
-        - Credential verification logic
-        - Password hash validation
-        - Session creation and management
-        - User status verification
-        - Authentication security preservation
-        """
-        # Mock user with correct credentials
-        mock_user = Mock(spec=User)
-        mock_user.id = str(uuid.uuid4())
-        mock_user.username = sample_auth_data.identifier
-        mock_user.email = "test@example.com"
-        mock_user.password_hash = generate_password_hash(sample_auth_data.password)
-        mock_user.is_active = True
-        mock_user.status = UserStatus.ACTIVE.value
-        
-        with patch.object(user_service, '_find_user_by_identifier', return_value=mock_user), \
-             patch.object(user_service, '_verify_password', return_value=True), \
-             patch.object(user_service, '_create_user_session', return_value={'session_id': 'test_session'}) as mock_session:
-            
-            # Execute authentication
-            result = user_service.authenticate_user(sample_auth_data)
-            
-            # Validate authentication success
-            assert result['success'] is True
-            assert result['user']['id'] == mock_user.id
-            assert result['user']['username'] == mock_user.username
-            assert 'session' in result
-            
-            # Verify session creation was called
-            mock_session.assert_called_once_with(mock_user, sample_auth_data.remember_me)
-    
-    def test_user_authentication_invalid_credentials(self, user_service, sample_auth_data):
-        """
-        Test authentication failure with invalid credentials.
-        
-        Validates proper security handling and error responses
-        without revealing sensitive information about user existence.
-        """
-        with patch.object(user_service, '_find_user_by_identifier', return_value=None):
-            result = user_service.authenticate_user(sample_auth_data)
-            
-            # Validate authentication failure
-            assert result['success'] is False
-            assert 'error' in result
-            assert 'invalid' in result['error'].lower()
-    
-    def test_user_authentication_inactive_user(self, user_service, sample_auth_data):
-        """
-        Test authentication failure for inactive user accounts.
-        
-        Validates business rule enforcement for user account status
-        and proper security handling for inactive accounts.
-        """
-        # Mock inactive user
-        mock_user = Mock(spec=User)
-        mock_user.is_active = False
-        mock_user.status = UserStatus.INACTIVE.value
-        
-        with patch.object(user_service, '_find_user_by_identifier', return_value=mock_user):
-            result = user_service.authenticate_user(sample_auth_data)
-            
-            # Validate inactive user handling
-            assert result['success'] is False
-            assert 'inactive' in result['error'].lower()
-    
-    def test_user_profile_update_success(self, user_service, db_session):
-        """
-        Test successful user profile update with business validation.
-        
-        Validates profile modification workflow, data validation,
-        and transaction boundary management for update operations.
-        """
-        user_id = str(uuid.uuid4())
-        update_data = {
-            'first_name': 'Updated',
-            'last_name': 'Name',
-            'profile_data': {'theme': 'light', 'notifications': True}
+        return {
+            'username': 'test_user_001',
+            'email': 'testuser001@example.com',
+            'password': 'TestPassword123!',
+            'is_active': True
         }
-        
-        # Mock existing user
-        mock_user = Mock(spec=User)
-        mock_user.id = user_id
-        mock_user.first_name = 'Original'
-        mock_user.last_name = 'User'
-        
-        with patch.object(user_service, '_find_user_by_id', return_value=mock_user), \
-             patch.object(db_session, 'commit') as mock_commit:
-            
-            result = user_service.update_user_profile(user_id, update_data)
-            
-            # Validate profile update success
-            assert result['success'] is True
-            assert result['user']['first_name'] == update_data['first_name']
-            assert result['user']['last_name'] == update_data['last_name']
-            
-            # Verify database commit was called
-            mock_commit.assert_called_once()
     
-    def test_user_profile_update_user_not_found(self, user_service):
+    @pytest.fixture
+    def mock_validation_service(self):
         """
-        Test profile update failure for non-existent user.
+        Create mock ValidationService for testing service composition.
         
-        Validates proper error handling and user existence validation
-        in profile management workflows.
+        Returns:
+            Mock: Mocked validation service with configured responses
         """
-        user_id = str(uuid.uuid4())
-        update_data = {'first_name': 'Updated'}
-        
-        with patch.object(user_service, '_find_user_by_id', return_value=None):
-            with pytest.raises(UserNotFoundError):
-                user_service.update_user_profile(user_id, update_data)
+        mock_service = Mock()
+        mock_service.validate_user_data.return_value = ValidationResult(is_valid=True)
+        mock_service.validate_business_rules.return_value = True
+        return mock_service
     
-    def test_user_session_management(self, user_service, db_session):
+    def test_user_service_initialization(self, user_service, app):
         """
-        Test user session lifecycle management and security validation.
+        Test UserService initialization with proper configuration.
         
-        Validates session creation, validation, expiration, and cleanup
-        with proper security controls and session integrity preservation.
+        Validates service initialization per Section 5.2.3 including
+        password policy configuration, session settings, and validation
+        service composition.
         """
-        # Mock user for session operations
-        mock_user = Mock(spec=User)
-        mock_user.id = str(uuid.uuid4())
-        mock_user.username = 'testuser'
-        
-        # Test session creation
-        with patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit') as mock_commit:
+        with app.app_context():
+            # Test base service initialization
+            assert hasattr(user_service, 'db')
+            assert hasattr(user_service, 'session')
+            assert hasattr(user_service, 'logger')
             
-            session_result = user_service._create_user_session(mock_user, remember_me=True)
+            # Test user-specific configuration
+            assert hasattr(user_service, '_password_policy')
+            assert hasattr(user_service, '_default_session_hours')
+            assert hasattr(user_service, '_remember_me_hours')
             
-            # Validate session creation
-            assert 'session_id' in session_result
-            assert 'expires_at' in session_result
-            assert session_result['user_id'] == mock_user.id
+            # Test password policy configuration
+            policy = user_service._password_policy
+            assert policy['min_length'] == 8
+            assert policy['require_uppercase'] is True
+            assert policy['require_lowercase'] is True
+            assert policy['require_digit'] is True
+            assert policy['require_special'] is True
+            assert policy['max_length'] == 128
             
-            # Verify database operations
-            mock_add.assert_called_once()
-            mock_commit.assert_called_once()
+            # Test session configuration
+            assert user_service._default_session_hours == 24
+            assert user_service._remember_me_hours == 168
     
-    @pytest.mark.parametrize("password,expected_strength", [
-        ("weak", False),
-        ("StrongPassword123!", True),
-        ("Medium@123", True),
-        ("12345", False),
-    ])
-    def test_password_validation(self, user_service, password, expected_strength):
+    def test_user_business_rules_validation_success(self, user_service, app, valid_user_data):
         """
-        Test password strength validation with various password patterns.
+        Test successful user business rules validation.
         
-        Validates business rules for password security requirements
-        and consistent validation behavior across different input patterns.
+        Validates business rule implementation per Section 4.12.1 including
+        username validation, email format checking, and password policy
+        enforcement.
         """
-        result = user_service._validate_password_strength(password)
-        assert result == expected_strength
-    
-    def test_transaction_rollback_on_error(self, user_service, sample_user_data, db_session):
-        """
-        Test transaction rollback behavior during registration errors.
-        
-        Validates transaction boundary management and data consistency
-        during error scenarios with proper rollback mechanisms.
-        """
-        with patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit', side_effect=IntegrityError("test", "test", "test")) as mock_commit, \
-             patch.object(db_session, 'rollback') as mock_rollback:
+        with app.app_context():
+            # Test complete user data validation
+            result = user_service.validate_business_rules(valid_user_data)
+            assert result is True
             
-            # Mock no existing users for initial validation
-            with patch.object(user_service, '_find_user_by_email', return_value=None), \
-                 patch.object(user_service, '_find_user_by_username', return_value=None):
+            # Test individual field validation
+            username_data = {'username': 'valid_user123'}
+            assert user_service.validate_business_rules(username_data) is True
+            
+            email_data = {'email': 'valid@example.com'}
+            assert user_service.validate_business_rules(email_data) is True
+            
+            password_data = {'password': 'ValidPassword123!'}
+            assert user_service.validate_business_rules(password_data) is True
+    
+    def test_user_business_rules_validation_failures(self, user_service, app):
+        """
+        Test user business rules validation failures.
+        
+        Validates proper error handling for invalid user data that violates
+        business rules and security policies.
+        """
+        with app.app_context():
+            # Test invalid username
+            with pytest.raises(ValidationError) as exc_info:
+                user_service.validate_business_rules({'username': 'a'})  # Too short
+            assert "Username does not meet business requirements" in str(exc_info.value)
+            
+            with pytest.raises(ValidationError):
+                user_service.validate_business_rules({'username': 'invalid@username'})  # Invalid chars
+            
+            # Test invalid email
+            with pytest.raises(ValidationError) as exc_info:
+                user_service.validate_business_rules({'email': 'invalid_email'})
+            assert "Email format does not meet business requirements" in str(exc_info.value)
+            
+            with pytest.raises(ValidationError):
+                user_service.validate_business_rules({'email': 'test@'})  # Incomplete email
+            
+            # Test invalid password
+            with pytest.raises(ValidationError) as exc_info:
+                user_service.validate_business_rules({'password': 'weak'})
+            assert "Password does not meet security policy requirements" in str(exc_info.value)
+            
+            with pytest.raises(ValidationError):
+                user_service.validate_business_rules({'password': 'NoDigits!'})  # Missing digit
+            
+            with pytest.raises(ValidationError):
+                user_service.validate_business_rules({'password': 'noupper123!'})  # Missing uppercase
+            
+            with pytest.raises(ValidationError):
+                user_service.validate_business_rules({'password': 'NOLOWER123!'})  # Missing lowercase
+            
+            with pytest.raises(ValidationError):
+                user_service.validate_business_rules({'password': 'NoSpecial123'})  # Missing special char
+    
+    def test_username_validation_rules(self, user_service, app):
+        """
+        Test specific username validation rules implementation.
+        
+        Validates username business rules including length requirements,
+        character restrictions, and format validation.
+        """
+        with app.app_context():
+            # Test valid usernames
+            assert user_service._validate_username('user123') is True
+            assert user_service._validate_username('test_user') is True
+            assert user_service._validate_username('user-name') is True
+            assert user_service._validate_username('a' * 80) is True  # Max length
+            
+            # Test invalid usernames
+            assert user_service._validate_username('ab') is False  # Too short
+            assert user_service._validate_username('a' * 81) is False  # Too long
+            assert user_service._validate_username('user@name') is False  # Invalid char
+            assert user_service._validate_username('user name') is False  # Space
+            assert user_service._validate_username('_username') is False  # Start with underscore
+            assert user_service._validate_username('-username') is False  # Start with hyphen
+            assert user_service._validate_username('') is False  # Empty
+            assert user_service._validate_username(None) is False  # None
+            assert user_service._validate_username(123) is False  # Non-string
+    
+    def test_email_validation_rules(self, user_service, app):
+        """
+        Test specific email validation rules implementation.
+        
+        Validates email format business rules including basic format checking,
+        length requirements, and domain validation.
+        """
+        with app.app_context():
+            # Test valid emails
+            assert user_service._validate_email_format('test@example.com') is True
+            assert user_service._validate_email_format('user.name@domain.co.uk') is True
+            assert user_service._validate_email_format('user+tag@example.org') is True
+            assert user_service._validate_email_format('a@b.co') is True  # Min valid
+            
+            # Test invalid emails
+            assert user_service._validate_email_format('') is False  # Empty
+            assert user_service._validate_email_format('invalid') is False  # No @
+            assert user_service._validate_email_format('@example.com') is False  # No local part
+            assert user_service._validate_email_format('test@') is False  # No domain
+            assert user_service._validate_email_format('test@domain') is False  # No TLD
+            assert user_service._validate_email_format('test..test@domain.com') is False  # Double dot
+            assert user_service._validate_email_format('a@b.c') is False  # TLD too short
+            assert user_service._validate_email_format('a' * 115 + '@example.com') is False  # Too long
+            assert user_service._validate_email_format(None) is False  # None
+            assert user_service._validate_email_format(123) is False  # Non-string
+    
+    def test_password_policy_validation(self, user_service, app):
+        """
+        Test comprehensive password policy validation.
+        
+        Validates password security policy enforcement including length,
+        character requirements, and complexity rules.
+        """
+        with app.app_context():
+            # Test valid passwords
+            assert user_service._validate_password_policy('TestPass123!') is True
+            assert user_service._validate_password_policy('Abc123@#$') is True
+            assert user_service._validate_password_policy('P@ssw0rd') is True  # Min length
+            assert user_service._validate_password_policy('A' * 126 + '1!') is True  # Max length
+            
+            # Test length violations
+            assert user_service._validate_password_policy('Short1!') is False  # Too short
+            assert user_service._validate_password_policy('A' * 127 + '1!') is False  # Too long
+            
+            # Test character requirement violations
+            assert user_service._validate_password_policy('testpass123!') is False  # No uppercase
+            assert user_service._validate_password_policy('TESTPASS123!') is False  # No lowercase
+            assert user_service._validate_password_policy('TestPass!') is False  # No digit
+            assert user_service._validate_password_policy('TestPass123') is False  # No special
+            
+            # Test edge cases
+            assert user_service._validate_password_policy('') is False  # Empty
+            assert user_service._validate_password_policy(None) is False  # None
+            assert user_service._validate_password_policy(123) is False  # Non-string
+    
+    def test_user_registration_success(self, user_service, app, db, valid_user_data):
+        """
+        Test successful user registration workflow.
+        
+        Validates complete user registration process including validation,
+        database persistence, and proper user instance creation as specified
+        in Feature F-005 business logic preservation.
+        """
+        with app.app_context():
+            # Test basic user registration
+            user = user_service.register_user(valid_user_data)
+            
+            # Verify user instance
+            assert isinstance(user, User)
+            assert user.id is not None
+            assert user.username == valid_user_data['username'].lower()
+            assert user.email == valid_user_data['email'].lower()
+            assert user.is_active == valid_user_data['is_active']
+            
+            # Verify password hashing
+            assert user.password_hash != valid_user_data['password']
+            assert check_password_hash(user.password_hash, valid_user_data['password'])
+            
+            # Verify database persistence
+            saved_user = User.query.filter_by(username=user.username).first()
+            assert saved_user is not None
+            assert saved_user.id == user.id
+    
+    def test_user_registration_with_auto_login(self, user_service, app, db, valid_user_data):
+        """
+        Test user registration with automatic login functionality.
+        
+        Validates user registration with auto-login feature including session
+        creation and Flask-Login integration.
+        """
+        with app.app_context():
+            # Mock request context for session creation
+            request_context = {
+                'user_agent': 'Mozilla/5.0 Test Browser',
+                'ip_address': '192.168.1.1'
+            }
+            
+            with patch('flask_login.login_user') as mock_login:
+                user = user_service.register_user(
+                    valid_user_data,
+                    auto_login=True,
+                    request_context=request_context
+                )
                 
-                result = user_service.register_user(sample_user_data)
+                # Verify auto-login was called
+                mock_login.assert_called_once_with(user)
                 
-                # Validate error handling and rollback
-                assert result['status'] == RegistrationStatus.SYSTEM_ERROR
-                mock_add.assert_called_once()
-                mock_commit.assert_called_once()
-                mock_rollback.assert_called_once()
+                # Verify user creation
+                assert user is not None
+                assert user.username == valid_user_data['username'].lower()
+    
+    def test_user_registration_duplicate_username(self, user_service, app, db, valid_user_data):
+        """
+        Test user registration with duplicate username handling.
+        
+        Validates proper error handling when attempting to register a user
+        with an existing username, ensuring database constraint enforcement.
+        """
+        with app.app_context():
+            # Create first user
+            user1 = user_service.register_user(valid_user_data)
+            assert user1 is not None
+            
+            # Attempt to create second user with same username
+            duplicate_data = valid_user_data.copy()
+            duplicate_data['email'] = 'different@example.com'
+            
+            with pytest.raises(UserRegistrationError) as exc_info:
+                user_service.register_user(duplicate_data)
+            
+            assert "User already exists" in str(exc_info.value)
+    
+    def test_user_registration_duplicate_email(self, user_service, app, db, valid_user_data):
+        """
+        Test user registration with duplicate email handling.
+        
+        Validates proper error handling when attempting to register a user
+        with an existing email address.
+        """
+        with app.app_context():
+            # Create first user
+            user1 = user_service.register_user(valid_user_data)
+            assert user1 is not None
+            
+            # Attempt to create second user with same email
+            duplicate_data = valid_user_data.copy()
+            duplicate_data['username'] = 'different_user'
+            
+            with pytest.raises(UserRegistrationError) as exc_info:
+                user_service.register_user(duplicate_data)
+            
+            assert "User already exists" in str(exc_info.value)
+    
+    def test_user_registration_validation_error(self, user_service, app, db):
+        """
+        Test user registration with validation errors.
+        
+        Validates proper error handling when registration data fails
+        business rule validation.
+        """
+        with app.app_context():
+            # Test missing required fields
+            invalid_data = {'username': 'test_user'}  # Missing email and password
+            
+            with pytest.raises(ValidationError) as exc_info:
+                user_service.register_user(invalid_data)
+            
+            assert "Required fields missing" in str(exc_info.value)
+            
+            # Test invalid business rules
+            invalid_data = {
+                'username': 'a',  # Too short
+                'email': 'invalid_email',  # Invalid format
+                'password': 'weak'  # Weak password
+            }
+            
+            with pytest.raises(ValidationError):
+                user_service.register_user(invalid_data)
+    
+    def test_user_authentication_success(self, user_service, app, db, valid_user_data):
+        """
+        Test successful user authentication workflow.
+        
+        Validates user authentication process including credential verification,
+        session creation, and Flask-Login integration as specified in Feature F-007.
+        """
+        with app.app_context():
+            # Create user for authentication testing
+            user = user_service.register_user(valid_user_data)
+            
+            # Test authentication with username
+            authenticated_user = user_service.authenticate_user(
+                valid_user_data['username'],
+                valid_user_data['password']
+            )
+            
+            assert authenticated_user is not None
+            assert authenticated_user.id == user.id
+            assert authenticated_user.username == user.username
+            
+            # Test authentication with email
+            authenticated_user_email = user_service.authenticate_user(
+                valid_user_data['email'],
+                valid_user_data['password']
+            )
+            
+            assert authenticated_user_email is not None
+            assert authenticated_user_email.id == user.id
+    
+    def test_user_authentication_invalid_credentials(self, user_service, app, db, valid_user_data):
+        """
+        Test user authentication with invalid credentials.
+        
+        Validates proper handling of authentication failures including
+        invalid usernames, passwords, and non-existent users.
+        """
+        with app.app_context():
+            # Create user for testing
+            user = user_service.register_user(valid_user_data)
+            
+            # Test invalid password
+            result = user_service.authenticate_user(
+                valid_user_data['username'],
+                'wrong_password'
+            )
+            assert result is None
+            
+            # Test non-existent user
+            result = user_service.authenticate_user(
+                'non_existent_user',
+                valid_user_data['password']
+            )
+            assert result is None
+            
+            # Test invalid email
+            result = user_service.authenticate_user(
+                'nonexistent@example.com',
+                valid_user_data['password']
+            )
+            assert result is None
+    
+    def test_user_authentication_with_remember_me(self, user_service, app, db, valid_user_data):
+        """
+        Test user authentication with remember-me functionality.
+        
+        Validates extended session creation for remember-me login functionality
+        with proper session duration management.
+        """
+        with app.app_context():
+            # Create user for testing
+            user = user_service.register_user(valid_user_data)
+            
+            request_context = {
+                'user_agent': 'Mozilla/5.0 Test Browser',
+                'ip_address': '192.168.1.1'
+            }
+            
+            # Test authentication with remember_me
+            with patch.object(user_service, '_create_user_session_internal') as mock_session:
+                mock_session.return_value = 'test_session_token'
+                
+                authenticated_user = user_service.authenticate_user(
+                    valid_user_data['username'],
+                    valid_user_data['password'],
+                    remember_me=True,
+                    request_context=request_context
+                )
+                
+                assert authenticated_user is not None
+                # Verify session creation was called with remember_me context
+                mock_session.assert_called_once()
+    
+    def test_user_authentication_inactive_user(self, user_service, app, db, valid_user_data):
+        """
+        Test authentication for inactive user accounts.
+        
+        Validates that inactive users cannot authenticate even with valid
+        credentials, ensuring proper account status enforcement.
+        """
+        with app.app_context():
+            # Create inactive user
+            valid_user_data['is_active'] = False
+            user = user_service.register_user(valid_user_data)
+            
+            # Manually set user as inactive in database
+            user.is_active = False
+            db.session.commit()
+            
+            # Test authentication for inactive user
+            result = user_service.authenticate_user(
+                valid_user_data['username'],
+                valid_user_data['password']
+            )
+            
+            # Should return None for inactive user
+            assert result is None
+    
+    @patch('src.services.user_service.ValidationService')
+    def test_user_service_composition(self, mock_validation_class, user_service, app):
+        """
+        Test UserService composition with ValidationService.
+        
+        Validates service composition patterns as specified in Section 5.2.3
+        for complex business workflow coordination.
+        """
+        with app.app_context():
+            # Configure mock validation service
+            mock_validation_instance = Mock()
+            mock_validation_instance.validate_user_data.return_value = ValidationResult(is_valid=True)
+            user_service._validation_service = mock_validation_instance
+            
+            # Test validation service access
+            validation_service = user_service.validation_service
+            assert validation_service == mock_validation_instance
+            
+            # Test validation service caching
+            validation_service_2 = user_service.validation_service
+            assert validation_service is validation_service_2
+    
+    def test_user_service_transaction_boundary_integration(self, user_service, app, db, valid_user_data):
+        """
+        Test UserService integration with transaction boundary management.
+        
+        Validates proper transaction handling within user service operations
+        including commit and rollback scenarios.
+        """
+        with app.app_context():
+            # Test successful transaction
+            with user_service.transaction_boundary():
+                user = User(
+                    username=valid_user_data['username'],
+                    email=valid_user_data['email'],
+                    password=valid_user_data['password']
+                )
+                user_service.session.add(user)
+                user_service.session.flush()
+                user_id = user.id
+            
+            # Verify transaction committed
+            saved_user = User.query.get(user_id)
+            assert saved_user is not None
+            
+            # Test transaction rollback
+            with pytest.raises(TransactionError):
+                with user_service.transaction_boundary():
+                    user2 = User(
+                        username='rollback_user',
+                        email='rollback@example.com',
+                        password='TestPassword123!'
+                    )
+                    user_service.session.add(user2)
+                    user_service.session.flush()
+                    # Force exception to trigger rollback
+                    raise Exception("Test rollback")
+            
+            # Verify rollback occurred
+            rollback_user = User.query.filter_by(username='rollback_user').first()
+            assert rollback_user is None
+    
+    def test_user_service_error_handling(self, user_service, app, db):
+        """
+        Test comprehensive error handling in UserService operations.
+        
+        Validates proper error translation and handling across all user
+        service operations including database errors and validation failures.
+        """
+        with app.app_context():
+            # Test database error handling
+            with patch.object(user_service.session, 'add', side_effect=SQLAlchemyError("Database error")):
+                with pytest.raises(UserRegistrationError) as exc_info:
+                    user_service.register_user({
+                        'username': 'test_user',
+                        'email': 'test@example.com',
+                        'password': 'TestPassword123!'
+                    })
+                
+                assert "User registration failed" in str(exc_info.value)
+                assert exc_info.value.original_error is not None
+            
+            # Test validation error propagation
+            with pytest.raises(ValidationError):
+                user_service.register_user({
+                    'username': 'a',  # Invalid username
+                    'email': 'test@example.com',
+                    'password': 'TestPassword123!'
+                })
 
 
 class TestBusinessEntityService:
     """
-    Comprehensive unit tests for BusinessEntityService complex workflow validation.
+    Unit tests for BusinessEntityService complex workflow validation.
     
-    Tests validate entity creation, relationship management, lifecycle operations,
-    and cross-entity business rules while ensuring functional equivalence with
-    original Node.js business logic patterns through Service Layer implementation.
-    
-    Coverage Areas:
-    - Entity creation workflow with business validation
-    - Complex entity relationship mapping and constraints
-    - Entity lifecycle management with status transitions
-    - Cross-entity business rule coordination and enforcement
-    - Transaction boundary management for entity operations
-    - Service composition patterns for multi-entity workflows
+    Tests business entity management workflows including entity creation,
+    relationship management, lifecycle operations, and cross-entity business
+    rules to ensure functional equivalence with Node.js implementation as
+    specified in Section 5.2.3.
     """
     
     @pytest.fixture
-    def business_service(self, app, db_session):
-        """Create BusinessEntityService instance with Flask application context."""
+    def business_entity_service(self, app, db):
+        """
+        Create BusinessEntityService instance for testing.
+        
+        Args:
+            app: Flask application fixture
+            db: SQLAlchemy database fixture
+        
+        Returns:
+            BusinessEntityService: Configured business entity service instance
+        """
         with app.app_context():
-            service = BusinessEntityService(db=db_session)
-            yield service
+            return BusinessEntityService(db=db)
     
     @pytest.fixture
-    def sample_entity_data(self):
-        """Sample entity creation data for testing scenarios."""
-        return EntityCreationRequest(
-            name="Test Entity",
-            description="Test entity for unit testing",
-            owner_id=1,
-            status="active",
-            metadata={"category": "test", "priority": "high"}
-        )
+    def test_user(self, app, db):
+        """
+        Create test user for entity ownership testing.
+        
+        Returns:
+            User: Test user instance
+        """
+        with app.app_context():
+            user = User(
+                username='entity_owner',
+                email='owner@example.com',
+                password='TestPassword123!'
+            )
+            db.session.add(user)
+            db.session.commit()
+            return user
     
     @pytest.fixture
-    def sample_relationship_data(self):
-        """Sample relationship data for entity relationship testing."""
-        return EntityRelationshipRequest(
-            source_entity_id=1,
-            target_entity_id=2,
-            relationship_type="depends_on",
-            metadata={"strength": "strong", "weight": 0.8},
-            is_active=True
-        )
-    
-    def test_business_entity_service_initialization(self, business_service):
-        """Test BusinessEntityService proper initialization with dependencies."""
-        assert business_service is not None
-        assert isinstance(business_service, BusinessEntityService)
-        assert hasattr(business_service, 'db')
-        assert hasattr(business_service, 'validation_service')
-        assert hasattr(business_service, 'logger')
-    
-    def test_entity_creation_success(self, business_service, sample_entity_data, db_session):
+    def valid_entity_data(self, test_user):
         """
-        Test successful entity creation with business validation.
+        Provide valid business entity data for testing.
         
-        Validates:
-        - Entity data validation and business rules
-        - Proper database persistence with transaction management
-        - Entity metadata handling and serialization
-        - Business rule enforcement for entity constraints
-        - Successful entity creation workflow orchestration
+        Args:
+            test_user: Test user fixture for ownership
+        
+        Returns:
+            Dict[str, Any]: Valid entity data meeting business rules
         """
-        # Mock database operations for isolation
-        with patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit') as mock_commit, \
-             patch.object(db_session, 'rollback') as mock_rollback:
-            
-            # Mock entity validation to pass
-            with patch.object(business_service, '_validate_entity_data', return_value=True), \
-                 patch.object(business_service, '_check_entity_name_unique', return_value=True):
-                
-                # Execute entity creation
-                result = business_service.create_entity(sample_entity_data)
-                
-                # Validate creation success
-                assert result['success'] is True
-                assert result['entity']['name'] == sample_entity_data.name
-                assert result['entity']['description'] == sample_entity_data.description
-                assert result['entity']['status'] == sample_entity_data.status
-                assert result['entity']['metadata'] == sample_entity_data.metadata
-                
-                # Verify database operations
-                mock_add.assert_called_once()
-                mock_commit.assert_called_once()
-                mock_rollback.assert_not_called()
-    
-    def test_entity_creation_validation_failure(self, business_service, sample_entity_data):
-        """
-        Test entity creation failure due to validation errors.
-        
-        Validates business rule enforcement and proper error handling
-        without database persistence for invalid entity data.
-        """
-        # Mock validation failure
-        validation_errors = ["Entity name is required", "Invalid status value"]
-        
-        with patch.object(business_service, '_validate_entity_data', return_value=False), \
-             patch.object(business_service, '_get_validation_errors', return_value=validation_errors):
-            
-            result = business_service.create_entity(sample_entity_data)
-            
-            # Validate validation failure handling
-            assert result['success'] is False
-            assert 'errors' in result
-            assert len(result['errors']) == len(validation_errors)
-    
-    def test_entity_creation_duplicate_name(self, business_service, sample_entity_data):
-        """
-        Test entity creation failure due to duplicate name constraint.
-        
-        Validates business rule enforcement for unique entity names
-        and proper constraint violation handling.
-        """
-        with patch.object(business_service, '_validate_entity_data', return_value=True), \
-             patch.object(business_service, '_check_entity_name_unique', return_value=False):
-            
-            result = business_service.create_entity(sample_entity_data)
-            
-            # Validate duplicate name handling
-            assert result['success'] is False
-            assert 'duplicate' in result['error'].lower()
-            assert 'name' in result['error'].lower()
-    
-    def test_entity_relationship_creation_success(self, business_service, sample_relationship_data, db_session):
-        """
-        Test successful entity relationship creation with validation.
-        
-        Validates:
-        - Relationship data validation and business rules
-        - Entity existence verification for relationship endpoints
-        - Relationship type validation and constraint checking
-        - Transaction boundary management for relationship operations
-        - Complex business entity relationship mapping per Section 6.2.2.1
-        """
-        # Mock source and target entities
-        mock_source = Mock(spec=BusinessEntity)
-        mock_source.id = sample_relationship_data.source_entity_id
-        mock_source.status = "active"
-        
-        mock_target = Mock(spec=BusinessEntity)
-        mock_target.id = sample_relationship_data.target_entity_id
-        mock_target.status = "active"
-        
-        with patch.object(business_service, '_find_entity_by_id') as mock_find, \
-             patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit') as mock_commit:
-            
-            # Configure entity lookup mock
-            mock_find.side_effect = [mock_source, mock_target]
-            
-            # Mock relationship validation
-            with patch.object(business_service, '_validate_relationship_data', return_value=True), \
-                 patch.object(business_service, '_check_relationship_exists', return_value=False):
-                
-                # Execute relationship creation
-                result = business_service.create_relationship(sample_relationship_data)
-                
-                # Validate relationship creation success
-                assert result['success'] is True
-                assert result['relationship']['source_entity_id'] == sample_relationship_data.source_entity_id
-                assert result['relationship']['target_entity_id'] == sample_relationship_data.target_entity_id
-                assert result['relationship']['relationship_type'] == sample_relationship_data.relationship_type
-                
-                # Verify database operations
-                mock_add.assert_called_once()
-                mock_commit.assert_called_once()
-    
-    def test_entity_relationship_creation_missing_entity(self, business_service, sample_relationship_data):
-        """
-        Test relationship creation failure for non-existent entities.
-        
-        Validates entity existence verification and proper error handling
-        for relationship operations with missing entity references.
-        """
-        # Mock missing source entity
-        with patch.object(business_service, '_find_entity_by_id', return_value=None):
-            result = business_service.create_relationship(sample_relationship_data)
-            
-            # Validate missing entity handling
-            assert result['success'] is False
-            assert 'not found' in result['error'].lower()
-    
-    def test_entity_update_success(self, business_service, db_session):
-        """
-        Test successful entity update with selective field updates.
-        
-        Validates entity lifecycle management with partial updates,
-        business rule preservation, and transaction boundary management.
-        """
-        entity_id = 1
-        update_data = EntityUpdateRequest(
-            entity_id=entity_id,
-            name="Updated Entity Name",
-            description="Updated description",
-            status="inactive"
-        )
-        
-        # Mock existing entity
-        mock_entity = Mock(spec=BusinessEntity)
-        mock_entity.id = entity_id
-        mock_entity.name = "Original Name"
-        mock_entity.description = "Original description"
-        mock_entity.status = "active"
-        
-        with patch.object(business_service, '_find_entity_by_id', return_value=mock_entity), \
-             patch.object(db_session, 'commit') as mock_commit:
-            
-            # Mock validation success
-            with patch.object(business_service, '_validate_update_data', return_value=True):
-                
-                # Execute entity update
-                result = business_service.update_entity(update_data)
-                
-                # Validate update success
-                assert result['success'] is True
-                assert mock_entity.name == update_data.name
-                assert mock_entity.description == update_data.description
-                assert mock_entity.status == update_data.status
-                
-                # Verify database commit
-                mock_commit.assert_called_once()
-    
-    def test_entity_lifecycle_state_transitions(self, business_service, db_session):
-        """
-        Test entity lifecycle state transitions with business rules.
-        
-        Validates status transition validation, business rule enforcement,
-        and proper lifecycle management for entity status changes.
-        """
-        entity_id = 1
-        
-        # Mock entity with current status
-        mock_entity = Mock(spec=BusinessEntity)
-        mock_entity.id = entity_id
-        mock_entity.status = "active"
-        
-        with patch.object(business_service, '_find_entity_by_id', return_value=mock_entity), \
-             patch.object(db_session, 'commit') as mock_commit:
-            
-            # Test valid status transition
-            result = business_service.update_entity_status(entity_id, "inactive")
-            
-            # Validate status transition
-            assert result['success'] is True
-            assert mock_entity.status == "inactive"
-            mock_commit.assert_called_once()
-    
-    def test_cross_entity_business_rules(self, business_service, db_session):
-        """
-        Test cross-entity business rule coordination and enforcement.
-        
-        Validates complex business logic coordination across multiple entities,
-        relationship constraint validation, and business rule preservation
-        during multi-entity operations per Section 5.2.3.
-        """
-        # Mock entities with dependencies
-        parent_entity = Mock(spec=BusinessEntity)
-        parent_entity.id = 1
-        parent_entity.status = "active"
-        parent_entity.children = []
-        
-        child_entity = Mock(spec=BusinessEntity)
-        child_entity.id = 2
-        child_entity.status = "active"
-        child_entity.parent_id = 1
-        
-        with patch.object(business_service, '_find_entity_by_id') as mock_find, \
-             patch.object(business_service, '_get_entity_children', return_value=[child_entity]):
-            
-            mock_find.return_value = parent_entity
-            
-            # Test business rule: cannot deactivate parent with active children
-            result = business_service.validate_entity_deactivation(1)
-            
-            # Validate business rule enforcement
-            assert result['can_deactivate'] is False
-            assert 'active children' in result['reason'].lower()
-    
-    def test_entity_search_and_filtering(self, business_service, db_session):
-        """
-        Test entity search and filtering capabilities with business logic.
-        
-        Validates search functionality, filtering logic, and result
-        formatting while maintaining business rule consistency.
-        """
-        # Mock search criteria
-        search_criteria = {
-            'name': 'Test',
+        return {
+            'name': 'Test Business Entity',
+            'description': 'A test business entity for unit testing',
             'status': 'active',
-            'metadata': {'category': 'test'}
+            'owner_id': test_user.id,
+            'metadata': {
+                'category': 'test',
+                'priority': 'high',
+                'tags': ['testing', 'business']
+            }
         }
-        
-        # Mock search results
-        mock_entities = [
-            Mock(spec=BusinessEntity, id=1, name="Test Entity 1"),
-            Mock(spec=BusinessEntity, id=2, name="Test Entity 2")
-        ]
-        
-        with patch.object(business_service, '_search_entities', return_value=mock_entities):
-            
-            result = business_service.search_entities(search_criteria)
-            
-            # Validate search results
-            assert result['success'] is True
-            assert len(result['entities']) == 2
-            assert all('id' in entity for entity in result['entities'])
-            assert all('name' in entity for entity in result['entities'])
     
-    def test_transaction_boundary_management(self, business_service, sample_entity_data, db_session):
+    def test_business_entity_service_initialization(self, business_entity_service, app):
         """
-        Test transaction boundary management for complex entity operations.
+        Test BusinessEntityService initialization and configuration.
         
-        Validates transaction consistency, rollback behavior on errors,
-        and proper resource cleanup during transaction failures.
+        Validates service initialization per Section 5.2.3 including
+        proper inheritance from BaseService and entity-specific configuration.
         """
-        with patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit', side_effect=SQLAlchemyError("Database error")) as mock_commit, \
-             patch.object(db_session, 'rollback') as mock_rollback:
+        with app.app_context():
+            # Test base service initialization
+            assert hasattr(business_entity_service, 'db')
+            assert hasattr(business_entity_service, 'session')
+            assert hasattr(business_entity_service, 'logger')
             
-            # Mock validation success but database failure
-            with patch.object(business_service, '_validate_entity_data', return_value=True), \
-                 patch.object(business_service, '_check_entity_name_unique', return_value=True):
+            # Test business entity specific attributes
+            assert hasattr(business_entity_service, '_entity_status_values')
+            assert hasattr(business_entity_service, '_relationship_types')
+            
+            # Test entity status configuration
+            status_values = business_entity_service._entity_status_values
+            assert 'active' in status_values
+            assert 'inactive' in status_values
+            assert 'pending' in status_values
+            assert 'archived' in status_values
+    
+    def test_entity_business_rules_validation(self, business_entity_service, app, valid_entity_data):
+        """
+        Test business entity validation rules implementation.
+        
+        Validates entity-specific business rules including name validation,
+        description requirements, status validation, and ownership rules.
+        """
+        with app.app_context():
+            # Test valid entity data
+            result = business_entity_service.validate_business_rules(valid_entity_data)
+            assert result is True
+            
+            # Test invalid entity name
+            invalid_data = valid_entity_data.copy()
+            invalid_data['name'] = ''  # Empty name
+            
+            with pytest.raises(ValidationError) as exc_info:
+                business_entity_service.validate_business_rules(invalid_data)
+            assert "Entity name is required" in str(exc_info.value)
+            
+            # Test invalid status
+            invalid_data = valid_entity_data.copy()
+            invalid_data['status'] = 'invalid_status'
+            
+            with pytest.raises(ValidationError) as exc_info:
+                business_entity_service.validate_business_rules(invalid_data)
+            assert "Invalid entity status" in str(exc_info.value)
+            
+            # Test missing owner
+            invalid_data = valid_entity_data.copy()
+            del invalid_data['owner_id']
+            
+            with pytest.raises(ValidationError) as exc_info:
+                business_entity_service.validate_business_rules(invalid_data)
+            assert "Entity owner is required" in str(exc_info.value)
+    
+    def test_create_business_entity_success(self, business_entity_service, app, db, valid_entity_data):
+        """
+        Test successful business entity creation workflow.
+        
+        Validates complete entity creation process including validation,
+        database persistence, and proper entity instance creation.
+        """
+        with app.app_context():
+            # Create business entity
+            entity = business_entity_service.create_entity(valid_entity_data)
+            
+            # Verify entity instance
+            assert isinstance(entity, BusinessEntity)
+            assert entity.id is not None
+            assert entity.name == valid_entity_data['name']
+            assert entity.description == valid_entity_data['description']
+            assert entity.status == valid_entity_data['status']
+            assert entity.owner_id == valid_entity_data['owner_id']
+            
+            # Verify timestamps
+            assert entity.created_at is not None
+            assert entity.updated_at is not None
+            
+            # Verify database persistence
+            saved_entity = BusinessEntity.query.filter_by(name=entity.name).first()
+            assert saved_entity is not None
+            assert saved_entity.id == entity.id
+    
+    def test_create_business_entity_with_metadata(self, business_entity_service, app, db, valid_entity_data):
+        """
+        Test business entity creation with metadata handling.
+        
+        Validates metadata serialization and storage for entity attributes
+        that require flexible schema support.
+        """
+        with app.app_context():
+            # Create entity with metadata
+            entity = business_entity_service.create_entity(valid_entity_data)
+            
+            # Verify metadata storage
+            assert entity.metadata is not None
+            assert entity.metadata['category'] == 'test'
+            assert entity.metadata['priority'] == 'high'
+            assert 'testing' in entity.metadata['tags']
+            assert 'business' in entity.metadata['tags']
+    
+    def test_update_business_entity_success(self, business_entity_service, app, db, valid_entity_data):
+        """
+        Test successful business entity update workflow.
+        
+        Validates entity update process including partial updates,
+        validation, and proper change tracking.
+        """
+        with app.app_context():
+            # Create entity first
+            entity = business_entity_service.create_entity(valid_entity_data)
+            original_updated_at = entity.updated_at
+            
+            # Update entity
+            update_data = {
+                'description': 'Updated description for testing',
+                'status': 'inactive',
+                'metadata': {
+                    'category': 'updated_test',
+                    'priority': 'medium'
+                }
+            }
+            
+            # Wait briefly to ensure timestamp difference
+            time.sleep(0.1)
+            
+            updated_entity = business_entity_service.update_entity(entity.id, update_data)
+            
+            # Verify updates
+            assert updated_entity.id == entity.id
+            assert updated_entity.description == update_data['description']
+            assert updated_entity.status == update_data['status']
+            assert updated_entity.metadata['category'] == 'updated_test'
+            assert updated_entity.metadata['priority'] == 'medium'
+            
+            # Verify timestamp update
+            assert updated_entity.updated_at > original_updated_at
+            
+            # Verify unchanged fields
+            assert updated_entity.name == entity.name
+            assert updated_entity.owner_id == entity.owner_id
+    
+    def test_entity_relationship_creation(self, business_entity_service, app, db, test_user):
+        """
+        Test entity relationship creation and management.
+        
+        Validates complex business entity relationship workflows including
+        relationship creation, type validation, and bidirectional associations.
+        """
+        with app.app_context():
+            # Create source and target entities
+            source_data = {
+                'name': 'Source Entity',
+                'description': 'Source entity for relationship testing',
+                'status': 'active',
+                'owner_id': test_user.id
+            }
+            target_data = {
+                'name': 'Target Entity',
+                'description': 'Target entity for relationship testing',
+                'status': 'active',
+                'owner_id': test_user.id
+            }
+            
+            source_entity = business_entity_service.create_entity(source_data)
+            target_entity = business_entity_service.create_entity(target_data)
+            
+            # Create relationship
+            relationship_data = {
+                'source_entity_id': source_entity.id,
+                'target_entity_id': target_entity.id,
+                'relationship_type': 'dependency',
+                'metadata': {
+                    'strength': 'strong',
+                    'direction': 'unidirectional'
+                }
+            }
+            
+            relationship = business_entity_service.create_relationship(relationship_data)
+            
+            # Verify relationship
+            assert isinstance(relationship, EntityRelationship)
+            assert relationship.id is not None
+            assert relationship.source_entity_id == source_entity.id
+            assert relationship.target_entity_id == target_entity.id
+            assert relationship.relationship_type == 'dependency'
+            assert relationship.is_active is True
+            
+            # Verify metadata
+            assert relationship.metadata['strength'] == 'strong'
+            assert relationship.metadata['direction'] == 'unidirectional'
+    
+    def test_entity_lifecycle_management(self, business_entity_service, app, db, valid_entity_data):
+        """
+        Test entity lifecycle management including activation, deactivation, and archival.
+        
+        Validates entity state transitions and lifecycle business rules
+        enforcement throughout entity lifetime.
+        """
+        with app.app_context():
+            # Create entity
+            entity = business_entity_service.create_entity(valid_entity_data)
+            assert entity.status == 'active'
+            
+            # Deactivate entity
+            deactivated_entity = business_entity_service.deactivate_entity(entity.id)
+            assert deactivated_entity.status == 'inactive'
+            
+            # Reactivate entity
+            reactivated_entity = business_entity_service.activate_entity(entity.id)
+            assert reactivated_entity.status == 'active'
+            
+            # Archive entity
+            archived_entity = business_entity_service.archive_entity(entity.id)
+            assert archived_entity.status == 'archived'
+            
+            # Test that archived entities cannot be activated
+            with pytest.raises(EntityLifecycleError) as exc_info:
+                business_entity_service.activate_entity(entity.id)
+            assert "Cannot activate archived entity" in str(exc_info.value)
+    
+    def test_entity_ownership_validation(self, business_entity_service, app, db):
+        """
+        Test entity ownership validation and access control.
+        
+        Validates that entities can only be modified by their owners or
+        authorized users according to business rules.
+        """
+        with app.app_context():
+            # Create two users
+            owner = User(
+                username='entity_owner',
+                email='owner@example.com',
+                password='TestPassword123!'
+            )
+            other_user = User(
+                username='other_user',
+                email='other@example.com',
+                password='TestPassword123!'
+            )
+            db.session.add_all([owner, other_user])
+            db.session.commit()
+            
+            # Create entity with owner
+            entity_data = {
+                'name': 'Owned Entity',
+                'description': 'Entity with ownership validation',
+                'status': 'active',
+                'owner_id': owner.id
+            }
+            
+            entity = business_entity_service.create_entity(entity_data)
+            
+            # Test ownership validation in updates
+            with patch.object(business_entity_service, 'get_current_user_id', return_value=other_user.id):
+                with pytest.raises(ValidationError) as exc_info:
+                    business_entity_service.update_entity(entity.id, {'description': 'Unauthorized update'})
+                assert "Not authorized to modify entity" in str(exc_info.value)
+            
+            # Test owner can update
+            with patch.object(business_entity_service, 'get_current_user_id', return_value=owner.id):
+                updated_entity = business_entity_service.update_entity(
+                    entity.id, 
+                    {'description': 'Authorized update'}
+                )
+                assert updated_entity.description == 'Authorized update'
+    
+    def test_entity_search_and_filtering(self, business_entity_service, app, db, test_user):
+        """
+        Test entity search and filtering capabilities.
+        
+        Validates entity query operations including search by name,
+        status filtering, and owner-based filtering.
+        """
+        with app.app_context():
+            # Create multiple entities with different attributes
+            entities_data = [
+                {
+                    'name': 'Alpha Entity',
+                    'description': 'First test entity',
+                    'status': 'active',
+                    'owner_id': test_user.id
+                },
+                {
+                    'name': 'Beta Entity',
+                    'description': 'Second test entity',
+                    'status': 'inactive',
+                    'owner_id': test_user.id
+                },
+                {
+                    'name': 'Gamma Entity',
+                    'description': 'Third test entity',
+                    'status': 'active',
+                    'owner_id': test_user.id
+                }
+            ]
+            
+            created_entities = []
+            for data in entities_data:
+                entity = business_entity_service.create_entity(data)
+                created_entities.append(entity)
+            
+            # Test search by name
+            search_results = business_entity_service.search_entities(name_filter='Alpha')
+            assert len(search_results) == 1
+            assert search_results[0].name == 'Alpha Entity'
+            
+            # Test filter by status
+            active_entities = business_entity_service.search_entities(status_filter='active')
+            assert len(active_entities) == 2
+            
+            inactive_entities = business_entity_service.search_entities(status_filter='inactive')
+            assert len(inactive_entities) == 1
+            assert inactive_entities[0].name == 'Beta Entity'
+            
+            # Test filter by owner
+            owner_entities = business_entity_service.search_entities(owner_id=test_user.id)
+            assert len(owner_entities) == 3
+    
+    def test_entity_transaction_boundary_management(self, business_entity_service, app, db, valid_entity_data):
+        """
+        Test transaction boundary management in entity operations.
+        
+        Validates that entity operations properly handle transaction boundaries
+        including commit and rollback scenarios for data consistency.
+        """
+        with app.app_context():
+            # Test successful transaction
+            with business_entity_service.transaction_boundary():
+                entity = BusinessEntity(
+                    name=valid_entity_data['name'],
+                    description=valid_entity_data['description'],
+                    status=valid_entity_data['status'],
+                    owner_id=valid_entity_data['owner_id']
+                )
+                business_entity_service.session.add(entity)
+                business_entity_service.session.flush()
+                entity_id = entity.id
+            
+            # Verify transaction committed
+            saved_entity = BusinessEntity.query.get(entity_id)
+            assert saved_entity is not None
+            
+            # Test transaction rollback
+            with pytest.raises(TransactionError):
+                with business_entity_service.transaction_boundary():
+                    entity2 = BusinessEntity(
+                        name='Rollback Entity',
+                        description='Entity for rollback testing',
+                        status='active',
+                        owner_id=valid_entity_data['owner_id']
+                    )
+                    business_entity_service.session.add(entity2)
+                    business_entity_service.session.flush()
+                    # Force exception to trigger rollback
+                    raise Exception("Test rollback")
+            
+            # Verify rollback occurred
+            rollback_entity = BusinessEntity.query.filter_by(name='Rollback Entity').first()
+            assert rollback_entity is None
+    
+    def test_entity_service_composition(self, business_entity_service, app):
+        """
+        Test BusinessEntityService composition with other services.
+        
+        Validates service composition patterns for complex business workflows
+        requiring coordination between multiple services.
+        """
+        with app.app_context():
+            # Test validation service composition
+            validation_service = business_entity_service.compose_service(ValidationService)
+            assert validation_service is not None
+            
+            # Test service caching
+            validation_service_2 = business_entity_service.compose_service(ValidationService)
+            assert validation_service is validation_service_2
+    
+    def test_entity_error_handling(self, business_entity_service, app, db):
+        """
+        Test comprehensive error handling in entity operations.
+        
+        Validates proper error translation and handling across all entity
+        service operations including database errors and validation failures.
+        """
+        with app.app_context():
+            # Test database error handling
+            with patch.object(business_entity_service.session, 'add', side_effect=SQLAlchemyError("Database error")):
+                with pytest.raises(EntityCreationError) as exc_info:
+                    business_entity_service.create_entity({
+                        'name': 'Test Entity',
+                        'description': 'Test description',
+                        'status': 'active',
+                        'owner_id': 1
+                    })
                 
-                result = business_service.create_entity(sample_entity_data)
-                
-                # Validate error handling and rollback
-                assert result['success'] is False
-                assert 'error' in result
-                mock_add.assert_called_once()
-                mock_commit.assert_called_once()
-                mock_rollback.assert_called_once()
+                assert "Entity creation failed" in str(exc_info.value)
+                assert exc_info.value.original_error is not None
+            
+            # Test validation error propagation
+            with pytest.raises(ValidationError):
+                business_entity_service.create_entity({
+                    'name': '',  # Invalid name
+                    'description': 'Test description',
+                    'status': 'active',
+                    'owner_id': 1
+                })
 
 
 class TestValidationService:
     """
-    Comprehensive unit tests for ValidationService dataclasses and type hint validation.
+    Unit tests for ValidationService dataclasses and type hint validation.
     
-    Tests validate business rule enforcement, data validation logic, constraint checking,
-    and input sanitization while ensuring type safety and validation consistency
-    throughout the Flask application per Section 4.5.1 requirements.
-    
-    Coverage Areas:
-    - Dataclass validation with type hints and constraints
-    - Business rule enforcement and validation logic preservation  
-    - Input validation and sanitization patterns from Node.js
-    - Database constraint checking and integrity validation
-    - Validation error handling with detailed error reporting
-    - Security validation and input sanitization for safety
+    Tests comprehensive data validation, business rule enforcement, and constraint
+    checking using Python dataclasses and type hints as specified in Section 4.5.1
+    and Section 4.12.1 validation rules implementation.
     """
     
     @pytest.fixture
-    def validation_service(self, app):
-        """Create ValidationService instance with Flask application context."""
+    def validation_service(self, app, db):
+        """
+        Create ValidationService instance for testing.
+        
+        Args:
+            app: Flask application fixture
+            db: SQLAlchemy database fixture
+        
+        Returns:
+            ValidationService: Configured validation service instance
+        """
         with app.app_context():
-            service = ValidationService()
-            yield service
+            return ValidationService(db=db)
     
     @pytest.fixture
     def sample_validation_data(self):
-        """Sample data for validation testing scenarios."""
+        """
+        Provide sample data for validation testing.
+        
+        Returns:
+            Dict[str, Any]: Sample data with various data types
+        """
         return {
-            'username': 'testuser123',
-            'email': 'test@example.com',
-            'age': 25,
-            'status': 'active',
-            'metadata': {'preferences': {'theme': 'dark'}}
+            'string_field': 'test_value',
+            'integer_field': 42,
+            'float_field': 3.14,
+            'boolean_field': True,
+            'email_field': 'test@example.com',
+            'date_field': '2023-12-01',
+            'optional_field': None,
+            'list_field': ['item1', 'item2', 'item3'],
+            'dict_field': {'nested_key': 'nested_value'}
         }
     
-    def test_validation_service_initialization(self, validation_service):
-        """Test ValidationService proper initialization with configuration."""
-        assert validation_service is not None
-        assert isinstance(validation_service, ValidationService)
-        assert hasattr(validation_service, 'validation_schemas')
-        assert hasattr(validation_service, 'sanitization_rules')
-    
-    def test_dataclass_validation_success(self, validation_service, sample_validation_data):
+    def test_validation_service_initialization(self, validation_service, app):
         """
-        Test successful dataclass validation with type hints.
+        Test ValidationService initialization and configuration.
         
-        Validates dataclass integration per Section 4.5.1 requirements,
-        type hint validation, and successful validation workflow
-        with proper result formatting and metadata tracking.
+        Validates service initialization per Section 4.5.1 including
+        validation rules setup, type hint configuration, and dataclass
+        validation infrastructure.
         """
-        # Define validation schema with type hints
-        validation_schema = {
-            'username': {'type': str, 'required': True, 'min_length': 3},
-            'email': {'type': str, 'required': True, 'format': 'email'},
-            'age': {'type': int, 'required': False, 'min_value': 0},
-            'status': {'type': str, 'required': True, 'choices': ['active', 'inactive']}
-        }
-        
-        # Execute validation
-        result = validation_service.validate_data(sample_validation_data, validation_schema)
-        
-        # Validate successful validation
-        assert isinstance(result, ValidationResult)
-        assert result.is_valid is True
-        assert len(result.errors) == 0
-        assert result.sanitized_data is not None
-        assert result.validation_timestamp is not None
-    
-    def test_dataclass_validation_type_errors(self, validation_service):
-        """
-        Test dataclass validation with type constraint violations.
-        
-        Validates type hint enforcement, error collection and reporting,
-        and consistent validation behavior for type safety requirements.
-        """
-        # Invalid data with type violations
-        invalid_data = {
-            'username': 123,  # Should be string
-            'email': 'invalid-email',  # Invalid format
-            'age': 'twenty-five',  # Should be integer
-            'status': 'unknown'  # Invalid choice
-        }
-        
-        validation_schema = {
-            'username': {'type': str, 'required': True},
-            'email': {'type': str, 'required': True, 'format': 'email'},
-            'age': {'type': int, 'required': False},
-            'status': {'type': str, 'required': True, 'choices': ['active', 'inactive']}
-        }
-        
-        # Execute validation
-        result = validation_service.validate_data(invalid_data, validation_schema)
-        
-        # Validate type error handling
-        assert result.is_valid is False
-        assert len(result.errors) > 0
-        
-        # Check specific error types
-        error_fields = [error['field'] for error in result.errors]
-        assert 'username' in error_fields
-        assert 'email' in error_fields
-        assert 'age' in error_fields
-        assert 'status' in error_fields
-    
-    def test_business_rule_validation(self, validation_service):
-        """
-        Test business rule enforcement with custom validation logic.
-        
-        Validates business rule preservation from Node.js implementation,
-        custom validation function execution, and complex business
-        constraint checking per Section 4.12.1 validation requirements.
-        """
-        # Sample data for business rule testing
-        user_data = {
-            'username': 'admin',
-            'role': 'administrator',
-            'department': 'IT',
-            'clearance_level': 5
-        }
-        
-        # Define business rules
-        def validate_admin_clearance(data):
-            """Business rule: Administrators must have clearance level >= 4"""
-            if data.get('role') == 'administrator' and data.get('clearance_level', 0) < 4:
-                return False, "Administrators require minimum clearance level 4"
-            return True, None
-        
-        def validate_department_role_consistency(data):
-            """Business rule: IT department can only have specific roles"""
-            if data.get('department') == 'IT':
-                valid_roles = ['administrator', 'developer', 'analyst']
-                if data.get('role') not in valid_roles:
-                    return False, "Invalid role for IT department"
-            return True, None
-        
-        # Apply business rule validation
-        result = validation_service.validate_business_rules(user_data, [
-            validate_admin_clearance,
-            validate_department_role_consistency
-        ])
-        
-        # Validate business rule success
-        assert result.is_valid is True
-        assert len(result.errors) == 0
-    
-    def test_business_rule_validation_failures(self, validation_service):
-        """
-        Test business rule validation with rule violations.
-        
-        Validates business rule error handling, multiple rule violation
-        collection, and detailed error reporting for business constraint failures.
-        """
-        # Data that violates business rules
-        user_data = {
-            'username': 'lowclearance',
-            'role': 'administrator',
-            'department': 'IT',
-            'clearance_level': 2  # Violates admin clearance rule
-        }
-        
-        def validate_admin_clearance(data):
-            if data.get('role') == 'administrator' and data.get('clearance_level', 0) < 4:
-                return False, "Administrators require minimum clearance level 4"
-            return True, None
-        
-        # Apply business rule validation
-        result = validation_service.validate_business_rules(user_data, [validate_admin_clearance])
-        
-        # Validate business rule failure
-        assert result.is_valid is False
-        assert len(result.errors) == 1
-        assert 'clearance level' in result.errors[0]['message'].lower()
-    
-    def test_input_sanitization(self, validation_service):
-        """
-        Test input sanitization and security validation.
-        
-        Validates input sanitization patterns preservation from Node.js,
-        XSS prevention, SQL injection protection, and safe data processing
-        for security vulnerability prevention.
-        """
-        # Data with potential security issues
-        unsafe_data = {
-            'username': '<script>alert("xss")</script>',
-            'description': 'Normal text with <img src="x" onerror="alert(1)">',
-            'sql_field': "'; DROP TABLE users; --",
-            'html_content': '<p>Safe content</p><script>unsafe()</script>'
-        }
-        
-        # Execute sanitization
-        result = validation_service.sanitize_input(unsafe_data)
-        
-        # Validate sanitization success
-        assert result.sanitized_data is not None
-        
-        # Verify script tags are removed or escaped
-        sanitized = result.sanitized_data
-        assert '<script>' not in sanitized['username']
-        assert 'onerror' not in sanitized['description']
-        assert 'DROP TABLE' not in sanitized['sql_field']
-        assert '<script>' not in sanitized['html_content']
-    
-    def test_database_constraint_validation(self, validation_service, db_session):
-        """
-        Test database constraint checking and integrity validation.
-        
-        Validates database constraint enforcement, foreign key validation,
-        unique constraint checking, and data integrity preservation
-        during validation workflows per Section 6.2.2.2 requirements.
-        """
-        # Mock database constraints
-        constraints = {
-            'unique_email': {
-                'table': 'users',
-                'field': 'email',
-                'value': 'test@example.com'
-            },
-            'foreign_key_user': {
-                'table': 'entities',
-                'field': 'owner_id',
-                'reference_table': 'users',
-                'reference_field': 'id',
-                'value': 999  # Non-existent user ID
-            }
-        }
-        
-        with patch.object(validation_service, '_check_unique_constraint') as mock_unique, \
-             patch.object(validation_service, '_check_foreign_key_constraint') as mock_fk:
+        with app.app_context():
+            # Test base service initialization
+            assert hasattr(validation_service, 'db')
+            assert hasattr(validation_service, 'session')
+            assert hasattr(validation_service, 'logger')
             
-            # Configure constraint check results
-            mock_unique.return_value = False  # Email already exists
-            mock_fk.return_value = False  # User ID doesn't exist
+            # Test validation-specific attributes
+            assert hasattr(validation_service, '_validation_rules')
+            assert hasattr(validation_service, '_type_validators')
+            assert hasattr(validation_service, '_sanitizers')
             
-            # Execute constraint validation
-            result = validation_service.validate_database_constraints(constraints)
-            
-            # Validate constraint failures
-            assert result.is_valid is False
-            assert len(result.errors) == 2
-            
-            # Verify constraint checking was called
-            mock_unique.assert_called()
-            mock_fk.assert_called()
+            # Test validation configuration
+            assert hasattr(validation_service, '_email_pattern')
+            assert hasattr(validation_service, '_phone_pattern')
+            assert hasattr(validation_service, '_url_pattern')
     
-    def test_nested_data_validation(self, validation_service):
+    def test_validation_result_dataclass(self, validation_service, app):
         """
-        Test validation of nested data structures with complex schemas.
+        Test ValidationResult dataclass functionality.
         
-        Validates nested object validation, array validation, and complex
-        data structure handling with recursive validation logic.
+        Validates dataclass implementation per Section 4.5.1 including
+        proper field definitions, type hints, and default values.
         """
-        # Complex nested data structure
-        nested_data = {
-            'user': {
-                'profile': {
-                    'personal': {
-                        'first_name': 'John',
-                        'last_name': 'Doe',
-                        'age': 30
-                    },
-                    'preferences': {
-                        'theme': 'dark',
-                        'notifications': True,
-                        'languages': ['en', 'es']
-                    }
+        with app.app_context():
+            # Test default ValidationResult creation
+            result = ValidationResult()
+            
+            assert result.is_valid is True
+            assert result.errors == []
+            assert result.warnings == []
+            assert result.field_errors == {}
+            assert result.sanitized_data == {}
+            assert result.validation_type is None
+            assert result.severity is None
+            assert result.metadata == {}
+            
+            # Test ValidationResult with data
+            result_with_data = ValidationResult(
+                is_valid=False,
+                errors=['Test error'],
+                warnings=['Test warning'],
+                field_errors={'field1': 'Field error'},
+                sanitized_data={'clean': 'data'},
+                validation_type=ValidationType.BUSINESS_RULE,
+                severity=ValidationSeverity.ERROR,
+                metadata={'context': 'test'}
+            )
+            
+            assert result_with_data.is_valid is False
+            assert result_with_data.errors == ['Test error']
+            assert result_with_data.warnings == ['Test warning']
+            assert result_with_data.field_errors == {'field1': 'Field error'}
+            assert result_with_data.sanitized_data == {'clean': 'data'}
+            assert result_with_data.validation_type == ValidationType.BUSINESS_RULE
+            assert result_with_data.severity == ValidationSeverity.ERROR
+            assert result_with_data.metadata == {'context': 'test'}
+    
+    def test_data_type_validation(self, validation_service, app, sample_validation_data):
+        """
+        Test data type validation with type hints.
+        
+        Validates type checking functionality using Python type hints
+        for robust data validation as specified in Section 4.5.1.
+        """
+        with app.app_context():
+            # Test string validation
+            string_result = validation_service.validate_data_type(
+                sample_validation_data['string_field'],
+                str,
+                'string_field'
+            )
+            assert string_result.is_valid is True
+            
+            # Test integer validation
+            integer_result = validation_service.validate_data_type(
+                sample_validation_data['integer_field'],
+                int,
+                'integer_field'
+            )
+            assert integer_result.is_valid is True
+            
+            # Test float validation
+            float_result = validation_service.validate_data_type(
+                sample_validation_data['float_field'],
+                float,
+                'float_field'
+            )
+            assert float_result.is_valid is True
+            
+            # Test boolean validation
+            boolean_result = validation_service.validate_data_type(
+                sample_validation_data['boolean_field'],
+                bool,
+                'boolean_field'
+            )
+            assert boolean_result.is_valid is True
+            
+            # Test type mismatch
+            type_mismatch_result = validation_service.validate_data_type(
+                sample_validation_data['string_field'],
+                int,
+                'string_field'
+            )
+            assert type_mismatch_result.is_valid is False
+            assert 'Type mismatch' in type_mismatch_result.field_errors['string_field']
+    
+    def test_business_rule_validation(self, validation_service, app):
+        """
+        Test business rule validation implementation.
+        
+        Validates business rule enforcement per Section 4.12.1 including
+        custom validation rules and constraint checking.
+        """
+        with app.app_context():
+            # Test email validation business rule
+            valid_email_result = validation_service.validate_email('test@example.com')
+            assert valid_email_result.is_valid is True
+            
+            invalid_email_result = validation_service.validate_email('invalid-email')
+            assert invalid_email_result.is_valid is False
+            assert 'Invalid email format' in invalid_email_result.errors
+            
+            # Test phone number validation business rule
+            valid_phone_result = validation_service.validate_phone('+1-555-123-4567')
+            assert valid_phone_result.is_valid is True
+            
+            invalid_phone_result = validation_service.validate_phone('invalid-phone')
+            assert invalid_phone_result.is_valid is False
+            assert 'Invalid phone format' in invalid_phone_result.errors
+            
+            # Test URL validation business rule
+            valid_url_result = validation_service.validate_url('https://example.com')
+            assert valid_url_result.is_valid is True
+            
+            invalid_url_result = validation_service.validate_url('not-a-url')
+            assert invalid_url_result.is_valid is False
+            assert 'Invalid URL format' in invalid_url_result.errors
+    
+    def test_constraint_validation(self, validation_service, app):
+        """
+        Test constraint validation implementation.
+        
+        Validates constraint checking including length constraints,
+        range constraints, and pattern constraints.
+        """
+        with app.app_context():
+            # Test string length constraints
+            valid_length_result = validation_service.validate_string_length(
+                'test_string',
+                min_length=5,
+                max_length=20,
+                field_name='test_field'
+            )
+            assert valid_length_result.is_valid is True
+            
+            too_short_result = validation_service.validate_string_length(
+                'abc',
+                min_length=5,
+                max_length=20,
+                field_name='test_field'
+            )
+            assert too_short_result.is_valid is False
+            assert 'too short' in too_short_result.field_errors['test_field']
+            
+            too_long_result = validation_service.validate_string_length(
+                'a' * 25,
+                min_length=5,
+                max_length=20,
+                field_name='test_field'
+            )
+            assert too_long_result.is_valid is False
+            assert 'too long' in too_long_result.field_errors['test_field']
+            
+            # Test numeric range constraints
+            valid_range_result = validation_service.validate_numeric_range(
+                15,
+                min_value=10,
+                max_value=20,
+                field_name='number_field'
+            )
+            assert valid_range_result.is_valid is True
+            
+            below_range_result = validation_service.validate_numeric_range(
+                5,
+                min_value=10,
+                max_value=20,
+                field_name='number_field'
+            )
+            assert below_range_result.is_valid is False
+            assert 'below minimum' in below_range_result.field_errors['number_field']
+            
+            above_range_result = validation_service.validate_numeric_range(
+                25,
+                min_value=10,
+                max_value=20,
+                field_name='number_field'
+            )
+            assert above_range_result.is_valid is False
+            assert 'above maximum' in above_range_result.field_errors['number_field']
+    
+    def test_data_sanitization(self, validation_service, app):
+        """
+        Test data sanitization functionality.
+        
+        Validates input sanitization patterns preservation per Section 2.1.9
+        including XSS prevention, SQL injection prevention, and data cleaning.
+        """
+        with app.app_context():
+            # Test HTML sanitization
+            html_input = '<script>alert("xss")</script><p>Safe content</p>'
+            sanitized_html = validation_service.sanitize_html(html_input)
+            
+            assert '<script>' not in sanitized_html
+            assert 'alert' not in sanitized_html
+            assert '<p>Safe content</p>' in sanitized_html
+            
+            # Test string trimming and normalization
+            messy_string = '  \t\n  Test String  \t\n  '
+            sanitized_string = validation_service.sanitize_string(messy_string)
+            
+            assert sanitized_string == 'Test String'
+            
+            # Test SQL injection prevention
+            sql_input = "'; DROP TABLE users; --"
+            sanitized_sql = validation_service.sanitize_sql_input(sql_input)
+            
+            assert 'DROP TABLE' not in sanitized_sql
+            assert '--' not in sanitized_sql
+            
+            # Test email sanitization
+            email_input = '  TEST@EXAMPLE.COM  '
+            sanitized_email = validation_service.sanitize_email(email_input)
+            
+            assert sanitized_email == 'test@example.com'
+    
+    def test_comprehensive_validation_workflow(self, validation_service, app):
+        """
+        Test comprehensive validation workflow with multiple validation types.
+        
+        Validates end-to-end validation process combining type validation,
+        business rules, constraints, and sanitization.
+        """
+        with app.app_context():
+            # Define comprehensive validation schema
+            validation_schema = {
+                'username': {
+                    'type': str,
+                    'min_length': 3,
+                    'max_length': 50,
+                    'pattern': r'^[a-zA-Z0-9_]+$',
+                    'required': True
                 },
-                'roles': [
-                    {'name': 'user', 'permissions': ['read']},
-                    {'name': 'admin', 'permissions': ['read', 'write', 'delete']}
-                ]
+                'email': {
+                    'type': str,
+                    'format': 'email',
+                    'required': True
+                },
+                'age': {
+                    'type': int,
+                    'min_value': 18,
+                    'max_value': 120,
+                    'required': True
+                },
+                'website': {
+                    'type': str,
+                    'format': 'url',
+                    'required': False
+                }
             }
-        }
-        
-        # Define nested validation schema
-        nested_schema = {
-            'user.profile.personal.first_name': {'type': str, 'required': True},
-            'user.profile.personal.age': {'type': int, 'min_value': 0},
-            'user.profile.preferences.theme': {'type': str, 'choices': ['light', 'dark']},
-            'user.roles': {'type': list, 'min_length': 1}
-        }
-        
-        # Execute nested validation
-        result = validation_service.validate_nested_data(nested_data, nested_schema)
-        
-        # Validate nested validation success
-        assert result.is_valid is True
-        assert result.sanitized_data is not None
-    
-    @pytest.mark.parametrize("validation_type,data,expected_valid", [
-        (ValidationType.FORMAT, {'email': 'test@example.com'}, True),
-        (ValidationType.FORMAT, {'email': 'invalid-email'}, False),
-        (ValidationType.SECURITY, {'password': 'StrongPass123!'}, True),
-        (ValidationType.SECURITY, {'password': '123'}, False),
-        (ValidationType.BUSINESS_RULE, {'age': 25, 'role': 'adult'}, True),
-        (ValidationType.BUSINESS_RULE, {'age': 15, 'role': 'adult'}, False),
-    ])
-    def test_validation_type_scenarios(self, validation_service, validation_type, data, expected_valid):
-        """
-        Test various validation type scenarios with parameterized inputs.
-        
-        Validates different validation types, consistent behavior across
-        validation categories, and proper validation result classification.
-        """
-        # Configure validation based on type
-        if validation_type == ValidationType.FORMAT:
-            schema = {'email': {'type': str, 'format': 'email'}}
-        elif validation_type == ValidationType.SECURITY:
-            schema = {'password': {'type': str, 'min_length': 8, 'security': True}}
-        elif validation_type == ValidationType.BUSINESS_RULE:
-            schema = {'age': {'type': int}, 'role': {'type': str}}
             
-            def age_role_rule(data):
-                if data.get('role') == 'adult' and data.get('age', 0) < 18:
-                    return False, "Adults must be 18 or older"
-                return True, None
+            # Test valid data
+            valid_data = {
+                'username': 'john_doe123',
+                'email': 'john@example.com',
+                'age': 25,
+                'website': 'https://johndoe.com'
+            }
             
-            # Execute with business rule
-            result = validation_service.validate_business_rules(data, [age_role_rule])
-            assert result.is_valid == expected_valid
-            return
-        
-        # Execute standard validation
-        result = validation_service.validate_data(data, schema)
-        assert result.is_valid == expected_valid
+            result = validation_service.validate_comprehensive(valid_data, validation_schema)
+            
+            assert result.is_valid is True
+            assert len(result.errors) == 0
+            assert len(result.field_errors) == 0
+            
+            # Test invalid data
+            invalid_data = {
+                'username': 'ab',  # Too short
+                'email': 'invalid-email',  # Invalid format
+                'age': 15,  # Below minimum
+                'website': 'not-a-url'  # Invalid format
+            }
+            
+            result = validation_service.validate_comprehensive(invalid_data, validation_schema)
+            
+            assert result.is_valid is False
+            assert len(result.errors) > 0
+            assert 'username' in result.field_errors
+            assert 'email' in result.field_errors
+            assert 'age' in result.field_errors
+            assert 'website' in result.field_errors
     
-    def test_validation_performance_monitoring(self, validation_service, performance_monitor):
+    def test_validation_service_business_rules(self, validation_service, app, sample_validation_data):
         """
-        Test validation performance monitoring and SLA compliance.
+        Test ValidationService business rules implementation.
         
-        Validates validation performance requirements, timing measurement,
-        and performance threshold enforcement for validation operations.
+        Validates implementation of abstract business rules method
+        with validation-specific business logic.
         """
-        # Large dataset for performance testing
-        large_dataset = {
-            f'field_{i}': f'value_{i}' for i in range(1000)
-        }
+        with app.app_context():
+            # Test valid business rules
+            result = validation_service.validate_business_rules(sample_validation_data)
+            assert result is True
+            
+            # Test invalid business rules
+            invalid_data = {
+                'string_field': '',  # Empty string
+                'integer_field': -1,  # Negative number
+                'email_field': 'invalid'  # Invalid email
+            }
+            
+            with pytest.raises(ValidationError):
+                validation_service.validate_business_rules(invalid_data)
+    
+    def test_validation_error_handling(self, validation_service, app):
+        """
+        Test validation error handling and error message generation.
         
-        schema = {
-            f'field_{i}': {'type': str, 'required': True} for i in range(1000)
-        }
+        Validates consistent error handling per Section 4.5.3 with
+        proper error categorization and message formatting.
+        """
+        with app.app_context():
+            # Test validation error creation
+            error_result = ValidationResult(
+                is_valid=False,
+                errors=['General validation error'],
+                field_errors={'field1': 'Field-specific error'},
+                severity=ValidationSeverity.ERROR,
+                validation_type=ValidationType.BUSINESS_RULE
+            )
+            
+            assert error_result.is_valid is False
+            assert 'General validation error' in error_result.errors
+            assert error_result.field_errors['field1'] == 'Field-specific error'
+            assert error_result.severity == ValidationSeverity.ERROR
+            
+            # Test multiple error aggregation
+            errors = ['Error 1', 'Error 2', 'Error 3']
+            field_errors = {
+                'field1': 'Field 1 error',
+                'field2': 'Field 2 error'
+            }
+            
+            multi_error_result = ValidationResult(
+                is_valid=False,
+                errors=errors,
+                field_errors=field_errors
+            )
+            
+            assert len(multi_error_result.errors) == 3
+            assert len(multi_error_result.field_errors) == 2
+    
+    def test_validation_service_composition(self, validation_service, app):
+        """
+        Test ValidationService composition with other services.
         
-        # Monitor validation performance
-        performance_monitor['start']()
-        result = validation_service.validate_data(large_dataset, schema)
-        performance_monitor['stop']()
-        
-        # Validate performance and results
-        assert result.is_valid is True
-        
-        # Ensure validation completes within performance threshold
-        performance_monitor['assert_threshold'](5.0)  # 5 second threshold
+        Validates service composition patterns for complex validation workflows
+        requiring coordination between validation and other business services.
+        """
+        with app.app_context():
+            # Test user service composition for user validation
+            user_service = validation_service.compose_service(UserService)
+            assert user_service is not None
+            
+            # Test service caching
+            user_service_2 = validation_service.compose_service(UserService)
+            assert user_service is user_service_2
 
 
 class TestWorkflowOrchestrator:
     """
-    Comprehensive unit tests for WorkflowOrchestrator service composition patterns.
+    Unit tests for WorkflowOrchestrator service composition patterns.
     
-    Tests validate advanced workflow orchestration, service composition architecture,
-    transaction boundary management, and event-driven processing while ensuring
-    business logic coordination and workflow consistency per Section 5.2.3 requirements.
-    
-    Coverage Areas:
-    - Service composition patterns for complex business operations
-    - Workflow step execution and coordination management  
-    - Transaction boundary management with ACID properties preservation
-    - Event-driven processing through Flask signals integration
-    - Workflow retry mechanisms for resilient operation handling
-    - Performance monitoring and SLA compliance for workflows
+    Tests advanced workflow orchestration patterns, service composition,
+    transaction boundary management, and complex business process coordination
+    as specified in Section 4.5.3 and Section 5.2.3.
     """
     
     @pytest.fixture
-    def workflow_orchestrator(self, app, db_session):
-        """Create WorkflowOrchestrator instance with Flask application context."""
+    def workflow_orchestrator(self, app, db):
+        """
+        Create WorkflowOrchestrator instance for testing.
+        
+        Args:
+            app: Flask application fixture
+            db: SQLAlchemy database fixture
+        
+        Returns:
+            WorkflowOrchestrator: Configured workflow orchestrator instance
+        """
         with app.app_context():
-            orchestrator = WorkflowOrchestrator(db=db_session)
-            yield orchestrator
+            return WorkflowOrchestrator(db=db)
     
     @pytest.fixture
-    def sample_workflow_steps(self):
-        """Sample workflow steps for orchestration testing."""
-        return [
-            WorkflowStep(
-                name="validate_user",
-                service="user_service",
-                method="validate_user_data",
-                parameters={'user_id': 1},
-                retry_count=3,
-                timeout=30
-            ),
-            WorkflowStep(
-                name="create_entity",
-                service="business_entity_service", 
-                method="create_entity",
-                parameters={'entity_data': {'name': 'Test Entity'}},
-                retry_count=2,
-                timeout=60
-            ),
-            WorkflowStep(
-                name="send_notification",
-                service="notification_service",
-                method="send_notification",
-                parameters={'message': 'Entity created successfully'},
-                retry_count=1,
-                timeout=15
-            )
-        ]
+    def mock_services(self, app, db):
+        """
+        Create mock services for workflow composition testing.
+        
+        Returns:
+            Dict[str, Mock]: Dictionary of mock service instances
+        """
+        with app.app_context():
+            mock_user_service = Mock(spec=UserService)
+            mock_entity_service = Mock(spec=BusinessEntityService)
+            mock_validation_service = Mock(spec=ValidationService)
+            
+            return {
+                'user_service': mock_user_service,
+                'entity_service': mock_entity_service,
+                'validation_service': mock_validation_service
+            }
     
-    def test_workflow_orchestrator_initialization(self, workflow_orchestrator):
-        """Test WorkflowOrchestrator proper initialization with dependencies."""
-        assert workflow_orchestrator is not None
-        assert isinstance(workflow_orchestrator, WorkflowOrchestrator)
-        assert hasattr(workflow_orchestrator, 'db')
-        assert hasattr(workflow_orchestrator, 'service_registry')
-        assert hasattr(workflow_orchestrator, 'signal_dispatcher')
+    def test_workflow_orchestrator_initialization(self, workflow_orchestrator, app):
+        """
+        Test WorkflowOrchestrator initialization and configuration.
+        
+        Validates orchestrator initialization per Section 5.2.3 including
+        workflow step configuration, service composition setup, and
+        event-driven processing infrastructure.
+        """
+        with app.app_context():
+            # Test base service initialization
+            assert hasattr(workflow_orchestrator, 'db')
+            assert hasattr(workflow_orchestrator, 'session')
+            assert hasattr(workflow_orchestrator, 'logger')
+            
+            # Test workflow-specific attributes
+            assert hasattr(workflow_orchestrator, '_workflow_steps')
+            assert hasattr(workflow_orchestrator, '_workflow_state')
+            assert hasattr(workflow_orchestrator, '_service_registry')
+            assert hasattr(workflow_orchestrator, '_retry_policies')
+            
+            # Test workflow configuration
+            assert hasattr(workflow_orchestrator, '_default_timeout')
+            assert hasattr(workflow_orchestrator, '_max_concurrent_workflows')
+            assert workflow_orchestrator._default_timeout == 300  # 5 minutes
+            assert workflow_orchestrator._max_concurrent_workflows == 10
     
-    def test_workflow_execution_success(self, workflow_orchestrator, sample_workflow_steps, db_session):
+    def test_service_composition_registration(self, workflow_orchestrator, app, mock_services):
+        """
+        Test service composition registration for workflow coordination.
+        
+        Validates service registration and discovery mechanisms for complex
+        business workflow orchestration.
+        """
+        with app.app_context():
+            # Register services with orchestrator
+            workflow_orchestrator.register_service('user_service', mock_services['user_service'])
+            workflow_orchestrator.register_service('entity_service', mock_services['entity_service'])
+            workflow_orchestrator.register_service('validation_service', mock_services['validation_service'])
+            
+            # Test service retrieval
+            retrieved_user_service = workflow_orchestrator.get_service('user_service')
+            assert retrieved_user_service == mock_services['user_service']
+            
+            retrieved_entity_service = workflow_orchestrator.get_service('entity_service')
+            assert retrieved_entity_service == mock_services['entity_service']
+            
+            # Test service listing
+            registered_services = workflow_orchestrator.list_registered_services()
+            assert 'user_service' in registered_services
+            assert 'entity_service' in registered_services
+            assert 'validation_service' in registered_services
+            assert len(registered_services) == 3
+    
+    def test_workflow_step_definition(self, workflow_orchestrator, app):
+        """
+        Test workflow step definition and configuration.
+        
+        Validates workflow step creation, ordering, and dependency management
+        for complex business process orchestration.
+        """
+        with app.app_context():
+            # Define workflow steps
+            workflow_steps = [
+                {
+                    'step_id': 'validate_input',
+                    'service': 'validation_service',
+                    'method': 'validate_user_data',
+                    'timeout': 30,
+                    'retry_policy': {'max_retries': 3, 'delay': 1}
+                },
+                {
+                    'step_id': 'create_user',
+                    'service': 'user_service',
+                    'method': 'register_user',
+                    'timeout': 60,
+                    'depends_on': ['validate_input'],
+                    'retry_policy': {'max_retries': 2, 'delay': 2}
+                },
+                {
+                    'step_id': 'create_entity',
+                    'service': 'entity_service',
+                    'method': 'create_entity',
+                    'timeout': 45,
+                    'depends_on': ['create_user'],
+                    'retry_policy': {'max_retries': 1, 'delay': 3}
+                }
+            ]
+            
+            # Register workflow
+            workflow_id = workflow_orchestrator.define_workflow('user_onboarding', workflow_steps)
+            
+            assert workflow_id is not None
+            assert workflow_id in workflow_orchestrator._workflow_steps
+            
+            # Verify workflow steps
+            registered_steps = workflow_orchestrator._workflow_steps[workflow_id]
+            assert len(registered_steps) == 3
+            assert registered_steps[0]['step_id'] == 'validate_input'
+            assert registered_steps[1]['step_id'] == 'create_user'
+            assert registered_steps[2]['step_id'] == 'create_entity'
+            
+            # Verify dependencies
+            assert 'depends_on' not in registered_steps[0]
+            assert registered_steps[1]['depends_on'] == ['validate_input']
+            assert registered_steps[2]['depends_on'] == ['create_user']
+    
+    def test_workflow_execution_success(self, workflow_orchestrator, app, mock_services):
         """
         Test successful workflow execution with service composition.
         
-        Validates:
-        - Workflow step coordination and execution sequencing
-        - Service composition patterns for multi-service operations
-        - Transaction boundary management across workflow steps
-        - Event-driven processing with Flask signals integration
-        - Successful workflow completion with proper result aggregation
+        Validates end-to-end workflow execution including step coordination,
+        data passing between steps, and success handling.
         """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock service registry and method execution
-        mock_user_service = Mock()
-        mock_user_service.validate_user_data.return_value = {'valid': True, 'user': {'id': 1}}
-        
-        mock_entity_service = Mock()
-        mock_entity_service.create_entity.return_value = {'success': True, 'entity': {'id': 1}}
-        
-        mock_notification_service = Mock()
-        mock_notification_service.send_notification.return_value = {'sent': True, 'message_id': 'msg_123'}
-        
-        # Configure service registry
-        service_registry = {
-            'user_service': mock_user_service,
-            'business_entity_service': mock_entity_service,
-            'notification_service': mock_notification_service
-        }
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry), \
-             patch.object(db_session, 'commit') as mock_commit:
-            
-            # Execute workflow
-            result = workflow_orchestrator.execute_workflow(workflow_id, sample_workflow_steps)
-            
-            # Validate workflow execution success
-            assert result['status'] == WorkflowStatus.COMPLETED
-            assert result['workflow_id'] == workflow_id
-            assert len(result['step_results']) == len(sample_workflow_steps)
-            
-            # Verify all steps completed successfully
-            for step_result in result['step_results']:
-                assert step_result['status'] == WorkflowStepStatus.COMPLETED
-            
-            # Verify service method calls
-            mock_user_service.validate_user_data.assert_called_once()
-            mock_entity_service.create_entity.assert_called_once()
-            mock_notification_service.send_notification.assert_called_once()
-            
-            # Verify transaction commit
-            mock_commit.assert_called()
-    
-    def test_workflow_step_failure_and_retry(self, workflow_orchestrator, sample_workflow_steps):
-        """
-        Test workflow step failure handling with retry mechanisms.
-        
-        Validates retry logic, failure recovery, error handling,
-        and resilient operation patterns for workflow step failures
-        per Section 4.5.3 workflow requirements.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock service that fails initially then succeeds
-        mock_service = Mock()
-        mock_service.validate_user_data.side_effect = [
-            Exception("Temporary failure"),
-            Exception("Still failing"),
-            {'valid': True, 'user': {'id': 1}}  # Success on third try
-        ]
-        
-        service_registry = {'user_service': mock_service}
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry):
-            
-            # Execute single step workflow with retry
-            single_step = [sample_workflow_steps[0]]  # Just the user validation step
-            result = workflow_orchestrator.execute_workflow(workflow_id, single_step)
-            
-            # Validate retry behavior
-            assert result['status'] == WorkflowStatus.COMPLETED
-            assert mock_service.validate_user_data.call_count == 3  # Initial + 2 retries
-            
-            # Verify step result shows retry history
-            step_result = result['step_results'][0]
-            assert step_result['retry_count'] == 2
-            assert step_result['status'] == WorkflowStepStatus.COMPLETED
-    
-    def test_workflow_step_max_retries_exceeded(self, workflow_orchestrator, sample_workflow_steps):
-        """
-        Test workflow step failure when max retries are exceeded.
-        
-        Validates failure handling, retry limit enforcement, and
-        proper workflow termination for persistent step failures.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock service that always fails
-        mock_service = Mock()
-        mock_service.validate_user_data.side_effect = Exception("Persistent failure")
-        
-        service_registry = {'user_service': mock_service}
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry):
-            
-            # Execute workflow with failing step
-            single_step = [sample_workflow_steps[0]]
-            result = workflow_orchestrator.execute_workflow(workflow_id, single_step)
-            
-            # Validate failure handling
-            assert result['status'] == WorkflowStatus.FAILED
-            assert mock_service.validate_user_data.call_count == 4  # Initial + 3 retries
-            
-            # Verify step result shows failure
-            step_result = result['step_results'][0]
-            assert step_result['status'] == WorkflowStepStatus.FAILED
-            assert 'Persistent failure' in step_result['error_message']
-    
-    def test_transaction_boundary_management(self, workflow_orchestrator, sample_workflow_steps, db_session):
-        """
-        Test transaction boundary management across workflow steps.
-        
-        Validates ACID properties preservation, transaction consistency,
-        rollback behavior on failures, and proper resource cleanup
-        during complex multi-service workflows per Section 4.5.2.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock services with mixed success/failure
-        mock_user_service = Mock()
-        mock_user_service.validate_user_data.return_value = {'valid': True}
-        
-        mock_entity_service = Mock()
-        mock_entity_service.create_entity.side_effect = Exception("Database constraint violation")
-        
-        service_registry = {
-            'user_service': mock_user_service,
-            'business_entity_service': mock_entity_service
-        }
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry), \
-             patch.object(db_session, 'rollback') as mock_rollback, \
-             patch.object(db_session, 'commit') as mock_commit:
-            
-            # Execute workflow with transaction failure
-            first_two_steps = sample_workflow_steps[:2]
-            result = workflow_orchestrator.execute_workflow(workflow_id, first_two_steps)
-            
-            # Validate transaction rollback on failure
-            assert result['status'] == WorkflowStatus.FAILED
-            mock_rollback.assert_called()
-            mock_commit.assert_not_called()
-    
-    def test_event_driven_processing(self, workflow_orchestrator, sample_workflow_steps):
-        """
-        Test event-driven processing through Flask signals integration.
-        
-        Validates event emission, signal handling, event-driven coordination,
-        and workflow event propagation per Section 4.5.3 event processing.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock signal dispatcher
-        mock_signal_dispatcher = Mock()
-        
-        # Mock service registry
-        mock_service = Mock()
-        mock_service.validate_user_data.return_value = {'valid': True}
-        service_registry = {'user_service': mock_service}
-        
-        with patch.object(workflow_orchestrator, 'signal_dispatcher', mock_signal_dispatcher), \
-             patch.object(workflow_orchestrator, 'service_registry', service_registry):
-            
-            # Execute workflow with event monitoring
-            single_step = [sample_workflow_steps[0]]
-            result = workflow_orchestrator.execute_workflow(workflow_id, single_step)
-            
-            # Validate event emission
-            assert result['status'] == WorkflowStatus.COMPLETED
-            
-            # Verify workflow events were emitted
-            mock_signal_dispatcher.send.assert_any_call(
-                'workflow_started',
-                workflow_id=workflow_id,
-                steps=single_step
+        with app.app_context():
+            # Configure mock services
+            mock_services['validation_service'].validate_user_data.return_value = ValidationResult(
+                is_valid=True,
+                sanitized_data={'username': 'test_user', 'email': 'test@example.com'}
             )
-            mock_signal_dispatcher.send.assert_any_call(
-                'workflow_completed',
-                workflow_id=workflow_id,
-                result=ANY
-            )
-    
-    def test_service_composition_patterns(self, workflow_orchestrator, db_session):
-        """
-        Test complex service composition patterns for business operations.
-        
-        Validates service dependency coordination, data flow between services,
-        composition result aggregation, and service interaction patterns
-        per Section 5.2.3 service composition architecture.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Define complex composition workflow
-        composition_steps = [
-            WorkflowStep(
-                name="fetch_user",
-                service="user_service",
-                method="get_user",
-                parameters={'user_id': 1}
-            ),
-            WorkflowStep(
-                name="validate_permissions",
-                service="auth_service",
-                method="check_permissions",
-                parameters={'user_id': '${fetch_user.result.id}', 'action': 'create_entity'}
-            ),
-            WorkflowStep(
-                name="create_entity",
-                service="business_entity_service",
-                method="create_entity",
-                parameters={
-                    'entity_data': {'name': 'New Entity', 'owner_id': '${fetch_user.result.id}'}
+            mock_user = Mock()
+            mock_user.id = 123
+            mock_user.username = 'test_user'
+            mock_services['user_service'].register_user.return_value = mock_user
+            
+            mock_entity = Mock()
+            mock_entity.id = 456
+            mock_entity.name = 'Test Entity'
+            mock_services['entity_service'].create_entity.return_value = mock_entity
+            
+            # Register services
+            for service_name, service_instance in mock_services.items():
+                workflow_orchestrator.register_service(service_name, service_instance)
+            
+            # Define and execute workflow
+            workflow_steps = [
+                {
+                    'step_id': 'validate_input',
+                    'service': 'validation_service',
+                    'method': 'validate_user_data',
+                    'input_mapping': {'data': 'workflow_input'}
+                },
+                {
+                    'step_id': 'create_user',
+                    'service': 'user_service',
+                    'method': 'register_user',
+                    'input_mapping': {'user_data': 'validate_input.sanitized_data'},
+                    'depends_on': ['validate_input']
+                },
+                {
+                    'step_id': 'create_entity',
+                    'service': 'entity_service',
+                    'method': 'create_entity',
+                    'input_mapping': {
+                        'entity_data': {
+                            'name': 'User Entity',
+                            'owner_id': 'create_user.id'
+                        }
+                    },
+                    'depends_on': ['create_user']
                 }
-            ),
-            WorkflowStep(
-                name="log_activity",
-                service="audit_service",
-                method="log_action",
-                parameters={
-                    'user_id': '${fetch_user.result.id}',
-                    'action': 'entity_created',
-                    'entity_id': '${create_entity.result.entity.id}'
-                }
-            )
-        ]
-        
-        # Mock services with interdependent results
-        mock_user_service = Mock()
-        mock_user_service.get_user.return_value = {'id': 1, 'username': 'testuser'}
-        
-        mock_auth_service = Mock()
-        mock_auth_service.check_permissions.return_value = {'authorized': True}
-        
-        mock_entity_service = Mock()
-        mock_entity_service.create_entity.return_value = {'success': True, 'entity': {'id': 123}}
-        
-        mock_audit_service = Mock()
-        mock_audit_service.log_action.return_value = {'logged': True, 'log_id': 'log_456'}
-        
-        service_registry = {
-            'user_service': mock_user_service,
-            'auth_service': mock_auth_service,
-            'business_entity_service': mock_entity_service,
-            'audit_service': mock_audit_service
-        }
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry), \
-             patch.object(workflow_orchestrator, '_resolve_parameters') as mock_resolve:
-            
-            # Configure parameter resolution for dependencies
-            mock_resolve.side_effect = [
-                {'user_id': 1},  # fetch_user parameters
-                {'user_id': 1, 'action': 'create_entity'},  # validate_permissions parameters
-                {'entity_data': {'name': 'New Entity', 'owner_id': 1}},  # create_entity parameters
-                {'user_id': 1, 'action': 'entity_created', 'entity_id': 123}  # log_activity parameters
             ]
             
-            # Execute composition workflow
-            result = workflow_orchestrator.execute_workflow(workflow_id, composition_steps)
+            workflow_id = workflow_orchestrator.define_workflow('user_onboarding', workflow_steps)
             
-            # Validate composition success
-            assert result['status'] == WorkflowStatus.COMPLETED
-            assert len(result['step_results']) == 4
-            
-            # Verify service call sequence and parameter resolution
-            mock_user_service.get_user.assert_called_with(user_id=1)
-            mock_auth_service.check_permissions.assert_called_with(user_id=1, action='create_entity')
-            mock_entity_service.create_entity.assert_called_with(
-                entity_data={'name': 'New Entity', 'owner_id': 1}
-            )
-            mock_audit_service.log_action.assert_called_with(
-                user_id=1, action='entity_created', entity_id=123
-            )
-    
-    def test_workflow_timeout_handling(self, workflow_orchestrator, sample_workflow_steps):
-        """
-        Test workflow timeout handling and resource cleanup.
-        
-        Validates timeout enforcement, resource cleanup on timeout,
-        and proper workflow termination for long-running operations.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock service with artificial delay
-        mock_service = Mock()
-        
-        def slow_operation(*args, **kwargs):
-            time.sleep(2)  # Simulate slow operation
-            return {'result': 'success'}
-        
-        mock_service.validate_user_data = slow_operation
-        service_registry = {'user_service': mock_service}
-        
-        # Set short timeout for testing
-        timeout_step = sample_workflow_steps[0]
-        timeout_step.timeout = 1  # 1 second timeout
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry):
-            
-            # Execute workflow with timeout
-            result = workflow_orchestrator.execute_workflow(workflow_id, [timeout_step])
-            
-            # Validate timeout handling
-            assert result['status'] == WorkflowStatus.TIMEOUT
-            
-            step_result = result['step_results'][0]
-            assert step_result['status'] == WorkflowStepStatus.FAILED
-            assert 'timeout' in step_result['error_message'].lower()
-    
-    def test_workflow_performance_monitoring(self, workflow_orchestrator, sample_workflow_steps, performance_monitor):
-        """
-        Test workflow performance monitoring and SLA compliance.
-        
-        Validates workflow execution timing, performance threshold enforcement,
-        and SLA compliance for complex business workflow operations.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock fast services for performance testing
-        mock_services = {}
-        for step in sample_workflow_steps:
-            mock_service = Mock()
-            setattr(mock_service, step.method, Mock(return_value={'success': True}))
-            mock_services[step.service] = mock_service
-        
-        with patch.object(workflow_orchestrator, 'service_registry', mock_services):
-            
-            # Monitor workflow performance
-            performance_monitor['start']()
-            result = workflow_orchestrator.execute_workflow(workflow_id, sample_workflow_steps)
-            performance_monitor['stop']()
-            
-            # Validate workflow success and performance
-            assert result['status'] == WorkflowStatus.COMPLETED
-            
-            # Ensure workflow completes within performance threshold
-            performance_monitor['assert_threshold'](2.0)  # 2 second threshold for 3 steps
-    
-    @pytest.mark.parametrize("isolation_level", [
-        TransactionIsolationLevel.READ_COMMITTED,
-        TransactionIsolationLevel.REPEATABLE_READ,
-        TransactionIsolationLevel.SERIALIZABLE
-    ])
-    def test_transaction_isolation_levels(self, workflow_orchestrator, sample_workflow_steps, isolation_level, db_session):
-        """
-        Test different transaction isolation levels for workflow execution.
-        
-        Validates transaction isolation configuration, concurrent access handling,
-        and data consistency across different isolation levels.
-        """
-        workflow_id = str(uuid.uuid4())
-        
-        # Mock service for isolation testing
-        mock_service = Mock()
-        mock_service.validate_user_data.return_value = {'valid': True}
-        service_registry = {'user_service': mock_service}
-        
-        with patch.object(workflow_orchestrator, 'service_registry', service_registry), \
-             patch.object(db_session, 'execute') as mock_execute:
-            
-            # Execute workflow with specific isolation level
-            result = workflow_orchestrator.execute_workflow(
-                workflow_id, 
-                [sample_workflow_steps[0]], 
-                isolation_level=isolation_level
-            )
-            
-            # Validate isolation level was set
-            assert result['status'] == WorkflowStatus.COMPLETED
-            mock_execute.assert_any_call(f"SET TRANSACTION ISOLATION LEVEL {isolation_level.value}")
-
-
-# ================================
-# Integration Test Scenarios
-# ================================
-
-class TestServiceIntegration:
-    """
-    Integration tests for service layer components working together.
-    
-    Tests validate service composition, cross-service workflows, and
-    end-to-end business logic coordination while ensuring functional
-    equivalence with original Node.js business rules.
-    """
-    
-    @pytest.fixture
-    def integrated_services(self, app, db_session):
-        """Create integrated service instances for testing."""
-        with app.app_context():
-            services = {
-                'user_service': UserService(db=db_session),
-                'business_entity_service': BusinessEntityService(db=db_session),
-                'validation_service': ValidationService(),
-                'workflow_orchestrator': WorkflowOrchestrator(db=db_session)
+            # Execute workflow
+            workflow_input = {
+                'username': 'test_user',
+                'email': 'test@example.com',
+                'password': 'TestPassword123!'
             }
-            yield services
-    
-    def test_user_entity_creation_workflow(self, integrated_services, db_session):
-        """
-        Test integrated workflow: user registration -> entity creation -> validation.
-        
-        Validates end-to-end business workflow coordination across multiple
-        services while maintaining transactional consistency and business rules.
-        """
-        user_service = integrated_services['user_service']
-        entity_service = integrated_services['business_entity_service']
-        validation_service = integrated_services['validation_service']
-        orchestrator = integrated_services['workflow_orchestrator']
-        
-        # Mock database operations
-        with patch.object(db_session, 'add') as mock_add, \
-             patch.object(db_session, 'commit') as mock_commit:
             
-            # Mock service dependencies
-            with patch.object(user_service, '_find_user_by_email', return_value=None), \
-                 patch.object(user_service, '_find_user_by_username', return_value=None), \
-                 patch.object(entity_service, '_validate_entity_data', return_value=True), \
-                 patch.object(entity_service, '_check_entity_name_unique', return_value=True):
-                
-                # Define integrated workflow
-                workflow_steps = [
-                    WorkflowStep(
-                        name="register_user",
-                        service="user_service",
-                        method="register_user",
-                        parameters={
-                            'user_data': UserRegistrationData(
-                                username="integration_user",
-                                email="integration@example.com",
-                                password="SecurePass123!"
-                            )
-                        }
-                    ),
-                    WorkflowStep(
-                        name="create_entity",
-                        service="business_entity_service", 
-                        method="create_entity",
-                        parameters={
-                            'entity_data': EntityCreationRequest(
-                                name="User Entity",
-                                description="Entity for integration user",
-                                owner_id="${register_user.result.user_id}"
-                            )
-                        }
-                    )
-                ]
-                
-                # Configure service registry
-                orchestrator.service_registry = {
-                    'user_service': user_service,
-                    'business_entity_service': entity_service
-                }
-                
-                # Execute integrated workflow
-                result = orchestrator.execute_workflow(str(uuid.uuid4()), workflow_steps)
-                
-                # Validate integrated workflow success
-                assert result['status'] == WorkflowStatus.COMPLETED
-                assert len(result['step_results']) == 2
-                
-                # Verify both services were called
-                assert mock_add.call_count >= 2  # At least one call per service
-                assert mock_commit.call_count >= 1  # Transaction committed
+            result = workflow_orchestrator.execute_workflow(workflow_id, workflow_input)
+            
+            # Verify execution result
+            assert result.is_success is True
+            assert result.workflow_id == workflow_id
+            assert len(result.step_results) == 3
+            assert 'validate_input' in result.step_results
+            assert 'create_user' in result.step_results
+            assert 'create_entity' in result.step_results
+            
+            # Verify service method calls
+            mock_services['validation_service'].validate_user_data.assert_called_once()
+            mock_services['user_service'].register_user.assert_called_once()
+            mock_services['entity_service'].create_entity.assert_called_once()
     
-    def test_validation_error_propagation(self, integrated_services):
+    def test_workflow_execution_step_failure(self, workflow_orchestrator, app, mock_services):
         """
-        Test validation error propagation across service boundaries.
+        Test workflow execution with step failure and error handling.
         
-        Validates error handling consistency, validation failure propagation,
-        and proper error response formatting across service compositions.
+        Validates error handling, rollback mechanisms, and failure recovery
+        when individual workflow steps fail during execution.
         """
-        validation_service = integrated_services['validation_service']
-        user_service = integrated_services['user_service']
-        
-        # Invalid user data that should fail validation
-        invalid_user_data = UserRegistrationData(
-            username="",  # Empty username
-            email="invalid-email",  # Invalid email format
-            password="weak"  # Weak password
-        )
-        
-        # Execute registration with validation
-        result = user_service.register_user(invalid_user_data)
-        
-        # Validate error propagation
-        assert result['status'] == RegistrationStatus.VALIDATION_FAILED
-        assert 'errors' in result
-        assert len(result['errors']) > 0
-
-
-# ================================
-# Performance and Load Testing
-# ================================
-
-@pytest.mark.performance
-class TestServicePerformance:
-    """
-    Performance tests for service layer components.
-    
-    Tests validate performance requirements, load handling capabilities,
-    and SLA compliance for service layer operations under various conditions.
-    """
-    
-    def test_user_service_bulk_operations(self, app, db_session, performance_monitor):
-        """Test user service performance with bulk operations."""
         with app.app_context():
-            user_service = UserService(db=db_session)
-            
-            # Mock bulk database operations
-            with patch.object(db_session, 'add'), \
-                 patch.object(db_session, 'commit'), \
-                 patch.object(user_service, '_find_user_by_email', return_value=None), \
-                 patch.object(user_service, '_find_user_by_username', return_value=None):
-                
-                # Performance test with multiple user registrations
-                performance_monitor['start']()
-                
-                results = []
-                for i in range(100):
-                    user_data = UserRegistrationData(
-                        username=f"perfuser_{i}",
-                        email=f"perf_{i}@example.com",
-                        password="TestPassword123!"
-                    )
-                    result = user_service.register_user(user_data)
-                    results.append(result)
-                
-                performance_monitor['stop']()
-                
-                # Validate performance and results
-                assert all(r['status'] == RegistrationStatus.SUCCESS for r in results)
-                performance_monitor['assert_threshold'](10.0)  # 10 second threshold for 100 operations
-    
-    def test_workflow_orchestrator_concurrent_execution(self, app, db_session, performance_monitor):
-        """Test workflow orchestrator performance with concurrent workflows."""
-        with app.app_context():
-            orchestrator = WorkflowOrchestrator(db=db_session)
-            
-            # Mock fast service for concurrent testing
-            mock_service = Mock()
-            mock_service.test_operation.return_value = {'success': True}
-            orchestrator.service_registry = {'test_service': mock_service}
-            
-            # Define simple workflow step
-            workflow_step = WorkflowStep(
-                name="test_step",
-                service="test_service",
-                method="test_operation",
-                parameters={}
+            # Configure mock services with failure
+            mock_services['validation_service'].validate_user_data.return_value = ValidationResult(
+                is_valid=True,
+                sanitized_data={'username': 'test_user', 'email': 'test@example.com'}
             )
             
-            # Performance test with concurrent workflows
-            performance_monitor['start']()
+            # User service will fail
+            mock_services['user_service'].register_user.side_effect = UserRegistrationError(
+                "Registration failed"
+            )
             
+            # Register services
+            for service_name, service_instance in mock_services.items():
+                workflow_orchestrator.register_service(service_name, service_instance)
+            
+            # Define workflow with rollback steps
+            workflow_steps = [
+                {
+                    'step_id': 'validate_input',
+                    'service': 'validation_service',
+                    'method': 'validate_user_data'
+                },
+                {
+                    'step_id': 'create_user',
+                    'service': 'user_service',
+                    'method': 'register_user',
+                    'depends_on': ['validate_input'],
+                    'rollback_method': 'cleanup_user_registration'
+                }
+            ]
+            
+            workflow_id = workflow_orchestrator.define_workflow('failing_workflow', workflow_steps)
+            
+            # Execute workflow
+            workflow_input = {'username': 'test_user', 'email': 'test@example.com'}
+            
+            result = workflow_orchestrator.execute_workflow(workflow_id, workflow_input)
+            
+            # Verify execution failure
+            assert result.is_success is False
+            assert result.error is not None
+            assert "Registration failed" in str(result.error)
+            assert 'validate_input' in result.step_results  # Should have succeeded
+            assert 'create_user' not in result.step_results or result.step_results['create_user'].is_error
+    
+    def test_workflow_step_retry_mechanism(self, workflow_orchestrator, app, mock_services):
+        """
+        Test workflow step retry mechanisms for resilient execution.
+        
+        Validates retry logic implementation per Section 4.5.3 including
+        exponential backoff and maximum retry limits.
+        """
+        with app.app_context():
+            # Configure mock service with intermittent failures
+            call_count = 0
+            
+            def failing_then_success(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise ServiceError("Temporary failure")
+                return ValidationResult(is_valid=True, sanitized_data={'validated': True})
+            
+            mock_services['validation_service'].validate_user_data.side_effect = failing_then_success
+            
+            # Register services
+            workflow_orchestrator.register_service('validation_service', mock_services['validation_service'])
+            
+            # Define workflow with retry policy
+            workflow_steps = [
+                {
+                    'step_id': 'validate_input',
+                    'service': 'validation_service',
+                    'method': 'validate_user_data',
+                    'retry_policy': {
+                        'max_retries': 3,
+                        'delay': 0.1,
+                        'backoff_factor': 2.0
+                    }
+                }
+            ]
+            
+            workflow_id = workflow_orchestrator.define_workflow('retry_workflow', workflow_steps)
+            
+            # Execute workflow
+            with patch('time.sleep'):  # Mock sleep to speed up test
+                result = workflow_orchestrator.execute_workflow(workflow_id, {'data': 'test'})
+            
+            # Verify retry success
+            assert result.is_success is True
+            assert call_count == 3  # Should have retried twice before success
+            assert mock_services['validation_service'].validate_user_data.call_count == 3
+    
+    def test_workflow_transaction_boundary_management(self, workflow_orchestrator, app, db):
+        """
+        Test workflow transaction boundary management across multiple services.
+        
+        Validates that workflow orchestration properly manages transaction
+        boundaries across service boundaries for data consistency.
+        """
+        with app.app_context():
+            # Test successful workflow transaction
+            with workflow_orchestrator.workflow_transaction_boundary() as transaction_context:
+                # Simulate multiple service operations within workflow
+                user = User(
+                    username='workflow_user',
+                    email='workflow@example.com',
+                    password='TestPassword123!'
+                )
+                transaction_context.session.add(user)
+                transaction_context.session.flush()
+                
+                entity = BusinessEntity(
+                    name='Workflow Entity',
+                    description='Entity created in workflow',
+                    status='active',
+                    owner_id=user.id
+                )
+                transaction_context.session.add(entity)
+                transaction_context.session.flush()
+                
+                # Store IDs for verification
+                user_id = user.id
+                entity_id = entity.id
+            
+            # Verify all operations committed
+            saved_user = User.query.get(user_id)
+            saved_entity = BusinessEntity.query.get(entity_id)
+            assert saved_user is not None
+            assert saved_entity is not None
+            assert saved_entity.owner_id == saved_user.id
+            
+            # Test workflow transaction rollback
+            with pytest.raises(WorkflowExecutionError):
+                with workflow_orchestrator.workflow_transaction_boundary() as transaction_context:
+                    user2 = User(
+                        username='rollback_user',
+                        email='rollback@example.com',
+                        password='TestPassword123!'
+                    )
+                    transaction_context.session.add(user2)
+                    transaction_context.session.flush()
+                    
+                    # Force rollback
+                    raise WorkflowExecutionError("Workflow failed")
+            
+            # Verify rollback occurred
+            rollback_user = User.query.filter_by(username='rollback_user').first()
+            assert rollback_user is None
+    
+    def test_workflow_state_management(self, workflow_orchestrator, app):
+        """
+        Test workflow state management and persistence.
+        
+        Validates workflow state tracking, step progress monitoring,
+        and state persistence for long-running workflows.
+        """
+        with app.app_context():
+            # Define multi-step workflow
+            workflow_steps = [
+                {'step_id': 'step1', 'service': 'test_service', 'method': 'method1'},
+                {'step_id': 'step2', 'service': 'test_service', 'method': 'method2', 'depends_on': ['step1']},
+                {'step_id': 'step3', 'service': 'test_service', 'method': 'method3', 'depends_on': ['step2']}
+            ]
+            
+            workflow_id = workflow_orchestrator.define_workflow('state_test_workflow', workflow_steps)
+            
+            # Initialize workflow state
+            execution_id = workflow_orchestrator.initialize_workflow_state(workflow_id, {'input': 'data'})
+            
+            # Verify initial state
+            state = workflow_orchestrator.get_workflow_state(execution_id)
+            assert state.workflow_id == workflow_id
+            assert state.status == 'initialized'
+            assert state.current_step is None
+            assert state.completed_steps == []
+            assert state.failed_steps == []
+            
+            # Update state as workflow progresses
+            workflow_orchestrator.update_workflow_state(execution_id, 'running', current_step='step1')
+            state = workflow_orchestrator.get_workflow_state(execution_id)
+            assert state.status == 'running'
+            assert state.current_step == 'step1'
+            
+            # Mark step as completed
+            workflow_orchestrator.mark_step_completed(execution_id, 'step1', {'result': 'step1_result'})
+            state = workflow_orchestrator.get_workflow_state(execution_id)
+            assert 'step1' in state.completed_steps
+            assert state.step_results['step1']['result'] == 'step1_result'
+            
+            # Mark step as failed
+            workflow_orchestrator.mark_step_failed(execution_id, 'step2', 'Step 2 failed')
+            state = workflow_orchestrator.get_workflow_state(execution_id)
+            assert 'step2' in state.failed_steps
+            assert state.step_errors['step2'] == 'Step 2 failed'
+    
+    def test_workflow_orchestrator_business_rules(self, workflow_orchestrator, app):
+        """
+        Test WorkflowOrchestrator business rules implementation.
+        
+        Validates implementation of abstract business rules method
+        with workflow-specific business logic validation.
+        """
+        with app.app_context():
+            # Test valid workflow data
+            valid_data = {
+                'workflow_id': 'test_workflow',
+                'execution_context': {'user_id': 123},
+                'input_data': {'valid': True}
+            }
+            
+            result = workflow_orchestrator.validate_business_rules(valid_data)
+            assert result is True
+            
+            # Test invalid workflow data
+            invalid_data = {
+                'workflow_id': '',  # Empty workflow ID
+                'execution_context': {},  # Missing user context
+                'input_data': None  # Invalid input
+            }
+            
+            with pytest.raises(ValidationError):
+                workflow_orchestrator.validate_business_rules(invalid_data)
+    
+    def test_workflow_orchestrator_service_composition(self, workflow_orchestrator, app):
+        """
+        Test WorkflowOrchestrator composition with other services.
+        
+        Validates service composition patterns for complex workflow coordination
+        requiring integration with all other service layer components.
+        """
+        with app.app_context():
+            # Test user service composition
+            user_service = workflow_orchestrator.compose_service(UserService)
+            assert user_service is not None
+            
+            # Test business entity service composition
+            entity_service = workflow_orchestrator.compose_service(BusinessEntityService)
+            assert entity_service is not None
+            
+            # Test validation service composition
+            validation_service = workflow_orchestrator.compose_service(ValidationService)
+            assert validation_service is not None
+            
+            # Test service caching
+            user_service_2 = workflow_orchestrator.compose_service(UserService)
+            assert user_service is user_service_2
+    
+    def test_concurrent_workflow_execution(self, workflow_orchestrator, app, mock_services):
+        """
+        Test concurrent workflow execution with proper isolation.
+        
+        Validates that multiple workflows can execute concurrently without
+        interference and with proper resource management.
+        """
+        with app.app_context():
+            # Configure mock services
+            mock_services['validation_service'].validate_user_data.return_value = ValidationResult(
+                is_valid=True,
+                sanitized_data={'validated': True}
+            )
+            
+            # Register services
+            workflow_orchestrator.register_service('validation_service', mock_services['validation_service'])
+            
+            # Define simple workflow
+            workflow_steps = [
+                {
+                    'step_id': 'validate',
+                    'service': 'validation_service',
+                    'method': 'validate_user_data'
+                }
+            ]
+            
+            workflow_id = workflow_orchestrator.define_workflow('concurrent_test', workflow_steps)
+            
+            # Execute multiple workflows concurrently
+            import threading
             results = []
-            for i in range(50):
-                workflow_id = f"perf_workflow_{i}"
-                result = orchestrator.execute_workflow(workflow_id, [workflow_step])
+            
+            def execute_workflow(input_data):
+                result = workflow_orchestrator.execute_workflow(workflow_id, input_data)
                 results.append(result)
             
-            performance_monitor['stop']()
-            
-            # Validate concurrent execution performance
-            assert all(r['status'] == WorkflowStatus.COMPLETED for r in results)
-            performance_monitor['assert_threshold'](15.0)  # 15 second threshold for 50 workflows
-
-
-# ================================
-# Error Handling and Edge Cases
-# ================================
-
-@pytest.mark.unit
-class TestServiceErrorHandling:
-    """
-    Comprehensive error handling tests for service layer components.
-    
-    Tests validate error scenarios, exception handling, recovery mechanisms,
-    and proper error response formatting across all service components.
-    """
-    
-    def test_database_connection_failure_handling(self, app):
-        """Test service behavior during database connection failures."""
-        with app.app_context():
-            # Simulate database connection failure
-            with patch('sqlalchemy.create_engine', side_effect=OperationalError("connection", "failed", "error")):
-                
-                user_service = UserService()
-                
-                user_data = UserRegistrationData(
-                    username="testuser",
-                    email="test@example.com", 
-                    password="TestPassword123!"
+            threads = []
+            for i in range(5):
+                thread = threading.Thread(
+                    target=execute_workflow,
+                    args=({'data': f'test_{i}'},)
                 )
-                
-                # Validate graceful error handling
-                with pytest.raises(ServiceError):
-                    user_service.register_user(user_data)
-    
-    def test_service_dependency_injection_failure(self, app, db_session):
-        """Test service behavior when dependency injection fails."""
-        with app.app_context():
-            # Test with missing required dependencies
-            with pytest.raises((ImportError, AttributeError)):
-                # This should fail due to missing dependencies
-                BusinessEntityService(db=None)
-    
-    def test_concurrent_access_conflict_resolution(self, app, db_session):
-        """Test service handling of concurrent access conflicts."""
-        with app.app_context():
-            user_service = UserService(db=db_session)
+                threads.append(thread)
+                thread.start()
             
-            # Simulate concurrent access conflict
-            with patch.object(db_session, 'commit', side_effect=IntegrityError("conflict", "params", "orig")):
-                
-                user_data = UserRegistrationData(
-                    username="concurrent_user",
-                    email="concurrent@example.com",
-                    password="TestPassword123!"
-                )
-                
-                # Mock no existing users for initial validation
-                with patch.object(user_service, '_find_user_by_email', return_value=None), \
-                     patch.object(user_service, '_find_user_by_username', return_value=None):
-                    
-                    result = user_service.register_user(user_data)
-                    
-                    # Validate conflict handling
-                    assert result['status'] == RegistrationStatus.SYSTEM_ERROR
-                    assert 'error' in result
-
-
-if __name__ == '__main__':
-    # Configure pytest execution for service layer testing
-    pytest.main([
-        __file__,
-        '-v',
-        '--tb=short',
-        '--cov=src.services',
-        '--cov-report=html',
-        '--cov-report=term-missing',
-        '--cov-fail-under=90'
-    ])
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
+            
+            # Verify all workflows completed successfully
+            assert len(results) == 5
+            for result in results:
+                assert result.is_success is True
+            
+            # Verify service was called for each workflow
+            assert mock_services['validation_service'].validate_user_data.call_count == 5
