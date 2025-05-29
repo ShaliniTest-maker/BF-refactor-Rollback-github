@@ -1,1390 +1,903 @@
 """
-Auth0 Identity Provider Integration Service
+Auth0 Identity Provider Integration Service for Flask Application Factory Pattern.
 
-This module implements comprehensive Auth0 identity provider integration using
-Auth0 Python SDK 4.9.0 for enterprise-grade external authentication management.
-Provides user authentication flows, token validation, user profile synchronization,
-and Auth0 Management API interactions.
+This module implements comprehensive external authentication using Auth0 Python SDK 4.9.0,
+managing user authentication flows, token validation, user profile synchronization, and
+Auth0 Management API interactions while maintaining compatibility with Flask application
+factory pattern and providing seamless identity management.
 
 Key Features:
-- Auth0 Python SDK 4.9.0 integration with Flask application factory
-- JWT token validation with Auth0 public key verification  
-- User profile synchronization with Flask-SQLAlchemy models
-- Auth0 Management API integration for user lifecycle operations
-- Refresh token rotation policy with automated revocation
-- Security incident response capabilities
-- Comprehensive error handling and logging
+- Auth0 Python SDK 4.9.0 integration with Flask application factory per Section 6.4.1.1
+- JWT token validation with Auth0 public key verification per Section 6.4.1.4  
+- User profile synchronization between Auth0 and Flask-SQLAlchemy per Section 6.4.1.1
+- Auth0 Management API integration for user lifecycle operations per Section 6.4.1.1
+- Token revocation and security incident response capabilities per Section 6.4.6.2
+- Automated refresh token rotation policy with security enforcement per Section 6.4.1.4
 
-Dependencies:
-- auth0-python 4.9.0 for Auth0 API integration
-- PyJWT for token validation and processing
-- Flask-SQLAlchemy for user model synchronization
-- Requests with retry logic for reliable API communication
-- Integration with security monitoring and token management
-
-Architectural Pattern:
-Implements the Service Layer pattern for Auth0 operations, providing clean
-abstraction between Flask authentication decorators and Auth0 identity provider
-while maintaining Flask application context and session management.
+Technical Specification References:
+- Section 6.4.1.1: Auth0 Python SDK integration and identity management
+- Section 6.4.1.4: JWT token validation and refresh token management
+- Section 6.4.6.2: Token revocation and security incident response
+- Section 4.6: Authentication Migration Workflow from Node.js to Flask
 """
 
 import os
 import json
+import jwt
 import time
-import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Union, Tuple, Any, NamedTuple
-from dataclasses import dataclass, asdict
-from functools import wraps, lru_cache
-from urllib.parse import urlencode, urlparse
+from typing import Optional, Dict, Any, List, Union
+from functools import wraps
+from urllib.parse import urlencode
 
-import jwt
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from flask import Flask, current_app, g, request, session, url_for, redirect, jsonify
-from werkzeug.security import safe_str_cmp
+from jose import jwt as jose_jwt, JWTError
+from auth0.v3.authentication import GetToken, Users, Social
+from auth0.v3.management import Auth0
+from auth0.v3.exceptions import Auth0Error
+from flask import current_app, request, g, session, jsonify, url_for, redirect
+from flask_login import current_user, login_user, logout_user
+from werkzeug.exceptions import Unauthorized, BadRequest, InternalServerError
 
-# Auth0 Python SDK imports
-try:
-    from auth0.authentication import GetToken, Social, Users
-    from auth0.management import Auth0
-    from auth0.management.rest import RestClient
-    from auth0.exceptions import Auth0Error
-except ImportError as e:
-    # Handle missing Auth0 SDK during development/testing
-    GetToken = None
-    Social = None
-    Users = None
-    Auth0 = None
-    RestClient = None
-    Auth0Error = Exception
-    print(f"Warning: Auth0 SDK not available: {e}")
-
-# Internal imports
-try:
-    from ..models.user import User
-    from ..models.session import UserSession
-    from .security_monitor import SecurityMonitor, SecurityEventType, SecuritySeverity
-except ImportError:
-    # Handle imports during testing or standalone execution
-    User = None
-    UserSession = None
-    SecurityMonitor = None
-    SecurityEventType = None
-    SecuritySeverity = None
+from ..models.user import User
+from ..models.session import UserSession
+from ..models.base import db
 
 
-@dataclass
-class Auth0Configuration:
-    """Auth0 configuration data structure."""
-    domain: str
-    client_id: str
-    client_secret: str
-    audience: str
-    management_api_audience: Optional[str] = None
-    callback_url: Optional[str] = None
-    logout_url: Optional[str] = None
-    connection: Optional[str] = None
-    scope: str = "openid profile email"
+# Configure module logger for comprehensive audit trails per Section 6.4.2.5
+logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Auth0UserProfile:
-    """Auth0 user profile data structure."""
-    user_id: str
-    email: str
-    username: Optional[str] = None
-    name: Optional[str] = None
-    picture: Optional[str] = None
-    email_verified: bool = False
-    auth0_sub: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-    app_metadata: Optional[Dict[str, Any]] = None
-    roles: Optional[List[str]] = None
-    permissions: Optional[List[str]] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-
-@dataclass
-class AuthenticationResult:
-    """Result of Auth0 authentication operation."""
-    success: bool
-    user_profile: Optional[Auth0UserProfile] = None
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    id_token: Optional[str] = None
-    expires_in: Optional[int] = None
-    token_type: Optional[str] = None
-    error_code: Optional[str] = None
-    error_description: Optional[str] = None
-
-
-@dataclass
-class TokenValidationResult:
-    """Result of token validation operation."""
-    valid: bool
-    user_profile: Optional[Auth0UserProfile] = None
-    token_claims: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
-    expired: bool = False
-    revoked: bool = False
-
-
-@dataclass
-class UserSyncResult:
-    """Result of user synchronization operation."""
-    success: bool
-    user_id: Optional[str] = None
-    created: bool = False
-    updated: bool = False
-    sync_fields: Optional[List[str]] = None
-    error_message: Optional[str] = None
-
-
-class Auth0IntegrationError(Exception):
-    """Base exception for Auth0 integration errors."""
+class Auth0TokenError(Exception):
+    """Custom exception for Auth0 token-related errors."""
     pass
 
 
-class Auth0AuthenticationError(Auth0IntegrationError):
-    """Exception raised when Auth0 authentication fails."""
+class Auth0ProfileError(Exception):
+    """Custom exception for Auth0 user profile-related errors."""
     pass
 
 
-class Auth0TokenValidationError(Auth0IntegrationError):
-    """Exception raised when Auth0 token validation fails."""
+class Auth0ManagementError(Exception):
+    """Custom exception for Auth0 Management API-related errors."""
     pass
 
 
-class Auth0ManagementError(Auth0IntegrationError):
-    """Exception raised when Auth0 Management API operations fail."""
-    pass
-
-
-class Auth0UserSyncError(Auth0IntegrationError):
-    """Exception raised when user synchronization fails."""
-    pass
-
-
-class Auth0IntegrationService:
+class Auth0Integration:
     """
-    Comprehensive Auth0 identity provider integration service implementing
-    enterprise-grade external authentication using Auth0 Python SDK 4.9.0.
+    Comprehensive Auth0 identity provider integration service.
     
-    This service provides:
-    - User authentication flows with Auth0 Universal Login
-    - JWT token validation with Auth0 public key verification
-    - User profile synchronization with Flask-SQLAlchemy models
-    - Auth0 Management API integration for user lifecycle operations
-    - Refresh token rotation policy with automated revocation
-    - Security incident response capabilities
+    This service provides complete Auth0 integration capabilities including user
+    authentication, token management, profile synchronization, and Management API
+    operations. Designed for Flask application factory pattern compatibility with
+    comprehensive error handling and security incident response.
+    
+    Attributes:
+        domain (str): Auth0 tenant domain
+        client_id (str): Auth0 application client ID
+        client_secret (str): Auth0 application client secret
+        audience (str): Auth0 API audience identifier
+        algorithms (List[str]): Supported JWT signing algorithms
+        get_token (GetToken): Auth0 authentication API client
+        users_client (Users): Auth0 Users API client
+        management_client (Auth0): Auth0 Management API client
+        jwks_uri (str): Auth0 JSON Web Key Set URI for token validation
+        issuer (str): Auth0 token issuer URL
     """
-
-    def __init__(self, app: Optional[Flask] = None):
+    
+    def __init__(self, app=None):
         """
         Initialize Auth0 integration service.
         
         Args:
-            app: Flask application instance for configuration
+            app (Flask, optional): Flask application instance for immediate initialization
         """
-        self.app = app
-        self.config = None
-        self.auth0_domain = None
+        self.domain = None
         self.client_id = None
         self.client_secret = None
         self.audience = None
-        
-        # Auth0 SDK clients
-        self.get_token_client = None
-        self.social_client = None
+        self.algorithms = ['RS256']
+        self.get_token = None
         self.users_client = None
         self.management_client = None
-        
-        # Token validation
         self.jwks_uri = None
-        self.public_keys = {}
-        self.algorithms = ['RS256']
+        self.issuer = None
+        self._jwks_cache = {}
+        self._jwks_cache_expiry = 0
         
-        # Session and security
-        self.security_monitor = None
-        self.logger = logging.getLogger(__name__)
-        
-        # Configuration
-        self.token_cache_ttl = 300  # 5 minutes
-        self.user_sync_fields = [
-            'email', 'username', 'name', 'picture', 
-            'email_verified', 'metadata', 'app_metadata'
-        ]
-        
-        if app:
+        if app is not None:
             self.init_app(app)
-
-    def init_app(self, app: Flask) -> None:
+    
+    def init_app(self, app):
         """
         Initialize Auth0 integration with Flask application factory pattern.
         
-        Args:
-            app: Flask application instance
-        """
-        self.app = app
-        
-        # Load configuration
-        self._load_configuration(app)
-        
-        # Initialize Auth0 SDK clients
-        self._initialize_auth0_clients()
-        
-        # Load public keys for token validation
-        self._load_auth0_public_keys()
-        
-        # Initialize security monitoring
-        self._initialize_monitoring(app)
-        
-        # Register error handlers
-        self._register_error_handlers(app)
-        
-        # Cache management client token
-        self._management_token_cache = {}
-        
-        app.logger.info(f"Auth0 Integration Service initialized for domain: {self.auth0_domain}")
-
-    def _load_configuration(self, app: Flask) -> None:
-        """Load Auth0 configuration from Flask application config."""
-        required_configs = ['AUTH0_DOMAIN', 'AUTH0_CLIENT_ID', 'AUTH0_CLIENT_SECRET']
-        missing_configs = [config for config in required_configs if not app.config.get(config)]
-        
-        if missing_configs:
-            raise Auth0IntegrationError(f"Missing required Auth0 configuration: {missing_configs}")
-        
-        self.config = Auth0Configuration(
-            domain=app.config['AUTH0_DOMAIN'],
-            client_id=app.config['AUTH0_CLIENT_ID'],
-            client_secret=app.config['AUTH0_CLIENT_SECRET'],
-            audience=app.config.get('AUTH0_AUDIENCE', f"https://{app.config['AUTH0_DOMAIN']}/api/v2/"),
-            management_api_audience=app.config.get('AUTH0_MANAGEMENT_AUDIENCE'),
-            callback_url=app.config.get('AUTH0_CALLBACK_URL'),
-            logout_url=app.config.get('AUTH0_LOGOUT_URL'),
-            connection=app.config.get('AUTH0_CONNECTION', 'Username-Password-Authentication'),
-            scope=app.config.get('AUTH0_SCOPE', 'openid profile email')
-        )
-        
-        # Set instance attributes for easy access
-        self.auth0_domain = self.config.domain
-        self.client_id = self.config.client_id
-        self.client_secret = self.config.client_secret
-        self.audience = self.config.audience
-        self.jwks_uri = f"https://{self.auth0_domain}/.well-known/jwks.json"
-
-    def _initialize_auth0_clients(self) -> None:
-        """Initialize Auth0 SDK clients."""
-        if not all([GetToken, Social, Users, Auth0]):
-            self.logger.warning("Auth0 SDK not available, some features will be limited")
-            return
-        
-        try:
-            # Authentication clients
-            self.get_token_client = GetToken(
-                domain=self.auth0_domain,
-                client_id=self.client_id,
-                client_secret=self.client_secret
-            )
-            
-            self.social_client = Social(domain=self.auth0_domain)
-            
-            self.users_client = Users(domain=self.auth0_domain)
-            
-            self.logger.info("Auth0 SDK clients initialized successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Auth0 SDK clients: {e}")
-            raise Auth0IntegrationError(f"Auth0 SDK initialization failed: {e}")
-
-    def _load_auth0_public_keys(self) -> None:
-        """Load Auth0 public keys for JWT token validation."""
-        if not self.jwks_uri:
-            self.logger.warning("JWKS URI not configured, token validation will be limited")
-            return
-        
-        try:
-            # Configure retry strategy for JWKS endpoint
-            session = requests.Session()
-            retry_strategy = Retry(
-                total=3,
-                backoff_factor=1,
-                status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS"]
-            )
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            session.mount("https://", adapter)
-            
-            # Fetch JWKS
-            response = session.get(self.jwks_uri, timeout=30)
-            response.raise_for_status()
-            
-            jwks = response.json()
-            
-            # Extract and store public keys
-            for key in jwks.get('keys', []):
-                kid = key.get('kid')
-                if kid and key.get('kty') == 'RSA':
-                    self.public_keys[kid] = key
-            
-            self.logger.info(f"Loaded {len(self.public_keys)} Auth0 public keys for token validation")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load Auth0 public keys: {e}")
-            # Continue without public keys - will use alternative validation
-
-    def _initialize_monitoring(self, app: Flask) -> None:
-        """Initialize security monitoring integration."""
-        if SecurityMonitor:
-            self.security_monitor = SecurityMonitor(app)
-        else:
-            self.logger.warning("SecurityMonitor not available, security logging will be limited")
-
-    def _register_error_handlers(self, app: Flask) -> None:
-        """Register Auth0-specific error handlers."""
-        @app.errorhandler(Auth0IntegrationError)
-        def handle_auth0_error(error):
-            """Handle Auth0 integration errors."""
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_ERROR,
-                    SecuritySeverity.ERROR,
-                    "Auth0 integration error",
-                    {'error': str(error), 'error_type': type(error).__name__}
-                )
-            
-            self.logger.error(f"Auth0 integration error: {error}")
-            return jsonify({'error': 'Authentication service error'}), 500
-
-    def generate_authorization_url(
-        self,
-        state: Optional[str] = None,
-        redirect_uri: Optional[str] = None,
-        scope: Optional[str] = None,
-        connection: Optional[str] = None
-    ) -> str:
-        """
-        Generate Auth0 authorization URL for Universal Login.
+        Configures Auth0 SDK clients and establishes connection to Auth0 services
+        using environment variables and Flask configuration per Section 6.4.1.1.
         
         Args:
-            state: Optional state parameter for CSRF protection
-            redirect_uri: Optional callback URL override
-            scope: Optional scope override
-            connection: Optional connection override
+            app (Flask): Flask application instance
             
+        Raises:
+            ValueError: If required Auth0 configuration is missing
+            Auth0Error: If Auth0 service connection fails
+        """
+        # Extract Auth0 configuration from Flask app config and environment variables
+        self.domain = app.config.get('AUTH0_DOMAIN') or os.getenv('AUTH0_DOMAIN')
+        self.client_id = app.config.get('AUTH0_CLIENT_ID') or os.getenv('AUTH0_CLIENT_ID')
+        self.client_secret = app.config.get('AUTH0_CLIENT_SECRET') or os.getenv('AUTH0_CLIENT_SECRET')
+        self.audience = app.config.get('AUTH0_AUDIENCE') or os.getenv('AUTH0_AUDIENCE')
+        
+        # Validate required configuration
+        if not all([self.domain, self.client_id, self.client_secret]):
+            raise ValueError(
+                "AUTH0_DOMAIN, AUTH0_CLIENT_ID, and AUTH0_CLIENT_SECRET must be configured"
+            )
+        
+        # Configure JWT validation parameters per Section 6.4.1.4
+        self.algorithms = app.config.get('AUTH0_ALGORITHMS', ['RS256'])
+        self.jwks_uri = f"https://{self.domain}/.well-known/jwks.json"
+        self.issuer = f"https://{self.domain}/"
+        
+        # Initialize Auth0 SDK clients per Section 6.4.1.1
+        try:
+            # Authentication API client for token operations
+            self.get_token = GetToken(self.domain)
+            
+            # Users API client for user management
+            self.users_client = Users(self.domain)
+            
+            # Management API client for administrative operations
+            self.management_client = Auth0(self.domain, self._get_management_token())
+            
+            logger.info(
+                "Auth0 integration initialized successfully",
+                extra={
+                    'domain': self.domain,
+                    'client_id': self.client_id,
+                    'audience': self.audience,
+                    'algorithms': self.algorithms
+                }
+            )
+            
+        except Auth0Error as e:
+            logger.error(f"Failed to initialize Auth0 clients: {str(e)}")
+            raise Auth0Error(f"Auth0 service connection failed: {str(e)}")
+        
+        # Store integration instance in Flask app for access across blueprints
+        app.auth0 = self
+    
+    def _get_management_token(self) -> str:
+        """
+        Obtain Auth0 Management API token for administrative operations.
+        
+        Uses client credentials flow to obtain a Management API token with
+        appropriate scopes for user lifecycle operations per Section 6.4.1.1.
+        
         Returns:
-            Auth0 authorization URL for user authentication
+            str: Management API access token
+            
+        Raises:
+            Auth0ManagementError: If token acquisition fails
         """
         try:
-            # Use provided values or defaults
-            redirect_uri = redirect_uri or self.config.callback_url
-            scope = scope or self.config.scope
-            connection = connection or self.config.connection
-            state = state or str(uuid.uuid4())
+            token_url = f"https://{self.domain}/oauth/token"
             
-            # Store state in session for validation
-            session['auth0_state'] = state
-            
-            # Build authorization URL
-            auth_params = {
-                'response_type': 'code',
+            payload = {
                 'client_id': self.client_id,
-                'redirect_uri': redirect_uri,
-                'scope': scope,
-                'state': state
+                'client_secret': self.client_secret,
+                'audience': f"https://{self.domain}/api/v2/",
+                'grant_type': 'client_credentials'
             }
             
-            if connection:
-                auth_params['connection'] = connection
+            headers = {'Content-Type': 'application/json'}
             
-            auth_url = f"https://{self.auth0_domain}/authorize?" + urlencode(auth_params)
+            response = requests.post(token_url, json=payload, headers=headers, timeout=10)
+            response.raise_for_status()
             
-            # Log authorization URL generation
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_AUTHORIZATION_STARTED,
-                    SecuritySeverity.INFO,
-                    "Auth0 authorization URL generated",
-                    {
-                        'state': state,
-                        'scope': scope,
-                        'connection': connection,
-                        'redirect_uri': redirect_uri
-                    }
-                )
+            token_data = response.json()
             
-            return auth_url
+            logger.info("Management API token acquired successfully")
             
-        except Exception as e:
-            self.logger.error(f"Failed to generate authorization URL: {e}")
-            raise Auth0IntegrationError(f"Authorization URL generation failed: {e}")
-
-    def handle_callback(
-        self,
-        code: str,
-        state: str,
-        redirect_uri: Optional[str] = None
-    ) -> AuthenticationResult:
+            return token_data['access_token']
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to acquire Management API token: {str(e)}")
+            raise Auth0ManagementError(f"Management API token acquisition failed: {str(e)}")
+    
+    def get_authorization_url(self, redirect_uri: str, state: str = None) -> str:
         """
-        Handle Auth0 callback and exchange authorization code for tokens.
+        Generate Auth0 authorization URL for user authentication flow.
+        
+        Creates a properly formatted authorization URL for redirecting users to
+        Auth0 for authentication with optional state parameter for CSRF protection.
         
         Args:
-            code: Authorization code from Auth0 callback
-            state: State parameter for CSRF validation
-            redirect_uri: Callback URL used in authorization request
+            redirect_uri (str): Callback URL after authentication
+            state (str, optional): State parameter for CSRF protection
             
         Returns:
-            AuthenticationResult with user profile and tokens
+            str: Complete Auth0 authorization URL
+        """
+        params = {
+            'audience': self.audience,
+            'response_type': 'code',
+            'client_id': self.client_id,
+            'redirect_uri': redirect_uri,
+            'scope': 'openid profile email',
+        }
+        
+        if state:
+            params['state'] = state
+        
+        auth_url = f"https://{self.domain}/authorize?{urlencode(params)}"
+        
+        logger.info(
+            "Authorization URL generated",
+            extra={
+                'redirect_uri': redirect_uri,
+                'state': state,
+                'client_id': self.client_id
+            }
+        )
+        
+        return auth_url
+    
+    def exchange_code_for_tokens(self, code: str, redirect_uri: str) -> Dict[str, Any]:
+        """
+        Exchange authorization code for access and refresh tokens.
+        
+        Implements the authorization code flow token exchange per Auth0 OAuth 2.0
+        specification with comprehensive error handling and validation.
+        
+        Args:
+            code (str): Authorization code from Auth0 callback
+            redirect_uri (str): Redirect URI used in authorization request
+            
+        Returns:
+            Dict[str, Any]: Token response containing access_token, refresh_token, and id_token
+            
+        Raises:
+            Auth0TokenError: If token exchange fails
         """
         try:
-            # Validate state parameter
-            session_state = session.get('auth0_state')
-            if not session_state or not safe_str_cmp(session_state, state):
-                raise Auth0AuthenticationError("Invalid state parameter - possible CSRF attack")
+            token_payload = {
+                'grant_type': 'authorization_code',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri,
+            }
             
-            # Clear state from session
-            session.pop('auth0_state', None)
+            # Add audience if configured
+            if self.audience:
+                token_payload['audience'] = self.audience
             
-            # Exchange code for tokens
-            redirect_uri = redirect_uri or self.config.callback_url
-            
-            if not self.get_token_client:
-                raise Auth0AuthenticationError("Auth0 GetToken client not initialized")
-            
-            token_response = self.get_token_client.authorization_code(
+            token_response = self.get_token.authorization_code(
                 code=code,
                 redirect_uri=redirect_uri
             )
             
-            if 'error' in token_response:
-                error_msg = f"{token_response.get('error')}: {token_response.get('error_description', '')}"
-                raise Auth0AuthenticationError(f"Token exchange failed: {error_msg}")
+            logger.info(
+                "Authorization code exchanged for tokens successfully",
+                extra={
+                    'client_id': self.client_id,
+                    'redirect_uri': redirect_uri
+                }
+            )
             
-            # Extract tokens
-            access_token = token_response.get('access_token')
-            refresh_token = token_response.get('refresh_token')
-            id_token = token_response.get('id_token')
-            expires_in = token_response.get('expires_in')
-            token_type = token_response.get('token_type', 'Bearer')
+            return token_response
             
-            # Validate and decode ID token to get user profile
-            user_profile = None
-            if id_token:
-                try:
-                    user_profile = self._decode_id_token(id_token)
-                except Exception as e:
-                    self.logger.warning(f"Failed to decode ID token: {e}")
+        except Auth0Error as e:
+            logger.error(f"Token exchange failed: {str(e)}")
+            raise Auth0TokenError(f"Failed to exchange code for tokens: {str(e)}")
+    
+    def validate_jwt_token(self, token: str) -> Dict[str, Any]:
+        """
+        Validate JWT token with Auth0 public key verification per Section 6.4.1.4.
+        
+        Performs comprehensive JWT validation including signature verification,
+        expiration checking, issuer validation, and audience validation using
+        Auth0's public keys from JWKS endpoint.
+        
+        Args:
+            token (str): JWT token to validate
             
-            # If no user profile from ID token, try to get from userinfo endpoint
-            if not user_profile and access_token:
-                try:
-                    user_profile = self._get_user_info(access_token)
-                except Exception as e:
-                    self.logger.warning(f"Failed to get user info: {e}")
+        Returns:
+            Dict[str, Any]: Decoded token payload if validation successful
             
-            if not user_profile:
-                raise Auth0AuthenticationError("Failed to obtain user profile")
+        Raises:
+            Auth0TokenError: If token validation fails
+        """
+        try:
+            # Get JWT header to determine key ID
+            unverified_header = jose_jwt.get_unverified_header(token)
             
-            # Log successful authentication
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_AUTHENTICATION_SUCCESS,
-                    SecuritySeverity.INFO,
-                    "Auth0 authentication successful",
-                    {
-                        'user_id': user_profile.user_id,
-                        'email': user_profile.email,
-                        'auth0_sub': user_profile.auth0_sub,
-                        'has_refresh_token': bool(refresh_token)
+            # Get signing key from JWKS
+            jwks = self._get_jwks()
+            rsa_key = self._get_rsa_key(jwks, unverified_header['kid'])
+            
+            if not rsa_key:
+                raise Auth0TokenError("Unable to find appropriate key for token verification")
+            
+            # Validate and decode token
+            payload = jose_jwt.decode(
+                token,
+                rsa_key,
+                algorithms=self.algorithms,
+                audience=self.audience,
+                issuer=self.issuer,
+                options={'verify_exp': True}
+            )
+            
+            logger.info(
+                "JWT token validated successfully",
+                extra={
+                    'subject': payload.get('sub'),
+                    'audience': payload.get('aud'),
+                    'issuer': payload.get('iss')
+                }
+            )
+            
+            return payload
+            
+        except JWTError as e:
+            logger.warning(f"JWT validation failed: {str(e)}")
+            raise Auth0TokenError(f"Invalid JWT token: {str(e)}")
+        except Exception as e:
+            logger.error(f"Token validation error: {str(e)}")
+            raise Auth0TokenError(f"Token validation failed: {str(e)}")
+    
+    def _get_jwks(self) -> Dict[str, Any]:
+        """
+        Retrieve and cache Auth0 JSON Web Key Set (JWKS) for token validation.
+        
+        Implements caching mechanism for JWKS to reduce API calls while ensuring
+        up-to-date keys for token validation per Section 6.4.1.4.
+        
+        Returns:
+            Dict[str, Any]: JWKS response from Auth0
+            
+        Raises:
+            Auth0TokenError: If JWKS retrieval fails
+        """
+        current_time = time.time()
+        
+        # Return cached JWKS if still valid (cache for 1 hour)
+        if (self._jwks_cache and 
+            current_time < self._jwks_cache_expiry):
+            return self._jwks_cache
+        
+        try:
+            response = requests.get(self.jwks_uri, timeout=10)
+            response.raise_for_status()
+            
+            jwks = response.json()
+            
+            # Cache JWKS for 1 hour
+            self._jwks_cache = jwks
+            self._jwks_cache_expiry = current_time + 3600
+            
+            logger.debug("JWKS retrieved and cached successfully")
+            
+            return jwks
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to retrieve JWKS: {str(e)}")
+            raise Auth0TokenError(f"JWKS retrieval failed: {str(e)}")
+    
+    def _get_rsa_key(self, jwks: Dict[str, Any], kid: str) -> Dict[str, Any]:
+        """
+        Extract RSA key from JWKS for JWT signature verification.
+        
+        Args:
+            jwks (Dict[str, Any]): JSON Web Key Set from Auth0
+            kid (str): Key ID from JWT header
+            
+        Returns:
+            Dict[str, Any]: RSA key for signature verification
+        """
+        for key in jwks.get('keys', []):
+            if key.get('kid') == kid:
+                return {
+                    'kty': key.get('kty'),
+                    'kid': key.get('kid'),
+                    'use': key.get('use'),
+                    'n': key.get('n'),
+                    'e': key.get('e')
+                }
+        return {}
+    
+    def get_user_info(self, access_token: str) -> Dict[str, Any]:
+        """
+        Retrieve user information from Auth0 using access token.
+        
+        Fetches comprehensive user profile information from Auth0 userinfo
+        endpoint for profile synchronization per Section 6.4.1.1.
+        
+        Args:
+            access_token (str): Valid Auth0 access token
+            
+        Returns:
+            Dict[str, Any]: User profile information from Auth0
+            
+        Raises:
+            Auth0ProfileError: If user info retrieval fails
+        """
+        try:
+            userinfo_url = f"https://{self.domain}/userinfo"
+            headers = {'Authorization': f'Bearer {access_token}'}
+            
+            response = requests.get(userinfo_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            user_info = response.json()
+            
+            logger.info(
+                "User info retrieved successfully",
+                extra={
+                    'user_id': user_info.get('sub'),
+                    'email': user_info.get('email'),
+                    'email_verified': user_info.get('email_verified')
+                }
+            )
+            
+            return user_info
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to retrieve user info: {str(e)}")
+            raise Auth0ProfileError(f"User info retrieval failed: {str(e)}")
+    
+    def sync_user_profile(self, auth0_user_info: Dict[str, Any]) -> User:
+        """
+        Synchronize Auth0 user profile with Flask-SQLAlchemy User model per Section 6.4.1.1.
+        
+        Creates or updates local User record based on Auth0 profile information,
+        maintaining identity synchronization between Auth0 and local database.
+        
+        Args:
+            auth0_user_info (Dict[str, Any]): User profile from Auth0
+            
+        Returns:
+            User: Synchronized User model instance
+            
+        Raises:
+            Auth0ProfileError: If profile synchronization fails
+        """
+        try:
+            # Extract key profile fields from Auth0 user info
+            auth0_user_id = auth0_user_info.get('sub')
+            email = auth0_user_info.get('email')
+            username = auth0_user_info.get('preferred_username') or auth0_user_info.get('nickname') or email
+            email_verified = auth0_user_info.get('email_verified', False)
+            
+            if not auth0_user_id or not email:
+                raise Auth0ProfileError("Auth0 user ID and email are required for synchronization")
+            
+            # Find existing user by Auth0 user ID or email
+            user = User.query.filter(
+                (User.email == email) | 
+                (User.username == username)
+            ).first()
+            
+            if user:
+                # Update existing user profile
+                user.email = email
+                user.username = username
+                user.is_active = email_verified
+                user.updated_at = datetime.now(timezone.utc)
+                
+                logger.info(
+                    "User profile updated from Auth0",
+                    extra={
+                        'user_id': user.id,
+                        'auth0_user_id': auth0_user_id,
+                        'email': email,
+                        'email_verified': email_verified
+                    }
+                )
+            else:
+                # Create new user from Auth0 profile
+                # Note: Auth0 users don't have passwords in local system
+                user = User(
+                    username=username,
+                    email=email,
+                    password='auth0_managed',  # Placeholder - actual auth via Auth0
+                    is_active=email_verified
+                )
+                
+                db.session.add(user)
+                
+                logger.info(
+                    "New user created from Auth0 profile",
+                    extra={
+                        'auth0_user_id': auth0_user_id,
+                        'email': email,
+                        'username': username,
+                        'email_verified': email_verified
                     }
                 )
             
-            return AuthenticationResult(
-                success=True,
-                user_profile=user_profile,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                id_token=id_token,
-                expires_in=expires_in,
-                token_type=token_type
-            )
+            # Commit changes to database
+            db.session.commit()
             
-        except Auth0AuthenticationError:
-            raise
-        except Exception as e:
-            self.logger.error(f"Auth0 callback handling failed: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_AUTHENTICATION_FAILED,
-                    SecuritySeverity.ERROR,
-                    "Auth0 callback handling failed",
-                    {'error': str(e), 'state': state}
-                )
-            raise Auth0AuthenticationError(f"Callback handling failed: {e}")
-
-    def validate_token(
-        self,
-        token: str,
-        audience: Optional[str] = None,
-        issuer: Optional[str] = None
-    ) -> TokenValidationResult:
-        """
-        Validate JWT token using Auth0 public keys.
-        
-        Args:
-            token: JWT token to validate
-            audience: Expected audience (defaults to configured audience)
-            issuer: Expected issuer (defaults to Auth0 domain)
-            
-        Returns:
-            TokenValidationResult with validation status and claims
-        """
-        try:
-            # Set defaults
-            audience = audience or self.audience
-            issuer = issuer or f"https://{self.auth0_domain}/"
-            
-            # Decode header to get key ID
-            try:
-                unverified_header = jwt.get_unverified_header(token)
-            except jwt.InvalidTokenError as e:
-                return TokenValidationResult(
-                    valid=False,
-                    error_message=f"Invalid token header: {e}"
-                )
-            
-            kid = unverified_header.get('kid')
-            alg = unverified_header.get('alg')
-            
-            if not kid:
-                return TokenValidationResult(
-                    valid=False,
-                    error_message="Token missing key ID (kid)"
-                )
-            
-            if alg not in self.algorithms:
-                return TokenValidationResult(
-                    valid=False,
-                    error_message=f"Unsupported algorithm: {alg}"
-                )
-            
-            # Get public key
-            if kid not in self.public_keys:
-                # Try to refresh public keys
-                self._load_auth0_public_keys()
-                
-                if kid not in self.public_keys:
-                    return TokenValidationResult(
-                        valid=False,
-                        error_message=f"Public key not found for kid: {kid}"
-                    )
-            
-            public_key = self._jwk_to_pem(self.public_keys[kid])
-            
-            # Validate token
-            try:
-                token_claims = jwt.decode(
-                    token,
-                    public_key,
-                    algorithms=[alg],
-                    audience=audience,
-                    issuer=issuer,
-                    options={
-                        'verify_signature': True,
-                        'verify_exp': True,
-                        'verify_nbf': True,
-                        'verify_iat': True,
-                        'verify_aud': True,
-                        'verify_iss': True
-                    }
-                )
-                
-                # Extract user profile from token claims
-                user_profile = self._extract_user_profile_from_claims(token_claims)
-                
-                # Log successful validation
-                if self.security_monitor:
-                    self.security_monitor.log_security_event(
-                        SecurityEventType.AUTH0_TOKEN_VALIDATED,
-                        SecuritySeverity.INFO,
-                        "Auth0 token validation successful",
-                        {
-                            'user_id': user_profile.user_id if user_profile else 'unknown',
-                            'aud': token_claims.get('aud'),
-                            'iss': token_claims.get('iss'),
-                            'exp': token_claims.get('exp')
-                        }
-                    )
-                
-                return TokenValidationResult(
-                    valid=True,
-                    user_profile=user_profile,
-                    token_claims=token_claims
-                )
-                
-            except jwt.ExpiredSignatureError:
-                return TokenValidationResult(
-                    valid=False,
-                    expired=True,
-                    error_message="Token has expired"
-                )
-            except jwt.InvalidAudienceError:
-                return TokenValidationResult(
-                    valid=False,
-                    error_message=f"Invalid audience. Expected: {audience}"
-                )
-            except jwt.InvalidIssuerError:
-                return TokenValidationResult(
-                    valid=False,
-                    error_message=f"Invalid issuer. Expected: {issuer}"
-                )
-            except jwt.InvalidTokenError as e:
-                return TokenValidationResult(
-                    valid=False,
-                    error_message=f"Token validation failed: {e}"
-                )
+            return user
             
         except Exception as e:
-            self.logger.error(f"Token validation error: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_TOKEN_VALIDATION_ERROR,
-                    SecuritySeverity.ERROR,
-                    "Auth0 token validation error",
-                    {'error': str(e)}
-                )
-            
-            return TokenValidationResult(
-                valid=False,
-                error_message=f"Validation error: {e}"
-            )
-
-    def refresh_access_token(self, refresh_token: str) -> AuthenticationResult:
+            db.session.rollback()
+            logger.error(f"User profile synchronization failed: {str(e)}")
+            raise Auth0ProfileError(f"Profile synchronization failed: {str(e)}")
+    
+    def refresh_access_token(self, refresh_token: str) -> Dict[str, Any]:
         """
-        Refresh access token using refresh token with rotation policy.
+        Refresh access token using refresh token with rotation policy per Section 6.4.1.4.
+        
+        Implements Auth0 refresh token rotation policy with automated revocation
+        for enhanced security per Section 6.4.1.4.
         
         Args:
-            refresh_token: Valid refresh token
+            refresh_token (str): Valid refresh token
             
         Returns:
-            AuthenticationResult with new tokens
+            Dict[str, Any]: New token set with rotated refresh token
+            
+        Raises:
+            Auth0TokenError: If token refresh fails
         """
         try:
-            if not self.get_token_client:
-                raise Auth0AuthenticationError("Auth0 GetToken client not initialized")
-            
-            # Use refresh token to get new access token
-            token_response = self.get_token_client.refresh_token(refresh_token)
-            
-            if 'error' in token_response:
-                error_msg = f"{token_response.get('error')}: {token_response.get('error_description', '')}"
-                raise Auth0AuthenticationError(f"Token refresh failed: {error_msg}")
-            
-            # Extract new tokens
-            access_token = token_response.get('access_token')
-            new_refresh_token = token_response.get('refresh_token')  # May be rotated
-            id_token = token_response.get('id_token')
-            expires_in = token_response.get('expires_in')
-            token_type = token_response.get('token_type', 'Bearer')
-            
-            # Get user profile from new tokens
-            user_profile = None
-            if id_token:
-                try:
-                    user_profile = self._decode_id_token(id_token)
-                except Exception as e:
-                    self.logger.warning(f"Failed to decode refreshed ID token: {e}")
-            
-            if not user_profile and access_token:
-                try:
-                    user_profile = self._get_user_info(access_token)
-                except Exception as e:
-                    self.logger.warning(f"Failed to get user info from refreshed token: {e}")
-            
-            # Log successful refresh
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_TOKEN_REFRESHED,
-                    SecuritySeverity.INFO,
-                    "Auth0 token refresh successful",
-                    {
-                        'user_id': user_profile.user_id if user_profile else 'unknown',
-                        'token_rotated': bool(new_refresh_token and new_refresh_token != refresh_token),
-                        'has_id_token': bool(id_token)
-                    }
-                )
-            
-            return AuthenticationResult(
-                success=True,
-                user_profile=user_profile,
-                access_token=access_token,
-                refresh_token=new_refresh_token or refresh_token,  # Use new if rotated
-                id_token=id_token,
-                expires_in=expires_in,
-                token_type=token_type
-            )
-            
-        except Auth0AuthenticationError:
-            raise
-        except Exception as e:
-            self.logger.error(f"Token refresh failed: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_TOKEN_REFRESH_FAILED,
-                    SecuritySeverity.ERROR,
-                    "Auth0 token refresh failed",
-                    {'error': str(e)}
-                )
-            raise Auth0AuthenticationError(f"Token refresh failed: {e}")
-
-    def revoke_refresh_token(
-        self,
-        refresh_token: str,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None
-    ) -> bool:
-        """
-        Revoke refresh token for security incident response.
-        
-        Args:
-            refresh_token: Refresh token to revoke
-            client_id: Optional client ID override
-            client_secret: Optional client secret override
-            
-        Returns:
-            True if revocation was successful
-        """
-        try:
-            client_id = client_id or self.client_id
-            client_secret = client_secret or self.client_secret
-            
-            # Prepare revocation request
-            revoke_url = f"https://{self.auth0_domain}/oauth/revoke"
-            
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded'
+            refresh_payload = {
+                'grant_type': 'refresh_token',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'refresh_token': refresh_token,
             }
             
-            data = {
-                'client_id': client_id,
-                'client_secret': client_secret,
+            if self.audience:
+                refresh_payload['audience'] = self.audience
+            
+            token_url = f"https://{self.domain}/oauth/token"
+            headers = {'Content-Type': 'application/json'}
+            
+            response = requests.post(token_url, json=refresh_payload, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            token_data = response.json()
+            
+            logger.info(
+                "Access token refreshed successfully",
+                extra={
+                    'client_id': self.client_id,
+                    'token_type': token_data.get('token_type'),
+                    'expires_in': token_data.get('expires_in')
+                }
+            )
+            
+            return token_data
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Token refresh failed: {str(e)}")
+            raise Auth0TokenError(f"Failed to refresh access token: {str(e)}")
+    
+    def revoke_refresh_token(self, refresh_token: str) -> bool:
+        """
+        Revoke refresh token for security incident response per Section 6.4.6.2.
+        
+        Implements immediate token revocation capabilities for security incidents
+        and user logout scenarios with comprehensive audit logging.
+        
+        Args:
+            refresh_token (str): Refresh token to revoke
+            
+        Returns:
+            bool: True if revocation successful, False otherwise
+        """
+        try:
+            revoke_url = f"https://{self.domain}/oauth/revoke"
+            
+            revoke_payload = {
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
                 'token': refresh_token,
                 'token_type_hint': 'refresh_token'
             }
             
-            # Make revocation request
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            
             response = requests.post(
-                revoke_url,
-                headers=headers,
-                data=data,
-                timeout=30
+                revoke_url, 
+                data=revoke_payload, 
+                headers=headers, 
+                timeout=10
             )
             
-            if response.status_code == 200:
-                # Log successful revocation
-                if self.security_monitor:
-                    self.security_monitor.log_security_event(
-                        SecurityEventType.AUTH0_TOKEN_REVOKED,
-                        SecuritySeverity.INFO,
-                        "Auth0 refresh token revoked",
-                        {'revocation_successful': True}
-                    )
-                
-                return True
+            # Auth0 returns 200 for successful revocation, even if token was invalid
+            success = response.status_code == 200
+            
+            if success:
+                logger.info(
+                    "Refresh token revoked successfully",
+                    extra={'client_id': self.client_id}
+                )
             else:
-                self.logger.warning(f"Token revocation failed with status {response.status_code}: {response.text}")
-                return False
-            
-        except Exception as e:
-            self.logger.error(f"Token revocation error: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_TOKEN_REVOCATION_FAILED,
-                    SecuritySeverity.ERROR,
-                    "Auth0 token revocation failed",
-                    {'error': str(e)}
+                logger.warning(
+                    "Token revocation request failed",
+                    extra={
+                        'status_code': response.status_code,
+                        'response': response.text
+                    }
                 )
+            
+            return success
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Token revocation failed: {str(e)}")
             return False
-
-    def synchronize_user_profile(
-        self,
-        auth0_user_profile: Auth0UserProfile,
-        create_if_missing: bool = True
-    ) -> UserSyncResult:
+    
+    def get_user_by_id(self, auth0_user_id: str) -> Dict[str, Any]:
         """
-        Synchronize Auth0 user profile with Flask-SQLAlchemy User model.
+        Retrieve user details from Auth0 Management API by user ID.
+        
+        Uses Management API for comprehensive user lifecycle operations
+        per Section 6.4.1.1.
         
         Args:
-            auth0_user_profile: Auth0 user profile data
-            create_if_missing: Whether to create user if not found
+            auth0_user_id (str): Auth0 user identifier
             
         Returns:
-            UserSyncResult with synchronization details
+            Dict[str, Any]: Complete user profile from Auth0
+            
+        Raises:
+            Auth0ManagementError: If user retrieval fails
         """
         try:
-            if not User:
-                raise Auth0UserSyncError("User model not available")
+            user_details = self.management_client.users.get(auth0_user_id)
             
-            from flask import current_app
-            from ..models import db
-            
-            # Find existing user by Auth0 sub or email
-            existing_user = None
-            
-            # Try to find by Auth0 sub first
-            if auth0_user_profile.auth0_sub:
-                existing_user = User.query.filter_by(auth0_sub=auth0_user_profile.auth0_sub).first()
-            
-            # If not found by sub, try by email
-            if not existing_user and auth0_user_profile.email:
-                existing_user = User.query.filter_by(email=auth0_user_profile.email).first()
-            
-            user_created = False
-            user_updated = False
-            sync_fields = []
-            
-            if existing_user:
-                # Update existing user
-                sync_fields = self._sync_user_fields(existing_user, auth0_user_profile)
-                if sync_fields:
-                    user_updated = True
-                    db.session.commit()
-                
-                user_id = str(existing_user.id)
-                
-            elif create_if_missing:
-                # Create new user
-                new_user = User(
-                    username=auth0_user_profile.username or auth0_user_profile.email.split('@')[0],
-                    email=auth0_user_profile.email,
-                    auth0_sub=auth0_user_profile.auth0_sub,
-                    email_verified=auth0_user_profile.email_verified,
-                    name=auth0_user_profile.name,
-                    picture=auth0_user_profile.picture
-                )
-                
-                # Set metadata if available
-                if auth0_user_profile.metadata:
-                    new_user.user_metadata = auth0_user_profile.metadata
-                if auth0_user_profile.app_metadata:
-                    new_user.app_metadata = auth0_user_profile.app_metadata
-                
-                db.session.add(new_user)
-                db.session.commit()
-                
-                user_created = True
-                user_id = str(new_user.id)
-                sync_fields = self.user_sync_fields
-                
-            else:
-                raise Auth0UserSyncError("User not found and creation not allowed")
-            
-            # Log successful sync
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_USER_SYNC,
-                    SecuritySeverity.INFO,
-                    "Auth0 user profile synchronized",
-                    {
-                        'user_id': user_id,
-                        'auth0_sub': auth0_user_profile.auth0_sub,
-                        'email': auth0_user_profile.email,
-                        'created': user_created,
-                        'updated': user_updated,
-                        'sync_fields': sync_fields
-                    }
-                )
-            
-            return UserSyncResult(
-                success=True,
-                user_id=user_id,
-                created=user_created,
-                updated=user_updated,
-                sync_fields=sync_fields
+            logger.info(
+                "User details retrieved from Management API",
+                extra={
+                    'auth0_user_id': auth0_user_id,
+                    'email': user_details.get('email'),
+                    'last_login': user_details.get('last_login')
+                }
             )
             
-        except Exception as e:
-            self.logger.error(f"User synchronization failed: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_USER_SYNC_FAILED,
-                    SecuritySeverity.ERROR,
-                    "Auth0 user synchronization failed",
-                    {
-                        'error': str(e),
-                        'auth0_sub': auth0_user_profile.auth0_sub,
-                        'email': auth0_user_profile.email
-                    }
-                )
+            return user_details
             
-            return UserSyncResult(
-                success=False,
-                error_message=str(e)
-            )
-
-    def get_management_client(self) -> Optional[Auth0]:
+        except Auth0Error as e:
+            logger.error(f"Failed to retrieve user from Management API: {str(e)}")
+            raise Auth0ManagementError(f"User retrieval failed: {str(e)}")
+    
+    def update_user_metadata(self, auth0_user_id: str, user_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Get Auth0 Management API client with cached token.
+        Update user metadata using Auth0 Management API.
         
-        Returns:
-            Auth0 Management API client or None if not available
-        """
-        try:
-            if not Auth0:
-                return None
-            
-            # Check if we have a valid cached token
-            current_time = time.time()
-            cached_token = self._management_token_cache.get('token')
-            token_expires_at = self._management_token_cache.get('expires_at', 0)
-            
-            if cached_token and current_time < token_expires_at - 60:  # 60 second buffer
-                # Use cached token
-                return Auth0(domain=self.auth0_domain, token=cached_token)
-            
-            # Get new management token
-            if not self.get_token_client:
-                return None
-            
-            management_audience = self.config.management_api_audience or f"https://{self.auth0_domain}/api/v2/"
-            
-            token_response = self.get_token_client.client_credentials(
-                audience=management_audience
-            )
-            
-            if 'error' in token_response:
-                self.logger.error(f"Management token request failed: {token_response}")
-                return None
-            
-            access_token = token_response.get('access_token')
-            expires_in = token_response.get('expires_in', 3600)
-            
-            # Cache the token
-            self._management_token_cache = {
-                'token': access_token,
-                'expires_at': current_time + expires_in
-            }
-            
-            return Auth0(domain=self.auth0_domain, token=access_token)
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get Management API client: {e}")
-            return None
-
-    def get_user_by_auth0_id(self, auth0_user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get user information from Auth0 Management API.
+        Allows updating custom user metadata for enhanced profile management
+        per Section 6.4.1.1.
         
         Args:
-            auth0_user_id: Auth0 user ID (sub claim)
+            auth0_user_id (str): Auth0 user identifier
+            user_metadata (Dict[str, Any]): Metadata to update
             
         Returns:
-            User information dictionary or None if not found
+            Dict[str, Any]: Updated user profile
+            
+        Raises:
+            Auth0ManagementError: If metadata update fails
         """
         try:
-            management_client = self.get_management_client()
-            if not management_client:
-                return None
+            updated_user = self.management_client.users.update(
+                auth0_user_id, 
+                {'user_metadata': user_metadata}
+            )
             
-            user_info = management_client.users.get(auth0_user_id)
-            return user_info
+            logger.info(
+                "User metadata updated successfully",
+                extra={
+                    'auth0_user_id': auth0_user_id,
+                    'metadata_keys': list(user_metadata.keys())
+                }
+            )
             
-        except Exception as e:
-            self.logger.error(f"Failed to get user from Auth0: {e}")
-            return None
-
-    def update_user_metadata(
-        self,
-        auth0_user_id: str,
-        user_metadata: Optional[Dict[str, Any]] = None,
-        app_metadata: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """
-        Update user metadata in Auth0.
-        
-        Args:
-            auth0_user_id: Auth0 user ID
-            user_metadata: User metadata to update
-            app_metadata: App metadata to update
+            return updated_user
             
-        Returns:
-            True if update was successful
-        """
-        try:
-            management_client = self.get_management_client()
-            if not management_client:
-                return False
-            
-            update_data = {}
-            if user_metadata is not None:
-                update_data['user_metadata'] = user_metadata
-            if app_metadata is not None:
-                update_data['app_metadata'] = app_metadata
-            
-            if not update_data:
-                return True  # Nothing to update
-            
-            management_client.users.update(auth0_user_id, update_data)
-            
-            # Log successful update
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_USER_METADATA_UPDATED,
-                    SecuritySeverity.INFO,
-                    "Auth0 user metadata updated",
-                    {
-                        'auth0_user_id': auth0_user_id,
-                        'has_user_metadata': bool(user_metadata),
-                        'has_app_metadata': bool(app_metadata)
-                    }
-                )
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to update user metadata: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_USER_METADATA_UPDATE_FAILED,
-                    SecuritySeverity.ERROR,
-                    "Auth0 user metadata update failed",
-                    {'error': str(e), 'auth0_user_id': auth0_user_id}
-                )
-            return False
-
+        except Auth0Error as e:
+            logger.error(f"Failed to update user metadata: {str(e)}")
+            raise Auth0ManagementError(f"Metadata update failed: {str(e)}")
+    
     def block_user(self, auth0_user_id: str, reason: str = "Security incident") -> bool:
         """
-        Block user in Auth0 for security incident response.
+        Block user account for security incident response per Section 6.4.6.2.
+        
+        Implements immediate user blocking capabilities for security incidents
+        with comprehensive audit logging and reason tracking.
         
         Args:
-            auth0_user_id: Auth0 user ID to block
-            reason: Reason for blocking
+            auth0_user_id (str): Auth0 user identifier to block
+            reason (str): Reason for blocking the user account
             
         Returns:
-            True if user was successfully blocked
+            bool: True if user blocked successfully, False otherwise
         """
         try:
-            management_client = self.get_management_client()
-            if not management_client:
-                return False
+            self.management_client.users.update(
+                auth0_user_id,
+                {'blocked': True, 'user_metadata': {'block_reason': reason}}
+            )
             
-            management_client.users.update(auth0_user_id, {'blocked': True})
-            
-            # Log user blocking
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_USER_BLOCKED,
-                    SecuritySeverity.WARNING,
-                    "Auth0 user blocked for security incident",
-                    {
-                        'auth0_user_id': auth0_user_id,
-                        'reason': reason,
-                        'blocked_at': datetime.utcnow().isoformat()
-                    }
-                )
+            logger.warning(
+                "User account blocked",
+                extra={
+                    'auth0_user_id': auth0_user_id,
+                    'reason': reason,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+            )
             
             return True
             
-        except Exception as e:
-            self.logger.error(f"Failed to block user {auth0_user_id}: {e}")
-            if self.security_monitor:
-                self.security_monitor.log_security_event(
-                    SecurityEventType.AUTH0_USER_BLOCK_FAILED,
-                    SecuritySeverity.ERROR,
-                    "Auth0 user blocking failed",
-                    {'error': str(e), 'auth0_user_id': auth0_user_id}
-                )
+        except Auth0Error as e:
+            logger.error(f"Failed to block user account: {str(e)}")
             return False
-
-    def generate_logout_url(self, return_to: Optional[str] = None) -> str:
+    
+    def unblock_user(self, auth0_user_id: str) -> bool:
         """
-        Generate Auth0 logout URL.
+        Unblock user account after security incident resolution.
         
         Args:
-            return_to: Optional URL to redirect to after logout
+            auth0_user_id (str): Auth0 user identifier to unblock
             
         Returns:
-            Auth0 logout URL
+            bool: True if user unblocked successfully, False otherwise
         """
         try:
-            logout_params = {
-                'client_id': self.client_id
-            }
-            
-            if return_to:
-                logout_params['returnTo'] = return_to
-            elif self.config.logout_url:
-                logout_params['returnTo'] = self.config.logout_url
-            
-            logout_url = f"https://{self.auth0_domain}/v2/logout?" + urlencode(logout_params)
-            
-            return logout_url
-            
-        except Exception as e:
-            self.logger.error(f"Failed to generate logout URL: {e}")
-            raise Auth0IntegrationError(f"Logout URL generation failed: {e}")
-
-    def _decode_id_token(self, id_token: str) -> Auth0UserProfile:
-        """Decode ID token and extract user profile."""
-        try:
-            # Validate ID token
-            validation_result = self.validate_token(id_token)
-            
-            if not validation_result.valid:
-                raise Auth0TokenValidationError(f"ID token validation failed: {validation_result.error_message}")
-            
-            return validation_result.user_profile
-            
-        except Exception as e:
-            raise Auth0TokenValidationError(f"ID token decoding failed: {e}")
-
-    def _get_user_info(self, access_token: str) -> Auth0UserProfile:
-        """Get user information from Auth0 userinfo endpoint."""
-        try:
-            userinfo_url = f"https://{self.auth0_domain}/userinfo"
-            
-            headers = {
-                'Authorization': f'Bearer {access_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            response = requests.get(userinfo_url, headers=headers, timeout=30)
-            response.raise_for_status()
-            
-            user_data = response.json()
-            
-            return Auth0UserProfile(
-                user_id=user_data.get('sub', ''),
-                email=user_data.get('email', ''),
-                username=user_data.get('preferred_username') or user_data.get('nickname'),
-                name=user_data.get('name'),
-                picture=user_data.get('picture'),
-                email_verified=user_data.get('email_verified', False),
-                auth0_sub=user_data.get('sub'),
-                metadata=user_data.get('user_metadata'),
-                app_metadata=user_data.get('app_metadata'),
-                created_at=user_data.get('created_at'),
-                updated_at=user_data.get('updated_at')
+            self.management_client.users.update(
+                auth0_user_id,
+                {'blocked': False}
             )
             
-        except Exception as e:
-            raise Auth0IntegrationError(f"Failed to get user info: {e}")
-
-    def _extract_user_profile_from_claims(self, token_claims: Dict[str, Any]) -> Auth0UserProfile:
-        """Extract user profile from JWT token claims."""
-        return Auth0UserProfile(
-            user_id=token_claims.get('sub', ''),
-            email=token_claims.get('email', ''),
-            username=token_claims.get('preferred_username') or token_claims.get('nickname'),
-            name=token_claims.get('name'),
-            picture=token_claims.get('picture'),
-            email_verified=token_claims.get('email_verified', False),
-            auth0_sub=token_claims.get('sub'),
-            metadata=token_claims.get('user_metadata'),
-            app_metadata=token_claims.get('app_metadata'),
-            roles=token_claims.get('roles', []),
-            permissions=token_claims.get('permissions', [])
+            logger.info(
+                "User account unblocked",
+                extra={
+                    'auth0_user_id': auth0_user_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+            )
+            
+            return True
+            
+        except Auth0Error as e:
+            logger.error(f"Failed to unblock user account: {str(e)}")
+            return False
+    
+    def logout_url(self, return_to: str = None) -> str:
+        """
+        Generate Auth0 logout URL with optional return URL.
+        
+        Creates properly formatted logout URL for complete session termination
+        including Auth0 session cleanup.
+        
+        Args:
+            return_to (str, optional): URL to redirect after logout
+            
+        Returns:
+            str: Complete Auth0 logout URL
+        """
+        params = {'client_id': self.client_id}
+        
+        if return_to:
+            params['returnTo'] = return_to
+        
+        logout_url = f"https://{self.domain}/v2/logout?{urlencode(params)}"
+        
+        logger.info(
+            "Logout URL generated",
+            extra={
+                'client_id': self.client_id,
+                'return_to': return_to
+            }
         )
+        
+        return logout_url
 
-    def _sync_user_fields(self, user: User, auth0_profile: Auth0UserProfile) -> List[str]:
-        """Synchronize user fields with Auth0 profile data."""
-        updated_fields = []
-        
-        # Email
-        if auth0_profile.email and user.email != auth0_profile.email:
-            user.email = auth0_profile.email
-            updated_fields.append('email')
-        
-        # Username
-        if auth0_profile.username and user.username != auth0_profile.username:
-            user.username = auth0_profile.username
-            updated_fields.append('username')
-        
-        # Name
-        if auth0_profile.name and getattr(user, 'name', None) != auth0_profile.name:
-            user.name = auth0_profile.name
-            updated_fields.append('name')
-        
-        # Picture
-        if auth0_profile.picture and getattr(user, 'picture', None) != auth0_profile.picture:
-            user.picture = auth0_profile.picture
-            updated_fields.append('picture')
-        
-        # Email verified
-        if hasattr(user, 'email_verified') and user.email_verified != auth0_profile.email_verified:
-            user.email_verified = auth0_profile.email_verified
-            updated_fields.append('email_verified')
-        
-        # Auth0 sub
-        if auth0_profile.auth0_sub and getattr(user, 'auth0_sub', None) != auth0_profile.auth0_sub:
-            user.auth0_sub = auth0_profile.auth0_sub
-            updated_fields.append('auth0_sub')
-        
-        # Metadata
-        if auth0_profile.metadata and getattr(user, 'user_metadata', None) != auth0_profile.metadata:
-            user.user_metadata = auth0_profile.metadata
-            updated_fields.append('user_metadata')
-        
-        if auth0_profile.app_metadata and getattr(user, 'app_metadata', None) != auth0_profile.app_metadata:
-            user.app_metadata = auth0_profile.app_metadata
-            updated_fields.append('app_metadata')
-        
-        # Update timestamp
-        if updated_fields:
-            user.updated_at = datetime.utcnow()
-        
-        return updated_fields
 
-    def _jwk_to_pem(self, jwk: Dict[str, str]) -> bytes:
-        """Convert JSON Web Key to PEM format."""
+def require_auth0_token(f):
+    """
+    Flask decorator for Auth0 JWT token validation per Section 6.4.1.4.
+    
+    Validates Auth0 JWT tokens and populates Flask g object with user information
+    for use in protected routes. Integrates with Flask-Login for session management.
+    
+    Args:
+        f: Function to decorate
+        
+    Returns:
+        Decorated function with Auth0 token validation
+        
+    Raises:
+        Unauthorized: If token validation fails
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
         try:
-            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
-            from cryptography.hazmat.primitives import serialization
-            import base64
+            # Extract token from Authorization header
+            auth_header = request.headers.get('Authorization')
             
-            # Decode RSA components
-            def base64_url_decode(data):
-                # Add padding if necessary
-                padding = 4 - (len(data) % 4)
-                if padding != 4:
-                    data += '=' * padding
-                return base64.urlsafe_b64decode(data)
+            if not auth_header:
+                logger.warning("Missing Authorization header")
+                raise Unauthorized("Authorization header is required")
             
-            n = int.from_bytes(base64_url_decode(jwk['n']), byteorder='big')
-            e = int.from_bytes(base64_url_decode(jwk['e']), byteorder='big')
+            # Parse Bearer token
+            try:
+                token_type, token = auth_header.split(' ', 1)
+                if token_type.lower() != 'bearer':
+                    raise ValueError("Invalid token type")
+            except ValueError:
+                logger.warning("Invalid Authorization header format")
+                raise Unauthorized("Invalid Authorization header format")
             
-            # Create RSA public key
-            public_numbers = RSAPublicNumbers(e, n)
-            public_key = public_numbers.public_key()
+            # Validate token using Auth0 integration
+            auth0 = current_app.auth0
+            payload = auth0.validate_jwt_token(token)
             
-            # Serialize to PEM format
-            pem = public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            # Store validated token payload in Flask g object
+            g.auth0_token = payload
+            g.auth0_user_id = payload.get('sub')
+            g.auth0_email = payload.get('email')
+            
+            # Optional: Sync with local user if needed
+            if hasattr(current_app, 'config') and current_app.config.get('AUTH0_SYNC_USERS', True):
+                try:
+                    user_info = auth0.get_user_info(token)
+                    user = auth0.sync_user_profile(user_info)
+                    g.current_user = user
+                except Exception as e:
+                    logger.warning(f"User sync failed: {str(e)}")
+            
+            logger.info(
+                "Auth0 token validated successfully",
+                extra={
+                    'user_id': g.auth0_user_id,
+                    'email': g.auth0_email,
+                    'endpoint': request.endpoint
+                }
             )
             
-            return pem
+            return f(*args, **kwargs)
             
+        except Auth0TokenError as e:
+            logger.warning(f"Auth0 token validation failed: {str(e)}")
+            raise Unauthorized(str(e))
         except Exception as e:
-            raise Auth0TokenValidationError(f"JWK to PEM conversion failed: {e}")
-
-    @lru_cache(maxsize=128)
-    def _get_cached_public_key(self, kid: str) -> Optional[bytes]:
-        """Get cached public key for performance optimization."""
-        if kid in self.public_keys:
-            return self._jwk_to_pem(self.public_keys[kid])
-        return None
+            logger.error(f"Authentication error: {str(e)}")
+            raise Unauthorized("Authentication failed")
+    
+    return decorated_function
 
 
-# Authentication decorator for Auth0 integration
-def auth0_required(
-    auth0_service: Auth0IntegrationService,
-    optional: bool = False,
-    scopes: Optional[List[str]] = None
-):
+def create_auth0_integration(app):
     """
-    Create Auth0 authentication decorator.
+    Factory function for creating Auth0 integration with Flask application.
+    
+    Provides a convenient way to initialize Auth0 integration within the
+    Flask application factory pattern per Section 6.4.1.1.
     
     Args:
-        auth0_service: Auth0 integration service instance
-        optional: Whether authentication is optional
-        scopes: Required scopes for the endpoint
+        app (Flask): Flask application instance
         
     Returns:
-        Decorator function for Auth0 authentication
+        Auth0Integration: Configured Auth0 integration instance
     """
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            try:
-                # Get token from Authorization header
-                auth_header = request.headers.get('Authorization')
-                if not auth_header:
-                    if optional:
-                        return f(*args, **kwargs)
-                    return jsonify({'error': 'Authorization header required'}), 401
-                
-                # Extract token
-                try:
-                    scheme, token = auth_header.split(' ', 1)
-                    if scheme.lower() != 'bearer':
-                        raise ValueError("Invalid authorization scheme")
-                except ValueError:
-                    if optional:
-                        return f(*args, **kwargs)
-                    return jsonify({'error': 'Invalid authorization header format'}), 401
-                
-                # Validate token
-                validation_result = auth0_service.validate_token(token)
-                
-                if not validation_result.valid:
-                    if optional:
-                        return f(*args, **kwargs)
-                    
-                    if validation_result.expired:
-                        return jsonify({'error': 'Token expired'}), 401
-                    else:
-                        return jsonify({'error': 'Invalid token'}), 401
-                
-                # Check scopes if required
-                if scopes:
-                    token_scopes = validation_result.token_claims.get('scope', '').split()
-                    if not all(scope in token_scopes for scope in scopes):
-                        return jsonify({'error': 'Insufficient scope'}), 403
-                
-                # Store user profile in Flask g for access in route
-                g.auth0_user = validation_result.user_profile
-                g.auth0_token_claims = validation_result.token_claims
-                
-                return f(*args, **kwargs)
-                
-            except Exception as e:
-                auth0_service.logger.error(f"Auth0 authentication error: {e}")
-                if optional:
-                    return f(*args, **kwargs)
-                return jsonify({'error': 'Authentication failed'}), 401
-        
-        return decorated_function
-    return decorator
+    auth0_integration = Auth0Integration(app)
+    return auth0_integration
 
 
-# Module-level instance for Flask application factory integration
-auth0_service = Auth0IntegrationService()
-
-
-def init_auth0_integration(app: Flask) -> Auth0IntegrationService:
-    """
-    Initialize Auth0 Integration Service with Flask application factory pattern.
-    
-    Args:
-        app: Flask application instance
-        
-    Returns:
-        Configured Auth0IntegrationService instance
-    """
-    auth0_service.init_app(app)
-    return auth0_service
-
-
-# Export public interface
+# Export key classes and functions for use throughout the application
 __all__ = [
-    'Auth0IntegrationService',
-    'Auth0Configuration',
-    'Auth0UserProfile',
-    'AuthenticationResult',
-    'TokenValidationResult',
-    'UserSyncResult',
-    'Auth0IntegrationError',
-    'Auth0AuthenticationError',
-    'Auth0TokenValidationError',
+    'Auth0Integration',
+    'Auth0TokenError', 
+    'Auth0ProfileError',
     'Auth0ManagementError',
-    'Auth0UserSyncError',
-    'auth0_required',
-    'init_auth0_integration',
-    'auth0_service'
+    'require_auth0_token',
+    'create_auth0_integration'
 ]
