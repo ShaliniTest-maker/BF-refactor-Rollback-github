@@ -1,1926 +1,1875 @@
 """
-Comprehensive baseline comparison test suite orchestrating parallel execution of Flask and Node.js
-systems for real-time performance validation and migration success verification.
+Comprehensive baseline comparison test suite orchestrating parallel execution of Flask and
+Node.js systems for real-time performance validation and migration success verification.
 
-This critical test module implements tox 4.26.0 multi-environment testing orchestration,
-coordinates simultaneous system execution, performs comprehensive statistical comparison analysis,
-and provides migration validation with 100% functional parity verification through automated
-comparison workflows as specified in Sections 4.7.1, 4.7.2, and 6.5.1.1.
+This critical test module implements tox 4.26.0 multi-environment testing orchestration
+with pytest-benchmark 5.1.0 statistical measurement to ensure 100% functional parity
+between Flask 3.1.1 and Node.js implementations while validating performance equivalence
+as specified in Section 4.7.1 and Section 4.7.2 of the technical specification.
 
 Key Features:
-- tox 4.26.0 multi-environment testing orchestration for Flask and Node.js performance comparison
-- Parallel system execution framework with real-time performance comparison and validation
-- Comprehensive statistical analysis with parity validation and automated discrepancy detection
-- Automated correction workflow triggering when performance discrepancies are detected
-- Migration validation metrics with 100% functional equivalence requirement and performance benchmarking
-- Comprehensive test reporting with performance trend analysis and migration success validation
+- Parallel system execution framework with real-time performance comparison
+- Statistical analysis with automated discrepancy detection and correction workflows
+- 100% functional parity validation with comprehensive behavioral verification
+- Performance regression detection against Node.js baseline metrics
+- Automated correction workflow triggering for performance discrepancies
+- Integration with comprehensive test reporting and trend analysis
+- tox 4.26.0 multi-environment testing orchestration with Python 3.13.3
 
-Performance Targets (Section 4.11.1):
-- API Response Time: <200ms average (Flask endpoints)
-- Database Query Response: <100ms average (SQLAlchemy operations)  
-- Authentication Response: <150ms average (Auth0 integration with ItsDangerous)
-- System Availability: 99.9% uptime (Flask application health)
+Technical Specification Compliance:
+- Section 4.7.1: 100% functional parity validation with performance equivalence
+- Section 4.7.2: tox 4.26.0 multi-environment comparison execution framework
+- Section 4.11.1: Performance SLA validation (sub-200ms API, sub-100ms DB, sub-150ms auth)
+- Section 0.2.3: Migration success criteria verification with comprehensive validation
+- Section 6.5.1.1: Integration with monitoring and observability infrastructure
 
 Dependencies:
 - pytest-benchmark 5.1.0: Statistical performance measurement and baseline comparison
-- tox 4.26.0: Multi-environment testing orchestration with virtual environment isolation
-- requests/httpx: HTTP client libraries for API performance testing
-- numpy/scipy/pandas: Statistical analysis packages for performance data analysis
-- memory_profiler/pympler: Memory profiling tools for comprehensive resource analysis
-- opentelemetry-*: Distributed tracing and metrics collection for performance monitoring
+- tox 4.26.0: Multi-environment testing orchestration and parallel execution
+- Flask 3.1.1: Application factory pattern with performance monitoring integration
+- concurrent.futures: Parallel system execution and thread pool management
+- requests: HTTP client for Node.js system interaction and API validation
+- deepdiff: Comprehensive data structure comparison for functional parity
+- scipy.stats: Statistical analysis and significance testing for performance validation
 """
 
-import asyncio
-import concurrent.futures
-import json
-import logging
-import multiprocessing
 import os
-import statistics
-import subprocess
 import sys
-import tempfile
-import threading
 import time
-import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+import json
+import threading
+import subprocess
+import statistics
+import traceback
+import tempfile
+import socket
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union, Callable
-from unittest.mock import patch, Mock, MagicMock
+from typing import Dict, List, Any, Optional, Tuple, Callable, Union, Generator
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, Future
+from dataclasses import dataclass, field
+from urllib.parse import urljoin, urlparse
+import signal
+import psutil
+import queue
 
-import numpy as np
-import pandas as pd
 import pytest
+from pytest_benchmark import BenchmarkFixture
 import requests
-import scipy.stats as stats
-from memory_profiler import profile, memory_usage
-from pympler import tracker, muppy, summary
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+import deepdiff
+import numpy as np
+from scipy import stats
+from unittest.mock import Mock, patch, MagicMock
+import threading
 
-# pytest-benchmark integration for statistical performance measurement
-import pytest_benchmark
-from pytest_benchmark.fixture import BenchmarkFixture
+# Flask and application imports
+from flask import Flask, request, g, current_app
+from flask.testing import FlaskClient
+from werkzeug.test import Client
 
-# Flask and testing framework imports
-try:
-    from flask import Flask, current_app, g, request, session
-    from flask.testing import FlaskClient
-    from flask_sqlalchemy import SQLAlchemy
-    from src.app import create_app
-    from src.models import db
-    from src.auth.models import User
-    from src.services.base import ServiceLayer
-    from tests.conftest import MockAuth0Client, MockUser, TestingConfiguration
-except ImportError as e:
-    # Handle import errors gracefully during test discovery
-    logging.warning(f"Import error during test discovery: {e}")
-    create_app = None
-    db = None
-    User = None
-    ServiceLayer = None
-
-# OpenTelemetry instrumentation for performance monitoring
-try:
-    from opentelemetry import trace, metrics
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.exporter.prometheus import PrometheusMetricReader
-    from opentelemetry.instrumentation.flask import FlaskInstrumentor
-    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-    OTEL_AVAILABLE = True
-except ImportError:
-    OTEL_AVAILABLE = False
-    logging.warning("OpenTelemetry not available for baseline comparison testing")
-
-# Configure logging for baseline comparison testing
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)8s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+# Import performance testing fixtures and utilities
+from .conftest import (
+    PerformanceTestingConfiguration, PerformanceMetricsCollector,
+    ConcurrentLoadTester, MemoryProfiler, performance_app, 
+    performance_client, performance_metrics_collector, baseline_comparison_validator,
+    api_performance_tester, database_performance_tester, authentication_performance_tester
 )
-logger = logging.getLogger(__name__)
+
+# Import base testing configuration
+from ..conftest import (
+    TestingConfiguration, MockUser, MockAuth0Client, sample_users,
+    authenticated_user, auth_headers, test_data_factory
+)
 
 
 # ================================
-# Configuration and Data Classes
+# Baseline Comparison Configuration and Data Structures
 # ================================
 
 @dataclass
-class PerformanceMetrics:
+class SystemConfiguration:
     """
-    Comprehensive performance metrics data class for statistical analysis
-    and baseline comparison validation with detailed measurement tracking.
+    System configuration data class encapsulating comprehensive system setup
+    parameters for Flask and Node.js baseline comparison testing scenarios.
     
-    This class provides structured performance data collection enabling
-    statistical comparison between Flask and Node.js implementations
-    with comprehensive metric categorization and analysis capabilities.
+    This configuration ensures consistent system initialization and provides
+    comprehensive metadata for performance comparison and validation analysis.
     """
+    name: str
+    base_url: str
+    port: int
+    startup_command: List[str]
+    health_check_endpoint: str
+    startup_timeout: int = 30
+    health_check_timeout: int = 5
+    environment_variables: Dict[str, str] = field(default_factory=dict)
+    working_directory: Optional[str] = None
+    process_handle: Optional[subprocess.Popen] = None
+    startup_time: Optional[float] = None
+    ready: bool = False
+    performance_baseline: Dict[str, float] = field(default_factory=dict)
     
-    # Response time metrics (milliseconds)
-    response_time_ms: float = 0.0
-    response_time_min_ms: float = float('inf')
-    response_time_max_ms: float = 0.0
-    response_time_p50_ms: float = 0.0
-    response_time_p95_ms: float = 0.0
-    response_time_p99_ms: float = 0.0
+    def __post_init__(self):
+        """Post-initialization validation and configuration setup"""
+        self.validate_configuration()
+        self.setup_environment()
     
-    # Throughput metrics (requests per second)
-    throughput_rps: float = 0.0
-    throughput_peak_rps: float = 0.0
-    
-    # Memory usage metrics (MB)
-    memory_usage_mb: float = 0.0
-    memory_peak_mb: float = 0.0
-    memory_gc_pause_ms: float = 0.0
-    
-    # Database performance metrics (milliseconds)
-    db_query_time_ms: float = 0.0
-    db_connection_time_ms: float = 0.0
-    db_pool_utilization_percent: float = 0.0
-    
-    # Authentication metrics (milliseconds)
-    auth_response_time_ms: float = 0.0
-    auth_token_validation_ms: float = 0.0
-    
-    # Error and availability metrics
-    error_rate_percent: float = 0.0
-    success_rate_percent: float = 100.0
-    availability_percent: float = 100.0
-    
-    # Concurrency metrics
-    concurrent_users: int = 1
-    thread_pool_utilization_percent: float = 0.0
-    
-    # Metadata
-    timestamp: datetime = field(default_factory=datetime.utcnow)
-    test_scenario: str = ""
-    system_type: str = ""  # 'flask' or 'nodejs'
-    environment: str = ""
-    
-    # Statistical validation fields
-    sample_size: int = 1
-    statistical_confidence: float = 0.95
-    measurement_variance: float = 0.0
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert metrics to dictionary for JSON serialization and analysis"""
-        return {
-            'response_time_ms': self.response_time_ms,
-            'response_time_min_ms': self.response_time_min_ms,
-            'response_time_max_ms': self.response_time_max_ms,
-            'response_time_p50_ms': self.response_time_p50_ms,
-            'response_time_p95_ms': self.response_time_p95_ms,
-            'response_time_p99_ms': self.response_time_p99_ms,
-            'throughput_rps': self.throughput_rps,
-            'throughput_peak_rps': self.throughput_peak_rps,
-            'memory_usage_mb': self.memory_usage_mb,
-            'memory_peak_mb': self.memory_peak_mb,
-            'memory_gc_pause_ms': self.memory_gc_pause_ms,
-            'db_query_time_ms': self.db_query_time_ms,
-            'db_connection_time_ms': self.db_connection_time_ms,
-            'db_pool_utilization_percent': self.db_pool_utilization_percent,
-            'auth_response_time_ms': self.auth_response_time_ms,
-            'auth_token_validation_ms': self.auth_token_validation_ms,
-            'error_rate_percent': self.error_rate_percent,
-            'success_rate_percent': self.success_rate_percent,
-            'availability_percent': self.availability_percent,
-            'concurrent_users': self.concurrent_users,
-            'thread_pool_utilization_percent': self.thread_pool_utilization_percent,
-            'timestamp': self.timestamp.isoformat(),
-            'test_scenario': self.test_scenario,
-            'system_type': self.system_type,
-            'environment': self.environment,
-            'sample_size': self.sample_size,
-            'statistical_confidence': self.statistical_confidence,
-            'measurement_variance': self.measurement_variance
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'PerformanceMetrics':
-        """Create PerformanceMetrics instance from dictionary data"""
-        timestamp_str = data.get('timestamp', datetime.utcnow().isoformat())
-        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+    def validate_configuration(self):
+        """Validate system configuration parameters for completeness and correctness"""
+        required_fields = ['name', 'base_url', 'port', 'startup_command', 'health_check_endpoint']
+        for field_name in required_fields:
+            if not getattr(self, field_name):
+                raise ValueError(f"Required configuration field '{field_name}' is missing or empty")
         
-        return cls(
-            response_time_ms=data.get('response_time_ms', 0.0),
-            response_time_min_ms=data.get('response_time_min_ms', float('inf')),
-            response_time_max_ms=data.get('response_time_max_ms', 0.0),
-            response_time_p50_ms=data.get('response_time_p50_ms', 0.0),
-            response_time_p95_ms=data.get('response_time_p95_ms', 0.0),
-            response_time_p99_ms=data.get('response_time_p99_ms', 0.0),
-            throughput_rps=data.get('throughput_rps', 0.0),
-            throughput_peak_rps=data.get('throughput_peak_rps', 0.0),
-            memory_usage_mb=data.get('memory_usage_mb', 0.0),
-            memory_peak_mb=data.get('memory_peak_mb', 0.0),
-            memory_gc_pause_ms=data.get('memory_gc_pause_ms', 0.0),
-            db_query_time_ms=data.get('db_query_time_ms', 0.0),
-            db_connection_time_ms=data.get('db_connection_time_ms', 0.0),
-            db_pool_utilization_percent=data.get('db_pool_utilization_percent', 0.0),
-            auth_response_time_ms=data.get('auth_response_time_ms', 0.0),
-            auth_token_validation_ms=data.get('auth_token_validation_ms', 0.0),
-            error_rate_percent=data.get('error_rate_percent', 0.0),
-            success_rate_percent=data.get('success_rate_percent', 100.0),
-            availability_percent=data.get('availability_percent', 100.0),
-            concurrent_users=data.get('concurrent_users', 1),
-            thread_pool_utilization_percent=data.get('thread_pool_utilization_percent', 0.0),
-            timestamp=timestamp,
-            test_scenario=data.get('test_scenario', ''),
-            system_type=data.get('system_type', ''),
-            environment=data.get('environment', ''),
-            sample_size=data.get('sample_size', 1),
-            statistical_confidence=data.get('statistical_confidence', 0.95),
-            measurement_variance=data.get('measurement_variance', 0.0)
-        )
+        # Validate URL format
+        try:
+            parsed_url = urlparse(self.base_url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError(f"Invalid base_url format: {self.base_url}")
+        except Exception as e:
+            raise ValueError(f"URL validation failed for {self.base_url}: {e}")
+        
+        # Validate port range
+        if not (1 <= self.port <= 65535):
+            raise ValueError(f"Port {self.port} is outside valid range (1-65535)")
+    
+    def setup_environment(self):
+        """Set up system-specific environment configuration"""
+        # Default environment variables for all systems
+        default_env = {
+            'NODE_ENV': 'testing' if 'node' in self.name.lower() else None,
+            'FLASK_ENV': 'testing' if 'flask' in self.name.lower() else None,
+            'PORT': str(self.port),
+            'TESTING': 'true',
+            'LOG_LEVEL': 'warning'
+        }
+        
+        # Merge with provided environment variables
+        for key, value in default_env.items():
+            if value and key not in self.environment_variables:
+                self.environment_variables[key] = value
 
 
 @dataclass
 class ComparisonResult:
     """
-    Statistical comparison result data class providing comprehensive analysis
-    of performance differences between Flask and Node.js implementations.
+    Comprehensive comparison result data structure for baseline validation analysis
+    encapsulating functional parity verification and performance comparison metrics.
     
-    This class enables detailed statistical validation with confidence intervals,
-    significance testing, and automated discrepancy detection for migration
-    success validation as specified in Section 4.7.1.
+    This structure provides detailed comparison analysis with statistical validation
+    and automated discrepancy detection for migration success verification.
     """
+    test_name: str
+    flask_result: Any
+    nodejs_result: Any
+    functional_parity: bool
+    performance_comparison: Dict[str, float]
+    statistical_analysis: Dict[str, float]
+    discrepancies: List[Dict[str, Any]] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    test_metadata: Dict[str, Any] = field(default_factory=dict)
     
-    # System identification
-    flask_metrics: PerformanceMetrics
-    nodejs_metrics: PerformanceMetrics
+    def __post_init__(self):
+        """Post-initialization analysis and validation"""
+        self.analyze_discrepancies()
+        self.generate_recommendations()
     
-    # Performance comparison results
-    response_time_difference_percent: float = 0.0
-    throughput_difference_percent: float = 0.0
-    memory_difference_percent: float = 0.0
-    error_rate_difference_percent: float = 0.0
-    
-    # Statistical validation results
-    is_performance_equivalent: bool = False
-    is_functionally_equivalent: bool = False
-    statistical_significance: float = 0.0
-    confidence_interval_lower: float = 0.0
-    confidence_interval_upper: float = 0.0
-    
-    # Migration validation status
-    passes_migration_criteria: bool = False
-    sla_compliance_status: bool = False
-    performance_regression_detected: bool = False
-    
-    # Discrepancy analysis
-    discrepancies_detected: List[str] = field(default_factory=list)
-    critical_issues: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    
-    # Metadata
-    comparison_timestamp: datetime = field(default_factory=datetime.utcnow)
-    test_scenario: str = ""
-    comparison_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    
-    def generate_report(self) -> str:
-        """Generate comprehensive comparison report for analysis and documentation"""
-        report_lines = [
-            f"BASELINE COMPARISON REPORT - {self.comparison_timestamp.isoformat()}",
-            "=" * 80,
-            f"Test Scenario: {self.test_scenario}",
-            f"Comparison ID: {self.comparison_id}",
-            "",
-            "PERFORMANCE COMPARISON RESULTS:",
-            f"  Response Time Difference: {self.response_time_difference_percent:.2f}%",
-            f"  Throughput Difference: {self.throughput_difference_percent:.2f}%", 
-            f"  Memory Usage Difference: {self.memory_difference_percent:.2f}%",
-            f"  Error Rate Difference: {self.error_rate_difference_percent:.2f}%",
-            "",
-            "STATISTICAL VALIDATION:",
-            f"  Performance Equivalent: {self.is_performance_equivalent}",
-            f"  Functionally Equivalent: {self.is_functionally_equivalent}",
-            f"  Statistical Significance: {self.statistical_significance:.4f}",
-            f"  Confidence Interval: [{self.confidence_interval_lower:.2f}, {self.confidence_interval_upper:.2f}]",
-            "",
-            "MIGRATION VALIDATION STATUS:",
-            f"  Passes Migration Criteria: {self.passes_migration_criteria}",
-            f"  SLA Compliance: {self.sla_compliance_status}",
-            f"  Performance Regression: {self.performance_regression_detected}",
-            "",
-            "FLASK METRICS:",
-            f"  Response Time: {self.flask_metrics.response_time_ms:.2f}ms (P95: {self.flask_metrics.response_time_p95_ms:.2f}ms)",
-            f"  Memory Usage: {self.flask_metrics.memory_usage_mb:.2f}MB",
-            f"  Throughput: {self.flask_metrics.throughput_rps:.2f} RPS",
-            f"  Error Rate: {self.flask_metrics.error_rate_percent:.2f}%",
-            "",
-            "NODE.JS BASELINE METRICS:",
-            f"  Response Time: {self.nodejs_metrics.response_time_ms:.2f}ms (P95: {self.nodejs_metrics.response_time_p95_ms:.2f}ms)",
-            f"  Memory Usage: {self.nodejs_metrics.memory_usage_mb:.2f}MB",
-            f"  Throughput: {self.nodejs_metrics.throughput_rps:.2f} RPS",
-            f"  Error Rate: {self.nodejs_metrics.error_rate_percent:.2f}%",
-            ""
-        ]
-        
-        if self.discrepancies_detected:
-            report_lines.extend([
-                "DISCREPANCIES DETECTED:",
-                *[f"  - {discrepancy}" for discrepancy in self.discrepancies_detected],
-                ""
-            ])
-        
-        if self.critical_issues:
-            report_lines.extend([
-                "CRITICAL ISSUES:",
-                *[f"  - {issue}" for issue in self.critical_issues],
-                ""
-            ])
-        
-        if self.warnings:
-            report_lines.extend([
-                "WARNINGS:",
-                *[f"  - {warning}" for warning in self.warnings],
-                ""
-            ])
-        
-        report_lines.append("=" * 80)
-        return "\n".join(report_lines)
-
-
-# ================================
-# Baseline Comparison Framework
-# ================================
-
-class BaselineComparisonFramework:
-    """
-    Comprehensive baseline comparison framework orchestrating parallel execution
-    of Flask and Node.js systems for real-time performance validation and
-    automated discrepancy detection as specified in Section 4.7.2.
-    
-    This framework provides the core infrastructure for migration validation
-    through statistical comparison analysis, automated correction workflows,
-    and comprehensive reporting capabilities.
-    """
-    
-    def __init__(self, 
-                 flask_base_url: str = "http://localhost:5000",
-                 nodejs_base_url: str = "http://localhost:3000",
-                 tolerance_percent: float = 10.0,
-                 confidence_level: float = 0.95,
-                 sample_size: int = 100):
-        """
-        Initialize baseline comparison framework with configuration parameters
-        
-        Args:
-            flask_base_url: Flask application base URL for testing
-            nodejs_base_url: Node.js baseline system base URL
-            tolerance_percent: Performance tolerance threshold for comparison
-            confidence_level: Statistical confidence level for validation
-            sample_size: Number of samples for statistical analysis
-        """
-        self.flask_base_url = flask_base_url
-        self.nodejs_base_url = nodejs_base_url
-        self.tolerance_percent = tolerance_percent
-        self.confidence_level = confidence_level
-        self.sample_size = sample_size
-        
-        # Initialize performance data storage
-        self.flask_metrics_history: List[PerformanceMetrics] = []
-        self.nodejs_metrics_history: List[PerformanceMetrics] = []
-        self.comparison_results: List[ComparisonResult] = []
-        
-        # Initialize monitoring components
-        self.memory_tracker = tracker.SummaryTracker()
-        self.thread_pool = ThreadPoolExecutor(max_workers=multiprocessing.cpu_count())
-        
-        # Configure OpenTelemetry if available
-        if OTEL_AVAILABLE:
-            self._configure_opentelemetry()
-        
-        logger.info(f"Baseline comparison framework initialized: Flask={flask_base_url}, Node.js={nodejs_base_url}")
-    
-    def _configure_opentelemetry(self):
-        """Configure OpenTelemetry instrumentation for performance monitoring"""
-        try:
-            # Initialize tracer provider
-            trace.set_tracer_provider(TracerProvider())
-            self.tracer = trace.get_tracer(__name__)
-            
-            # Initialize metrics provider
-            metrics.set_meter_provider(MeterProvider())
-            self.meter = metrics.get_meter(__name__)
-            
-            # Create custom metrics
-            self.response_time_histogram = self.meter.create_histogram(
-                name="baseline_comparison_response_time",
-                description="Response time distribution for baseline comparison",
-                unit="ms"
+    def analyze_discrepancies(self):
+        """Analyze functional and performance discrepancies with detailed categorization"""
+        # Functional discrepancy analysis
+        if not self.functional_parity:
+            functional_diff = deepdiff.DeepDiff(
+                self.nodejs_result, 
+                self.flask_result,
+                ignore_order=True,
+                significant_digits=3
             )
             
-            self.throughput_counter = self.meter.create_counter(
-                name="baseline_comparison_requests_total",
-                description="Total requests processed during baseline comparison"
-            )
-            
-            logger.info("OpenTelemetry instrumentation configured for baseline comparison")
-            
-        except Exception as e:
-            logger.warning(f"Failed to configure OpenTelemetry: {e}")
-    
-    @contextmanager
-    def performance_measurement_context(self, scenario: str, system_type: str):
-        """
-        Context manager for comprehensive performance measurement with automatic
-        metric collection, memory profiling, and statistical data recording.
+            for diff_type, diff_details in functional_diff.items():
+                self.discrepancies.append({
+                    'type': 'functional',
+                    'category': diff_type,
+                    'details': diff_details,
+                    'severity': self._categorize_functional_severity(diff_type, diff_details)
+                })
         
-        Args:
-            scenario: Test scenario identifier
-            system_type: System type ('flask' or 'nodejs')
+        # Performance discrepancy analysis
+        if self.performance_comparison:
+            flask_time = self.performance_comparison.get('flask_duration', 0)
+            nodejs_time = self.performance_comparison.get('nodejs_duration', 0)
             
-        Yields:
-            PerformanceMetrics: Performance metrics collector for the context
-        """
-        metrics = PerformanceMetrics(
-            test_scenario=scenario,
-            system_type=system_type,
-            environment=os.getenv('FLASK_ENV', 'testing')
+            if nodejs_time > 0:
+                performance_ratio = flask_time / nodejs_time
+                regression_threshold = PerformanceTestingConfiguration.PERFORMANCE_REGRESSION_THRESHOLD
+                
+                if performance_ratio > (1.0 + regression_threshold):
+                    self.discrepancies.append({
+                        'type': 'performance',
+                        'category': 'regression',
+                        'details': {
+                            'flask_duration': flask_time,
+                            'nodejs_duration': nodejs_time,
+                            'performance_ratio': performance_ratio,
+                            'threshold_exceeded': (performance_ratio - 1.0) * 100
+                        },
+                        'severity': 'high' if performance_ratio > 1.5 else 'medium'
+                    })
+    
+    def _categorize_functional_severity(self, diff_type: str, diff_details: Any) -> str:
+        """Categorize functional discrepancy severity based on difference type and impact"""
+        high_impact_types = ['type_changes', 'values_changed']
+        medium_impact_types = ['dictionary_item_added', 'dictionary_item_removed']
+        
+        if diff_type in high_impact_types:
+            return 'high'
+        elif diff_type in medium_impact_types:
+            return 'medium'
+        else:
+            return 'low'
+    
+    def generate_recommendations(self):
+        """Generate automated recommendations for discrepancy resolution"""
+        for discrepancy in self.discrepancies:
+            if discrepancy['type'] == 'functional':
+                if discrepancy['category'] == 'type_changes':
+                    self.recommendations.append(
+                        "Verify data type consistency between Flask and Node.js implementations"
+                    )
+                elif discrepancy['category'] == 'values_changed':
+                    self.recommendations.append(
+                        "Review business logic implementation for value calculation differences"
+                    )
+            
+            elif discrepancy['type'] == 'performance':
+                if discrepancy['severity'] == 'high':
+                    self.recommendations.append(
+                        "Critical performance regression detected - immediate optimization required"
+                    )
+                else:
+                    self.recommendations.append(
+                        "Performance tuning recommended for optimal migration success"
+                    )
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """Generate comprehensive comparison summary for reporting and analysis"""
+        return {
+            'test_name': self.test_name,
+            'functional_parity': self.functional_parity,
+            'performance_ratio': self.performance_comparison.get('performance_ratio', 0),
+            'discrepancy_count': len(self.discrepancies),
+            'high_severity_discrepancies': len([d for d in self.discrepancies if d.get('severity') == 'high']),
+            'recommendations_count': len(self.recommendations),
+            'overall_status': 'PASS' if self.functional_parity and len([d for d in self.discrepancies if d.get('severity') == 'high']) == 0 else 'FAIL',
+            'timestamp': self.timestamp.isoformat()
+        }
+
+
+class BaselineComparisonOrchestrator:
+    """
+    Comprehensive baseline comparison orchestrator managing parallel system execution,
+    performance monitoring, and automated validation workflows for Flask vs Node.js
+    baseline comparison testing with statistical analysis and discrepancy detection.
+    
+    This orchestrator implements the core comparison logic as specified in Section 4.7.2
+    for tox 4.26.0 multi-environment testing with comprehensive automation workflows.
+    """
+    
+    def __init__(self, flask_config: SystemConfiguration, nodejs_config: SystemConfiguration,
+                 metrics_collector: PerformanceMetricsCollector):
+        self.flask_config = flask_config
+        self.nodejs_config = nodejs_config
+        self.metrics_collector = metrics_collector
+        self.systems_ready = False
+        self.comparison_results = []
+        self.session_id = hashlib.md5(f"{datetime.utcnow()}".encode()).hexdigest()[:8]
+        self.correction_workflows = []
+        
+        # Configure HTTP session with retry logic for reliable system communication
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            method_whitelist=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
         )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         
-        # Record initial memory state
-        initial_memory = memory_usage()[0] if memory_usage() else 0.0
-        start_time = time.time()
+        # Initialize performance baselines and thresholds
+        self.performance_thresholds = {
+            'api_response_time': PerformanceTestingConfiguration.API_RESPONSE_TIME_THRESHOLD,
+            'database_query_time': PerformanceTestingConfiguration.DATABASE_QUERY_THRESHOLD,
+            'authentication_time': PerformanceTestingConfiguration.AUTHENTICATION_THRESHOLD
+        }
         
-        # Start OpenTelemetry span if available
-        span = None
-        if OTEL_AVAILABLE and hasattr(self, 'tracer'):
-            span = self.tracer.start_span(f"baseline_comparison_{scenario}_{system_type}")
-            span.set_attribute("scenario", scenario)
-            span.set_attribute("system_type", system_type)
-        
-        try:
-            yield metrics
-            
-        finally:
-            # Calculate final metrics
-            end_time = time.time()
-            final_memory = memory_usage()[0] if memory_usage() else 0.0
-            
-            metrics.response_time_ms = (end_time - start_time) * 1000
-            metrics.memory_usage_mb = final_memory
-            metrics.memory_peak_mb = max(initial_memory, final_memory)
-            metrics.timestamp = datetime.utcnow()
-            
-            # Record OpenTelemetry metrics
-            if OTEL_AVAILABLE and hasattr(self, 'response_time_histogram'):
-                self.response_time_histogram.record(
-                    metrics.response_time_ms,
-                    {"scenario": scenario, "system_type": system_type}
-                )
-                self.throughput_counter.add(1, {"system_type": system_type})
-            
-            # Close OpenTelemetry span
-            if span:
-                span.set_attribute("response_time_ms", metrics.response_time_ms)
-                span.set_attribute("memory_usage_mb", metrics.memory_usage_mb)
-                span.end()
-            
-            # Store metrics for analysis
-            if system_type == 'flask':
-                self.flask_metrics_history.append(metrics)
-            else:
-                self.nodejs_metrics_history.append(metrics)
-            
-            logger.debug(f"Performance measurement completed: {scenario} ({system_type}) - {metrics.response_time_ms:.2f}ms")
+        # Statistical analysis configuration
+        self.statistical_config = {
+            'confidence_interval': PerformanceTestingConfiguration.CONFIDENCE_INTERVAL,
+            'significance_threshold': PerformanceTestingConfiguration.STATISTICAL_SIGNIFICANCE_THRESHOLD,
+            'outlier_detection': PerformanceTestingConfiguration.OUTLIER_DETECTION_ENABLED
+        }
     
-    def execute_parallel_benchmark(self, 
-                                 endpoint: str, 
-                                 method: str = 'GET',
-                                 payload: Optional[Dict] = None,
-                                 headers: Optional[Dict] = None,
-                                 scenario: str = "api_benchmark") -> ComparisonResult:
+    def start_systems(self) -> bool:
         """
-        Execute parallel performance benchmarking against Flask and Node.js systems
-        with comprehensive statistical analysis and discrepancy detection.
+        Start Flask and Node.js systems in parallel with comprehensive health monitoring
+        and readiness validation for baseline comparison testing scenarios.
+        
+        Returns:
+            bool: True if both systems started successfully and passed health checks
+        """
+        print(f"\n{'='*80}")
+        print("STARTING BASELINE COMPARISON SYSTEMS")
+        print(f"{'='*80}")
+        print(f"Session ID: {self.session_id}")
+        print(f"Flask System: {self.flask_config.name} -> {self.flask_config.base_url}")
+        print(f"Node.js System: {self.nodejs_config.name} -> {self.nodejs_config.base_url}")
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit system startup tasks
+            flask_future = executor.submit(self._start_system, self.flask_config)
+            nodejs_future = executor.submit(self._start_system, self.nodejs_config)
+            
+            # Wait for both systems to start
+            flask_started = flask_future.result()
+            nodejs_started = nodejs_future.result()
+            
+            # Validate both systems are ready
+            self.systems_ready = flask_started and nodejs_started
+            
+            if self.systems_ready:
+                print("\n✓ Both systems started successfully and passed health checks")
+                self._collect_system_baselines()
+            else:
+                print("\n✗ System startup failed - baseline comparison cannot proceed")
+                self.stop_systems()
+            
+            return self.systems_ready
+    
+    def _start_system(self, config: SystemConfiguration) -> bool:
+        """
+        Start individual system with comprehensive startup monitoring and validation
         
         Args:
-            endpoint: API endpoint path for testing
-            method: HTTP method for requests
-            payload: Request payload for POST/PUT requests
-            headers: HTTP headers for requests
-            scenario: Test scenario identifier
+            config: System configuration for startup and health monitoring
             
         Returns:
-            ComparisonResult: Comprehensive comparison analysis results
+            bool: True if system started successfully and passed health checks
         """
-        logger.info(f"Starting parallel benchmark: {method} {endpoint} (scenario: {scenario})")
+        try:
+            print(f"\nStarting {config.name}...")
+            
+            # Check if port is available
+            if not self._is_port_available(config.port):
+                print(f"✗ Port {config.port} is already in use for {config.name}")
+                return False
+            
+            # Start system process
+            startup_env = {**os.environ, **config.environment_variables}
+            config.startup_time = time.time()
+            
+            config.process_handle = subprocess.Popen(
+                config.startup_command,
+                env=startup_env,
+                cwd=config.working_directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            # Wait for system to be ready with health checks
+            ready = self._wait_for_system_ready(config)
+            config.ready = ready
+            
+            if ready:
+                startup_duration = time.time() - config.startup_time
+                print(f"✓ {config.name} started in {startup_duration:.2f}s")
+                return True
+            else:
+                print(f"✗ {config.name} failed to start or pass health checks")
+                self._stop_system(config)
+                return False
+                
+        except Exception as e:
+            print(f"✗ Error starting {config.name}: {e}")
+            return False
+    
+    def _is_port_available(self, port: int) -> bool:
+        """Check if port is available for system startup"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            return sock.connect_ex(('localhost', port)) != 0
+    
+    def _wait_for_system_ready(self, config: SystemConfiguration) -> bool:
+        """
+        Wait for system to be ready with comprehensive health check validation
         
-        # Prepare request parameters
-        flask_url = f"{self.flask_base_url}{endpoint}"
-        nodejs_url = f"{self.nodejs_base_url}{endpoint}"
+        Args:
+            config: System configuration with health check parameters
+            
+        Returns:
+            bool: True if system is ready and passes health checks
+        """
+        health_url = urljoin(config.base_url, config.health_check_endpoint)
+        timeout = config.startup_timeout
+        check_interval = 1.0
         
-        # Execute parallel benchmarking
-        futures = []
-        
-        # Submit Flask benchmark task
-        flask_future = self.thread_pool.submit(
-            self._execute_system_benchmark,
-            flask_url, method, payload, headers, scenario, 'flask'
-        )
-        futures.append(('flask', flask_future))
-        
-        # Submit Node.js benchmark task
-        nodejs_future = self.thread_pool.submit(
-            self._execute_system_benchmark, 
-            nodejs_url, method, payload, headers, scenario, 'nodejs'
-        )
-        futures.append(('nodejs', nodejs_future))
-        
-        # Collect results
-        results = {}
-        for system_type, future in futures:
+        for attempt in range(int(timeout / check_interval)):
             try:
-                results[system_type] = future.result(timeout=300)  # 5-minute timeout
-            except Exception as e:
-                logger.error(f"Benchmark failed for {system_type}: {e}")
-                # Create fallback metrics for failed system
-                results[system_type] = PerformanceMetrics(
-                    test_scenario=scenario,
-                    system_type=system_type,
-                    error_rate_percent=100.0,
-                    success_rate_percent=0.0,
-                    availability_percent=0.0
+                # Check if process is still running
+                if config.process_handle and config.process_handle.poll() is not None:
+                    print(f"✗ {config.name} process terminated unexpectedly")
+                    return False
+                
+                # Perform health check
+                response = self.session.get(
+                    health_url, 
+                    timeout=config.health_check_timeout
                 )
+                
+                if response.status_code == 200:
+                    print(f"✓ {config.name} health check passed")
+                    return True
+                    
+            except requests.exceptions.RequestException:
+                # System not ready yet, continue waiting
+                pass
+            
+            time.sleep(check_interval)
         
-        # Perform statistical comparison analysis
-        comparison_result = self._analyze_performance_comparison(
-            results['flask'], 
-            results['nodejs'], 
-            scenario
+        print(f"✗ {config.name} failed health check after {timeout}s timeout")
+        return False
+    
+    def _collect_system_baselines(self):
+        """Collect initial performance baselines from both systems for comparison"""
+        print("\nCollecting system performance baselines...")
+        
+        # Collect Flask baseline
+        flask_baseline = self._collect_single_system_baseline(self.flask_config)
+        self.flask_config.performance_baseline = flask_baseline
+        
+        # Collect Node.js baseline
+        nodejs_baseline = self._collect_single_system_baseline(self.nodejs_config)
+        self.nodejs_config.performance_baseline = nodejs_baseline
+        
+        print(f"✓ Baseline collection completed")
+        print(f"  Flask baseline: {len(flask_baseline)} metrics")
+        print(f"  Node.js baseline: {len(nodejs_baseline)} metrics")
+    
+    def _collect_single_system_baseline(self, config: SystemConfiguration) -> Dict[str, float]:
+        """
+        Collect performance baseline from single system with comprehensive metrics
+        
+        Args:
+            config: System configuration for baseline collection
+            
+        Returns:
+            Dict[str, float]: Performance baseline metrics
+        """
+        baseline = {}
+        
+        try:
+            # Basic endpoint response time
+            start_time = time.time()
+            response = self.session.get(
+                urljoin(config.base_url, '/health'),
+                timeout=5.0
+            )
+            baseline['health_endpoint_time'] = time.time() - start_time
+            
+            # Memory usage if available
+            if config.process_handle:
+                try:
+                    process = psutil.Process(config.process_handle.pid)
+                    baseline['memory_usage_mb'] = process.memory_info().rss / 1024 / 1024
+                    baseline['cpu_percent'] = process.cpu_percent()
+                except psutil.NoSuchProcess:
+                    pass
+            
+        except Exception as e:
+            print(f"Warning: Could not collect complete baseline for {config.name}: {e}")
+        
+        return baseline
+    
+    def stop_systems(self):
+        """Stop both Flask and Node.js systems with graceful shutdown and cleanup"""
+        print(f"\n{'='*80}")
+        print("STOPPING BASELINE COMPARISON SYSTEMS")
+        print(f"{'='*80}")
+        
+        # Stop systems in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            flask_future = executor.submit(self._stop_system, self.flask_config)
+            nodejs_future = executor.submit(self._stop_system, self.nodejs_config)
+            
+            flask_stopped = flask_future.result()
+            nodejs_stopped = nodejs_future.result()
+        
+        self.systems_ready = False
+        print("✓ System shutdown completed")
+    
+    def _stop_system(self, config: SystemConfiguration):
+        """
+        Stop individual system with graceful shutdown and process cleanup
+        
+        Args:
+            config: System configuration for shutdown
+        """
+        if config.process_handle:
+            try:
+                # Attempt graceful shutdown
+                config.process_handle.terminate()
+                
+                # Wait for graceful shutdown
+                try:
+                    config.process_handle.wait(timeout=10)
+                    print(f"✓ {config.name} stopped gracefully")
+                except subprocess.TimeoutExpired:
+                    # Force kill if needed
+                    config.process_handle.kill()
+                    config.process_handle.wait()
+                    print(f"✓ {config.name} force stopped")
+                    
+            except Exception as e:
+                print(f"Warning: Error stopping {config.name}: {e}")
+            finally:
+                config.process_handle = None
+                config.ready = False
+    
+    def execute_comparison_test(self, test_name: str, test_function: Callable,
+                              *args, **kwargs) -> ComparisonResult:
+        """
+        Execute comprehensive comparison test with parallel system validation
+        and statistical analysis for functional parity and performance verification.
+        
+        Args:
+            test_name: Name of the test for tracking and reporting
+            test_function: Test function to execute against both systems
+            *args: Positional arguments for test function
+            **kwargs: Keyword arguments for test function
+            
+        Returns:
+            ComparisonResult: Comprehensive comparison analysis and validation results
+        """
+        if not self.systems_ready:
+            raise RuntimeError("Systems not ready for comparison testing")
+        
+        print(f"\nExecuting comparison test: {test_name}")
+        
+        # Execute test against both systems in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit Flask test
+            flask_future = executor.submit(
+                self._execute_system_test,
+                test_name,
+                test_function,
+                self.flask_config,
+                *args, **kwargs
+            )
+            
+            # Submit Node.js test
+            nodejs_future = executor.submit(
+                self._execute_system_test,
+                test_name,
+                test_function,
+                self.nodejs_config,
+                *args, **kwargs
+            )
+            
+            # Collect results
+            flask_result = flask_future.result()
+            nodejs_result = nodejs_future.result()
+        
+        # Perform comprehensive comparison analysis
+        comparison_result = self._analyze_comparison_results(
+            test_name, flask_result, nodejs_result
         )
         
+        # Store result for session analysis
         self.comparison_results.append(comparison_result)
         
-        logger.info(f"Parallel benchmark completed: {scenario} - Performance equivalent: {comparison_result.is_performance_equivalent}")
+        # Trigger correction workflow if discrepancies detected
+        if comparison_result.discrepancies:
+            self._trigger_correction_workflow(comparison_result)
+        
         return comparison_result
     
-    def _execute_system_benchmark(self, 
-                                url: str, 
-                                method: str,
-                                payload: Optional[Dict],
-                                headers: Optional[Dict],
-                                scenario: str,
-                                system_type: str) -> PerformanceMetrics:
+    def _execute_system_test(self, test_name: str, test_function: Callable,
+                           config: SystemConfiguration, *args, **kwargs) -> Dict[str, Any]:
         """
-        Execute performance benchmark against a single system with comprehensive
-        metric collection and statistical analysis.
+        Execute test function against individual system with comprehensive monitoring
         
         Args:
-            url: System URL for benchmarking
-            method: HTTP method for requests
-            payload: Request payload data
-            headers: HTTP headers
-            scenario: Test scenario identifier
-            system_type: System type ('flask' or 'nodejs')
+            test_name: Name of the test for tracking
+            test_function: Test function to execute
+            config: System configuration for test execution
+            *args: Positional arguments for test function
+            **kwargs: Keyword arguments for test function
             
         Returns:
-            PerformanceMetrics: Comprehensive performance metrics
+            Dict[str, Any]: Test execution results with performance metrics
         """
-        with self.performance_measurement_context(scenario, system_type) as metrics:
-            response_times = []
-            success_count = 0
-            error_count = 0
-            memory_samples = []
-            
-            # Execute benchmark samples
-            for i in range(self.sample_size):
-                try:
-                    # Record memory before request
-                    current_memory = memory_usage()[0] if memory_usage() else 0.0
-                    memory_samples.append(current_memory)
-                    
-                    # Execute HTTP request with timing
-                    start_time = time.time()
-                    
-                    if method.upper() == 'GET':
-                        response = requests.get(url, headers=headers, timeout=10)
-                    elif method.upper() == 'POST':
-                        response = requests.post(url, json=payload, headers=headers, timeout=10)
-                    elif method.upper() == 'PUT':
-                        response = requests.put(url, json=payload, headers=headers, timeout=10)
-                    else:
-                        response = requests.request(method, url, json=payload, headers=headers, timeout=10)
-                    
-                    end_time = time.time()
-                    response_time_ms = (end_time - start_time) * 1000
-                    response_times.append(response_time_ms)
-                    
-                    # Check response status
-                    if 200 <= response.status_code < 300:
-                        success_count += 1
-                    else:
-                        error_count += 1
-                        logger.warning(f"Non-success response: {response.status_code} for {url}")
-                    
-                except Exception as e:
-                    error_count += 1
-                    logger.warning(f"Request failed for {url}: {e}")
-                    response_times.append(10000)  # 10-second penalty for failed requests
-            
-            # Calculate comprehensive metrics
-            if response_times:
-                metrics.response_time_ms = statistics.mean(response_times)
-                metrics.response_time_min_ms = min(response_times)
-                metrics.response_time_max_ms = max(response_times)
-                metrics.response_time_p50_ms = statistics.median(response_times)
-                metrics.response_time_p95_ms = np.percentile(response_times, 95)
-                metrics.response_time_p99_ms = np.percentile(response_times, 99)
-                metrics.measurement_variance = statistics.variance(response_times) if len(response_times) > 1 else 0.0
-            
-            # Calculate throughput metrics
-            total_time_seconds = sum(response_times) / 1000
-            if total_time_seconds > 0:
-                metrics.throughput_rps = self.sample_size / total_time_seconds
-            
-            # Calculate memory metrics
-            if memory_samples:
-                metrics.memory_usage_mb = statistics.mean(memory_samples)
-                metrics.memory_peak_mb = max(memory_samples)
-            
-            # Calculate error metrics
-            metrics.error_rate_percent = (error_count / self.sample_size) * 100
-            metrics.success_rate_percent = (success_count / self.sample_size) * 100
-            metrics.availability_percent = metrics.success_rate_percent
-            
-            # Set additional metadata
-            metrics.sample_size = self.sample_size
-            metrics.statistical_confidence = self.confidence_level
-            
-        return metrics
-    
-    def _analyze_performance_comparison(self, 
-                                      flask_metrics: PerformanceMetrics,
-                                      nodejs_metrics: PerformanceMetrics,
-                                      scenario: str) -> ComparisonResult:
-        """
-        Perform comprehensive statistical analysis comparing Flask and Node.js
-        performance metrics with significance testing and discrepancy detection.
+        start_time = time.time()
         
-        Args:
-            flask_metrics: Flask system performance metrics
-            nodejs_metrics: Node.js baseline performance metrics
-            scenario: Test scenario identifier
-            
-        Returns:
-            ComparisonResult: Detailed comparison analysis with validation status
-        """
-        comparison = ComparisonResult(
-            flask_metrics=flask_metrics,
-            nodejs_metrics=nodejs_metrics,
-            test_scenario=scenario
-        )
-        
-        # Calculate performance differences
-        if nodejs_metrics.response_time_ms > 0:
-            comparison.response_time_difference_percent = (
-                (flask_metrics.response_time_ms - nodejs_metrics.response_time_ms) / 
-                nodejs_metrics.response_time_ms
-            ) * 100
-        
-        if nodejs_metrics.throughput_rps > 0:
-            comparison.throughput_difference_percent = (
-                (flask_metrics.throughput_rps - nodejs_metrics.throughput_rps) / 
-                nodejs_metrics.throughput_rps
-            ) * 100
-        
-        if nodejs_metrics.memory_usage_mb > 0:
-            comparison.memory_difference_percent = (
-                (flask_metrics.memory_usage_mb - nodejs_metrics.memory_usage_mb) / 
-                nodejs_metrics.memory_usage_mb
-            ) * 100
-        
-        comparison.error_rate_difference_percent = (
-            flask_metrics.error_rate_percent - nodejs_metrics.error_rate_percent
-        )
-        
-        # Perform statistical significance testing
         try:
-            # Calculate confidence intervals for response time difference
-            response_time_diff = flask_metrics.response_time_ms - nodejs_metrics.response_time_ms
-            combined_variance = (flask_metrics.measurement_variance + nodejs_metrics.measurement_variance) / 2
-            standard_error = np.sqrt(combined_variance / flask_metrics.sample_size)
+            # Execute test with system configuration
+            result = test_function(config.base_url, *args, **kwargs)
+            duration = time.time() - start_time
             
-            # T-test for statistical significance
-            if standard_error > 0:
-                t_statistic = response_time_diff / standard_error
-                degrees_freedom = (flask_metrics.sample_size + nodejs_metrics.sample_size) - 2
-                p_value = 2 * (1 - stats.t.cdf(abs(t_statistic), degrees_freedom))
-                comparison.statistical_significance = p_value
-                
-                # Calculate confidence interval
-                t_critical = stats.t.ppf((1 + self.confidence_level) / 2, degrees_freedom)
-                margin_error = t_critical * standard_error
-                comparison.confidence_interval_lower = response_time_diff - margin_error
-                comparison.confidence_interval_upper = response_time_diff + margin_error
-                
+            # Collect performance metrics
+            performance_data = {
+                'duration': duration,
+                'system_name': config.name,
+                'success': True,
+                'result': result
+            }
+            
+            # Record metrics
+            self.metrics_collector.record_metric(
+                test_name=f"{test_name}_{config.name}",
+                metric_type='response_time',
+                value=duration,
+                unit='seconds',
+                metadata={
+                    'system': config.name,
+                    'test_name': test_name,
+                    'session_id': self.session_id
+                }
+            )
+            
+            return performance_data
+            
         except Exception as e:
-            logger.warning(f"Statistical analysis failed: {e}")
-            comparison.statistical_significance = 1.0  # Assume no significance if calculation fails
-        
-        # Performance equivalence validation
-        comparison.is_performance_equivalent = (
-            abs(comparison.response_time_difference_percent) <= self.tolerance_percent and
-            comparison.error_rate_difference_percent <= 1.0 and  # Max 1% error rate increase
-            flask_metrics.availability_percent >= 99.0  # Minimum 99% availability
-        )
-        
-        # Functional equivalence validation (simplified check)
-        comparison.is_functionally_equivalent = (
-            flask_metrics.success_rate_percent >= nodejs_metrics.success_rate_percent - 1.0 and
-            flask_metrics.error_rate_percent <= nodejs_metrics.error_rate_percent + 1.0
-        )
-        
-        # SLA compliance validation per Section 4.11.1
-        comparison.sla_compliance_status = (
-            flask_metrics.response_time_ms <= 200.0 and  # API response time SLA
-            flask_metrics.availability_percent >= 99.9 and  # System availability SLA
-            flask_metrics.error_rate_percent <= 1.0  # Error rate threshold
-        )
-        
-        # Migration criteria validation
-        comparison.passes_migration_criteria = (
-            comparison.is_performance_equivalent and
-            comparison.is_functionally_equivalent and
-            comparison.sla_compliance_status
-        )
-        
-        # Performance regression detection
-        comparison.performance_regression_detected = (
-            comparison.response_time_difference_percent > 20.0 or  # >20% response time increase
-            comparison.throughput_difference_percent < -20.0 or  # >20% throughput decrease
-            comparison.error_rate_difference_percent > 5.0  # >5% error rate increase
-        )
-        
-        # Discrepancy detection and categorization
-        self._detect_and_categorize_discrepancies(comparison)
-        
-        return comparison
+            duration = time.time() - start_time
+            
+            return {
+                'duration': duration,
+                'system_name': config.name,
+                'success': False,
+                'error': str(e),
+                'result': None
+            }
     
-    def _detect_and_categorize_discrepancies(self, comparison: ComparisonResult):
+    def _analyze_comparison_results(self, test_name: str, flask_result: Dict[str, Any],
+                                  nodejs_result: Dict[str, Any]) -> ComparisonResult:
         """
-        Detect and categorize performance discrepancies for automated correction
-        workflow triggering as specified in Section 4.7.2.
+        Analyze comparison results with comprehensive functional and performance validation
         
         Args:
-            comparison: Comparison result to analyze for discrepancies
-        """
-        # Clear existing discrepancies
-        comparison.discrepancies_detected = []
-        comparison.critical_issues = []
-        comparison.warnings = []
-        
-        # Response time discrepancy analysis
-        if abs(comparison.response_time_difference_percent) > self.tolerance_percent:
-            discrepancy = f"Response time difference exceeds tolerance: {comparison.response_time_difference_percent:.2f}% (limit: {self.tolerance_percent}%)"
-            comparison.discrepancies_detected.append(discrepancy)
-            
-            if comparison.response_time_difference_percent > 50.0:
-                comparison.critical_issues.append(f"Critical response time regression: {comparison.response_time_difference_percent:.2f}%")
-            elif comparison.response_time_difference_percent > 20.0:
-                comparison.warnings.append(f"Significant response time increase: {comparison.response_time_difference_percent:.2f}%")
-        
-        # Throughput discrepancy analysis
-        if abs(comparison.throughput_difference_percent) > self.tolerance_percent:
-            discrepancy = f"Throughput difference exceeds tolerance: {comparison.throughput_difference_percent:.2f}% (limit: {self.tolerance_percent}%)"
-            comparison.discrepancies_detected.append(discrepancy)
-            
-            if comparison.throughput_difference_percent < -30.0:
-                comparison.critical_issues.append(f"Critical throughput regression: {comparison.throughput_difference_percent:.2f}%")
-        
-        # Memory usage discrepancy analysis
-        if abs(comparison.memory_difference_percent) > 25.0:  # 25% tolerance for memory
-            discrepancy = f"Memory usage difference exceeds tolerance: {comparison.memory_difference_percent:.2f}%"
-            comparison.discrepancies_detected.append(discrepancy)
-            
-            if comparison.memory_difference_percent > 100.0:
-                comparison.critical_issues.append(f"Critical memory usage increase: {comparison.memory_difference_percent:.2f}%")
-        
-        # Error rate discrepancy analysis
-        if comparison.error_rate_difference_percent > 1.0:
-            discrepancy = f"Error rate increased by {comparison.error_rate_difference_percent:.2f}%"
-            comparison.discrepancies_detected.append(discrepancy)
-            
-            if comparison.error_rate_difference_percent > 5.0:
-                comparison.critical_issues.append(f"Critical error rate increase: {comparison.error_rate_difference_percent:.2f}%")
-        
-        # SLA compliance discrepancy analysis
-        if not comparison.sla_compliance_status:
-            comparison.discrepancies_detected.append("SLA compliance violation detected")
-            
-            if comparison.flask_metrics.response_time_ms > 500.0:
-                comparison.critical_issues.append(f"Critical SLA violation: Response time {comparison.flask_metrics.response_time_ms:.2f}ms > 500ms")
-            elif comparison.flask_metrics.response_time_ms > 200.0:
-                comparison.warnings.append(f"SLA warning: Response time {comparison.flask_metrics.response_time_ms:.2f}ms > 200ms")
-        
-        # Statistical significance analysis
-        if comparison.statistical_significance < 0.05 and comparison.response_time_difference_percent > 10.0:
-            comparison.warnings.append(f"Statistically significant performance difference detected (p={comparison.statistical_significance:.4f})")
-        
-        logger.info(f"Discrepancy analysis completed: {len(comparison.discrepancies_detected)} discrepancies, {len(comparison.critical_issues)} critical issues")
-    
-    def generate_comprehensive_report(self) -> str:
-        """
-        Generate comprehensive baseline comparison report with statistical analysis,
-        trend analysis, and migration validation summary.
-        
-        Returns:
-            str: Comprehensive report for documentation and analysis
-        """
-        report_lines = [
-            "COMPREHENSIVE BASELINE COMPARISON REPORT",
-            "=" * 80,
-            f"Generated: {datetime.utcnow().isoformat()}",
-            f"Total Comparisons: {len(self.comparison_results)}",
-            f"Configuration: Tolerance={self.tolerance_percent}%, Confidence={self.confidence_level}, Samples={self.sample_size}",
-            ""
-        ]
-        
-        if not self.comparison_results:
-            report_lines.extend([
-                "No comparison results available.",
-                "Execute baseline comparisons before generating report.",
-                "=" * 80
-            ])
-            return "\n".join(report_lines)
-        
-        # Summary statistics
-        performance_equivalent_count = sum(1 for r in self.comparison_results if r.is_performance_equivalent)
-        functionally_equivalent_count = sum(1 for r in self.comparison_results if r.is_functionally_equivalent)
-        sla_compliant_count = sum(1 for r in self.comparison_results if r.sla_compliance_status)
-        migration_criteria_passed = sum(1 for r in self.comparison_results if r.passes_migration_criteria)
-        
-        report_lines.extend([
-            "SUMMARY STATISTICS:",
-            f"  Performance Equivalent: {performance_equivalent_count}/{len(self.comparison_results)} ({(performance_equivalent_count/len(self.comparison_results)*100):.1f}%)",
-            f"  Functionally Equivalent: {functionally_equivalent_count}/{len(self.comparison_results)} ({(functionally_equivalent_count/len(self.comparison_results)*100):.1f}%)",
-            f"  SLA Compliant: {sla_compliant_count}/{len(self.comparison_results)} ({(sla_compliant_count/len(self.comparison_results)*100):.1f}%)",
-            f"  Migration Criteria Passed: {migration_criteria_passed}/{len(self.comparison_results)} ({(migration_criteria_passed/len(self.comparison_results)*100):.1f}%)",
-            ""
-        ])
-        
-        # Performance trend analysis
-        if len(self.comparison_results) > 1:
-            response_time_diffs = [r.response_time_difference_percent for r in self.comparison_results]
-            throughput_diffs = [r.throughput_difference_percent for r in self.comparison_results]
-            
-            report_lines.extend([
-                "PERFORMANCE TREND ANALYSIS:",
-                f"  Average Response Time Difference: {statistics.mean(response_time_diffs):.2f}%",
-                f"  Response Time Difference Std Dev: {statistics.stdev(response_time_diffs) if len(response_time_diffs) > 1 else 0:.2f}%",
-                f"  Average Throughput Difference: {statistics.mean(throughput_diffs):.2f}%",
-                f"  Throughput Difference Std Dev: {statistics.stdev(throughput_diffs) if len(throughput_diffs) > 1 else 0:.2f}%",
-                ""
-            ])
-        
-        # Critical issues summary
-        all_critical_issues = []
-        all_warnings = []
-        for result in self.comparison_results:
-            all_critical_issues.extend(result.critical_issues)
-            all_warnings.extend(result.warnings)
-        
-        if all_critical_issues:
-            report_lines.extend([
-                "CRITICAL ISSUES SUMMARY:",
-                *[f"  - {issue}" for issue in set(all_critical_issues)],
-                ""
-            ])
-        
-        if all_warnings:
-            report_lines.extend([
-                "WARNINGS SUMMARY:",
-                *[f"  - {warning}" for warning in set(all_warnings)],
-                ""
-            ])
-        
-        # Individual comparison results
-        report_lines.extend([
-            "INDIVIDUAL COMPARISON RESULTS:",
-            "-" * 40
-        ])
-        
-        for i, result in enumerate(self.comparison_results, 1):
-            report_lines.extend([
-                f"{i}. {result.test_scenario} ({result.comparison_timestamp.strftime('%H:%M:%S')})",
-                f"   Performance Equivalent: {result.is_performance_equivalent}",
-                f"   Response Time Diff: {result.response_time_difference_percent:.2f}%",
-                f"   SLA Compliant: {result.sla_compliance_status}",
-                f"   Migration Criteria: {result.passes_migration_criteria}",
-                ""
-            ])
-        
-        report_lines.append("=" * 80)
-        return "\n".join(report_lines)
-
-
-# ================================
-# pytest-benchmark Integration
-# ================================
-
-class BaselineComparisonBenchmark:
-    """
-    pytest-benchmark integration class providing statistical performance measurement
-    with baseline comparison capabilities for migration validation.
-    
-    This class integrates with pytest-benchmark 5.1.0 to provide comprehensive
-    statistical analysis and automated performance regression detection.
-    """
-    
-    def __init__(self, comparison_framework: BaselineComparisonFramework):
-        """
-        Initialize benchmark integration with comparison framework
-        
-        Args:
-            comparison_framework: Baseline comparison framework instance
-        """
-        self.framework = comparison_framework
-        
-    def benchmark_api_endpoint(self, 
-                             benchmark: BenchmarkFixture,
-                             endpoint: str,
-                             method: str = 'GET',
-                             payload: Optional[Dict] = None,
-                             headers: Optional[Dict] = None) -> ComparisonResult:
-        """
-        Benchmark API endpoint with pytest-benchmark integration and baseline comparison
-        
-        Args:
-            benchmark: pytest-benchmark fixture
-            endpoint: API endpoint path
-            method: HTTP method
-            payload: Request payload
-            headers: HTTP headers
+            test_name: Name of the test for analysis
+            flask_result: Flask system test results
+            nodejs_result: Node.js system test results
             
         Returns:
             ComparisonResult: Comprehensive comparison analysis
         """
-        # Configure benchmark settings
-        benchmark.group = f"api_endpoints_{method.lower()}"
-        benchmark.name = f"{method}_{endpoint.replace('/', '_')}"
+        # Functional parity analysis
+        functional_parity = self._validate_functional_parity(
+            flask_result.get('result'),
+            nodejs_result.get('result')
+        )
         
-        # Execute baseline comparison benchmark
-        def benchmark_function():
-            return self.framework.execute_parallel_benchmark(
-                endpoint=endpoint,
-                method=method,
-                payload=payload,
-                headers=headers,
-                scenario=f"benchmark_{method}_{endpoint}"
-            )
+        # Performance comparison analysis
+        performance_comparison = self._analyze_performance_comparison(
+            flask_result, nodejs_result
+        )
         
-        # Run benchmark with statistical analysis
-        result = benchmark(benchmark_function)
+        # Statistical analysis
+        statistical_analysis = self._perform_statistical_analysis(
+            flask_result, nodejs_result
+        )
         
-        # Extract comparison result from benchmark execution
-        if hasattr(result, 'passes_migration_criteria'):
-            return result
-        else:
-            # If result is just the benchmark result, execute comparison separately
-            return self.framework.execute_parallel_benchmark(
-                endpoint=endpoint,
-                method=method,
-                payload=payload,
-                headers=headers,
-                scenario=f"benchmark_{method}_{endpoint}"
-            )
-
-
-# ================================
-# Test Fixtures and Configuration
-# ================================
-
-@pytest.fixture(scope="session")
-def baseline_comparison_framework():
-    """
-    Session-scoped baseline comparison framework fixture providing comprehensive
-    testing infrastructure for Flask vs Node.js performance validation.
+        # Create comprehensive comparison result
+        return ComparisonResult(
+            test_name=test_name,
+            flask_result=flask_result,
+            nodejs_result=nodejs_result,
+            functional_parity=functional_parity,
+            performance_comparison=performance_comparison,
+            statistical_analysis=statistical_analysis,
+            test_metadata={
+                'session_id': self.session_id,
+                'timestamp': datetime.utcnow().isoformat(),
+                'flask_system': self.flask_config.name,
+                'nodejs_system': self.nodejs_config.name
+            }
+        )
     
-    Returns:
-        BaselineComparisonFramework: Configured comparison framework
-    """
-    # Get configuration from environment variables
-    flask_url = os.getenv('FLASK_BASE_URL', 'http://localhost:5000')
-    nodejs_url = os.getenv('NODEJS_BASELINE_URL', 'http://localhost:3000')
-    tolerance = float(os.getenv('COMPARISON_TOLERANCE_PERCENT', '10.0'))
-    confidence = float(os.getenv('STATISTICAL_CONFIDENCE_LEVEL', '0.95'))
-    sample_size = int(os.getenv('BENCHMARK_SAMPLE_SIZE', '50'))
-    
-    framework = BaselineComparisonFramework(
-        flask_base_url=flask_url,
-        nodejs_base_url=nodejs_url,
-        tolerance_percent=tolerance,
-        confidence_level=confidence,
-        sample_size=sample_size
-    )
-    
-    logger.info(f"Baseline comparison framework fixture created: {flask_url} vs {nodejs_url}")
-    
-    yield framework
-    
-    # Cleanup and final reporting
-    final_report = framework.generate_comprehensive_report()
-    logger.info("FINAL BASELINE COMPARISON REPORT:")
-    logger.info(final_report)
-    
-    # Save report to file if configured
-    report_path = os.getenv('BASELINE_REPORT_PATH')
-    if report_path:
+    def _validate_functional_parity(self, flask_result: Any, nodejs_result: Any) -> bool:
+        """
+        Validate functional parity between Flask and Node.js results with comprehensive
+        comparison analysis accounting for minor differences in data formatting.
+        
+        Args:
+            flask_result: Flask system result data
+            nodejs_result: Node.js system result data
+            
+        Returns:
+            bool: True if functional parity is achieved
+        """
+        if flask_result is None and nodejs_result is None:
+            return True
+        
+        if flask_result is None or nodejs_result is None:
+            return False
+        
         try:
-            with open(report_path, 'w') as f:
-                f.write(final_report)
-            logger.info(f"Baseline comparison report saved to: {report_path}")
+            # Use deepdiff for comprehensive comparison with tolerance for minor differences
+            diff = deepdiff.DeepDiff(
+                nodejs_result,
+                flask_result,
+                ignore_order=True,
+                significant_digits=3,
+                exclude_paths=["root['timestamp']", "root['request_id']"],
+                ignore_string_case=True
+            )
+            
+            # Consider functional parity achieved if no significant differences
+            return len(diff) == 0
+            
         except Exception as e:
-            logger.error(f"Failed to save report: {e}")
-
-
-@pytest.fixture
-def baseline_benchmark(baseline_comparison_framework):
-    """
-    Baseline benchmark fixture providing pytest-benchmark integration
-    for statistical performance measurement and comparison.
+            print(f"Warning: Error in functional parity validation: {e}")
+            return False
     
-    Args:
-        baseline_comparison_framework: Framework fixture
+    def _analyze_performance_comparison(self, flask_result: Dict[str, Any],
+                                      nodejs_result: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Analyze performance comparison with comprehensive metrics and regression detection
         
-    Returns:
-        BaselineComparisonBenchmark: Benchmark integration instance
-    """
-    return BaselineComparisonBenchmark(baseline_comparison_framework)
-
-
-@pytest.fixture
-def performance_monitoring():
-    """
-    Performance monitoring fixture providing comprehensive system monitoring
-    during baseline comparison testing.
-    
-    Returns:
-        Dict[str, Any]: Performance monitoring utilities
-    """
-    monitor = {
-        'memory_tracker': tracker.SummaryTracker(),
-        'start_time': time.time(),
-        'initial_memory': memory_usage()[0] if memory_usage() else 0.0
-    }
-    
-    def get_current_stats():
-        current_time = time.time()
-        current_memory = memory_usage()[0] if memory_usage() else 0.0
+        Args:
+            flask_result: Flask system performance data
+            nodejs_result: Node.js system performance data
+            
+        Returns:
+            Dict[str, float]: Performance comparison metrics
+        """
+        flask_duration = flask_result.get('duration', 0)
+        nodejs_duration = nodejs_result.get('duration', 0)
+        
+        if nodejs_duration == 0:
+            return {
+                'flask_duration': flask_duration,
+                'nodejs_duration': nodejs_duration,
+                'performance_ratio': float('inf'),
+                'improvement_percentage': 0
+            }
+        
+        performance_ratio = flask_duration / nodejs_duration
+        improvement_percentage = ((nodejs_duration - flask_duration) / nodejs_duration) * 100
         
         return {
-            'elapsed_time': current_time - monitor['start_time'],
-            'memory_usage': current_memory,
-            'memory_delta': current_memory - monitor['initial_memory']
+            'flask_duration': flask_duration,
+            'nodejs_duration': nodejs_duration,
+            'performance_ratio': performance_ratio,
+            'improvement_percentage': improvement_percentage,
+            'regression_detected': performance_ratio > (1.0 + PerformanceTestingConfiguration.PERFORMANCE_REGRESSION_THRESHOLD)
         }
     
-    def generate_memory_report():
-        summary = monitor['memory_tracker'].create_summary()
-        return muppy.format_summary(summary)
+    def _perform_statistical_analysis(self, flask_result: Dict[str, Any],
+                                    nodejs_result: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Perform statistical analysis on performance comparison data with significance testing
+        
+        Args:
+            flask_result: Flask system performance data
+            nodejs_result: Node.js system performance data
+            
+        Returns:
+            Dict[str, float]: Statistical analysis results
+        """
+        # For single measurement, provide basic statistical framework
+        # In production, this would analyze multiple measurements
+        flask_duration = flask_result.get('duration', 0)
+        nodejs_duration = nodejs_result.get('duration', 0)
+        
+        if nodejs_duration == 0:
+            return {'statistical_significance': 0.0, 'confidence_interval': 0.0}
+        
+        # Basic statistical analysis (enhanced with multiple measurements in practice)
+        relative_difference = abs(flask_duration - nodejs_duration) / nodejs_duration
+        
+        return {
+            'relative_difference': relative_difference,
+            'statistical_significance': 1.0 if relative_difference > 0.05 else 0.0,
+            'confidence_interval': self.statistical_config['confidence_interval'],
+            'measurement_count': 1  # Single measurement for this implementation
+        }
     
-    monitor['get_stats'] = get_current_stats
-    monitor['memory_report'] = generate_memory_report
+    def _trigger_correction_workflow(self, comparison_result: ComparisonResult):
+        """
+        Trigger automated correction workflow when performance discrepancies are detected
+        
+        Args:
+            comparison_result: Comparison result containing discrepancies
+        """
+        print(f"\n⚠️  Triggering correction workflow for {comparison_result.test_name}")
+        
+        correction_workflow = {
+            'test_name': comparison_result.test_name,
+            'discrepancies': comparison_result.discrepancies,
+            'recommendations': comparison_result.recommendations,
+            'timestamp': datetime.utcnow().isoformat(),
+            'session_id': self.session_id,
+            'status': 'triggered'
+        }
+        
+        # Store correction workflow for analysis
+        self.correction_workflows.append(correction_workflow)
+        
+        # Log discrepancies and recommendations
+        for discrepancy in comparison_result.discrepancies:
+            print(f"  Discrepancy: {discrepancy['type']} - {discrepancy['category']}")
+            print(f"    Severity: {discrepancy.get('severity', 'unknown')}")
+        
+        for recommendation in comparison_result.recommendations:
+            print(f"  Recommendation: {recommendation}")
     
-    yield monitor
-    
-    # Final monitoring report
-    final_stats = monitor['get_stats']()
-    logger.info(f"Performance monitoring final stats: {final_stats}")
+    def get_session_summary(self) -> Dict[str, Any]:
+        """
+        Generate comprehensive session summary with aggregated comparison results
+        and migration validation analysis.
+        
+        Returns:
+            Dict[str, Any]: Session summary with validation metrics
+        """
+        total_tests = len(self.comparison_results)
+        functional_parity_passed = len([r for r in self.comparison_results if r.functional_parity])
+        high_severity_discrepancies = sum(
+            len([d for d in r.discrepancies if d.get('severity') == 'high'])
+            for r in self.comparison_results
+        )
+        
+        # Calculate overall migration success
+        migration_success = (
+            functional_parity_passed == total_tests and
+            high_severity_discrepancies == 0
+        )
+        
+        return {
+            'session_id': self.session_id,
+            'total_tests': total_tests,
+            'functional_parity_rate': functional_parity_passed / total_tests if total_tests > 0 else 0,
+            'migration_success': migration_success,
+            'high_severity_discrepancies': high_severity_discrepancies,
+            'correction_workflows_triggered': len(self.correction_workflows),
+            'average_performance_ratio': statistics.mean([
+                r.performance_comparison.get('performance_ratio', 1.0)
+                for r in self.comparison_results
+                if r.performance_comparison.get('performance_ratio', 0) > 0
+            ]) if self.comparison_results else 1.0,
+            'flask_system': self.flask_config.name,
+            'nodejs_system': self.nodejs_config.name,
+            'timestamp': datetime.utcnow().isoformat()
+        }
 
 
 # ================================
-# Main Test Classes
+# Core Baseline Comparison Test Functions
+# ================================
+
+def sample_api_test(base_url: str, endpoint: str = '/api/health') -> Dict[str, Any]:
+    """
+    Sample API test function for baseline comparison testing with comprehensive
+    response validation and error handling for realistic system interaction.
+    
+    Args:
+        base_url: Base URL of the system to test
+        endpoint: API endpoint to test
+        
+    Returns:
+        Dict[str, Any]: API response data and metadata
+    """
+    url = urljoin(base_url, endpoint)
+    
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        return {
+            'status_code': response.status_code,
+            'response_time': response.elapsed.total_seconds(),
+            'data': response.json() if response.content else {},
+            'headers': dict(response.headers),
+            'success': True
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'status_code': 0,
+            'response_time': 0,
+            'data': {},
+            'error': str(e),
+            'success': False
+        }
+
+
+def database_query_test(base_url: str, query_endpoint: str = '/api/users') -> Dict[str, Any]:
+    """
+    Database query test function for baseline comparison with comprehensive
+    query performance validation and result analysis.
+    
+    Args:
+        base_url: Base URL of the system to test
+        query_endpoint: Database query endpoint to test
+        
+    Returns:
+        Dict[str, Any]: Query results and performance metrics
+    """
+    url = urljoin(base_url, query_endpoint)
+    
+    try:
+        start_time = time.time()
+        response = requests.get(url, timeout=15)
+        query_duration = time.time() - start_time
+        
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        
+        return {
+            'query_duration': query_duration,
+            'record_count': len(data.get('users', [])) if isinstance(data, dict) else 0,
+            'data': data,
+            'success': True
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'query_duration': 0,
+            'record_count': 0,
+            'data': {},
+            'error': str(e),
+            'success': False
+        }
+
+
+def authentication_test(base_url: str, auth_endpoint: str = '/auth/login') -> Dict[str, Any]:
+    """
+    Authentication test function for baseline comparison with comprehensive
+    authentication flow validation and performance measurement.
+    
+    Args:
+        base_url: Base URL of the system to test
+        auth_endpoint: Authentication endpoint to test
+        
+    Returns:
+        Dict[str, Any]: Authentication results and performance metrics
+    """
+    url = urljoin(base_url, auth_endpoint)
+    
+    # Test credentials
+    credentials = {
+        'username': 'test_user',
+        'password': 'test_password'
+    }
+    
+    try:
+        start_time = time.time()
+        response = requests.post(
+            url, 
+            json=credentials,
+            timeout=10,
+            headers={'Content-Type': 'application/json'}
+        )
+        auth_duration = time.time() - start_time
+        
+        # Handle both successful and expected authentication failure responses
+        data = response.json() if response.content else {}
+        
+        return {
+            'auth_duration': auth_duration,
+            'status_code': response.status_code,
+            'authenticated': response.status_code == 200,
+            'data': data,
+            'success': True  # Success means we got a response, not necessarily authenticated
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'auth_duration': 0,
+            'status_code': 0,
+            'authenticated': False,
+            'data': {},
+            'error': str(e),
+            'success': False
+        }
+
+
+# ================================
+# Baseline Comparison Test Fixtures
+# ================================
+
+@pytest.fixture(scope='session')
+def flask_system_config() -> SystemConfiguration:
+    """
+    Flask system configuration fixture providing comprehensive Flask system
+    setup parameters for baseline comparison testing scenarios.
+    
+    Returns:
+        SystemConfiguration: Flask system configuration
+    """
+    return SystemConfiguration(
+        name='Flask_System',
+        base_url='http://localhost:5000',
+        port=5000,
+        startup_command=['python', '-m', 'flask', 'run', '--port=5000'],
+        health_check_endpoint='/health',
+        startup_timeout=30,
+        environment_variables={
+            'FLASK_APP': 'src.app:create_app',
+            'FLASK_ENV': 'testing',
+            'PORT': '5000'
+        }
+    )
+
+
+@pytest.fixture(scope='session')
+def nodejs_system_config() -> SystemConfiguration:
+    """
+    Node.js system configuration fixture providing comprehensive Node.js system
+    setup parameters for baseline comparison testing scenarios.
+    
+    Returns:
+        SystemConfiguration: Node.js system configuration
+    """
+    return SystemConfiguration(
+        name='NodeJS_System',
+        base_url='http://localhost:3000',
+        port=3000,
+        startup_command=['node', 'server.js'],
+        health_check_endpoint='/health',
+        startup_timeout=30,
+        environment_variables={
+            'NODE_ENV': 'testing',
+            'PORT': '3000'
+        }
+    )
+
+
+@pytest.fixture
+def baseline_orchestrator(flask_system_config: SystemConfiguration,
+                         nodejs_system_config: SystemConfiguration,
+                         performance_metrics_collector: PerformanceMetricsCollector) -> Generator[BaselineComparisonOrchestrator, None, None]:
+    """
+    Baseline comparison orchestrator fixture providing comprehensive system
+    orchestration for parallel Flask and Node.js comparison testing.
+    
+    Args:
+        flask_system_config: Flask system configuration
+        nodejs_system_config: Node.js system configuration
+        performance_metrics_collector: Performance metrics collector
+        
+    Yields:
+        BaselineComparisonOrchestrator: Configured orchestrator for comparison testing
+    """
+    orchestrator = BaselineComparisonOrchestrator(
+        flask_config=flask_system_config,
+        nodejs_config=nodejs_system_config,
+        metrics_collector=performance_metrics_collector
+    )
+    
+    # Start systems for testing session
+    systems_started = orchestrator.start_systems()
+    
+    if systems_started:
+        yield orchestrator
+    else:
+        # If systems failed to start, provide orchestrator but skip tests
+        pytest.skip("Baseline comparison systems failed to start")
+        yield orchestrator
+    
+    # Cleanup after testing session
+    orchestrator.stop_systems()
+
+
+# ================================
+# Core Baseline Comparison Tests
 # ================================
 
 @pytest.mark.performance
-@pytest.mark.baseline
-class TestBaselineComparison:
+@pytest.mark.baseline_comparison
+class TestFunctionalParity:
     """
-    Comprehensive baseline comparison test class implementing parallel execution
-    of Flask and Node.js systems for real-time performance validation and
-    migration success verification as specified in Section 4.7.
-    
-    This test class provides the primary interface for baseline comparison
-    testing with comprehensive coverage of API endpoints, authentication,
-    database operations, and concurrent load scenarios.
+    Comprehensive functional parity validation test suite ensuring 100% behavioral
+    equivalence between Flask and Node.js implementations across all critical
+    application functionality as specified in Section 4.7.1.
     """
     
-    def test_api_endpoint_baseline_comparison(self, 
-                                            baseline_benchmark,
-                                            benchmark,
-                                            performance_monitoring):
+    def test_api_endpoint_functional_parity(self, baseline_orchestrator: BaselineComparisonOrchestrator):
         """
-        Test comprehensive API endpoint baseline comparison with statistical
-        validation and automated discrepancy detection.
+        Test API endpoint functional parity with comprehensive response validation
+        ensuring identical behavior between Flask and Node.js API implementations.
         
-        This test validates Flask API endpoint performance against Node.js
-        baseline with sub-200ms response time requirements per Section 4.11.1.
+        This test validates 100% functional equivalence requirement per Section 4.7.1
+        with detailed comparison analysis and automated discrepancy detection.
         """
-        logger.info("Starting API endpoint baseline comparison test")
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
         
-        # Test critical API endpoints
-        endpoints = [
-            ('/api/health', 'GET'),
-            ('/api/users', 'GET'),
-            ('/api/users', 'POST', {'username': 'testuser', 'email': 'test@example.com'}),
-            ('/api/users/1', 'GET'),
-            ('/api/users/1', 'PUT', {'username': 'updated_user'}),
-            ('/api/auth/login', 'POST', {'username': 'testuser', 'password': 'testpass'}),
-            ('/api/auth/logout', 'POST')
+        # Test multiple API endpoints for comprehensive functional validation
+        test_endpoints = [
+            '/api/health',
+            '/api/users',
+            '/api/status'
+        ]
+        
+        parity_results = []
+        
+        for endpoint in test_endpoints:
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name=f'api_functional_parity_{endpoint.replace("/", "_")}',
+                test_function=sample_api_test,
+                endpoint=endpoint
+            )
+            
+            parity_results.append(comparison_result)
+            
+            # Assert functional parity for each endpoint
+            assert comparison_result.functional_parity, \
+                f"Functional parity failed for {endpoint}: {comparison_result.discrepancies}"
+        
+        # Validate overall functional parity across all endpoints
+        overall_parity = all(result.functional_parity for result in parity_results)
+        assert overall_parity, "Overall API functional parity validation failed"
+        
+        print(f"\n✓ API functional parity validated across {len(test_endpoints)} endpoints")
+    
+    def test_database_operation_functional_parity(self, baseline_orchestrator: BaselineComparisonOrchestrator):
+        """
+        Test database operation functional parity with comprehensive data validation
+        ensuring identical query results and data processing between implementations.
+        
+        This test validates data integrity and query result equivalence as required
+        for migration success criteria per Section 0.2.3.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        # Test database query endpoints for functional parity
+        query_endpoints = [
+            '/api/users',
+            '/api/users/count'
+        ]
+        
+        parity_results = []
+        
+        for endpoint in query_endpoints:
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name=f'database_functional_parity_{endpoint.replace("/", "_")}',
+                test_function=database_query_test,
+                query_endpoint=endpoint
+            )
+            
+            parity_results.append(comparison_result)
+            
+            # Assert functional parity for database operations
+            assert comparison_result.functional_parity, \
+                f"Database functional parity failed for {endpoint}: {comparison_result.discrepancies}"
+        
+        # Validate data consistency across all database operations
+        overall_parity = all(result.functional_parity for result in parity_results)
+        assert overall_parity, "Overall database functional parity validation failed"
+        
+        print(f"\n✓ Database functional parity validated across {len(query_endpoints)} operations")
+    
+    def test_authentication_functional_parity(self, baseline_orchestrator: BaselineComparisonOrchestrator):
+        """
+        Test authentication functional parity with comprehensive authentication flow
+        validation ensuring identical security behavior between implementations.
+        
+        This test validates authentication mechanism equivalence and security posture
+        preservation as specified in Section 6.4 security architecture requirements.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        # Test authentication endpoints for functional parity
+        auth_endpoints = [
+            '/auth/login',
+            '/auth/logout'
+        ]
+        
+        parity_results = []
+        
+        for endpoint in auth_endpoints:
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name=f'auth_functional_parity_{endpoint.replace("/", "_")}',
+                test_function=authentication_test,
+                auth_endpoint=endpoint
+            )
+            
+            parity_results.append(comparison_result)
+            
+            # Assert functional parity for authentication operations
+            assert comparison_result.functional_parity, \
+                f"Authentication functional parity failed for {endpoint}: {comparison_result.discrepancies}"
+        
+        # Validate authentication consistency across all flows
+        overall_parity = all(result.functional_parity for result in parity_results)
+        assert overall_parity, "Overall authentication functional parity validation failed"
+        
+        print(f"\n✓ Authentication functional parity validated across {len(auth_endpoints)} flows")
+
+
+@pytest.mark.performance
+@pytest.mark.baseline_comparison
+@pytest.mark.benchmark
+class TestPerformanceComparison:
+    """
+    Comprehensive performance comparison test suite validating Flask implementation
+    performance against Node.js baseline with statistical analysis and SLA compliance
+    validation as specified in Section 4.11.1 performance requirements.
+    """
+    
+    def test_api_response_time_comparison(self, baseline_orchestrator: BaselineComparisonOrchestrator,
+                                        benchmark: BenchmarkFixture):
+        """
+        Test API response time performance comparison with pytest-benchmark integration
+        validating sub-200ms response time requirement and baseline equivalence.
+        
+        This test implements performance benchmarking as specified in Section 4.7.1
+        with comprehensive statistical analysis and regression detection.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        def benchmark_api_comparison():
+            """Benchmark function for API response time comparison"""
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name='api_response_time_benchmark',
+                test_function=sample_api_test,
+                endpoint='/api/health'
+            )
+            
+            return comparison_result
+        
+        # Execute benchmarked comparison
+        result = benchmark(benchmark_api_comparison)
+        
+        # Validate performance requirements
+        flask_duration = result.performance_comparison.get('flask_duration', 0)
+        nodejs_duration = result.performance_comparison.get('nodejs_duration', 0)
+        performance_ratio = result.performance_comparison.get('performance_ratio', float('inf'))
+        
+        # Assert sub-200ms response time requirement per Section 4.11.1
+        assert flask_duration <= PerformanceTestingConfiguration.API_RESPONSE_TIME_THRESHOLD, \
+            f"Flask API response time {flask_duration:.3f}s exceeds 200ms threshold"
+        
+        # Assert performance regression threshold
+        regression_threshold = PerformanceTestingConfiguration.PERFORMANCE_REGRESSION_THRESHOLD
+        assert performance_ratio <= (1.0 + regression_threshold), \
+            f"Performance regression detected: {performance_ratio:.3f} > {1.0 + regression_threshold:.3f}"
+        
+        print(f"\n✓ API response time comparison validated:")
+        print(f"  Flask: {flask_duration:.3f}s")
+        print(f"  Node.js: {nodejs_duration:.3f}s")
+        print(f"  Ratio: {performance_ratio:.3f}")
+    
+    def test_database_query_performance_comparison(self, baseline_orchestrator: BaselineComparisonOrchestrator,
+                                                 benchmark: BenchmarkFixture):
+        """
+        Test database query performance comparison with comprehensive query timing
+        validation ensuring sub-100ms response time and baseline equivalence.
+        
+        This test validates SQLAlchemy query performance requirements per Section 4.11.1
+        with detailed query analysis and optimization recommendations.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        def benchmark_database_comparison():
+            """Benchmark function for database query performance comparison"""
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name='database_query_benchmark',
+                test_function=database_query_test,
+                query_endpoint='/api/users'
+            )
+            
+            return comparison_result
+        
+        # Execute benchmarked comparison
+        result = benchmark(benchmark_database_comparison)
+        
+        # Extract query durations from results
+        flask_result = result.flask_result.get('result', {})
+        nodejs_result = result.nodejs_result.get('result', {})
+        
+        flask_query_duration = flask_result.get('query_duration', 0)
+        nodejs_query_duration = nodejs_result.get('query_duration', 0)
+        
+        # Calculate query performance ratio
+        query_performance_ratio = (
+            flask_query_duration / nodejs_query_duration 
+            if nodejs_query_duration > 0 else float('inf')
+        )
+        
+        # Assert sub-100ms database query requirement per Section 4.11.1
+        assert flask_query_duration <= PerformanceTestingConfiguration.DATABASE_QUERY_THRESHOLD, \
+            f"Flask database query time {flask_query_duration:.3f}s exceeds 100ms threshold"
+        
+        # Assert query performance regression threshold
+        regression_threshold = PerformanceTestingConfiguration.PERFORMANCE_REGRESSION_THRESHOLD
+        assert query_performance_ratio <= (1.0 + regression_threshold), \
+            f"Database query performance regression: {query_performance_ratio:.3f} > {1.0 + regression_threshold:.3f}"
+        
+        print(f"\n✓ Database query performance comparison validated:")
+        print(f"  Flask query: {flask_query_duration:.3f}s")
+        print(f"  Node.js query: {nodejs_query_duration:.3f}s")
+        print(f"  Query ratio: {query_performance_ratio:.3f}")
+    
+    def test_authentication_performance_comparison(self, baseline_orchestrator: BaselineComparisonOrchestrator,
+                                                 benchmark: BenchmarkFixture):
+        """
+        Test authentication performance comparison with comprehensive authentication
+        timing validation ensuring sub-150ms response time and baseline equivalence.
+        
+        This test validates authentication performance requirements per Section 4.11.1
+        with security consideration analysis and ItsDangerous session management efficiency.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        def benchmark_authentication_comparison():
+            """Benchmark function for authentication performance comparison"""
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name='authentication_performance_benchmark',
+                test_function=authentication_test,
+                auth_endpoint='/auth/login'
+            )
+            
+            return comparison_result
+        
+        # Execute benchmarked comparison
+        result = benchmark(benchmark_authentication_comparison)
+        
+        # Extract authentication durations from results
+        flask_result = result.flask_result.get('result', {})
+        nodejs_result = result.nodejs_result.get('result', {})
+        
+        flask_auth_duration = flask_result.get('auth_duration', 0)
+        nodejs_auth_duration = nodejs_result.get('auth_duration', 0)
+        
+        # Calculate authentication performance ratio
+        auth_performance_ratio = (
+            flask_auth_duration / nodejs_auth_duration 
+            if nodejs_auth_duration > 0 else float('inf')
+        )
+        
+        # Assert sub-150ms authentication requirement per Section 4.11.1
+        assert flask_auth_duration <= PerformanceTestingConfiguration.AUTHENTICATION_THRESHOLD, \
+            f"Flask authentication time {flask_auth_duration:.3f}s exceeds 150ms threshold"
+        
+        # Assert authentication performance regression threshold
+        regression_threshold = PerformanceTestingConfiguration.PERFORMANCE_REGRESSION_THRESHOLD
+        assert auth_performance_ratio <= (1.0 + regression_threshold), \
+            f"Authentication performance regression: {auth_performance_ratio:.3f} > {1.0 + regression_threshold:.3f}"
+        
+        print(f"\n✓ Authentication performance comparison validated:")
+        print(f"  Flask auth: {flask_auth_duration:.3f}s")
+        print(f"  Node.js auth: {nodejs_auth_duration:.3f}s")
+        print(f"  Auth ratio: {auth_performance_ratio:.3f}")
+
+
+@pytest.mark.performance
+@pytest.mark.baseline_comparison
+class TestMigrationValidation:
+    """
+    Comprehensive migration validation test suite providing end-to-end migration
+    success verification with automated validation workflows and comprehensive
+    reporting as specified in Section 0.2.3 migration success criteria.
+    """
+    
+    def test_comprehensive_migration_validation(self, baseline_orchestrator: BaselineComparisonOrchestrator,
+                                              baseline_comparison_validator):
+        """
+        Test comprehensive migration validation with end-to-end system comparison
+        ensuring complete functional and performance equivalence for migration success.
+        
+        This test provides comprehensive migration validation as specified in Section 0.2.3
+        with automated validation workflows and migration success criteria verification.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        # Execute comprehensive test suite across all system components
+        test_scenarios = [
+            ('api_health_check', sample_api_test, {'endpoint': '/api/health'}),
+            ('api_users_endpoint', sample_api_test, {'endpoint': '/api/users'}),
+            ('database_user_query', database_query_test, {'query_endpoint': '/api/users'}),
+            ('authentication_login', authentication_test, {'auth_endpoint': '/auth/login'})
         ]
         
         comparison_results = []
         
-        for endpoint_config in endpoints:
-            endpoint = endpoint_config[0]
-            method = endpoint_config[1]
-            payload = endpoint_config[2] if len(endpoint_config) > 2 else None
-            
-            logger.info(f"Testing endpoint: {method} {endpoint}")
-            
-            # Execute baseline comparison benchmark
-            result = baseline_benchmark.benchmark_api_endpoint(
-                benchmark=benchmark,
-                endpoint=endpoint,
-                method=method,
-                payload=payload,
-                headers={'Content-Type': 'application/json'}
+        # Execute all test scenarios
+        for test_name, test_function, test_kwargs in test_scenarios:
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name=f'migration_validation_{test_name}',
+                test_function=test_function,
+                **test_kwargs
             )
-            
-            comparison_results.append(result)
-            
-            # Validate performance requirements per Section 4.11.1
-            assert result.flask_metrics.response_time_ms <= 200.0, \
-                f"API response time SLA violation: {result.flask_metrics.response_time_ms:.2f}ms > 200ms for {method} {endpoint}"
-            
-            # Validate functional parity
-            assert result.is_functionally_equivalent, \
-                f"Functional parity violation for {method} {endpoint}: {result.discrepancies_detected}"
-            
-            # Validate SLA compliance
-            assert result.sla_compliance_status, \
-                f"SLA compliance violation for {method} {endpoint}"
-            
-            # Log comparison results
-            logger.info(f"Endpoint {method} {endpoint} - Performance equivalent: {result.is_performance_equivalent}")
-            logger.info(f"Response time difference: {result.response_time_difference_percent:.2f}%")
+            comparison_results.append(comparison_result)
         
-        # Validate overall migration success criteria
-        migration_success_rate = sum(1 for r in comparison_results if r.passes_migration_criteria) / len(comparison_results)
-        assert migration_success_rate >= 0.95, \
-            f"Migration success rate below threshold: {migration_success_rate:.2f} < 0.95"
+        # Perform comprehensive validation analysis
+        validation_results = baseline_comparison_validator['validate_regression'](
+            [{'test_name': r.test_name, 'metric_type': 'response_time', 'value': r.performance_comparison.get('flask_duration', 0)}
+             for r in comparison_results]
+        )
         
-        logger.info(f"API endpoint baseline comparison completed: {len(comparison_results)} endpoints tested")
+        # Generate migration validation report
+        migration_report = baseline_comparison_validator['generate_report'](validation_results)
+        
+        # Assert migration success criteria
+        assert validation_results['overall_regression_check_passed'], \
+            "Migration validation failed - performance regression detected"
+        
+        functional_parity_rate = len([r for r in comparison_results if r.functional_parity]) / len(comparison_results)
+        assert functional_parity_rate == 1.0, \
+            f"Migration validation failed - functional parity rate {functional_parity_rate:.2%} < 100%"
+        
+        # Print comprehensive migration validation report
+        print(f"\n{'='*80}")
+        print("COMPREHENSIVE MIGRATION VALIDATION REPORT")
+        print(f"{'='*80}")
+        print(migration_report)
+        
+        # Get session summary for final validation
+        session_summary = baseline_orchestrator.get_session_summary()
+        
+        assert session_summary['migration_success'], \
+            "Migration validation failed - comprehensive validation criteria not met"
+        
+        print(f"\n✓ Migration validation successful:")
+        print(f"  Functional parity rate: {session_summary['functional_parity_rate']:.2%}")
+        print(f"  Average performance ratio: {session_summary['average_performance_ratio']:.3f}")
+        print(f"  High severity discrepancies: {session_summary['high_severity_discrepancies']}")
     
-    def test_database_performance_baseline_comparison(self,
-                                                     baseline_benchmark,
-                                                     benchmark,
-                                                     performance_monitoring):
-        """
-        Test database performance baseline comparison with sub-100ms query
-        response time validation per Section 4.11.1.
-        
-        This test validates Flask-SQLAlchemy database performance against
-        Node.js MongoDB baseline with comprehensive query analysis.
-        """
-        logger.info("Starting database performance baseline comparison test")
-        
-        # Test database-intensive endpoints
-        database_endpoints = [
-            ('/api/users?page=1&limit=10', 'GET'),  # Pagination query
-            ('/api/users?search=test', 'GET'),      # Search query
-            ('/api/users/stats', 'GET'),            # Aggregation query
-            ('/api/users/1/profile', 'GET'),        # Relationship query
-            ('/api/users/bulk', 'POST', {           # Bulk operation
-                'users': [
-                    {'username': f'user{i}', 'email': f'user{i}@example.com'}
-                    for i in range(10)
-                ]
-            })
-        ]
-        
-        db_comparison_results = []
-        
-        for endpoint_config in database_endpoints:
-            endpoint = endpoint_config[0]
-            method = endpoint_config[1]
-            payload = endpoint_config[2] if len(endpoint_config) > 2 else None
-            
-            logger.info(f"Testing database endpoint: {method} {endpoint}")
-            
-            # Execute database performance benchmark
-            result = baseline_benchmark.benchmark_api_endpoint(
-                benchmark=benchmark,
-                endpoint=endpoint,
-                method=method,
-                payload=payload,
-                headers={'Content-Type': 'application/json'}
-            )
-            
-            db_comparison_results.append(result)
-            
-            # Validate database query performance per Section 4.11.1
-            # Note: Using response time as proxy for database query time
-            assert result.flask_metrics.response_time_ms <= 200.0, \
-                f"Database query performance SLA violation: {result.flask_metrics.response_time_ms:.2f}ms > 200ms for {method} {endpoint}"
-            
-            # Validate data consistency (functional parity)
-            assert result.is_functionally_equivalent, \
-                f"Database data consistency violation for {method} {endpoint}"
-            
-            logger.info(f"Database endpoint {method} {endpoint} - Query time: {result.flask_metrics.response_time_ms:.2f}ms")
-        
-        # Validate overall database performance equivalence
-        avg_response_time = statistics.mean([r.flask_metrics.response_time_ms for r in db_comparison_results])
-        assert avg_response_time <= 150.0, \
-            f"Average database response time exceeds threshold: {avg_response_time:.2f}ms > 150ms"
-        
-        logger.info(f"Database performance baseline comparison completed: {len(db_comparison_results)} endpoints tested")
-    
-    def test_authentication_performance_baseline_comparison(self,
-                                                           baseline_benchmark,
-                                                           benchmark,
-                                                           performance_monitoring):
-        """
-        Test authentication performance baseline comparison with sub-150ms
-        authentication response time validation per Section 4.11.1.
-        
-        This test validates Flask authentication decorator and Auth0 integration
-        performance against Node.js authentication middleware baseline.
-        """
-        logger.info("Starting authentication performance baseline comparison test")
-        
-        # Test authentication workflows
-        auth_endpoints = [
-            ('/api/auth/login', 'POST', {'username': 'testuser', 'password': 'testpass'}),
-            ('/api/auth/refresh', 'POST', {'refresh_token': 'test_refresh_token'}),
-            ('/api/auth/validate', 'GET'),
-            ('/api/auth/logout', 'POST'),
-            ('/api/auth/profile', 'GET'),  # Protected endpoint requiring authentication
-            ('/api/admin/users', 'GET')    # Admin-protected endpoint
-        ]
-        
-        auth_comparison_results = []
-        auth_headers = {'Authorization': 'Bearer test_jwt_token', 'Content-Type': 'application/json'}
-        
-        for endpoint_config in auth_endpoints:
-            endpoint = endpoint_config[0]
-            method = endpoint_config[1]
-            payload = endpoint_config[2] if len(endpoint_config) > 2 else None
-            
-            logger.info(f"Testing authentication endpoint: {method} {endpoint}")
-            
-            # Execute authentication performance benchmark
-            result = baseline_benchmark.benchmark_api_endpoint(
-                benchmark=benchmark,
-                endpoint=endpoint,
-                method=method,
-                payload=payload,
-                headers=auth_headers
-            )
-            
-            auth_comparison_results.append(result)
-            
-            # Validate authentication performance per Section 4.11.1
-            assert result.flask_metrics.response_time_ms <= 150.0, \
-                f"Authentication response time SLA violation: {result.flask_metrics.response_time_ms:.2f}ms > 150ms for {method} {endpoint}"
-            
-            # Validate authentication security equivalence
-            assert result.is_functionally_equivalent, \
-                f"Authentication security equivalence violation for {method} {endpoint}"
-            
-            logger.info(f"Auth endpoint {method} {endpoint} - Response time: {result.flask_metrics.response_time_ms:.2f}ms")
-        
-        # Validate overall authentication performance
-        avg_auth_time = statistics.mean([r.flask_metrics.response_time_ms for r in auth_comparison_results])
-        assert avg_auth_time <= 100.0, \
-            f"Average authentication response time exceeds optimal threshold: {avg_auth_time:.2f}ms > 100ms"
-        
-        logger.info(f"Authentication performance baseline comparison completed: {len(auth_comparison_results)} endpoints tested")
-    
-    def test_concurrent_load_baseline_comparison(self,
-                                               baseline_comparison_framework,
-                                               benchmark,
-                                               performance_monitoring):
-        """
-        Test concurrent user load baseline comparison with thread pool utilization
-        monitoring and system capacity validation.
-        
-        This test validates Flask application concurrent user handling against
-        Node.js baseline with comprehensive load testing scenarios.
-        """
-        logger.info("Starting concurrent load baseline comparison test")
-        
-        # Configure concurrent load testing
-        concurrent_users = int(os.getenv('MAX_CONCURRENT_USERS', '20'))
-        load_duration = int(os.getenv('LOAD_TEST_DURATION_SECONDS', '30'))
-        
-        def concurrent_load_test():
-            """Execute concurrent load test scenario"""
-            with ThreadPoolExecutor(max_workers=concurrent_users) as executor:
-                # Submit concurrent requests
-                futures = []
-                start_time = time.time()
-                
-                while time.time() - start_time < load_duration:
-                    # Submit concurrent API requests
-                    for _ in range(concurrent_users):
-                        future = executor.submit(
-                            baseline_comparison_framework.execute_parallel_benchmark,
-                            '/api/users',
-                            'GET',
-                            None,
-                            {'Content-Type': 'application/json'},
-                            'concurrent_load_test'
-                        )
-                        futures.append(future)
-                    
-                    # Brief pause between batches
-                    time.sleep(0.1)
-                
-                # Collect results
-                results = []
-                for future in as_completed(futures, timeout=60):
-                    try:
-                        result = future.result()
-                        results.append(result)
-                    except Exception as e:
-                        logger.warning(f"Concurrent request failed: {e}")
-                
-                return results
-        
-        # Execute concurrent load benchmark
-        benchmark.name = "concurrent_load_baseline_comparison"
-        benchmark.group = "concurrent_load"
-        
-        load_results = benchmark(concurrent_load_test)
-        
-        # Analyze concurrent load results
-        if load_results:
-            successful_results = [r for r in load_results if r.flask_metrics.success_rate_percent > 90.0]
-            success_rate = len(successful_results) / len(load_results)
-            
-            # Calculate average metrics under load
-            avg_response_time = statistics.mean([r.flask_metrics.response_time_ms for r in successful_results])
-            avg_throughput = statistics.mean([r.flask_metrics.throughput_rps for r in successful_results])
-            avg_error_rate = statistics.mean([r.flask_metrics.error_rate_percent for r in load_results])
-            
-            # Validate concurrent load performance
-            assert success_rate >= 0.95, \
-                f"Concurrent load success rate below threshold: {success_rate:.2f} < 0.95"
-            
-            assert avg_response_time <= 500.0, \
-                f"Concurrent load response time exceeds threshold: {avg_response_time:.2f}ms > 500ms"
-            
-            assert avg_error_rate <= 5.0, \
-                f"Concurrent load error rate exceeds threshold: {avg_error_rate:.2f}% > 5%"
-            
-            logger.info(f"Concurrent load test completed: {len(load_results)} requests")
-            logger.info(f"Success rate: {success_rate:.2f}, Avg response time: {avg_response_time:.2f}ms")
-            logger.info(f"Avg throughput: {avg_throughput:.2f} RPS, Error rate: {avg_error_rate:.2f}%")
-        
-        else:
-            pytest.fail("Concurrent load test failed to produce results")
-    
-    def test_memory_profiling_baseline_comparison(self,
-                                                baseline_comparison_framework,
-                                                benchmark,
-                                                performance_monitoring):
-        """
-        Test memory profiling baseline comparison with Python GC pause analysis
-        and memory footprint optimization validation.
-        
-        This test validates Flask application memory usage patterns against
-        Node.js baseline with comprehensive memory leak detection.
-        """
-        logger.info("Starting memory profiling baseline comparison test")
-        
-        # Memory profiling configuration
-        profiling_duration = 60  # seconds
-        memory_samples = []
-        gc_pause_times = []
-        
-        @profile
-        def memory_intensive_operations():
-            """Execute memory-intensive operations for profiling analysis"""
-            operations_results = []
-            
-            # Execute multiple API operations to stress memory
-            for i in range(100):
-                try:
-                    # Create large payload for memory pressure
-                    large_payload = {
-                        'data': [{'id': j, 'value': f'test_value_{j}' * 10} for j in range(100)],
-                        'metadata': {'operation': f'memory_test_{i}', 'timestamp': time.time()}
-                    }
-                    
-                    # Execute API operation with memory tracking
-                    start_memory = memory_usage()[0] if memory_usage() else 0.0
-                    
-                    result = baseline_comparison_framework.execute_parallel_benchmark(
-                        '/api/bulk-data',
-                        'POST',
-                        large_payload,
-                        {'Content-Type': 'application/json'},
-                        f'memory_profiling_{i}'
-                    )
-                    
-                    end_memory = memory_usage()[0] if memory_usage() else 0.0
-                    memory_delta = end_memory - start_memory
-                    
-                    memory_samples.append({
-                        'operation': i,
-                        'start_memory': start_memory,
-                        'end_memory': end_memory,
-                        'memory_delta': memory_delta,
-                        'response_time': result.flask_metrics.response_time_ms
-                    })
-                    
-                    operations_results.append(result)
-                    
-                    # Brief pause for GC
-                    time.sleep(0.1)
-                    
-                except Exception as e:
-                    logger.warning(f"Memory profiling operation {i} failed: {e}")
-            
-            return operations_results
-        
-        # Execute memory profiling benchmark
-        benchmark.name = "memory_profiling_baseline_comparison"
-        benchmark.group = "memory_profiling"
-        
-        profiling_results = benchmark(memory_intensive_operations)
-        
-        # Analyze memory profiling results
-        if memory_samples:
-            # Calculate memory usage statistics
-            memory_deltas = [sample['memory_delta'] for sample in memory_samples]
-            avg_memory_delta = statistics.mean(memory_deltas)
-            max_memory_delta = max(memory_deltas)
-            memory_variance = statistics.variance(memory_deltas) if len(memory_deltas) > 1 else 0.0
-            
-            # Memory leak detection
-            memory_trend = np.polyfit(range(len(memory_deltas)), memory_deltas, 1)[0]
-            memory_leak_detected = memory_trend > 1.0  # More than 1MB/operation trend
-            
-            # Validate memory performance
-            assert not memory_leak_detected, \
-                f"Memory leak detected: trend = {memory_trend:.2f} MB/operation"
-            
-            assert max_memory_delta <= 100.0, \
-                f"Excessive memory usage detected: {max_memory_delta:.2f}MB > 100MB"
-            
-            assert avg_memory_delta <= 10.0, \
-                f"Average memory usage exceeds threshold: {avg_memory_delta:.2f}MB > 10MB"
-            
-            logger.info(f"Memory profiling completed: {len(memory_samples)} samples")
-            logger.info(f"Avg memory delta: {avg_memory_delta:.2f}MB, Max: {max_memory_delta:.2f}MB")
-            logger.info(f"Memory trend: {memory_trend:.4f} MB/operation")
-            
-            # Generate detailed memory report
-            memory_report = performance_monitoring['memory_report']()
-            logger.info(f"Memory profiling report:\n{memory_report}")
-        
-        else:
-            pytest.fail("Memory profiling failed to collect samples")
-    
-    def test_migration_validation_comprehensive(self,
-                                              baseline_comparison_framework,
-                                              benchmark,
-                                              performance_monitoring):
-        """
-        Comprehensive migration validation test with 100% functional parity
-        verification and performance benchmarking across all system components.
-        
-        This test provides final migration success validation combining all
-        performance, functional, and operational requirements.
-        """
-        logger.info("Starting comprehensive migration validation test")
-        
-        # Comprehensive validation scenarios
-        validation_scenarios = [
-            # Core API functionality
-            {'endpoint': '/api/health', 'method': 'GET', 'scenario': 'health_check'},
-            {'endpoint': '/api/version', 'method': 'GET', 'scenario': 'version_info'},
-            
-            # User management operations
-            {'endpoint': '/api/users', 'method': 'GET', 'scenario': 'user_list'},
-            {'endpoint': '/api/users', 'method': 'POST', 'payload': {'username': 'migration_test', 'email': 'test@migration.com'}, 'scenario': 'user_create'},
-            {'endpoint': '/api/users/1', 'method': 'GET', 'scenario': 'user_detail'},
-            {'endpoint': '/api/users/1', 'method': 'PUT', 'payload': {'username': 'updated_user'}, 'scenario': 'user_update'},
-            
-            # Authentication workflows
-            {'endpoint': '/api/auth/login', 'method': 'POST', 'payload': {'username': 'testuser', 'password': 'testpass'}, 'scenario': 'auth_login'},
-            {'endpoint': '/api/auth/profile', 'method': 'GET', 'headers': {'Authorization': 'Bearer test_token'}, 'scenario': 'auth_profile'},
-            {'endpoint': '/api/auth/logout', 'method': 'POST', 'scenario': 'auth_logout'},
-            
-            # Data operations
-            {'endpoint': '/api/data/export', 'method': 'GET', 'scenario': 'data_export'},
-            {'endpoint': '/api/data/import', 'method': 'POST', 'payload': {'data': 'test_data'}, 'scenario': 'data_import'},
-            
-            # Administrative functions
-            {'endpoint': '/api/admin/stats', 'method': 'GET', 'headers': {'Authorization': 'Bearer admin_token'}, 'scenario': 'admin_stats'},
-            {'endpoint': '/api/admin/config', 'method': 'GET', 'headers': {'Authorization': 'Bearer admin_token'}, 'scenario': 'admin_config'},
-        ]
-        
-        comprehensive_results = []
-        
-        def comprehensive_validation():
-            """Execute comprehensive validation across all scenarios"""
-            scenario_results = []
-            
-            for scenario_config in validation_scenarios:
-                endpoint = scenario_config['endpoint']
-                method = scenario_config['method']
-                payload = scenario_config.get('payload')
-                headers = scenario_config.get('headers', {'Content-Type': 'application/json'})
-                scenario = scenario_config['scenario']
-                
-                logger.info(f"Validating scenario: {scenario} ({method} {endpoint})")
-                
-                try:
-                    # Execute scenario validation
-                    result = baseline_comparison_framework.execute_parallel_benchmark(
-                        endpoint=endpoint,
-                        method=method,
-                        payload=payload,
-                        headers=headers,
-                        scenario=scenario
-                    )
-                    
-                    scenario_results.append(result)
-                    
-                    # Log scenario validation results
-                    logger.info(f"Scenario {scenario} - Migration criteria passed: {result.passes_migration_criteria}")
-                    
-                except Exception as e:
-                    logger.error(f"Scenario {scenario} failed: {e}")
-                    # Create failed result for tracking
-                    failed_result = ComparisonResult(
-                        flask_metrics=PerformanceMetrics(
-                            test_scenario=scenario,
-                            system_type='flask',
-                            error_rate_percent=100.0,
-                            success_rate_percent=0.0
-                        ),
-                        nodejs_metrics=PerformanceMetrics(
-                            test_scenario=scenario,
-                            system_type='nodejs'
-                        ),
-                        test_scenario=scenario
-                    )
-                    failed_result.passes_migration_criteria = False
-                    failed_result.critical_issues.append(f"Scenario execution failed: {str(e)}")
-                    scenario_results.append(failed_result)
-            
-            return scenario_results
-        
-        # Execute comprehensive validation benchmark
-        benchmark.name = "comprehensive_migration_validation"
-        benchmark.group = "migration_validation"
-        
-        comprehensive_results = benchmark(comprehensive_validation)
-        
-        # Analyze comprehensive validation results
-        if comprehensive_results:
-            # Calculate migration success metrics
-            total_scenarios = len(comprehensive_results)
-            passed_scenarios = sum(1 for r in comprehensive_results if r.passes_migration_criteria)
-            functional_parity_scenarios = sum(1 for r in comprehensive_results if r.is_functionally_equivalent)
-            performance_equivalent_scenarios = sum(1 for r in comprehensive_results if r.is_performance_equivalent)
-            sla_compliant_scenarios = sum(1 for r in comprehensive_results if r.sla_compliance_status)
-            
-            migration_success_rate = passed_scenarios / total_scenarios
-            functional_parity_rate = functional_parity_scenarios / total_scenarios
-            performance_equivalence_rate = performance_equivalent_scenarios / total_scenarios
-            sla_compliance_rate = sla_compliant_scenarios / total_scenarios
-            
-            # Calculate overall performance metrics
-            avg_response_time = statistics.mean([r.flask_metrics.response_time_ms for r in comprehensive_results])
-            avg_error_rate = statistics.mean([r.flask_metrics.error_rate_percent for r in comprehensive_results])
-            avg_throughput = statistics.mean([r.flask_metrics.throughput_rps for r in comprehensive_results if r.flask_metrics.throughput_rps > 0])
-            
-            # Validate comprehensive migration criteria per Section 0.2.3
-            assert migration_success_rate >= 0.95, \
-                f"Migration success rate below requirement: {migration_success_rate:.2f} < 0.95"
-            
-            assert functional_parity_rate >= 1.0, \
-                f"100% functional parity requirement not met: {functional_parity_rate:.2f} < 1.0"
-            
-            assert performance_equivalence_rate >= 0.90, \
-                f"Performance equivalence rate below threshold: {performance_equivalence_rate:.2f} < 0.90"
-            
-            assert sla_compliance_rate >= 0.95, \
-                f"SLA compliance rate below requirement: {sla_compliance_rate:.2f} < 0.95"
-            
-            assert avg_response_time <= 200.0, \
-                f"Overall average response time exceeds SLA: {avg_response_time:.2f}ms > 200ms"
-            
-            assert avg_error_rate <= 1.0, \
-                f"Overall error rate exceeds threshold: {avg_error_rate:.2f}% > 1.0%"
-            
-            # Log comprehensive validation summary
-            logger.info("COMPREHENSIVE MIGRATION VALIDATION SUMMARY:")
-            logger.info(f"  Total scenarios tested: {total_scenarios}")
-            logger.info(f"  Migration success rate: {migration_success_rate:.2%}")
-            logger.info(f"  Functional parity rate: {functional_parity_rate:.2%}")
-            logger.info(f"  Performance equivalence rate: {performance_equivalence_rate:.2%}")
-            logger.info(f"  SLA compliance rate: {sla_compliance_rate:.2%}")
-            logger.info(f"  Average response time: {avg_response_time:.2f}ms")
-            logger.info(f"  Average error rate: {avg_error_rate:.2f}%")
-            logger.info(f"  Average throughput: {avg_throughput:.2f} RPS")
-            
-            # Generate final comprehensive report
-            final_report = baseline_comparison_framework.generate_comprehensive_report()
-            logger.info("FINAL COMPREHENSIVE MIGRATION VALIDATION REPORT:")
-            logger.info(final_report)
-            
-            # Save comprehensive validation results
-            validation_summary = {
-                'total_scenarios': total_scenarios,
-                'migration_success_rate': migration_success_rate,
-                'functional_parity_rate': functional_parity_rate,
-                'performance_equivalence_rate': performance_equivalence_rate,
-                'sla_compliance_rate': sla_compliance_rate,
-                'avg_response_time_ms': avg_response_time,
-                'avg_error_rate_percent': avg_error_rate,
-                'avg_throughput_rps': avg_throughput,
-                'validation_timestamp': datetime.utcnow().isoformat(),
-                'validation_passed': migration_success_rate >= 0.95 and functional_parity_rate >= 1.0
-            }
-            
-            # Save results to file if configured
-            results_path = os.getenv('VALIDATION_RESULTS_PATH')
-            if results_path:
-                try:
-                    with open(results_path, 'w') as f:
-                        json.dump(validation_summary, f, indent=2)
-                    logger.info(f"Validation results saved to: {results_path}")
-                except Exception as e:
-                    logger.error(f"Failed to save validation results: {e}")
-        
-        else:
-            pytest.fail("Comprehensive migration validation failed to produce results")
-
-
-# ================================
-# Automated Correction Workflow
-# ================================
-
-@pytest.mark.performance
-@pytest.mark.baseline
-@pytest.mark.regression
-class TestAutomatedCorrectionWorkflow:
-    """
-    Automated correction workflow test class implementing discrepancy detection
-    and correction triggering when performance discrepancies are detected
-    as specified in Section 4.7.2.
-    
-    This class provides automated response to performance discrepancies with
-    intelligent correction recommendations and workflow automation.
-    """
-    
-    def test_discrepancy_detection_and_correction(self,
-                                                 baseline_comparison_framework,
-                                                 performance_monitoring):
+    def test_automated_discrepancy_detection(self, baseline_orchestrator: BaselineComparisonOrchestrator):
         """
         Test automated discrepancy detection and correction workflow triggering
-        with comprehensive analysis and intelligent correction recommendations.
+        ensuring comprehensive monitoring and automated response to performance issues.
+        
+        This test validates automated correction workflow implementation per Section 4.7.2
+        with discrepancy detection and workflow orchestration capabilities.
         """
-        logger.info("Starting automated discrepancy detection and correction test")
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
         
-        # Simulate performance discrepancy scenario
-        endpoint = '/api/users'
-        method = 'GET'
-        
-        # Execute baseline comparison to detect discrepancies
-        result = baseline_comparison_framework.execute_parallel_benchmark(
-            endpoint=endpoint,
-            method=method,
-            scenario='discrepancy_detection_test'
+        # Execute test with potential discrepancy scenarios
+        comparison_result = baseline_orchestrator.execute_comparison_test(
+            test_name='discrepancy_detection_test',
+            test_function=sample_api_test,
+            endpoint='/api/health'
         )
         
-        # Analyze discrepancy detection
-        if result.discrepancies_detected:
-            logger.warning(f"Performance discrepancies detected: {len(result.discrepancies_detected)}")
-            
-            # Trigger automated correction workflow
-            correction_recommendations = self._generate_correction_recommendations(result)
-            
-            # Log correction recommendations
-            logger.info("AUTOMATED CORRECTION RECOMMENDATIONS:")
-            for recommendation in correction_recommendations:
-                logger.info(f"  - {recommendation}")
-            
-            # Execute correction workflow if critical issues detected
-            if result.critical_issues:
-                logger.critical(f"Critical issues detected: {len(result.critical_issues)}")
-                self._execute_emergency_correction_workflow(result)
-            
-            # Validate correction workflow triggers
-            assert len(correction_recommendations) > 0, \
-                "Correction workflow should generate recommendations for detected discrepancies"
+        # Validate discrepancy detection mechanisms
+        assert hasattr(comparison_result, 'discrepancies'), \
+            "Comparison result missing discrepancy analysis"
         
+        assert hasattr(comparison_result, 'recommendations'), \
+            "Comparison result missing automated recommendations"
+        
+        # Check correction workflow triggering
+        correction_workflows_before = len(baseline_orchestrator.correction_workflows)
+        
+        # If discrepancies were detected, validate workflow triggering
+        if comparison_result.discrepancies:
+            correction_workflows_after = len(baseline_orchestrator.correction_workflows)
+            assert correction_workflows_after > correction_workflows_before, \
+                "Correction workflow was not triggered despite detected discrepancies"
+            
+            print(f"\n✓ Automated discrepancy detection validated:")
+            print(f"  Discrepancies detected: {len(comparison_result.discrepancies)}")
+            print(f"  Recommendations generated: {len(comparison_result.recommendations)}")
+            print(f"  Correction workflows triggered: {correction_workflows_after - correction_workflows_before}")
         else:
-            logger.info("No performance discrepancies detected - system operating within tolerance")
-        
-        # Validate discrepancy detection functionality
-        assert hasattr(result, 'discrepancies_detected'), \
-            "Comparison result must include discrepancy detection capabilities"
-        
-        assert hasattr(result, 'critical_issues'), \
-            "Comparison result must include critical issue categorization"
-        
-        logger.info("Automated discrepancy detection and correction test completed")
+            print(f"\n✓ No discrepancies detected - system comparison successful")
     
-    def _generate_correction_recommendations(self, comparison_result: ComparisonResult) -> List[str]:
+    def test_performance_trend_analysis(self, baseline_orchestrator: BaselineComparisonOrchestrator,
+                                      performance_metrics_collector: PerformanceMetricsCollector):
         """
-        Generate intelligent correction recommendations based on detected discrepancies
+        Test performance trend analysis with comprehensive historical comparison
+        and trend monitoring for migration validation and optimization insights.
         
-        Args:
-            comparison_result: Comparison result with detected discrepancies
+        This test validates performance trend analysis capabilities as specified
+        in Section 6.5.1.1 for comprehensive test reporting and metrics collection.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        # Execute multiple test iterations for trend analysis
+        trend_results = []
+        
+        for iteration in range(5):  # Multiple iterations for trend analysis
+            comparison_result = baseline_orchestrator.execute_comparison_test(
+                test_name=f'performance_trend_iteration_{iteration}',
+                test_function=sample_api_test,
+                endpoint='/api/health'
+            )
+            trend_results.append(comparison_result)
             
-        Returns:
-            List[str]: List of correction recommendations
-        """
-        recommendations = []
+            # Small delay between iterations
+            time.sleep(0.5)
         
-        # Response time correction recommendations
-        if comparison_result.response_time_difference_percent > 20.0:
-            recommendations.append(
-                f"Optimize Flask response time: {comparison_result.response_time_difference_percent:.1f}% slower than baseline"
-            )
-            recommendations.append("Consider enabling Flask application caching")
-            recommendations.append("Review SQLAlchemy query optimization opportunities")
-            recommendations.append("Evaluate Gunicorn worker configuration")
-        
-        # Throughput correction recommendations
-        if comparison_result.throughput_difference_percent < -20.0:
-            recommendations.append(
-                f"Improve Flask throughput: {abs(comparison_result.throughput_difference_percent):.1f}% lower than baseline"
-            )
-            recommendations.append("Increase Gunicorn worker count")
-            recommendations.append("Optimize Flask blueprint route handling")
-            recommendations.append("Review database connection pooling configuration")
-        
-        # Memory usage correction recommendations
-        if comparison_result.memory_difference_percent > 50.0:
-            recommendations.append(
-                f"Optimize memory usage: {comparison_result.memory_difference_percent:.1f}% higher than baseline"
-            )
-            recommendations.append("Investigate potential memory leaks in Flask application")
-            recommendations.append("Review Python garbage collection settings")
-            recommendations.append("Optimize SQLAlchemy session management")
-        
-        # Error rate correction recommendations
-        if comparison_result.error_rate_difference_percent > 2.0:
-            recommendations.append(
-                f"Reduce error rate: {comparison_result.error_rate_difference_percent:.1f}% higher than baseline"
-            )
-            recommendations.append("Review Flask error handling and exception management")
-            recommendations.append("Validate Auth0 integration configuration")
-            recommendations.append("Check database connectivity and timeout settings")
-        
-        # SLA compliance correction recommendations
-        if not comparison_result.sla_compliance_status:
-            recommendations.append("Address SLA compliance violations")
-            recommendations.append("Review and optimize critical performance bottlenecks")
-            recommendations.append("Consider horizontal scaling for Flask application")
-            recommendations.append("Implement performance monitoring alerts")
-        
-        return recommendations
-    
-    def _execute_emergency_correction_workflow(self, comparison_result: ComparisonResult):
-        """
-        Execute emergency correction workflow for critical performance issues
-        
-        Args:
-            comparison_result: Comparison result with critical issues
-        """
-        logger.critical("EXECUTING EMERGENCY CORRECTION WORKFLOW")
-        
-        for issue in comparison_result.critical_issues:
-            logger.critical(f"Critical issue: {issue}")
-        
-        # Emergency correction actions
-        correction_actions = [
-            "Trigger immediate performance alert to on-call team",
-            "Initiate automated rollback procedure if configured",
-            "Scale up Flask application instances",
-            "Enable emergency caching mechanisms",
-            "Activate performance monitoring debug mode"
+        # Analyze performance trends
+        flask_durations = [
+            r.performance_comparison.get('flask_duration', 0) 
+            for r in trend_results
+        ]
+        nodejs_durations = [
+            r.performance_comparison.get('nodejs_duration', 0) 
+            for r in trend_results
         ]
         
-        for action in correction_actions:
-            logger.critical(f"Emergency action: {action}")
+        # Calculate trend statistics
+        flask_mean = statistics.mean(flask_durations) if flask_durations else 0
+        flask_std = statistics.stdev(flask_durations) if len(flask_durations) > 1 else 0
         
-        # Note: In a real implementation, this would trigger actual
-        # infrastructure automation and alerting systems
+        nodejs_mean = statistics.mean(nodejs_durations) if nodejs_durations else 0
+        nodejs_std = statistics.stdev(nodejs_durations) if len(nodejs_durations) > 1 else 0
+        
+        # Validate trend analysis
+        assert len(trend_results) == 5, "Performance trend analysis incomplete"
+        
+        # Validate performance consistency
+        flask_coefficient_of_variation = (flask_std / flask_mean) if flask_mean > 0 else 0
+        assert flask_coefficient_of_variation < 0.5, \
+            f"Flask performance variability too high: {flask_coefficient_of_variation:.3f}"
+        
+        print(f"\n✓ Performance trend analysis validated:")
+        print(f"  Test iterations: {len(trend_results)}")
+        print(f"  Flask mean duration: {flask_mean:.3f}s (±{flask_std:.3f}s)")
+        print(f"  Node.js mean duration: {nodejs_mean:.3f}s (±{nodejs_std:.3f}s)")
+        print(f"  Flask CV: {flask_coefficient_of_variation:.3f}")
 
 
 # ================================
-# Performance Regression Detection
+# Integration and Regression Tests
+# ================================
+
+@pytest.mark.integration
+@pytest.mark.baseline_comparison
+class TestBaselineIntegration:
+    """
+    Baseline comparison integration test suite validating end-to-end system
+    integration with comprehensive workflow orchestration and system coordination
+    as specified in tox 4.26.0 multi-environment testing requirements.
+    """
+    
+    def test_tox_environment_integration(self, baseline_orchestrator: BaselineComparisonOrchestrator):
+        """
+        Test tox 4.26.0 environment integration with multi-environment orchestration
+        validation ensuring proper environment isolation and testing coordination.
+        
+        This test validates tox integration as specified in Section 4.7.2 for
+        multi-environment testing orchestration and environment management.
+        """
+        # Validate tox environment configuration
+        tox_env = os.environ.get('TOX_ENV_NAME', 'unknown')
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        
+        print(f"\n{'='*80}")
+        print("TOX ENVIRONMENT INTEGRATION VALIDATION")
+        print(f"{'='*80}")
+        print(f"Tox Environment: {tox_env}")
+        print(f"Python Version: {python_version}")
+        print(f"Flask Testing: {os.environ.get('FLASK_ENV', 'unknown')}")
+        print(f"Testing Mode: {os.environ.get('TESTING', 'unknown')}")
+        
+        # Validate Python 3.13.3 requirement per Section 4.11.3
+        assert sys.version_info >= (3, 13), \
+            f"Python version {python_version} does not meet Python 3.13.3 requirement"
+        
+        # Validate environment isolation
+        testing_enabled = os.environ.get('TESTING', '').lower() == 'true'
+        assert testing_enabled, "Testing environment not properly configured"
+        
+        # Validate baseline comparison environment
+        baseline_enabled = os.environ.get('BASELINE_COMPARISON_ENABLED', '').lower() == 'true'
+        if baseline_enabled:
+            print("✓ Baseline comparison environment validated")
+        
+        # Test environment-specific configuration
+        if baseline_orchestrator.systems_ready:
+            session_summary = baseline_orchestrator.get_session_summary()
+            
+            assert session_summary['session_id'], "Session tracking not properly configured"
+            print(f"✓ Session tracking validated: {session_summary['session_id']}")
+        
+        print(f"\n✓ Tox environment integration validated for {tox_env}")
+    
+    def test_parallel_execution_coordination(self, baseline_orchestrator: BaselineComparisonOrchestrator):
+        """
+        Test parallel execution coordination with comprehensive thread management
+        and system coordination validation for efficient multi-system testing.
+        
+        This test validates parallel execution capabilities for efficient baseline
+        comparison testing with proper resource management and coordination.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        # Test parallel execution with multiple concurrent tests
+        test_scenarios = [
+            ('parallel_test_1', sample_api_test, {'endpoint': '/api/health'}),
+            ('parallel_test_2', sample_api_test, {'endpoint': '/api/status'}),
+            ('parallel_test_3', database_query_test, {'query_endpoint': '/api/users'})
+        ]
+        
+        start_time = time.time()
+        
+        # Execute tests with thread pool coordination
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            
+            for test_name, test_function, test_kwargs in test_scenarios:
+                future = executor.submit(
+                    baseline_orchestrator.execute_comparison_test,
+                    test_name=f'parallel_coordination_{test_name}',
+                    test_function=test_function,
+                    **test_kwargs
+                )
+                futures.append(future)
+            
+            # Collect results
+            results = [future.result() for future in as_completed(futures)]
+        
+        total_duration = time.time() - start_time
+        
+        # Validate parallel execution efficiency
+        assert len(results) == len(test_scenarios), \
+            "Parallel execution did not complete all test scenarios"
+        
+        # Validate all tests completed successfully
+        successful_tests = [r for r in results if r.functional_parity]
+        assert len(successful_tests) == len(results), \
+            "Some parallel tests failed functional parity validation"
+        
+        print(f"\n✓ Parallel execution coordination validated:")
+        print(f"  Concurrent tests: {len(test_scenarios)}")
+        print(f"  Total execution time: {total_duration:.3f}s")
+        print(f"  Successful tests: {len(successful_tests)}/{len(results)}")
+    
+    def test_monitoring_integration(self, baseline_orchestrator: BaselineComparisonOrchestrator,
+                                  performance_metrics_collector: PerformanceMetricsCollector):
+        """
+        Test monitoring integration with comprehensive observability validation
+        ensuring proper metrics collection and monitoring infrastructure integration.
+        
+        This test validates monitoring integration as specified in Section 6.5.1.1
+        for comprehensive monitoring and observability infrastructure.
+        """
+        if not baseline_orchestrator.systems_ready:
+            pytest.skip("Baseline comparison systems not ready")
+        
+        # Execute test with monitoring validation
+        comparison_result = baseline_orchestrator.execute_comparison_test(
+            test_name='monitoring_integration_test',
+            test_function=sample_api_test,
+            endpoint='/api/health'
+        )
+        
+        # Validate metrics collection
+        session_stats = performance_metrics_collector.get_session_statistics(
+            'monitoring_integration_test_Flask_System',
+            'response_time'
+        )
+        
+        assert session_stats, "Performance metrics not collected properly"
+        assert 'mean' in session_stats, "Statistical analysis not performed"
+        
+        # Validate baseline comparison integration
+        flask_duration = comparison_result.performance_comparison.get('flask_duration', 0)
+        baseline_comparison = performance_metrics_collector.compare_with_baseline(
+            'monitoring_integration_test',
+            'response_time',
+            flask_duration
+        )
+        
+        assert 'comparison_available' in baseline_comparison, \
+            "Baseline comparison integration failed"
+        
+        print(f"\n✓ Monitoring integration validated:")
+        print(f"  Metrics collected: {len(session_stats)} statistics")
+        print(f"  Baseline comparison: {'Available' if baseline_comparison.get('comparison_available') else 'Not Available'}")
+        print(f"  Session statistics: mean={session_stats.get('mean', 0):.3f}s")
+
+
+# ================================
+# Comprehensive Test Execution and Reporting
 # ================================
 
 @pytest.mark.performance
-@pytest.mark.regression
-class TestPerformanceRegressionDetection:
+@pytest.mark.baseline_comparison
+@pytest.mark.sla_validation
+def test_comprehensive_baseline_comparison_suite(baseline_orchestrator: BaselineComparisonOrchestrator,
+                                               baseline_comparison_validator,
+                                               performance_metrics_collector: PerformanceMetricsCollector):
     """
-    Performance regression detection test class implementing automated detection
-    of performance degradation and trend analysis for continuous monitoring.
-    """
+    Comprehensive baseline comparison test suite execution with complete system
+    validation, performance analysis, and migration success verification.
     
-    def test_performance_regression_detection(self,
-                                            baseline_comparison_framework,
-                                            benchmark):
-        """
-        Test automated performance regression detection with statistical analysis
-        and trend monitoring for continuous performance validation.
-        """
-        logger.info("Starting performance regression detection test")
+    This comprehensive test orchestrates the complete baseline comparison workflow
+    as specified in Section 4.7.1 and Section 4.7.2 with automated validation
+    and comprehensive reporting for migration success verification.
+    """
+    if not baseline_orchestrator.systems_ready:
+        pytest.skip("Baseline comparison systems not ready for comprehensive testing")
+    
+    print(f"\n{'='*80}")
+    print("COMPREHENSIVE BASELINE COMPARISON SUITE EXECUTION")
+    print(f"{'='*80}")
+    
+    # Define comprehensive test matrix
+    comprehensive_test_matrix = [
+        # API Endpoint Testing
+        ('api_health_endpoint', sample_api_test, {'endpoint': '/api/health'}),
+        ('api_users_endpoint', sample_api_test, {'endpoint': '/api/users'}),
+        ('api_status_endpoint', sample_api_test, {'endpoint': '/api/status'}),
         
-        # Execute multiple baseline comparisons for trend analysis
-        regression_test_endpoints = [
-            '/api/health',
-            '/api/users',
-            '/api/auth/login'
-        ]
+        # Database Operation Testing
+        ('database_users_query', database_query_test, {'query_endpoint': '/api/users'}),
+        ('database_count_query', database_query_test, {'query_endpoint': '/api/users/count'}),
         
-        regression_results = []
+        # Authentication Flow Testing
+        ('authentication_login', authentication_test, {'auth_endpoint': '/auth/login'}),
+        ('authentication_logout', authentication_test, {'auth_endpoint': '/auth/logout'})
+    ]
+    
+    # Execute comprehensive test suite
+    suite_results = []
+    suite_start_time = time.time()
+    
+    for test_name, test_function, test_kwargs in comprehensive_test_matrix:
+        print(f"\nExecuting: {test_name}")
         
-        for endpoint in regression_test_endpoints:
-            # Execute multiple iterations for trend analysis
-            endpoint_results = []
-            
-            for iteration in range(5):
-                result = baseline_comparison_framework.execute_parallel_benchmark(
-                    endpoint=endpoint,
-                    method='GET',
-                    scenario=f'regression_test_{endpoint.replace("/", "_")}_{iteration}'
-                )
-                endpoint_results.append(result)
-                
-                # Brief pause between iterations
-                time.sleep(1)
-            
-            regression_results.extend(endpoint_results)
-        
-        # Analyze performance regression trends
-        response_times = [r.flask_metrics.response_time_ms for r in regression_results]
-        error_rates = [r.flask_metrics.error_rate_percent for r in regression_results]
-        
-        # Calculate regression indicators
-        response_time_trend = np.polyfit(range(len(response_times)), response_times, 1)[0]
-        error_rate_trend = np.polyfit(range(len(error_rates)), error_rates, 1)[0]
-        
-        # Detect performance regression
-        performance_regression_detected = (
-            response_time_trend > 5.0 or  # >5ms increase per iteration
-            error_rate_trend > 0.1  # >0.1% error rate increase per iteration
+        comparison_result = baseline_orchestrator.execute_comparison_test(
+            test_name=f'comprehensive_suite_{test_name}',
+            test_function=test_function,
+            **test_kwargs
         )
         
-        # Validate regression detection
-        if performance_regression_detected:
-            logger.warning("Performance regression detected!")
-            logger.warning(f"Response time trend: {response_time_trend:.2f} ms/iteration")
-            logger.warning(f"Error rate trend: {error_rate_trend:.4f} %/iteration")
-        else:
-            logger.info("No performance regression detected")
+        suite_results.append(comparison_result)
         
-        # Log regression analysis results
-        logger.info(f"Performance regression analysis completed: {len(regression_results)} samples")
-        logger.info(f"Average response time: {statistics.mean(response_times):.2f}ms")
-        logger.info(f"Average error rate: {statistics.mean(error_rates):.2f}%")
+        # Log test result
+        status = "✓ PASS" if comparison_result.functional_parity else "✗ FAIL"
+        performance_ratio = comparison_result.performance_comparison.get('performance_ratio', 0)
         
-        # Regression detection should function regardless of actual regression
-        assert isinstance(performance_regression_detected, bool), \
-            "Regression detection must return boolean result"
+        print(f"  {status} - Functional Parity: {comparison_result.functional_parity}")
+        print(f"  Performance Ratio: {performance_ratio:.3f}")
+        
+        if comparison_result.discrepancies:
+            print(f"  Discrepancies: {len(comparison_result.discrepancies)}")
+    
+    suite_duration = time.time() - suite_start_time
+    
+    # Comprehensive validation analysis
+    print(f"\n{'='*80}")
+    print("COMPREHENSIVE VALIDATION ANALYSIS")
+    print(f"{'='*80}")
+    
+    # Functional parity analysis
+    functional_parity_results = [r for r in suite_results if r.functional_parity]
+    functional_parity_rate = len(functional_parity_results) / len(suite_results)
+    
+    # Performance analysis
+    performance_metrics = []
+    for result in suite_results:
+        flask_duration = result.performance_comparison.get('flask_duration', 0)
+        if flask_duration > 0:
+            performance_metrics.append({
+                'test_name': result.test_name,
+                'metric_type': 'response_time',
+                'value': flask_duration
+            })
+    
+    # Generate comprehensive validation report
+    validation_results = baseline_comparison_validator['validate_regression'](performance_metrics)
+    migration_report = baseline_comparison_validator['generate_report'](validation_results)
+    
+    # Session summary analysis
+    session_summary = baseline_orchestrator.get_session_summary()
+    
+    # Comprehensive assertions for migration success
+    assert functional_parity_rate == 1.0, \
+        f"Comprehensive functional parity failed: {functional_parity_rate:.2%} < 100%"
+    
+    assert validation_results['overall_regression_check_passed'], \
+        "Comprehensive performance validation failed - regression detected"
+    
+    assert session_summary['migration_success'], \
+        "Comprehensive migration validation failed"
+    
+    # Final comprehensive report
+    print(f"\n{'='*80}")
+    print("COMPREHENSIVE BASELINE COMPARISON RESULTS")
+    print(f"{'='*80}")
+    print(f"Suite Execution Time: {suite_duration:.2f}s")
+    print(f"Total Tests Executed: {len(suite_results)}")
+    print(f"Functional Parity Rate: {functional_parity_rate:.2%}")
+    print(f"Performance Tests Passed: {validation_results['passed_tests']}/{validation_results['total_tests']}")
+    print(f"Migration Success: {'✓ PASS' if session_summary['migration_success'] else '✗ FAIL'}")
+    print(f"Session ID: {session_summary['session_id']}")
+    
+    # Performance summary
+    if validation_results['detailed_results']:
+        avg_performance_ratio = statistics.mean([
+            r['performance_ratio'] for r in validation_results['detailed_results']
+        ])
+        print(f"Average Performance Ratio: {avg_performance_ratio:.3f}")
+        
+        improvements = len([
+            r for r in validation_results['detailed_results']
+            if r['performance_ratio'] < 1.0
+        ])
+        print(f"Performance Improvements: {improvements}/{len(validation_results['detailed_results'])}")
+    
+    # Discrepancy summary
+    total_discrepancies = sum(len(r.discrepancies) for r in suite_results)
+    if total_discrepancies > 0:
+        print(f"Total Discrepancies Detected: {total_discrepancies}")
+        print(f"Correction Workflows Triggered: {len(baseline_orchestrator.correction_workflows)}")
+    
+    print(f"\n{'='*80}")
+    print(migration_report)
+    print(f"{'='*80}")
+    
+    print(f"\n🎉 COMPREHENSIVE BASELINE COMPARISON SUITE COMPLETED SUCCESSFULLY")
+    print(f"✓ 100% Functional Parity Achieved")
+    print(f"✓ Performance Requirements Met")
+    print(f"✓ Migration Validation Successful")
 
+
+# ================================
+# Test Execution and Configuration
+# ================================
 
 if __name__ == "__main__":
     """
-    Direct execution support for baseline comparison testing with comprehensive
-    configuration and reporting capabilities.
+    Direct test execution support for development and debugging scenarios
+    with comprehensive configuration and environment validation.
     """
-    # Configure logging for direct execution
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)8s] %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    print("Baseline Comparison Test Suite - Direct Execution")
+    print("=" * 80)
     
-    # Execute baseline comparison tests if run directly
-    pytest.main([
-        __file__,
-        '-v',
-        '--benchmark-autosave',
-        '--benchmark-json=baseline_comparison_results.json',
-        '--html=baseline_comparison_report.html',
-        '--self-contained-html',
-        '-m', 'baseline'
-    ])
+    # Validate Python version requirement
+    if sys.version_info < (3, 13):
+        print(f"❌ Python 3.13+ required, current version: {sys.version}")
+        sys.exit(1)
+    
+    # Set testing environment variables
+    os.environ.update({
+        'FLASK_ENV': 'testing',
+        'TESTING': 'true',
+        'BASELINE_COMPARISON_ENABLED': 'true',
+        'PERFORMANCE_TESTING': 'true'
+    })
+    
+    print("✓ Environment configured for baseline comparison testing")
+    print("✓ Python version requirement satisfied")
+    print("\nExecute with pytest for full test suite functionality:")
+    print("  pytest tests/performance/test_baseline_comparison.py -v")
+    print("  tox -e baseline-comparison")
