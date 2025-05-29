@@ -1,709 +1,802 @@
 """
-Authentication response formatting utilities providing consistent HTTP response generation
-for authentication endpoints, error handling, and status communication.
+Authentication Response Formatting Utilities
 
-This module ensures standardized response formats across all authentication operations
-while maintaining compatibility with existing client applications during the Node.js to Flask migration.
+This module provides comprehensive HTTP response generation utilities for authentication
+endpoints, ensuring standardized response formats across all authentication operations
+while maintaining compatibility with existing client applications during the Node.js
+to Flask migration.
 
-Key Features:
-- Standardized authentication response formatting (Section 4.6.3)
-- Consistent error handling with HTTP status codes (Section 4.6.3)
-- JSON response compatibility with existing clients (Section 0.2.1)
-- Authentication workflow response standardization (Section 4.6.1)
-- CSRF token integration for web security (Section 4.6.2)
+Features:
+- Standardized authentication response formatting per Section 4.6.3
+- Consistent error handling with appropriate status codes per Section 4.6.3  
+- JSON response compatibility with existing client applications per Section 0.2.1
+- Authentication workflow response standardization per Section 4.6.1
+- CSRF token response integration for web security per Section 4.6.2
+
+Author: Flask Migration Team
+Version: 1.0.0
+Flask Version: 3.1.1
+Python Version: 3.13.3
 """
 
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Union, List
-from http import HTTPStatus
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Union, List
+import json
 import logging
+from enum import Enum
 
-from flask import jsonify, request, current_app, Response, session
-from flask_wtf.csrf import generate_csrf, validate_csrf
+from flask import jsonify, request, g, current_app, Response
+from flask_wtf.csrf import generate_csrf
 from werkzeug.http import HTTP_STATUS_CODES
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
 
-class ResponseFormat:
-    """
-    Standard response format structure for authentication endpoints.
-    Ensures consistent response patterns across all authentication operations.
-    """
-    
-    @staticmethod
-    def success(
-        data: Optional[Dict[str, Any]] = None,
-        message: str = "Operation successful",
-        status_code: int = HTTPStatus.OK,
-        include_csrf: bool = False,
-        additional_headers: Optional[Dict[str, str]] = None
-    ) -> Response:
-        """
-        Generate standardized success response for authentication operations.
-        
-        Args:
-            data: Response data payload
-            message: Success message for client feedback
-            status_code: HTTP status code (default: 200)
-            include_csrf: Whether to include CSRF token in response
-            additional_headers: Additional HTTP headers to include
-            
-        Returns:
-            Flask Response object with standardized JSON format
-        """
-        response_payload = {
-            "success": True,
-            "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status_code": status_code
-        }
-        
-        if data is not None:
-            response_payload["data"] = data
-            
-        # Include CSRF token if requested
-        if include_csrf:
-            try:
-                csrf_token = generate_csrf()
-                response_payload["csrf_token"] = csrf_token
-                logger.debug("CSRF token included in authentication response")
-            except Exception as e:
-                logger.warning(f"Failed to generate CSRF token: {str(e)}")
-        
-        # Create JSON response
-        response = jsonify(response_payload)
-        response.status_code = status_code
-        
-        # Add additional headers if provided
-        if additional_headers:
-            for header_name, header_value in additional_headers.items():
-                response.headers[header_name] = header_value
-        
-        # Set security headers for authentication responses
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
-        
-        logger.info(f"Authentication success response generated: {message}")
-        return response
-    
-    @staticmethod
-    def error(
-        message: str,
-        status_code: int = HTTPStatus.BAD_REQUEST,
-        error_code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        include_csrf: bool = False
-    ) -> Response:
-        """
-        Generate standardized error response for authentication operations.
-        
-        Args:
-            message: Error message for client feedback
-            status_code: HTTP status code
-            error_code: Application-specific error code
-            details: Additional error details
-            include_csrf: Whether to include CSRF token in response
-            
-        Returns:
-            Flask Response object with standardized error format
-        """
-        response_payload = {
-            "success": False,
-            "error": {
-                "message": message,
-                "status_code": status_code,
-                "status_text": HTTP_STATUS_CODES.get(status_code, "Unknown Error")
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-        if error_code:
-            response_payload["error"]["code"] = error_code
-            
-        if details:
-            response_payload["error"]["details"] = details
-            
-        # Include CSRF token if requested (for forms that need re-submission)
-        if include_csrf:
-            try:
-                csrf_token = generate_csrf()
-                response_payload["csrf_token"] = csrf_token
-                logger.debug("CSRF token included in authentication error response")
-            except Exception as e:
-                logger.warning(f"Failed to generate CSRF token for error response: {str(e)}")
-        
-        response = jsonify(response_payload)
-        response.status_code = status_code
-        
-        # Set security headers
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
-        
-        logger.warning(f"Authentication error response generated: {message} (Status: {status_code})")
-        return response
+class AuthResponseStatus(Enum):
+    """Authentication response status enumeration for consistent status reporting."""
+    SUCCESS = "success"
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
 
 
-class AuthResponseHelper:
-    """
-    Specialized response helper for authentication workflows.
-    Provides standardized responses for common authentication scenarios.
-    """
+class AuthErrorCode(Enum):
+    """Standardized authentication error codes for client compatibility."""
+    # Authentication Errors (1000-1099)
+    INVALID_CREDENTIALS = "AUTH_1001"
+    INVALID_TOKEN = "AUTH_1002"
+    TOKEN_EXPIRED = "AUTH_1003"
+    TOKEN_MISSING = "AUTH_1004"
+    TOKEN_MALFORMED = "AUTH_1005"
+    INVALID_REFRESH_TOKEN = "AUTH_1006"
     
-    @staticmethod
-    def login_success(
-        user_data: Dict[str, Any],
-        token_data: Optional[Dict[str, Any]] = None,
-        session_info: Optional[Dict[str, Any]] = None,
-        remember_me: bool = False
-    ) -> Response:
-        """
-        Generate successful login response with user data and session information.
-        
-        Args:
-            user_data: User profile information
-            token_data: JWT token information (if using token-based auth)
-            session_info: Session metadata
-            remember_me: Whether remember-me functionality is enabled
-            
-        Returns:
-            Standardized login success response
-        """
-        response_data = {
-            "user": {
-                "id": user_data.get("id"),
-                "username": user_data.get("username"),
-                "email": user_data.get("email"),
-                "roles": user_data.get("roles", []),
-                "permissions": user_data.get("permissions", []),
-                "last_login": datetime.now(timezone.utc).isoformat(),
-                "remember_me": remember_me
-            }
-        }
-        
-        if token_data:
-            response_data["tokens"] = {
-                "access_token": token_data.get("access_token"),
-                "refresh_token": token_data.get("refresh_token"),
-                "token_type": token_data.get("token_type", "Bearer"),
-                "expires_in": token_data.get("expires_in"),
-                "expires_at": token_data.get("expires_at")
-            }
-            
-        if session_info:
-            response_data["session"] = {
-                "session_id": session_info.get("session_id"),
-                "expires_at": session_info.get("expires_at"),
-                "csrf_token": session_info.get("csrf_token")
-            }
-        
-        additional_headers = {}
-        if remember_me:
-            additional_headers['Set-Cookie-SameSite'] = 'Strict'
-            
-        return ResponseFormat.success(
-            data=response_data,
-            message="Login successful",
-            status_code=HTTPStatus.OK,
-            include_csrf=True,
-            additional_headers=additional_headers
-        )
+    # Authorization Errors (1100-1199)
+    INSUFFICIENT_PERMISSIONS = "AUTH_1101"
+    ACCESS_DENIED = "AUTH_1102"
+    ROLE_REQUIRED = "AUTH_1103"
+    PERMISSION_REQUIRED = "AUTH_1104"
     
-    @staticmethod
-    def login_failed(
-        reason: str = "Invalid credentials",
-        attempt_count: Optional[int] = None,
-        lockout_info: Optional[Dict[str, Any]] = None
-    ) -> Response:
-        """
-        Generate failed login response with security information.
-        
-        Args:
-            reason: Specific reason for login failure
-            attempt_count: Number of failed attempts
-            lockout_info: Account lockout information if applicable
-            
-        Returns:
-            Standardized login failure response
-        """
-        error_details = {"authentication_failed": True}
-        
-        if attempt_count is not None:
-            error_details["failed_attempts"] = attempt_count
-            
-        if lockout_info:
-            error_details["lockout"] = lockout_info
-            
-        return ResponseFormat.error(
-            message=reason,
-            status_code=HTTPStatus.UNAUTHORIZED,
-            error_code="AUTH_LOGIN_FAILED",
-            details=error_details,
-            include_csrf=True
-        )
+    # Session Errors (1200-1299)
+    SESSION_EXPIRED = "AUTH_1201"
+    SESSION_INVALID = "AUTH_1202"
+    SESSION_NOT_FOUND = "AUTH_1203"
+    CONCURRENT_SESSION_LIMIT = "AUTH_1204"
     
-    @staticmethod
-    def logout_success(
-        session_data: Optional[Dict[str, Any]] = None
-    ) -> Response:
-        """
-        Generate successful logout response.
-        
-        Args:
-            session_data: Session information being terminated
-            
-        Returns:
-            Standardized logout success response
-        """
-        response_data = {
-            "logged_out": True,
-            "session_terminated": True
-        }
-        
-        if session_data:
-            response_data["session_info"] = {
-                "session_duration": session_data.get("duration"),
-                "last_activity": session_data.get("last_activity")
-            }
-            
-        return ResponseFormat.success(
-            data=response_data,
-            message="Logout successful",
-            status_code=HTTPStatus.OK
-        )
+    # Validation Errors (1300-1399)
+    INVALID_INPUT = "AUTH_1301"
+    MISSING_REQUIRED_FIELD = "AUTH_1302"
+    INVALID_EMAIL_FORMAT = "AUTH_1303"
+    PASSWORD_TOO_WEAK = "AUTH_1304"
+    CSRF_TOKEN_MISSING = "AUTH_1305"
+    CSRF_TOKEN_INVALID = "AUTH_1306"
     
-    @staticmethod
-    def token_refresh_success(
-        new_tokens: Dict[str, Any],
-        user_info: Optional[Dict[str, Any]] = None
-    ) -> Response:
-        """
-        Generate successful token refresh response.
-        
-        Args:
-            new_tokens: New JWT token information
-            user_info: Updated user information
-            
-        Returns:
-            Standardized token refresh response
-        """
-        response_data = {
-            "tokens": {
-                "access_token": new_tokens.get("access_token"),
-                "refresh_token": new_tokens.get("refresh_token"),
-                "token_type": new_tokens.get("token_type", "Bearer"),
-                "expires_in": new_tokens.get("expires_in"),
-                "expires_at": new_tokens.get("expires_at"),
-                "refreshed_at": datetime.now(timezone.utc).isoformat()
-            }
-        }
-        
-        if user_info:
-            response_data["user"] = user_info
-            
-        return ResponseFormat.success(
-            data=response_data,
-            message="Token refreshed successfully",
-            status_code=HTTPStatus.OK
-        )
+    # Rate Limiting Errors (1400-1499)
+    RATE_LIMIT_EXCEEDED = "AUTH_1401"
+    TOO_MANY_ATTEMPTS = "AUTH_1402"
     
-    @staticmethod
-    def unauthorized_access(
-        resource: Optional[str] = None,
-        required_permissions: Optional[List[str]] = None
-    ) -> Response:
-        """
-        Generate unauthorized access response.
-        
-        Args:
-            resource: Resource that was attempted to be accessed
-            required_permissions: Permissions required for access
-            
-        Returns:
-            Standardized unauthorized response
-        """
-        error_details = {"unauthorized_access": True}
-        
-        if resource:
-            error_details["resource"] = resource
-            
-        if required_permissions:
-            error_details["required_permissions"] = required_permissions
-            
-        return ResponseFormat.error(
-            message="Unauthorized access attempt",
-            status_code=HTTPStatus.UNAUTHORIZED,
-            error_code="AUTH_UNAUTHORIZED",
-            details=error_details
-        )
-    
-    @staticmethod
-    def forbidden_access(
-        resource: Optional[str] = None,
-        user_permissions: Optional[List[str]] = None
-    ) -> Response:
-        """
-        Generate forbidden access response for insufficient permissions.
-        
-        Args:
-            resource: Resource that was attempted to be accessed
-            user_permissions: User's current permissions
-            
-        Returns:
-            Standardized forbidden response
-        """
-        error_details = {"forbidden_access": True}
-        
-        if resource:
-            error_details["resource"] = resource
-            
-        if user_permissions:
-            error_details["user_permissions"] = user_permissions
-            
-        return ResponseFormat.error(
-            message="Access forbidden - insufficient permissions",
-            status_code=HTTPStatus.FORBIDDEN,
-            error_code="AUTH_FORBIDDEN",
-            details=error_details
-        )
+    # Server Errors (1500-1599)
+    INTERNAL_SERVER_ERROR = "AUTH_1501"
+    SERVICE_UNAVAILABLE = "AUTH_1502"
+    DATABASE_ERROR = "AUTH_1503"
+    EXTERNAL_SERVICE_ERROR = "AUTH_1504"
 
 
-class CSRFResponseHelper:
-    """
-    CSRF token management utilities for authentication responses.
-    Integrates with Flask-WTF for comprehensive CSRF protection.
-    """
-    
-    @staticmethod
-    def get_csrf_token() -> Optional[str]:
-        """
-        Generate or retrieve CSRF token for the current session.
-        
-        Returns:
-            CSRF token string or None if generation fails
-        """
-        try:
-            csrf_token = generate_csrf()
-            logger.debug("CSRF token generated successfully")
-            return csrf_token
-        except Exception as e:
-            logger.error(f"Failed to generate CSRF token: {str(e)}")
-            return None
-    
-    @staticmethod
-    def validate_csrf_token(token: str) -> bool:
-        """
-        Validate provided CSRF token against session.
-        
-        Args:
-            token: CSRF token to validate
-            
-        Returns:
-            True if token is valid, False otherwise
-        """
-        try:
-            validate_csrf(token)
-            logger.debug("CSRF token validation successful")
-            return True
-        except Exception as e:
-            logger.warning(f"CSRF token validation failed: {str(e)}")
-            return False
-    
-    @staticmethod
-    def csrf_token_response() -> Response:
-        """
-        Generate response containing only CSRF token.
-        Useful for AJAX requests that need fresh CSRF tokens.
-        
-        Returns:
-            Response with CSRF token
-        """
-        csrf_token = CSRFResponseHelper.get_csrf_token()
-        
-        if csrf_token:
-            return ResponseFormat.success(
-                data={"csrf_token": csrf_token},
-                message="CSRF token generated",
-                status_code=HTTPStatus.OK
-            )
-        else:
-            return ResponseFormat.error(
-                message="Failed to generate CSRF token",
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                error_code="CSRF_GENERATION_FAILED"
-            )
-    
-    @staticmethod
-    def csrf_validation_failed() -> Response:
-        """
-        Generate response for CSRF validation failure.
-        
-        Returns:
-            Standardized CSRF validation error response
-        """
-        return ResponseFormat.error(
-            message="CSRF token validation failed",
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_code="CSRF_VALIDATION_FAILED",
-            details={
-                "csrf_failed": True,
-                "action_required": "Refresh page and retry"
-            },
-            include_csrf=True
-        )
+# HTTP Status Code Mappings for Authentication Errors
+AUTH_ERROR_STATUS_CODES = {
+    AuthErrorCode.INVALID_CREDENTIALS: 401,
+    AuthErrorCode.INVALID_TOKEN: 401,
+    AuthErrorCode.TOKEN_EXPIRED: 401,
+    AuthErrorCode.TOKEN_MISSING: 401,
+    AuthErrorCode.TOKEN_MALFORMED: 401,
+    AuthErrorCode.INVALID_REFRESH_TOKEN: 401,
+    AuthErrorCode.INSUFFICIENT_PERMISSIONS: 403,
+    AuthErrorCode.ACCESS_DENIED: 403,
+    AuthErrorCode.ROLE_REQUIRED: 403,
+    AuthErrorCode.PERMISSION_REQUIRED: 403,
+    AuthErrorCode.SESSION_EXPIRED: 401,
+    AuthErrorCode.SESSION_INVALID: 401,
+    AuthErrorCode.SESSION_NOT_FOUND: 401,
+    AuthErrorCode.CONCURRENT_SESSION_LIMIT: 429,
+    AuthErrorCode.INVALID_INPUT: 400,
+    AuthErrorCode.MISSING_REQUIRED_FIELD: 400,
+    AuthErrorCode.INVALID_EMAIL_FORMAT: 400,
+    AuthErrorCode.PASSWORD_TOO_WEAK: 400,
+    AuthErrorCode.CSRF_TOKEN_MISSING: 400,
+    AuthErrorCode.CSRF_TOKEN_INVALID: 400,
+    AuthErrorCode.RATE_LIMIT_EXCEEDED: 429,
+    AuthErrorCode.TOO_MANY_ATTEMPTS: 429,
+    AuthErrorCode.INTERNAL_SERVER_ERROR: 500,
+    AuthErrorCode.SERVICE_UNAVAILABLE: 503,
+    AuthErrorCode.DATABASE_ERROR: 500,
+    AuthErrorCode.EXTERNAL_SERVICE_ERROR: 502,
+}
 
 
-class ValidationResponseHelper:
+def _get_request_metadata() -> Dict[str, Any]:
     """
-    Response utilities for authentication input validation errors.
-    Provides consistent validation error formatting.
+    Extract request metadata for response enrichment.
+    
+    Returns:
+        Dict containing request metadata including timestamp, request ID, and client info
     """
-    
-    @staticmethod
-    def validation_errors(
-        errors: Dict[str, List[str]],
-        message: str = "Validation errors occurred"
-    ) -> Response:
-        """
-        Generate response for validation errors.
-        
-        Args:
-            errors: Dictionary of field names to error messages
-            message: General validation error message
-            
-        Returns:
-            Standardized validation error response
-        """
-        return ResponseFormat.error(
-            message=message,
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_code="VALIDATION_FAILED",
-            details={
-                "validation_errors": errors,
-                "fields_with_errors": list(errors.keys())
-            },
-            include_csrf=True
-        )
-    
-    @staticmethod
-    def password_validation_failed(
-        requirements: List[str],
-        failed_requirements: List[str]
-    ) -> Response:
-        """
-        Generate response for password validation failure.
-        
-        Args:
-            requirements: List of all password requirements
-            failed_requirements: List of requirements that failed
-            
-        Returns:
-            Password validation error response
-        """
-        return ResponseFormat.error(
-            message="Password does not meet security requirements",
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_code="PASSWORD_VALIDATION_FAILED",
-            details={
-                "password_requirements": requirements,
-                "failed_requirements": failed_requirements
-            },
-            include_csrf=True
-        )
-    
-    @staticmethod
-    def email_validation_failed(email: str) -> Response:
-        """
-        Generate response for email validation failure.
-        
-        Args:
-            email: Email address that failed validation
-            
-        Returns:
-            Email validation error response
-        """
-        return ResponseFormat.error(
-            message="Invalid email address format",
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_code="EMAIL_VALIDATION_FAILED",
-            details={
-                "invalid_email": email,
-                "expected_format": "user@domain.com"
-            },
-            include_csrf=True
-        )
+    return {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "request_id": getattr(g, 'request_id', None),
+        "endpoint": request.endpoint,
+        "method": request.method,
+        "user_agent": request.headers.get('User-Agent'),
+        "ip_address": request.remote_addr,
+        "blueprint": getattr(g, 'blueprint_name', request.blueprint)
+    }
 
 
-class SecurityResponseHelper:
+def _add_security_headers(response: Response) -> Response:
     """
-    Security-related response utilities for authentication endpoints.
-    Handles security events and incident responses.
-    """
-    
-    @staticmethod
-    def rate_limit_exceeded(
-        limit: int,
-        window: int,
-        retry_after: Optional[int] = None
-    ) -> Response:
-        """
-        Generate response for rate limit exceeded.
-        
-        Args:
-            limit: Rate limit threshold
-            window: Time window in seconds
-            retry_after: Seconds until retry is allowed
-            
-        Returns:
-            Rate limit exceeded response
-        """
-        additional_headers = {}
-        if retry_after:
-            additional_headers['Retry-After'] = str(retry_after)
-            
-        return ResponseFormat.error(
-            message="Rate limit exceeded",
-            status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            error_code="RATE_LIMIT_EXCEEDED",
-            details={
-                "rate_limit": limit,
-                "time_window": window,
-                "retry_after": retry_after
-            }
-        )
-    
-    @staticmethod
-    def account_locked(
-        lockout_duration: Optional[int] = None,
-        unlock_time: Optional[str] = None
-    ) -> Response:
-        """
-        Generate response for locked account.
-        
-        Args:
-            lockout_duration: Duration of lockout in seconds
-            unlock_time: ISO timestamp when account will be unlocked
-            
-        Returns:
-            Account locked response
-        """
-        details = {"account_locked": True}
-        
-        if lockout_duration:
-            details["lockout_duration"] = lockout_duration
-            
-        if unlock_time:
-            details["unlock_time"] = unlock_time
-            
-        return ResponseFormat.error(
-            message="Account is temporarily locked due to security measures",
-            status_code=HTTPStatus.FORBIDDEN,
-            error_code="ACCOUNT_LOCKED",
-            details=details
-        )
-    
-    @staticmethod
-    def suspicious_activity_detected(
-        activity_type: str,
-        action_taken: str
-    ) -> Response:
-        """
-        Generate response for suspicious activity detection.
-        
-        Args:
-            activity_type: Type of suspicious activity detected
-            action_taken: Security action taken in response
-            
-        Returns:
-            Suspicious activity response
-        """
-        return ResponseFormat.error(
-            message="Suspicious activity detected",
-            status_code=HTTPStatus.FORBIDDEN,
-            error_code="SUSPICIOUS_ACTIVITY",
-            details={
-                "activity_type": activity_type,
-                "action_taken": action_taken,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        )
-
-
-def create_response_with_request_context(
-    response_func,
-    *args,
-    request_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    **kwargs
-) -> Response:
-    """
-    Create response with additional request context information.
+    Add security headers to authentication responses.
     
     Args:
-        response_func: Response function to call
-        request_id: Unique request identifier
-        user_id: User identifier for audit trails
-        *args: Positional arguments for response function
-        **kwargs: Keyword arguments for response function
+        response: Flask Response object to enhance with security headers
         
     Returns:
-        Response with enriched context information
+        Enhanced Response object with security headers
     """
-    response = response_func(*args, **kwargs)
-    
-    # Add request context to response headers for debugging and audit
-    if request_id:
-        response.headers['X-Request-ID'] = request_id
-        
-    if user_id:
-        response.headers['X-User-ID'] = user_id
-        
-    # Add timestamp for response tracking
-    response.headers['X-Response-Timestamp'] = datetime.now(timezone.utc).isoformat()
+    # Security headers for authentication endpoints
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     
     return response
 
 
-# Module-level utility functions for common authentication responses
-
-def success_response(*args, **kwargs) -> Response:
-    """Convenience function for success responses."""
-    return ResponseFormat.success(*args, **kwargs)
-
-
-def error_response(*args, **kwargs) -> Response:
-    """Convenience function for error responses."""
-    return ResponseFormat.error(*args, **kwargs)
-
-
-def login_response(*args, **kwargs) -> Response:
-    """Convenience function for login responses."""
-    return AuthResponseHelper.login_success(*args, **kwargs)
-
-
-def logout_response(*args, **kwargs) -> Response:
-    """Convenience function for logout responses."""
-    return AuthResponseHelper.logout_success(*args, **kwargs)
-
-
-def unauthorized_response(*args, **kwargs) -> Response:
-    """Convenience function for unauthorized responses."""
-    return AuthResponseHelper.unauthorized_access(*args, **kwargs)
+def _add_csrf_token(response_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Add CSRF token to response data for web security.
+    
+    Args:
+        response_data: Response data dictionary to enhance with CSRF token
+        
+    Returns:
+        Enhanced response data with CSRF token
+    """
+    try:
+        csrf_token = generate_csrf()
+        response_data["csrf_token"] = csrf_token
+        logger.debug("CSRF token added to authentication response")
+    except Exception as e:
+        logger.warning(f"Failed to generate CSRF token: {str(e)}")
+        # Don't fail the response for CSRF token generation issues
+    
+    return response_data
 
 
-def forbidden_response(*args, **kwargs) -> Response:
-    """Convenience function for forbidden responses."""
-    return AuthResponseHelper.forbidden_access(*args, **kwargs)
+def create_auth_response(
+    status: AuthResponseStatus,
+    message: str,
+    data: Optional[Dict[str, Any]] = None,
+    status_code: int = 200,
+    include_csrf: bool = True,
+    additional_headers: Optional[Dict[str, str]] = None
+) -> Response:
+    """
+    Create standardized authentication response with consistent formatting.
+    
+    Args:
+        status: Response status from AuthResponseStatus enum
+        message: Human-readable message describing the response
+        data: Optional data payload to include in response
+        status_code: HTTP status code for the response
+        include_csrf: Whether to include CSRF token in response
+        additional_headers: Optional additional headers to include
+        
+    Returns:
+        Flask Response object with standardized authentication response format
+    """
+    # Build response data structure
+    response_data = {
+        "status": status.value,
+        "message": message,
+        "data": data or {},
+        "meta": _get_request_metadata()
+    }
+    
+    # Add CSRF token for web security if requested
+    if include_csrf and status == AuthResponseStatus.SUCCESS:
+        response_data = _add_csrf_token(response_data)
+    
+    # Create JSON response
+    response = jsonify(response_data)
+    response.status_code = status_code
+    
+    # Add security headers
+    response = _add_security_headers(response)
+    
+    # Add any additional headers
+    if additional_headers:
+        for key, value in additional_headers.items():
+            response.headers[key] = value
+    
+    # Log response creation for monitoring
+    logger.info(
+        "Authentication response created",
+        extra={
+            "status": status.value,
+            "status_code": status_code,
+            "endpoint": request.endpoint,
+            "request_id": getattr(g, 'request_id', None)
+        }
+    )
+    
+    return response
 
 
-def csrf_token_response() -> Response:
-    """Convenience function for CSRF token responses."""
-    return CSRFResponseHelper.csrf_token_response()
+def success_response(
+    message: str,
+    data: Optional[Dict[str, Any]] = None,
+    status_code: int = 200,
+    include_csrf: bool = True,
+    additional_headers: Optional[Dict[str, str]] = None
+) -> Response:
+    """
+    Create standardized success response for authentication operations.
+    
+    Args:
+        message: Success message to include in response
+        data: Optional success data payload
+        status_code: HTTP status code (default: 200)
+        include_csrf: Whether to include CSRF token (default: True)
+        additional_headers: Optional additional headers
+        
+    Returns:
+        Flask Response object with standardized success format
+    """
+    return create_auth_response(
+        status=AuthResponseStatus.SUCCESS,
+        message=message,
+        data=data,
+        status_code=status_code,
+        include_csrf=include_csrf,
+        additional_headers=additional_headers
+    )
 
 
-def validation_error_response(*args, **kwargs) -> Response:
-    """Convenience function for validation error responses."""
-    return ValidationResponseHelper.validation_errors(*args, **kwargs)
+def error_response(
+    error_code: AuthErrorCode,
+    message: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+    status_code: Optional[int] = None,
+    additional_headers: Optional[Dict[str, str]] = None
+) -> Response:
+    """
+    Create standardized error response for authentication failures.
+    
+    Args:
+        error_code: Authentication error code from AuthErrorCode enum
+        message: Optional custom error message (falls back to default)
+        details: Optional error details for debugging
+        status_code: Optional custom status code (falls back to mapped code)
+        additional_headers: Optional additional headers
+        
+    Returns:
+        Flask Response object with standardized error format
+    """
+    # Determine HTTP status code
+    if status_code is None:
+        status_code = AUTH_ERROR_STATUS_CODES.get(error_code, 500)
+    
+    # Generate default message if none provided
+    if message is None:
+        message = _get_default_error_message(error_code)
+    
+    # Build error data structure
+    error_data = {
+        "error_code": error_code.value,
+        "error_type": _get_error_type(error_code),
+        "details": details or {}
+    }
+    
+    # Log error for monitoring and debugging
+    logger.warning(
+        "Authentication error response created",
+        extra={
+            "error_code": error_code.value,
+            "status_code": status_code,
+            "endpoint": request.endpoint,
+            "request_id": getattr(g, 'request_id', None),
+            "details": details
+        }
+    )
+    
+    return create_auth_response(
+        status=AuthResponseStatus.ERROR,
+        message=message,
+        data=error_data,
+        status_code=status_code,
+        include_csrf=False,  # Don't include CSRF on error responses
+        additional_headers=additional_headers
+    )
+
+
+def _get_default_error_message(error_code: AuthErrorCode) -> str:
+    """
+    Get default error message for authentication error codes.
+    
+    Args:
+        error_code: Authentication error code
+        
+    Returns:
+        Default error message string
+    """
+    error_messages = {
+        AuthErrorCode.INVALID_CREDENTIALS: "Invalid username or password",
+        AuthErrorCode.INVALID_TOKEN: "Authentication token is invalid",
+        AuthErrorCode.TOKEN_EXPIRED: "Authentication token has expired",
+        AuthErrorCode.TOKEN_MISSING: "Authentication token is required",
+        AuthErrorCode.TOKEN_MALFORMED: "Authentication token format is invalid",
+        AuthErrorCode.INVALID_REFRESH_TOKEN: "Refresh token is invalid or expired",
+        AuthErrorCode.INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this operation",
+        AuthErrorCode.ACCESS_DENIED: "Access denied",
+        AuthErrorCode.ROLE_REQUIRED: "Required role not assigned to user",
+        AuthErrorCode.PERMISSION_REQUIRED: "Required permission not granted",
+        AuthErrorCode.SESSION_EXPIRED: "User session has expired",
+        AuthErrorCode.SESSION_INVALID: "User session is invalid",
+        AuthErrorCode.SESSION_NOT_FOUND: "User session not found",
+        AuthErrorCode.CONCURRENT_SESSION_LIMIT: "Maximum concurrent sessions exceeded",
+        AuthErrorCode.INVALID_INPUT: "Invalid input provided",
+        AuthErrorCode.MISSING_REQUIRED_FIELD: "Required field is missing",
+        AuthErrorCode.INVALID_EMAIL_FORMAT: "Email address format is invalid",
+        AuthErrorCode.PASSWORD_TOO_WEAK: "Password does not meet security requirements",
+        AuthErrorCode.CSRF_TOKEN_MISSING: "CSRF token is required",
+        AuthErrorCode.CSRF_TOKEN_INVALID: "CSRF token is invalid",
+        AuthErrorCode.RATE_LIMIT_EXCEEDED: "Rate limit exceeded, please try again later",
+        AuthErrorCode.TOO_MANY_ATTEMPTS: "Too many failed attempts, please try again later",
+        AuthErrorCode.INTERNAL_SERVER_ERROR: "Internal server error occurred",
+        AuthErrorCode.SERVICE_UNAVAILABLE: "Authentication service is temporarily unavailable",
+        AuthErrorCode.DATABASE_ERROR: "Database error occurred",
+        AuthErrorCode.EXTERNAL_SERVICE_ERROR: "External authentication service error"
+    }
+    
+    return error_messages.get(error_code, "An authentication error occurred")
+
+
+def _get_error_type(error_code: AuthErrorCode) -> str:
+    """
+    Get error type classification for error codes.
+    
+    Args:
+        error_code: Authentication error code
+        
+    Returns:
+        Error type classification string
+    """
+    if 1001 <= int(error_code.value.split('_')[1]) <= 1099:
+        return "authentication_error"
+    elif 1100 <= int(error_code.value.split('_')[1]) <= 1199:
+        return "authorization_error"
+    elif 1200 <= int(error_code.value.split('_')[1]) <= 1299:
+        return "session_error"
+    elif 1300 <= int(error_code.value.split('_')[1]) <= 1399:
+        return "validation_error"
+    elif 1400 <= int(error_code.value.split('_')[1]) <= 1499:
+        return "rate_limit_error"
+    elif 1500 <= int(error_code.value.split('_')[1]) <= 1599:
+        return "server_error"
+    else:
+        return "unknown_error"
+
+
+# Authentication Workflow-Specific Response Helpers
+
+def login_success_response(
+    user_data: Dict[str, Any],
+    token_data: Optional[Dict[str, Any]] = None,
+    session_data: Optional[Dict[str, Any]] = None
+) -> Response:
+    """
+    Create standardized login success response.
+    
+    Args:
+        user_data: User information to include in response
+        token_data: Optional authentication token information
+        session_data: Optional session information
+        
+    Returns:
+        Flask Response object with login success format
+    """
+    response_data = {
+        "user": user_data,
+        "authentication": token_data or {},
+        "session": session_data or {}
+    }
+    
+    return success_response(
+        message="Login successful",
+        data=response_data,
+        status_code=200,
+        include_csrf=True
+    )
+
+
+def logout_success_response(message: str = "Logout successful") -> Response:
+    """
+    Create standardized logout success response.
+    
+    Args:
+        message: Logout success message
+        
+    Returns:
+        Flask Response object with logout success format
+    """
+    return success_response(
+        message=message,
+        data={"logged_out": True},
+        status_code=200,
+        include_csrf=False  # No CSRF needed after logout
+    )
+
+
+def token_refresh_success_response(
+    token_data: Dict[str, Any],
+    expires_in: Optional[int] = None
+) -> Response:
+    """
+    Create standardized token refresh success response.
+    
+    Args:
+        token_data: New token information
+        expires_in: Token expiration time in seconds
+        
+    Returns:
+        Flask Response object with token refresh success format
+    """
+    response_data = {
+        "tokens": token_data,
+        "expires_in": expires_in
+    }
+    
+    if expires_in:
+        response_data["expires_at"] = (datetime.utcnow() + timedelta(seconds=expires_in)).isoformat() + "Z"
+    
+    return success_response(
+        message="Token refreshed successfully",
+        data=response_data,
+        status_code=200,
+        include_csrf=True
+    )
+
+
+def registration_success_response(
+    user_data: Dict[str, Any],
+    requires_verification: bool = False
+) -> Response:
+    """
+    Create standardized user registration success response.
+    
+    Args:
+        user_data: Newly created user information
+        requires_verification: Whether email verification is required
+        
+    Returns:
+        Flask Response object with registration success format
+    """
+    response_data = {
+        "user": user_data,
+        "requires_verification": requires_verification
+    }
+    
+    message = "Registration successful"
+    if requires_verification:
+        message += ". Please check your email for verification instructions."
+    
+    return success_response(
+        message=message,
+        data=response_data,
+        status_code=201,  # Created
+        include_csrf=True
+    )
+
+
+def password_reset_success_response(
+    email: str,
+    reset_token_sent: bool = True
+) -> Response:
+    """
+    Create standardized password reset success response.
+    
+    Args:
+        email: Email address where reset instructions were sent
+        reset_token_sent: Whether reset token was successfully sent
+        
+    Returns:
+        Flask Response object with password reset success format
+    """
+    response_data = {
+        "email": email,
+        "reset_instructions_sent": reset_token_sent
+    }
+    
+    return success_response(
+        message="Password reset instructions have been sent to your email",
+        data=response_data,
+        status_code=200,
+        include_csrf=True
+    )
+
+
+def permission_check_response(
+    has_permission: bool,
+    required_permission: str,
+    user_permissions: Optional[List[str]] = None
+) -> Response:
+    """
+    Create standardized permission check response.
+    
+    Args:
+        has_permission: Whether user has the required permission
+        required_permission: The permission that was checked
+        user_permissions: Optional list of user's current permissions
+        
+    Returns:
+        Flask Response object with permission check result
+    """
+    if has_permission:
+        response_data = {
+            "permission": required_permission,
+            "granted": True,
+            "user_permissions": user_permissions or []
+        }
+        
+        return success_response(
+            message="Permission granted",
+            data=response_data,
+            status_code=200
+        )
+    else:
+        return error_response(
+            error_code=AuthErrorCode.PERMISSION_REQUIRED,
+            details={
+                "required_permission": required_permission,
+                "user_permissions": user_permissions or []
+            }
+        )
+
+
+def session_status_response(
+    is_active: bool,
+    session_data: Optional[Dict[str, Any]] = None,
+    expires_at: Optional[datetime] = None
+) -> Response:
+    """
+    Create standardized session status response.
+    
+    Args:
+        is_active: Whether the session is currently active
+        session_data: Optional session information
+        expires_at: Optional session expiration time
+        
+    Returns:
+        Flask Response object with session status information
+    """
+    response_data = {
+        "active": is_active,
+        "session": session_data or {},
+        "expires_at": expires_at.isoformat() + "Z" if expires_at else None
+    }
+    
+    if is_active:
+        return success_response(
+            message="Session is active",
+            data=response_data,
+            status_code=200
+        )
+    else:
+        return error_response(
+            error_code=AuthErrorCode.SESSION_EXPIRED,
+            details=response_data
+        )
+
+
+def validation_error_response(
+    validation_errors: Dict[str, List[str]],
+    message: str = "Validation failed"
+) -> Response:
+    """
+    Create standardized validation error response.
+    
+    Args:
+        validation_errors: Dictionary of field names to error lists
+        message: Overall validation error message
+        
+    Returns:
+        Flask Response object with validation error details
+    """
+    return error_response(
+        error_code=AuthErrorCode.INVALID_INPUT,
+        message=message,
+        details={
+            "validation_errors": validation_errors,
+            "error_count": sum(len(errors) for errors in validation_errors.values())
+        }
+    )
+
+
+def rate_limit_error_response(
+    limit: int,
+    window_seconds: int,
+    retry_after: Optional[int] = None
+) -> Response:
+    """
+    Create standardized rate limit error response.
+    
+    Args:
+        limit: Rate limit threshold that was exceeded
+        window_seconds: Time window for the rate limit
+        retry_after: Seconds to wait before retrying
+        
+    Returns:
+        Flask Response object with rate limit error information
+    """
+    additional_headers = {}
+    if retry_after:
+        additional_headers['Retry-After'] = str(retry_after)
+    
+    return error_response(
+        error_code=AuthErrorCode.RATE_LIMIT_EXCEEDED,
+        details={
+            "limit": limit,
+            "window_seconds": window_seconds,
+            "retry_after_seconds": retry_after
+        },
+        additional_headers=additional_headers
+    )
+
+
+# Utility Functions for Response Enhancement
+
+def add_pagination_meta(
+    response_data: Dict[str, Any],
+    page: int,
+    per_page: int,
+    total: int,
+    total_pages: int
+) -> Dict[str, Any]:
+    """
+    Add pagination metadata to response data.
+    
+    Args:
+        response_data: Existing response data to enhance
+        page: Current page number
+        per_page: Items per page
+        total: Total number of items
+        total_pages: Total number of pages
+        
+    Returns:
+        Enhanced response data with pagination metadata
+    """
+    response_data["pagination"] = {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1,
+        "next_page": page + 1 if page < total_pages else None,
+        "prev_page": page - 1 if page > 1 else None
+    }
+    
+    return response_data
+
+
+def sanitize_user_data(user_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sanitize user data for safe inclusion in responses.
+    
+    Args:
+        user_data: Raw user data dictionary
+        
+    Returns:
+        Sanitized user data safe for client consumption
+    """
+    # Define safe fields that can be included in responses
+    safe_fields = {
+        'id', 'username', 'email', 'first_name', 'last_name', 
+        'display_name', 'avatar_url', 'created_at', 'updated_at',
+        'is_verified', 'is_active', 'last_login', 'roles', 'permissions'
+    }
+    
+    # Remove sensitive fields and only include safe fields
+    sanitized = {
+        key: value for key, value in user_data.items() 
+        if key in safe_fields
+    }
+    
+    # Convert datetime objects to ISO format strings
+    for key, value in sanitized.items():
+        if isinstance(value, datetime):
+            sanitized[key] = value.isoformat() + "Z"
+    
+    return sanitized
+
+
+def get_client_info() -> Dict[str, Any]:
+    """
+    Extract client information from request for response metadata.
+    
+    Returns:
+        Dictionary containing client information
+    """
+    return {
+        "user_agent": request.headers.get('User-Agent'),
+        "ip_address": request.remote_addr,
+        "accept_language": request.headers.get('Accept-Language'),
+        "referer": request.headers.get('Referer'),
+        "origin": request.headers.get('Origin')
+    }
+
+
+# Response Status Code Utilities
+
+def is_success_status(status_code: int) -> bool:
+    """Check if status code indicates success (2xx)."""
+    return 200 <= status_code < 300
+
+
+def is_client_error_status(status_code: int) -> bool:
+    """Check if status code indicates client error (4xx)."""
+    return 400 <= status_code < 500
+
+
+def is_server_error_status(status_code: int) -> bool:
+    """Check if status code indicates server error (5xx)."""
+    return 500 <= status_code < 600
+
+
+def get_status_message(status_code: int) -> str:
+    """Get HTTP status message for status code."""
+    return HTTP_STATUS_CODES.get(status_code, "Unknown Status")
+
+
+# Module Configuration and Initialization
+
+def init_response_helpers(app):
+    """
+    Initialize response helpers with Flask application.
+    
+    Args:
+        app: Flask application instance
+    """
+    # Configure logging for the module
+    if not app.debug:
+        formatter = logging.Formatter(
+            '%(asctime)s %(levelname)s [%(name)s] %(message)s'
+        )
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    
+    # Store reference to app for access to configuration
+    app.auth_response_helpers = {
+        'success_response': success_response,
+        'error_response': error_response,
+        'login_success_response': login_success_response,
+        'logout_success_response': logout_success_response,
+        'token_refresh_success_response': token_refresh_success_response,
+        'validation_error_response': validation_error_response,
+        'rate_limit_error_response': rate_limit_error_response
+    }
+    
+    logger.info("Authentication response helpers initialized successfully")
+
+
+if __name__ == "__main__":
+    # Module self-test functionality
+    print("Authentication Response Helpers Module")
+    print("=====================================")
+    print(f"Available error codes: {len(AuthErrorCode)}")
+    print(f"Available response statuses: {len(AuthResponseStatus)}")
+    print("Module loaded successfully!")
