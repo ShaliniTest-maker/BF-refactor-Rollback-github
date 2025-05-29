@@ -1,1197 +1,1558 @@
 """
-Workflow Orchestration Service
+Workflow Orchestration Service for Flask Application
 
-This service implements comprehensive workflow orchestration patterns for complex business 
-process coordination across multiple services and entities. Provides advanced service 
-composition architecture, transaction boundary management, and event-driven processing 
-capabilities while maintaining functional equivalence with the original Node.js implementation.
+This module implements the advanced workflow orchestration patterns as specified in
+Section 4.5.3, providing comprehensive business process coordination across multiple
+services and entities. The service manages multi-step business workflows, service
+composition patterns, and cross-cutting business concerns while maintaining
+transaction consistency throughout complex operations.
 
 Key Features:
-- Advanced workflow orchestration patterns per Section 4.5.3
-- Service composition architecture for complex business operations per Section 5.2.3
-- Transaction boundary management with ACID properties preservation per Section 4.5.2
-- Event-driven processing through Flask signals per Section 4.5.3
-- Workflow retry mechanisms for resilient operation per Section 4.5.3
+- Advanced workflow orchestration patterns for business process coordination
+- Service composition architecture enabling multi-step business workflows
+- Transaction boundary management with ACID properties preservation
+- Event-driven processing capabilities through Flask signals
+- Workflow retry mechanisms for resilient operation
+- Business logic coordination maintaining functional equivalence with Node.js
+
+Architecture Integration:
+- Integrates with the Service Layer pattern per Section 5.2.3
+- Coordinates with Flask blueprints for HTTP endpoint integration
+- Manages complex business operations across service boundaries
+- Provides workflow state management and error recovery
 """
 
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, Union
-import functools
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from enum import Enum, auto
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 from flask import current_app, g
 from flask.signals import Namespace
-from blinker import signal
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
-from werkzeug.exceptions import BadRequest, InternalServerError
+from flask_sqlalchemy import SQLAlchemy
+from injector import inject, singleton
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 
-# Import database models
-from ..models import User, BusinessEntity, EntityRelationship
-from ..models.base import db
+from .base import BaseService, ServiceError, TransactionError, ValidationError
+from .business_entity_service import BusinessEntityService
+from .user_service import UserService
+from .validation_service import ValidationService
 
-# Configure logging for workflow orchestration
+# Type variables for workflow operations
+T = TypeVar("T")
+WorkflowResult = TypeVar("WorkflowResult")
+
+# Flask signals namespace for workflow events
+workflow_signals = Namespace()
+
+# Workflow event signals
+workflow_started = workflow_signals.signal("workflow-started")
+workflow_completed = workflow_signals.signal("workflow-completed")
+workflow_failed = workflow_signals.signal("workflow-failed")
+workflow_step_completed = workflow_signals.signal("workflow-step-completed")
+workflow_step_failed = workflow_signals.signal("workflow-step-failed")
+workflow_rolled_back = workflow_signals.signal("workflow-rolled-back")
+
+# Logger configuration for workflow orchestration
 logger = logging.getLogger(__name__)
 
 
 class WorkflowStatus(Enum):
     """Enumeration of workflow execution statuses."""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    RETRYING = "retrying"
-    CANCELLED = "cancelled"
-    TIMEOUT = "timeout"
+    PENDING = auto()
+    RUNNING = auto()
+    COMPLETED = auto()
+    FAILED = auto()
+    CANCELLED = auto()
+    ROLLED_BACK = auto()
 
 
 class WorkflowStepStatus(Enum):
     """Enumeration of individual workflow step statuses."""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    RETRYING = "retrying"
+    PENDING = auto()
+    RUNNING = auto()
+    COMPLETED = auto()
+    FAILED = auto()
+    SKIPPED = auto()
+    RETRYING = auto()
 
 
-class TransactionIsolationLevel(Enum):
-    """Database transaction isolation levels for workflow execution."""
-    READ_UNCOMMITTED = "READ_UNCOMMITTED"
-    READ_COMMITTED = "READ_COMMITTED"
-    REPEATABLE_READ = "REPEATABLE_READ"
-    SERIALIZABLE = "SERIALIZABLE"
+class WorkflowPriority(Enum):
+    """Enumeration of workflow execution priorities."""
+    LOW = 1
+    NORMAL = 2
+    HIGH = 3
+    CRITICAL = 4
+
+
+@dataclass
+class WorkflowContext:
+    """
+    Context object containing workflow execution state and metadata.
+    
+    Provides comprehensive state management for workflow execution including
+    step tracking, error handling, and recovery information.
+    """
+    workflow_id: str
+    workflow_type: str
+    status: WorkflowStatus
+    priority: WorkflowPriority
+    user_id: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime]
+    error_message: Optional[str]
+    retry_count: int
+    max_retries: int
+    context_data: Dict[str, Any]
+    step_results: Dict[str, Any]
+    rollback_steps: List[str]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert workflow context to dictionary representation."""
+        return {
+            **asdict(self),
+            "status": self.status.name,
+            "priority": self.priority.name,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
 
 
 @dataclass
 class WorkflowStep:
     """
-    Individual workflow step configuration with execution metadata.
+    Definition of an individual workflow step with execution logic.
     
-    Implements step-level configuration for service composition patterns
-    enabling complex business workflow coordination with retry logic
-    and transaction boundary management.
+    Encapsulates step-specific configuration including execution function,
+    validation rules, rollback logic, and error handling policies.
     """
     step_id: str
-    service_method: Callable
-    input_data: Dict[str, Any] = field(default_factory=dict)
-    dependencies: List[str] = field(default_factory=list)
-    retry_attempts: int = 3
-    retry_delay: float = 1.0
-    timeout_seconds: int = 300
-    rollback_method: Optional[Callable] = None
-    conditional_execution: Optional[Callable[[Dict[str, Any]], bool]] = None
-    priority: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    step_name: str
+    step_function: Callable[[WorkflowContext], Any]
+    rollback_function: Optional[Callable[[WorkflowContext], None]]
+    validation_function: Optional[Callable[[WorkflowContext], bool]]
+    required_services: List[str]
+    retry_policy: Dict[str, Any]
+    timeout_seconds: Optional[int]
+    critical: bool
+    depends_on: List[str]
     
-    # Runtime execution state
-    status: WorkflowStepStatus = WorkflowStepStatus.PENDING
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    execution_time: Optional[float] = None
-    error_message: Optional[str] = None
-    result_data: Optional[Any] = None
-    attempt_count: int = 0
+    def __post_init__(self):
+        """Initialize default retry policy if not provided."""
+        if not self.retry_policy:
+            self.retry_policy = {
+                "max_retries": 3,
+                "delay": 1.0,
+                "backoff_factor": 2.0,
+                "retry_on_exceptions": [OperationalError, SQLAlchemyError]
+            }
 
 
-@dataclass
-class WorkflowDefinition:
+class WorkflowError(ServiceError):
     """
-    Complete workflow definition with steps, configuration, and metadata.
+    Exception raised for workflow execution errors.
     
-    Orchestrates multi-step business workflows through service composition 
-    patterns with comprehensive transaction management and event coordination.
+    Extends ServiceError with workflow-specific error context including
+    workflow ID, step information, and recovery guidance.
     """
-    workflow_id: str
-    name: str
-    description: str
-    steps: List[WorkflowStep]
-    max_execution_time: int = 3600  # 1 hour default
-    transaction_isolation: TransactionIsolationLevel = TransactionIsolationLevel.READ_COMMITTED
-    enable_parallel_execution: bool = False
-    rollback_on_failure: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
     
-    # Runtime execution state
-    status: WorkflowStatus = WorkflowStatus.PENDING
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    execution_time: Optional[float] = None
-    current_step: Optional[str] = None
-    error_message: Optional[str] = None
-    context: Dict[str, Any] = field(default_factory=dict)
+    def __init__(self, message: str, workflow_id: str = None, 
+                 step_id: str = None, original_error: Exception = None,
+                 context: WorkflowContext = None):
+        self.workflow_id = workflow_id
+        self.step_id = step_id
+        self.context = context
+        super().__init__(message, original_error)
 
 
-@dataclass
-class WorkflowResult:
+def workflow_step(step_id: str, step_name: str = None, rollback_function: Callable = None,
+                 validation_function: Callable = None, required_services: List[str] = None,
+                 retry_policy: Dict[str, Any] = None, timeout_seconds: int = None,
+                 critical: bool = True, depends_on: List[str] = None):
     """
-    Comprehensive workflow execution result with detailed step information.
+    Decorator for defining workflow steps with comprehensive configuration.
     
-    Provides complete execution metadata for workflow analysis, debugging,
-    and business process optimization with transaction boundary preservation.
+    Provides declarative workflow step definition with automatic registration,
+    dependency management, and error handling integration.
+    
+    Args:
+        step_id: Unique identifier for the workflow step
+        step_name: Human-readable name for the step
+        rollback_function: Function to execute for rollback operations
+        validation_function: Function to validate step preconditions
+        required_services: List of service names required for execution
+        retry_policy: Retry configuration for step execution
+        timeout_seconds: Maximum execution time for the step
+        critical: Whether step failure should fail the entire workflow
+        depends_on: List of step IDs that must complete before this step
+    
+    Returns:
+        Decorated function registered as a workflow step
     """
-    workflow_id: str
-    status: WorkflowStatus
-    started_at: datetime
-    completed_at: Optional[datetime] = None
-    execution_time: Optional[float] = None
-    steps_executed: int = 0
-    steps_successful: int = 0
-    steps_failed: int = 0
-    final_result: Optional[Any] = None
-    error_details: Optional[Dict[str, Any]] = None
-    step_results: Dict[str, Any] = field(default_factory=dict)
-    transaction_rollback_performed: bool = False
-    retry_attempts_total: int = 0
+    
+    def decorator(func: Callable[[WorkflowContext], Any]) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        
+        # Store step metadata on the function
+        wrapper._workflow_step = WorkflowStep(
+            step_id=step_id,
+            step_name=step_name or step_id,
+            step_function=wrapper,
+            rollback_function=rollback_function,
+            validation_function=validation_function,
+            required_services=required_services or [],
+            retry_policy=retry_policy or {},
+            timeout_seconds=timeout_seconds,
+            critical=critical,
+            depends_on=depends_on or []
+        )
+        
+        return wrapper
+    
+    return decorator
 
 
-class WorkflowOrchestratorError(Exception):
-    """Base exception for workflow orchestration errors."""
-    pass
-
-
-class WorkflowTimeoutError(WorkflowOrchestratorError):
-    """Exception raised when workflow execution exceeds timeout limits."""
-    pass
-
-
-class WorkflowStepFailedError(WorkflowOrchestratorError):
-    """Exception raised when a critical workflow step fails."""
-    pass
-
-
-class TransactionBoundaryError(WorkflowOrchestratorError):
-    """Exception raised when transaction boundary management fails."""
-    pass
-
-
-class ServiceCompositionError(WorkflowOrchestratorError):
-    """Exception raised when service composition encounters errors."""
-    pass
-
-
-# Flask signals namespace for workflow events
-workflow_signals = Namespace()
-
-# Workflow lifecycle signals for event-driven processing
-workflow_started = workflow_signals.signal('workflow-started')
-workflow_completed = workflow_signals.signal('workflow-completed')
-workflow_failed = workflow_signals.signal('workflow-failed')
-workflow_step_started = workflow_signals.signal('workflow-step-started')
-workflow_step_completed = workflow_signals.signal('workflow-step-completed')
-workflow_step_failed = workflow_signals.signal('workflow-step-failed')
-workflow_step_retrying = workflow_signals.signal('workflow-step-retrying')
-transaction_started = workflow_signals.signal('transaction-started')
-transaction_committed = workflow_signals.signal('transaction-committed')
-transaction_rolled_back = workflow_signals.signal('transaction-rolled-back')
-
-
-class WorkflowOrchestrator:
+@singleton
+class WorkflowOrchestrator(BaseService):
     """
     Advanced workflow orchestration service implementing complex business process
     coordination across multiple services and entities.
     
-    This service provides comprehensive workflow orchestration capabilities including:
-    - Service composition patterns for multi-step business operations
+    This service provides comprehensive workflow management capabilities including:
+    - Multi-step business workflow execution with dependency management
+    - Service composition patterns for complex business operations
     - Transaction boundary management with ACID properties preservation
-    - Event-driven processing through Flask signals integration
-    - Comprehensive retry mechanisms with exponential backoff
-    - Parallel and sequential workflow execution patterns
-    - Integration with Flask-SQLAlchemy session management
-    - Cross-cutting business concern coordination
+    - Event-driven processing through Flask signals
+    - Automatic retry mechanisms for resilient operation
+    - Workflow state persistence and recovery capabilities
+    - Business logic coordination maintaining functional equivalence
     
-    Features:
-    - Advanced workflow orchestration patterns per Section 4.5.3
-    - Service composition architecture per Section 5.2.3
-    - Transaction boundary management per Section 4.5.2
-    - Event-driven processing per Section 4.5.3
-    - Workflow retry mechanisms per Section 4.5.3
+    The orchestrator integrates with all business services through the Service
+    Layer pattern and provides centralized coordination for complex business
+    processes that span multiple domains and entities.
     """
     
-    def __init__(self, app=None):
+    @inject
+    def __init__(self, db: SQLAlchemy):
         """
-        Initialize workflow orchestrator with Flask application context.
+        Initialize workflow orchestrator with database and service dependencies.
         
         Args:
-            app: Flask application instance for context integration
+            db: Flask-SQLAlchemy database instance for transaction management
         """
-        self.app = app
-        self._active_workflows: Dict[str, WorkflowDefinition] = {}
-        self._workflow_history: Dict[str, WorkflowResult] = {}
-        self._service_registry: Dict[str, Any] = {}
-        self._executor = ThreadPoolExecutor(max_workers=10)
+        super().__init__(db)
         
-        if app is not None:
-            self.init_app(app)
+        # Service composition for complex business operations
+        self._user_service: Optional[UserService] = None
+        self._business_entity_service: Optional[BusinessEntityService] = None
+        self._validation_service: Optional[ValidationService] = None
+        
+        # Workflow execution state management
+        self._active_workflows: Dict[str, WorkflowContext] = {}
+        self._workflow_definitions: Dict[str, List[WorkflowStep]] = {}
+        self._workflow_locks: Dict[str, bool] = {}
+        
+        # Event-driven processing configuration
+        self._event_handlers: Dict[str, List[Callable]] = {}
+        self._register_signal_handlers()
+        
+        # Performance monitoring
+        self._workflow_metrics: Dict[str, Dict[str, Any]] = {}
+        
+        self.logger.info("Initialized WorkflowOrchestrator service")
     
-    def init_app(self, app):
+    @property
+    def user_service(self) -> UserService:
+        """Get user service instance through service composition."""
+        if self._user_service is None:
+            self._user_service = self.compose_service(UserService)
+        return self._user_service
+    
+    @property
+    def business_entity_service(self) -> BusinessEntityService:
+        """Get business entity service instance through service composition."""
+        if self._business_entity_service is None:
+            self._business_entity_service = self.compose_service(BusinessEntityService)
+        return self._business_entity_service
+    
+    @property
+    def validation_service(self) -> ValidationService:
+        """Get validation service instance through service composition."""
+        if self._validation_service is None:
+            self._validation_service = self.compose_service(ValidationService)
+        return self._validation_service
+    
+    def validate_business_rules(self, data: Dict[str, Any]) -> bool:
         """
-        Initialize workflow orchestrator with Flask application factory pattern.
+        Validate workflow orchestration business rules.
         
-        Integrates workflow orchestration service with Flask application context,
-        registers signal handlers, and configures transaction management.
+        Implements workflow-specific business rule validation including
+        workflow definition validation, step dependency checking, and
+        resource availability verification.
         
         Args:
-            app: Flask application instance
-        """
-        self.app = app
-        app.workflow_orchestrator = self
+            data: Workflow data to validate
         
-        # Register default signal handlers for workflow lifecycle events
-        self._register_default_signal_handlers()
-        
-        # Configure database session management for transaction boundaries
-        app.teardown_appcontext(self._close_database_sessions)
-        
-        logger.info("Workflow orchestrator initialized with Flask application")
-    
-    def _register_default_signal_handlers(self):
-        """
-        Register default signal handlers for workflow lifecycle events.
-        
-        Implements event-driven processing capabilities through Flask signals
-        integration enabling workflow monitoring and cross-cutting concerns.
-        """
-        @workflow_started.connect
-        def on_workflow_started(sender, workflow_id, workflow_name, **kwargs):
-            logger.info(f"Workflow started: {workflow_id} ({workflow_name})")
-        
-        @workflow_completed.connect
-        def on_workflow_completed(sender, workflow_id, result, **kwargs):
-            logger.info(f"Workflow completed: {workflow_id} with status {result.status}")
-        
-        @workflow_failed.connect
-        def on_workflow_failed(sender, workflow_id, error, **kwargs):
-            logger.error(f"Workflow failed: {workflow_id} - {error}")
-        
-        @transaction_rolled_back.connect
-        def on_transaction_rollback(sender, workflow_id, error, **kwargs):
-            logger.warning(f"Transaction rolled back for workflow: {workflow_id} - {error}")
-    
-    def _close_database_sessions(self, exception):
-        """
-        Clean up database sessions during application context teardown.
-        
-        Ensures proper transaction boundary management and resource cleanup
-        for workflow orchestration database operations.
-        """
-        if hasattr(g, 'workflow_session'):
-            try:
-                if exception:
-                    g.workflow_session.rollback()
-                else:
-                    g.workflow_session.commit()
-            except Exception as e:
-                logger.error(f"Error closing workflow database session: {e}")
-                g.workflow_session.rollback()
-            finally:
-                g.workflow_session.close()
-                delattr(g, 'workflow_session')
-    
-    def register_service(self, service_name: str, service_instance: Any):
-        """
-        Register service instance for workflow composition patterns.
-        
-        Enables service composition architecture by registering service instances
-        for use in workflow step execution and business logic coordination.
-        
-        Args:
-            service_name: Unique identifier for the service
-            service_instance: Service instance for workflow integration
-        """
-        self._service_registry[service_name] = service_instance
-        logger.debug(f"Registered service: {service_name}")
-    
-    def get_service(self, service_name: str) -> Any:
-        """
-        Retrieve registered service instance for workflow execution.
-        
-        Args:
-            service_name: Service identifier
-            
         Returns:
-            Service instance for workflow integration
-            
+            True if validation passes
+        
         Raises:
-            ServiceCompositionError: If service is not registered
+            ValidationError: When workflow business rules are violated
         """
-        if service_name not in self._service_registry:
-            raise ServiceCompositionError(f"Service not registered: {service_name}")
+        required_fields = ["workflow_type", "context_data"]
+        validated_data = self.validate_input(data, required_fields)
         
-        return self._service_registry[service_name]
+        workflow_type = validated_data["workflow_type"]
+        
+        # Validate workflow type is registered
+        if workflow_type not in self._workflow_definitions:
+            raise ValidationError(f"Unknown workflow type: {workflow_type}")
+        
+        # Validate context data structure
+        context_data = validated_data["context_data"]
+        if not isinstance(context_data, dict):
+            raise ValidationError("Workflow context_data must be a dictionary")
+        
+        # Validate workflow-specific business rules through composed services
+        if "user_id" in context_data:
+            # Validate user exists and is active
+            user_validation_data = {"user_id": context_data["user_id"]}
+            if not self.user_service.validate_business_rules(user_validation_data):
+                raise ValidationError("Invalid user for workflow execution")
+        
+        if "entity_id" in context_data:
+            # Validate business entity exists and is accessible
+            entity_validation_data = {"entity_id": context_data["entity_id"]}
+            if not self.business_entity_service.validate_business_rules(entity_validation_data):
+                raise ValidationError("Invalid business entity for workflow execution")
+        
+        self.logger.debug(f"Validated workflow business rules for type: {workflow_type}")
+        return True
     
-    def create_workflow_definition(
-        self,
-        workflow_id: str,
-        name: str,
-        description: str,
-        steps: List[WorkflowStep],
-        **kwargs
-    ) -> WorkflowDefinition:
+    def register_workflow_definition(self, workflow_type: str, 
+                                   steps: List[WorkflowStep]) -> None:
         """
-        Create comprehensive workflow definition for business process orchestration.
+        Register a workflow definition with step configuration.
         
-        Implements workflow definition creation with service composition patterns,
-        transaction configuration, and execution metadata management.
+        Provides workflow registration capabilities for complex business processes
+        with comprehensive step validation and dependency checking.
         
         Args:
-            workflow_id: Unique workflow identifier
-            name: Human-readable workflow name
-            description: Workflow description and purpose
-            steps: List of workflow steps for execution
-            **kwargs: Additional workflow configuration options
-            
-        Returns:
-            Complete workflow definition ready for execution
+            workflow_type: Unique identifier for the workflow type
+            steps: List of workflow steps in execution order
+        
+        Raises:
+            ValidationError: When workflow definition is invalid
         """
-        # Validate workflow step dependencies
-        self._validate_workflow_dependencies(steps)
+        if not workflow_type:
+            raise ValidationError("Workflow type cannot be empty")
         
-        # Sort steps by priority and dependencies
-        sorted_steps = self._sort_workflow_steps(steps)
+        if not steps:
+            raise ValidationError("Workflow must have at least one step")
         
-        workflow_definition = WorkflowDefinition(
-            workflow_id=workflow_id,
-            name=name,
-            description=description,
-            steps=sorted_steps,
-            **kwargs
-        )
+        # Validate step dependencies
+        step_ids = {step.step_id for step in steps}
+        for step in steps:
+            for dependency in step.depends_on:
+                if dependency not in step_ids:
+                    raise ValidationError(
+                        f"Step {step.step_id} depends on unknown step: {dependency}"
+                    )
         
-        logger.debug(f"Created workflow definition: {workflow_id} with {len(steps)} steps")
-        return workflow_definition
+        # Check for circular dependencies
+        self._validate_no_circular_dependencies(steps)
+        
+        self._workflow_definitions[workflow_type] = steps
+        self.logger.info(f"Registered workflow definition: {workflow_type} with {len(steps)} steps")
     
-    def _validate_workflow_dependencies(self, steps: List[WorkflowStep]):
+    def _validate_no_circular_dependencies(self, steps: List[WorkflowStep]) -> None:
         """
-        Validate workflow step dependencies for execution consistency.
-        
-        Ensures all step dependencies are satisfied and circular dependencies
-        are detected before workflow execution begins.
+        Validate that workflow steps have no circular dependencies.
         
         Args:
             steps: List of workflow steps to validate
-            
+        
         Raises:
-            WorkflowOrchestratorError: If dependencies are invalid
+            ValidationError: When circular dependencies are detected
         """
-        step_ids = {step.step_id for step in steps}
+        step_dependencies = {step.step_id: step.depends_on for step in steps}
         
+        def has_circular_dependency(step_id: str, visited: set, recursion_stack: set) -> bool:
+            visited.add(step_id)
+            recursion_stack.add(step_id)
+            
+            for dependency in step_dependencies.get(step_id, []):
+                if dependency not in visited:
+                    if has_circular_dependency(dependency, visited, recursion_stack):
+                        return True
+                elif dependency in recursion_stack:
+                    return True
+            
+            recursion_stack.remove(step_id)
+            return False
+        
+        visited = set()
         for step in steps:
-            for dependency in step.dependencies:
-                if dependency not in step_ids:
-                    raise WorkflowOrchestratorError(
-                        f"Step {step.step_id} depends on non-existent step: {dependency}"
-                    )
-        
-        # Check for circular dependencies using topological sort
-        try:
-            self._topological_sort(steps)
-        except ValueError as e:
-            raise WorkflowOrchestratorError(f"Circular dependency detected: {e}")
+            if step.step_id not in visited:
+                if has_circular_dependency(step.step_id, visited, set()):
+                    raise ValidationError(f"Circular dependency detected in workflow steps")
     
-    def _sort_workflow_steps(self, steps: List[WorkflowStep]) -> List[WorkflowStep]:
+    def execute_workflow(self, workflow_type: str, context_data: Dict[str, Any],
+                        priority: WorkflowPriority = WorkflowPriority.NORMAL,
+                        max_retries: int = 3) -> WorkflowContext:
         """
-        Sort workflow steps by dependencies and priority for execution order.
-        
-        Implements topological sorting for dependency resolution and
-        priority-based ordering for optimal workflow execution.
-        
-        Args:
-            steps: Unsorted list of workflow steps
-            
-        Returns:
-            Sorted list of workflow steps ready for execution
-        """
-        # Perform topological sort for dependency ordering
-        sorted_by_deps = self._topological_sort(steps)
-        
-        # Secondary sort by priority within dependency groups
-        return sorted(sorted_by_deps, key=lambda x: (-x.priority, x.step_id))
-    
-    def _topological_sort(self, steps: List[WorkflowStep]) -> List[WorkflowStep]:
-        """
-        Perform topological sort for workflow step dependency resolution.
-        
-        Args:
-            steps: List of workflow steps with dependencies
-            
-        Returns:
-            Topologically sorted list of workflow steps
-            
-        Raises:
-            ValueError: If circular dependencies are detected
-        """
-        # Build adjacency list and in-degree count
-        step_map = {step.step_id: step for step in steps}
-        in_degree = {step.step_id: 0 for step in steps}
-        adj_list = {step.step_id: [] for step in steps}
-        
-        for step in steps:
-            for dependency in step.dependencies:
-                adj_list[dependency].append(step.step_id)
-                in_degree[step.step_id] += 1
-        
-        # Kahn's algorithm for topological sorting
-        queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
-        result = []
-        
-        while queue:
-            current = queue.pop(0)
-            result.append(step_map[current])
-            
-            for neighbor in adj_list[current]:
-                in_degree[neighbor] -= 1
-                if in_degree[neighbor] == 0:
-                    queue.append(neighbor)
-        
-        if len(result) != len(steps):
-            raise ValueError("Circular dependency detected in workflow steps")
-        
-        return result
-    
-    def execute_workflow(
-        self,
-        workflow_definition: WorkflowDefinition,
-        context: Optional[Dict[str, Any]] = None
-    ) -> WorkflowResult:
-        """
-        Execute complete workflow with comprehensive orchestration and monitoring.
+        Execute a complete workflow with comprehensive orchestration.
         
         Implements advanced workflow orchestration patterns with transaction
-        boundary management, event-driven processing, and retry mechanisms
-        for resilient business process execution.
+        boundary management, event-driven processing, and error recovery.
         
         Args:
-            workflow_definition: Complete workflow definition for execution
-            context: Additional context data for workflow execution
-            
+            workflow_type: Type of workflow to execute
+            context_data: Initial context data for workflow execution
+            priority: Execution priority for resource allocation
+            max_retries: Maximum retry attempts for the entire workflow
+        
         Returns:
-            Comprehensive workflow execution result with detailed metadata
-            
+            WorkflowContext with execution results and status
+        
         Raises:
-            WorkflowOrchestratorError: If workflow execution encounters errors
+            WorkflowError: When workflow execution fails
         """
-        workflow_id = workflow_definition.workflow_id
-        context = context or {}
+        # Validate workflow execution request
+        validation_data = {
+            "workflow_type": workflow_type,
+            "context_data": context_data
+        }
+        self.validate_business_rules(validation_data)
         
-        # Initialize workflow execution state
-        workflow_definition.context.update(context)
-        workflow_definition.status = WorkflowStatus.RUNNING
-        workflow_definition.started_at = datetime.utcnow()
-        
-        # Store active workflow for monitoring
-        self._active_workflows[workflow_id] = workflow_definition
-        
-        # Emit workflow started signal
-        workflow_started.send(
-            current_app._get_current_object(),
+        # Create workflow context
+        workflow_id = str(uuid.uuid4())
+        workflow_context = WorkflowContext(
             workflow_id=workflow_id,
-            workflow_name=workflow_definition.name,
-            context=context
+            workflow_type=workflow_type,
+            status=WorkflowStatus.PENDING,
+            priority=priority,
+            user_id=self.get_current_user_id(),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            completed_at=None,
+            error_message=None,
+            retry_count=0,
+            max_retries=max_retries,
+            context_data=context_data.copy(),
+            step_results={},
+            rollback_steps=[]
         )
         
+        # Register active workflow
+        self._active_workflows[workflow_id] = workflow_context
+        
         try:
+            # Emit workflow started signal
+            workflow_started.send(
+                current_app._get_current_object(),
+                workflow_context=workflow_context
+            )
+            
             # Execute workflow with transaction boundary management
-            result = self._execute_workflow_with_transaction(workflow_definition)
-            
-            # Update workflow completion state
-            workflow_definition.status = WorkflowStatus.COMPLETED
-            workflow_definition.completed_at = datetime.utcnow()
-            workflow_definition.execution_time = (
-                workflow_definition.completed_at - workflow_definition.started_at
-            ).total_seconds()
-            
-            # Emit workflow completed signal
-            workflow_completed.send(
-                current_app._get_current_object(),
-                workflow_id=workflow_id,
-                result=result
-            )
-            
-            logger.info(f"Workflow {workflow_id} completed successfully in {workflow_definition.execution_time:.2f}s")
-            return result
-            
-        except Exception as e:
-            # Handle workflow execution failure
-            workflow_definition.status = WorkflowStatus.FAILED
-            workflow_definition.completed_at = datetime.utcnow()
-            workflow_definition.error_message = str(e)
-            
-            # Emit workflow failed signal
-            workflow_failed.send(
-                current_app._get_current_object(),
-                workflow_id=workflow_id,
-                error=str(e)
-            )
-            
-            logger.error(f"Workflow {workflow_id} failed: {e}")
-            
-            # Create failure result
-            result = WorkflowResult(
-                workflow_id=workflow_id,
-                status=WorkflowStatus.FAILED,
-                started_at=workflow_definition.started_at,
-                completed_at=workflow_definition.completed_at,
-                error_details={'error': str(e), 'type': type(e).__name__}
-            )
-            
-            # Store in workflow history
-            self._workflow_history[workflow_id] = result
-            
-            raise WorkflowOrchestratorError(f"Workflow execution failed: {e}") from e
-        
-        finally:
-            # Clean up active workflow tracking
-            if workflow_id in self._active_workflows:
-                del self._active_workflows[workflow_id]
-    
-    def _execute_workflow_with_transaction(
-        self,
-        workflow_definition: WorkflowDefinition
-    ) -> WorkflowResult:
-        """
-        Execute workflow within transaction boundary for ACID properties preservation.
-        
-        Implements comprehensive transaction boundary management with isolation
-        level control, rollback capabilities, and session coordination for
-        multi-step business workflow execution.
-        
-        Args:
-            workflow_definition: Workflow definition for transaction execution
-            
-        Returns:
-            Complete workflow execution result with transaction metadata
-        """
-        session = self._get_workflow_session(workflow_definition.transaction_isolation)
-        
-        try:
-            # Emit transaction started signal
-            transaction_started.send(
-                current_app._get_current_object(),
-                workflow_id=workflow_definition.workflow_id,
-                isolation_level=workflow_definition.transaction_isolation.value
-            )
-            
-            # Execute workflow steps within transaction
-            if workflow_definition.enable_parallel_execution:
-                result = self._execute_workflow_parallel(workflow_definition, session)
-            else:
-                result = self._execute_workflow_sequential(workflow_definition, session)
-            
-            # Commit transaction for successful workflow execution
-            session.commit()
-            
-            # Emit transaction committed signal
-            transaction_committed.send(
-                current_app._get_current_object(),
-                workflow_id=workflow_definition.workflow_id
-            )
-            
-            # Store successful result in workflow history
-            self._workflow_history[workflow_definition.workflow_id] = result
-            
-            return result
-            
-        except Exception as e:
-            # Rollback transaction on workflow failure
-            session.rollback()
-            
-            # Emit transaction rollback signal
-            transaction_rolled_back.send(
-                current_app._get_current_object(),
-                workflow_id=workflow_definition.workflow_id,
-                error=str(e)
-            )
-            
-            # Perform workflow-level rollback if enabled
-            if workflow_definition.rollback_on_failure:
-                self._perform_workflow_rollback(workflow_definition, session)
-            
-            raise TransactionBoundaryError(f"Transaction failed for workflow {workflow_definition.workflow_id}: {e}") from e
-        
-        finally:
-            session.close()
-    
-    def _get_workflow_session(self, isolation_level: TransactionIsolationLevel) -> Session:
-        """
-        Get database session with specified transaction isolation level.
-        
-        Creates and configures database session for workflow execution with
-        appropriate isolation level for transaction boundary management.
-        
-        Args:
-            isolation_level: Database transaction isolation level
-            
-        Returns:
-            Configured database session for workflow execution
-        """
-        session = db.session
-        
-        # Configure transaction isolation level
-        if isolation_level != TransactionIsolationLevel.READ_COMMITTED:
-            session.execute(f"SET TRANSACTION ISOLATION LEVEL {isolation_level.value}")
-        
-        # Store session in Flask application context
-        g.workflow_session = session
-        
-        return session
-    
-    def _execute_workflow_sequential(
-        self,
-        workflow_definition: WorkflowDefinition,
-        session: Session
-    ) -> WorkflowResult:
-        """
-        Execute workflow steps in sequential order with dependency resolution.
-        
-        Implements sequential workflow execution with comprehensive step
-        monitoring, retry mechanisms, and error handling for business
-        process coordination.
-        
-        Args:
-            workflow_definition: Workflow definition for sequential execution
-            session: Database session for transaction management
-            
-        Returns:
-            Complete workflow execution result with step-level details
-        """
-        result = WorkflowResult(
-            workflow_id=workflow_definition.workflow_id,
-            status=WorkflowStatus.RUNNING,
-            started_at=workflow_definition.started_at
-        )
-        
-        for step in workflow_definition.steps:
-            # Check workflow timeout before executing each step
-            if self._is_workflow_timeout(workflow_definition):
-                raise WorkflowTimeoutError(f"Workflow {workflow_definition.workflow_id} exceeded maximum execution time")
-            
-            # Check step conditional execution
-            if step.conditional_execution and not step.conditional_execution(workflow_definition.context):
-                step.status = WorkflowStepStatus.SKIPPED
-                logger.debug(f"Skipped step {step.step_id} due to conditional execution")
-                continue
-            
-            # Execute workflow step with retry mechanism
-            step_result = self._execute_workflow_step_with_retry(step, workflow_definition, session)
-            
-            # Update workflow context with step result
-            workflow_definition.context[f"step_{step.step_id}_result"] = step_result
-            result.step_results[step.step_id] = step_result
-            
-            # Update execution statistics
-            result.steps_executed += 1
-            if step.status == WorkflowStepStatus.COMPLETED:
-                result.steps_successful += 1
-            elif step.status == WorkflowStepStatus.FAILED:
-                result.steps_failed += 1
+            with self.transaction_boundary():
+                self._execute_workflow_steps(workflow_context)
                 
-                # Handle critical step failure
-                if not step.rollback_method:
-                    raise WorkflowStepFailedError(f"Critical step {step.step_id} failed: {step.error_message}")
+                # Mark workflow as completed
+                workflow_context.status = WorkflowStatus.COMPLETED
+                workflow_context.completed_at = datetime.utcnow()
+                workflow_context.updated_at = datetime.utcnow()
+                
+                # Emit workflow completed signal
+                workflow_completed.send(
+                    current_app._get_current_object(),
+                    workflow_context=workflow_context
+                )
+                
+                self.logger.info(f"Workflow {workflow_id} completed successfully")
+                
+        except Exception as e:
+            # Handle workflow failure with rollback
+            self._handle_workflow_failure(workflow_context, e)
+            raise WorkflowError(
+                f"Workflow execution failed: {str(e)}",
+                workflow_id=workflow_id,
+                original_error=e,
+                context=workflow_context
+            )
         
-        # Finalize workflow execution result
-        result.status = WorkflowStatus.COMPLETED
-        result.completed_at = datetime.utcnow()
-        result.execution_time = (result.completed_at - result.started_at).total_seconds()
-        result.final_result = workflow_definition.context
+        finally:
+            # Clean up active workflow registration
+            self._active_workflows.pop(workflow_id, None)
         
-        return result
+        return workflow_context
     
-    def _execute_workflow_parallel(
-        self,
-        workflow_definition: WorkflowDefinition,
-        session: Session
-    ) -> WorkflowResult:
+    def _execute_workflow_steps(self, workflow_context: WorkflowContext) -> None:
         """
-        Execute workflow steps in parallel where dependencies allow.
+        Execute individual workflow steps with dependency management.
         
-        Implements parallel workflow execution with dependency graph resolution,
-        concurrent step execution, and synchronized result collection for
-        enhanced workflow performance.
+        Implements step-by-step execution with dependency resolution,
+        error handling, and progress tracking.
         
         Args:
-            workflow_definition: Workflow definition for parallel execution
-            session: Database session for transaction management
-            
-        Returns:
-            Complete workflow execution result with parallel execution metadata
-        """
-        result = WorkflowResult(
-            workflow_id=workflow_definition.workflow_id,
-            status=WorkflowStatus.RUNNING,
-            started_at=workflow_definition.started_at
-        )
+            workflow_context: Workflow execution context
         
-        # Build dependency graph for parallel execution
-        dependency_graph = self._build_dependency_graph(workflow_definition.steps)
-        completed_steps = set()
-        step_futures = {}
-        
-        while len(completed_steps) < len(workflow_definition.steps):
-            # Find steps ready for execution (dependencies satisfied)
-            ready_steps = [
-                step for step in workflow_definition.steps
-                if (step.step_id not in completed_steps and
-                    all(dep in completed_steps for dep in step.dependencies))
-            ]
-            
-            # Submit ready steps for parallel execution
-            for step in ready_steps:
-                if step.step_id not in step_futures:
-                    future = self._executor.submit(
-                        self._execute_workflow_step_with_retry,
-                        step,
-                        workflow_definition,
-                        session
-                    )
-                    step_futures[step.step_id] = future
-            
-            # Wait for at least one step to complete
-            completed_future = next(iter(step_futures.values()))
-            completed_future.result()  # This will block until completion
-            
-            # Process completed steps
-            for step_id, future in list(step_futures.items()):
-                if future.done():
-                    try:
-                        step_result = future.result()
-                        workflow_definition.context[f"step_{step_id}_result"] = step_result
-                        result.step_results[step_id] = step_result
-                        result.steps_executed += 1
-                        result.steps_successful += 1
-                        completed_steps.add(step_id)
-                    except Exception as e:
-                        result.steps_failed += 1
-                        logger.error(f"Parallel step {step_id} failed: {e}")
-                        # Handle critical failure in parallel execution
-                        raise WorkflowStepFailedError(f"Parallel step {step_id} failed: {e}")
-                    finally:
-                        del step_futures[step_id]
-        
-        # Finalize parallel workflow execution result
-        result.status = WorkflowStatus.COMPLETED
-        result.completed_at = datetime.utcnow()
-        result.execution_time = (result.completed_at - result.started_at).total_seconds()
-        result.final_result = workflow_definition.context
-        
-        return result
-    
-    def _build_dependency_graph(self, steps: List[WorkflowStep]) -> Dict[str, List[str]]:
-        """
-        Build dependency graph for parallel workflow execution.
-        
-        Args:
-            steps: List of workflow steps with dependencies
-            
-        Returns:
-            Dependency graph mapping step IDs to dependent step IDs
-        """
-        graph = {}
-        for step in steps:
-            graph[step.step_id] = step.dependencies.copy()
-        return graph
-    
-    def _execute_workflow_step_with_retry(
-        self,
-        step: WorkflowStep,
-        workflow_definition: WorkflowDefinition,
-        session: Session
-    ) -> Any:
-        """
-        Execute individual workflow step with comprehensive retry mechanism.
-        
-        Implements robust workflow step execution with exponential backoff retry,
-        error handling, and signal emission for step-level monitoring and
-        event-driven processing coordination.
-        
-        Args:
-            step: Workflow step for execution
-            workflow_definition: Parent workflow definition for context
-            session: Database session for transaction management
-            
-        Returns:
-            Step execution result data
-            
         Raises:
-            WorkflowStepFailedError: If step fails after all retry attempts
+            WorkflowError: When step execution fails
         """
-        workflow_definition.current_step = step.step_id
-        step.status = WorkflowStepStatus.RUNNING
-        step.started_at = datetime.utcnow()
+        workflow_context.status = WorkflowStatus.RUNNING
+        steps = self._workflow_definitions[workflow_context.workflow_type]
         
-        # Emit step started signal
-        workflow_step_started.send(
-            current_app._get_current_object(),
-            workflow_id=workflow_definition.workflow_id,
-            step_id=step.step_id,
-            step=step
-        )
+        # Build execution order based on dependencies
+        execution_order = self._resolve_step_dependencies(steps)
         
-        last_exception = None
-        
-        for attempt in range(step.retry_attempts + 1):
-            step.attempt_count = attempt + 1
-            
+        for step in execution_order:
             try:
-                # Execute step with timeout handling
-                step_result = self._execute_step_with_timeout(step, workflow_definition, session)
+                # Check if step should be executed
+                if not self._should_execute_step(step, workflow_context):
+                    workflow_context.step_results[step.step_id] = {
+                        "status": WorkflowStepStatus.SKIPPED.name,
+                        "result": None,
+                        "executed_at": datetime.utcnow().isoformat()
+                    }
+                    continue
                 
-                # Update step completion state
-                step.status = WorkflowStepStatus.COMPLETED
-                step.completed_at = datetime.utcnow()
-                step.execution_time = (step.completed_at - step.started_at).total_seconds()
-                step.result_data = step_result
+                # Execute step with retry mechanism
+                step_result = self._execute_step_with_retry(step, workflow_context)
+                
+                # Store step result
+                workflow_context.step_results[step.step_id] = {
+                    "status": WorkflowStepStatus.COMPLETED.name,
+                    "result": step_result,
+                    "executed_at": datetime.utcnow().isoformat()
+                }
+                
+                # Add to rollback steps if rollback function exists
+                if step.rollback_function:
+                    workflow_context.rollback_steps.append(step.step_id)
                 
                 # Emit step completed signal
                 workflow_step_completed.send(
                     current_app._get_current_object(),
-                    workflow_id=workflow_definition.workflow_id,
-                    step_id=step.step_id,
+                    workflow_context=workflow_context,
+                    step=step,
                     result=step_result
                 )
                 
-                logger.debug(f"Step {step.step_id} completed in attempt {attempt + 1}")
-                return step_result
+                self.logger.debug(f"Completed step {step.step_id} in workflow {workflow_context.workflow_id}")
                 
             except Exception as e:
-                last_exception = e
-                step.error_message = str(e)
+                # Handle step failure
+                workflow_context.step_results[step.step_id] = {
+                    "status": WorkflowStepStatus.FAILED.name,
+                    "error": str(e),
+                    "executed_at": datetime.utcnow().isoformat()
+                }
                 
-                # Check if we should retry
-                if attempt < step.retry_attempts:
-                    step.status = WorkflowStepStatus.RETRYING
-                    
-                    # Emit step retrying signal
-                    workflow_step_retrying.send(
-                        current_app._get_current_object(),
-                        workflow_id=workflow_definition.workflow_id,
+                # Emit step failed signal
+                workflow_step_failed.send(
+                    current_app._get_current_object(),
+                    workflow_context=workflow_context,
+                    step=step,
+                    error=e
+                )
+                
+                self.logger.error(f"Step {step.step_id} failed in workflow {workflow_context.workflow_id}: {e}")
+                
+                # Check if step is critical
+                if step.critical:
+                    raise WorkflowError(
+                        f"Critical step {step.step_id} failed: {str(e)}",
+                        workflow_id=workflow_context.workflow_id,
                         step_id=step.step_id,
-                        attempt=attempt + 1,
-                        error=str(e)
+                        original_error=e,
+                        context=workflow_context
                     )
-                    
-                    # Calculate exponential backoff delay
-                    delay = step.retry_delay * (2 ** attempt)
-                    logger.warning(f"Step {step.step_id} failed (attempt {attempt + 1}), retrying in {delay}s: {e}")
-                    time.sleep(delay)
-                else:
-                    # Final failure after all retry attempts
-                    step.status = WorkflowStepStatus.FAILED
-                    step.completed_at = datetime.utcnow()
-                    step.execution_time = (step.completed_at - step.started_at).total_seconds()
-                    
-                    # Emit step failed signal
-                    workflow_step_failed.send(
-                        current_app._get_current_object(),
-                        workflow_id=workflow_definition.workflow_id,
-                        step_id=step.step_id,
-                        error=str(e),
-                        attempts=step.retry_attempts + 1
-                    )
-                    
-                    logger.error(f"Step {step.step_id} failed after {step.retry_attempts + 1} attempts: {e}")
-                    break
-        
-        # Perform step rollback if available
-        if step.rollback_method:
-            try:
-                logger.info(f"Performing rollback for failed step: {step.step_id}")
-                step.rollback_method(workflow_definition.context)
-            except Exception as rollback_error:
-                logger.error(f"Rollback failed for step {step.step_id}: {rollback_error}")
-        
-        raise WorkflowStepFailedError(f"Step {step.step_id} failed after {step.retry_attempts + 1} attempts: {last_exception}")
+                
+                # Continue with non-critical step failure
+                self.logger.warning(f"Non-critical step {step.step_id} failed, continuing workflow")
     
-    def _execute_step_with_timeout(
-        self,
-        step: WorkflowStep,
-        workflow_definition: WorkflowDefinition,
-        session: Session
-    ) -> Any:
+    def _resolve_step_dependencies(self, steps: List[WorkflowStep]) -> List[WorkflowStep]:
         """
-        Execute workflow step with timeout handling.
+        Resolve step execution order based on dependencies.
+        
+        Implements topological sorting for dependency resolution.
         
         Args:
-            step: Workflow step for execution
-            workflow_definition: Parent workflow definition
-            session: Database session for transaction management
+            steps: List of workflow steps
+        
+        Returns:
+            List of steps in execution order
+        """
+        step_map = {step.step_id: step for step in steps}
+        in_degree = {step.step_id: len(step.depends_on) for step in steps}
+        queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
+        execution_order = []
+        
+        while queue:
+            current_step_id = queue.pop(0)
+            current_step = step_map[current_step_id]
+            execution_order.append(current_step)
             
+            # Update in-degree for dependent steps
+            for step in steps:
+                if current_step_id in step.depends_on:
+                    in_degree[step.step_id] -= 1
+                    if in_degree[step.step_id] == 0:
+                        queue.append(step.step_id)
+        
+        return execution_order
+    
+    def _should_execute_step(self, step: WorkflowStep, 
+                           workflow_context: WorkflowContext) -> bool:
+        """
+        Determine if a workflow step should be executed.
+        
+        Evaluates step preconditions and validation functions.
+        
+        Args:
+            step: Workflow step to evaluate
+            workflow_context: Current workflow context
+        
+        Returns:
+            True if step should be executed
+        """
+        # Check validation function if provided
+        if step.validation_function:
+            try:
+                return step.validation_function(workflow_context)
+            except Exception as e:
+                self.logger.warning(f"Step validation failed for {step.step_id}: {e}")
+                return False
+        
+        return True
+    
+    def _execute_step_with_retry(self, step: WorkflowStep, 
+                               workflow_context: WorkflowContext) -> Any:
+        """
+        Execute a workflow step with retry mechanism.
+        
+        Implements step-specific retry policies with exponential backoff.
+        
+        Args:
+            step: Workflow step to execute
+            workflow_context: Current workflow context
+        
         Returns:
             Step execution result
-            
+        
         Raises:
-            TimeoutError: If step execution exceeds timeout
+            WorkflowError: When step execution fails after all retries
         """
-        import signal
-        import functools
+        retry_policy = step.retry_policy
+        max_retries = retry_policy.get("max_retries", 3)
+        delay = retry_policy.get("delay", 1.0)
+        backoff_factor = retry_policy.get("backoff_factor", 2.0)
+        retry_exceptions = tuple(retry_policy.get("retry_on_exceptions", [OperationalError]))
         
-        def timeout_handler(signum, frame):
-            raise TimeoutError(f"Step {step.step_id} timed out after {step.timeout_seconds} seconds")
+        last_exception = None
+        current_delay = delay
         
-        # Set up timeout handling
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(step.timeout_seconds)
-        
-        try:
-            # Prepare step input data with workflow context
-            step_input = {
-                **step.input_data,
-                'workflow_context': workflow_definition.context,
-                'session': session
-            }
-            
-            # Execute step method with prepared input
-            return step.service_method(**step_input)
-            
-        finally:
-            # Clean up timeout handling
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-    
-    def _is_workflow_timeout(self, workflow_definition: WorkflowDefinition) -> bool:
-        """
-        Check if workflow has exceeded maximum execution time.
-        
-        Args:
-            workflow_definition: Workflow definition to check
-            
-        Returns:
-            True if workflow has timed out, False otherwise
-        """
-        if not workflow_definition.started_at:
-            return False
-        
-        elapsed_time = (datetime.utcnow() - workflow_definition.started_at).total_seconds()
-        return elapsed_time > workflow_definition.max_execution_time
-    
-    def _perform_workflow_rollback(
-        self,
-        workflow_definition: WorkflowDefinition,
-        session: Session
-    ):
-        """
-        Perform comprehensive workflow rollback for completed steps.
-        
-        Executes rollback operations for all completed workflow steps in
-        reverse order to maintain business logic consistency and data integrity.
-        
-        Args:
-            workflow_definition: Workflow definition for rollback
-            session: Database session for rollback operations
-        """
-        logger.info(f"Performing workflow rollback for: {workflow_definition.workflow_id}")
-        
-        # Get completed steps in reverse order
-        completed_steps = [
-            step for step in reversed(workflow_definition.steps)
-            if step.status == WorkflowStepStatus.COMPLETED and step.rollback_method
-        ]
-        
-        for step in completed_steps:
+        for attempt in range(max_retries + 1):
             try:
-                logger.debug(f"Rolling back step: {step.step_id}")
-                step.rollback_method(workflow_definition.context)
-            except Exception as rollback_error:
-                logger.error(f"Rollback failed for step {step.step_id}: {rollback_error}")
-                # Continue with remaining rollbacks despite individual failures
+                # Execute step function with context
+                return step.step_function(workflow_context)
+                
+            except retry_exceptions as e:
+                last_exception = e
+                if attempt == max_retries:
+                    self.logger.error(
+                        f"Step {step.step_id} failed after {max_retries} retries: {e}"
+                    )
+                    break
+                
+                self.logger.warning(
+                    f"Retry attempt {attempt + 1}/{max_retries} for step {step.step_id}: {e}"
+                )
+                time.sleep(current_delay)
+                current_delay *= backoff_factor
+                
+            except Exception as e:
+                # Don't retry on non-retryable exceptions
+                self.logger.error(f"Non-retryable error in step {step.step_id}: {e}")
+                raise WorkflowError(
+                    f"Step execution failed: {str(e)}",
+                    workflow_id=workflow_context.workflow_id,
+                    step_id=step.step_id,
+                    original_error=e,
+                    context=workflow_context
+                )
+        
+        # If we get here, all retries failed
+        raise WorkflowError(
+            f"Step {step.step_id} failed after {max_retries} retries",
+            workflow_id=workflow_context.workflow_id,
+            step_id=step.step_id,
+            original_error=last_exception,
+            context=workflow_context
+        )
     
-    def get_workflow_status(self, workflow_id: str) -> Optional[WorkflowResult]:
+    def _handle_workflow_failure(self, workflow_context: WorkflowContext, 
+                               error: Exception) -> None:
         """
-        Get current status and result for specified workflow.
+        Handle workflow failure with rollback operations.
+        
+        Implements comprehensive error handling with automatic rollback
+        of completed steps and state recovery.
         
         Args:
-            workflow_id: Workflow identifier for status query
-            
-        Returns:
-            Workflow result with current status, or None if not found
+            workflow_context: Failed workflow context
+            error: Exception that caused the failure
         """
-        # Check active workflows first
-        if workflow_id in self._active_workflows:
-            workflow = self._active_workflows[workflow_id]
-            return WorkflowResult(
-                workflow_id=workflow_id,
-                status=workflow.status,
-                started_at=workflow.started_at,
-                completed_at=workflow.completed_at,
-                execution_time=workflow.execution_time,
-                steps_executed=len([s for s in workflow.steps if s.status != WorkflowStepStatus.PENDING]),
-                steps_successful=len([s for s in workflow.steps if s.status == WorkflowStepStatus.COMPLETED]),
-                steps_failed=len([s for s in workflow.steps if s.status == WorkflowStepStatus.FAILED])
-            )
+        workflow_context.status = WorkflowStatus.FAILED
+        workflow_context.error_message = str(error)
+        workflow_context.updated_at = datetime.utcnow()
         
-        # Check workflow history
-        return self._workflow_history.get(workflow_id)
+        # Attempt to rollback completed steps
+        if workflow_context.rollback_steps:
+            self.logger.info(f"Rolling back {len(workflow_context.rollback_steps)} steps")
+            
+            try:
+                self._execute_rollback_steps(workflow_context)
+                workflow_context.status = WorkflowStatus.ROLLED_BACK
+                
+                # Emit rollback signal
+                workflow_rolled_back.send(
+                    current_app._get_current_object(),
+                    workflow_context=workflow_context
+                )
+                
+            except Exception as rollback_error:
+                self.logger.error(f"Rollback failed: {rollback_error}")
+                workflow_context.error_message += f"; Rollback failed: {str(rollback_error)}"
+        
+        # Emit workflow failed signal
+        workflow_failed.send(
+            current_app._get_current_object(),
+            workflow_context=workflow_context,
+            error=error
+        )
+        
+        self.logger.error(f"Workflow {workflow_context.workflow_id} failed: {error}")
+    
+    def _execute_rollback_steps(self, workflow_context: WorkflowContext) -> None:
+        """
+        Execute rollback operations for completed workflow steps.
+        
+        Implements reverse-order rollback execution with error handling.
+        
+        Args:
+            workflow_context: Workflow context with rollback information
+        """
+        steps = self._workflow_definitions[workflow_context.workflow_type]
+        step_map = {step.step_id: step for step in steps}
+        
+        # Execute rollback in reverse order
+        for step_id in reversed(workflow_context.rollback_steps):
+            step = step_map.get(step_id)
+            if step and step.rollback_function:
+                try:
+                    step.rollback_function(workflow_context)
+                    self.logger.debug(f"Rolled back step {step_id}")
+                except Exception as e:
+                    self.logger.error(f"Rollback failed for step {step_id}: {e}")
+                    # Continue with other rollback operations
+    
+    def _register_signal_handlers(self) -> None:
+        """
+        Register Flask signal handlers for workflow events.
+        
+        Implements event-driven processing capabilities through Flask signals
+        for workflow monitoring and integration.
+        """
+        @workflow_started.connect
+        def handle_workflow_started(sender, workflow_context):
+            self.logger.info(f"Workflow started: {workflow_context.workflow_id}")
+            self._update_workflow_metrics(workflow_context, "started")
+        
+        @workflow_completed.connect
+        def handle_workflow_completed(sender, workflow_context):
+            self.logger.info(f"Workflow completed: {workflow_context.workflow_id}")
+            self._update_workflow_metrics(workflow_context, "completed")
+        
+        @workflow_failed.connect
+        def handle_workflow_failed(sender, workflow_context, error):
+            self.logger.error(f"Workflow failed: {workflow_context.workflow_id}")
+            self._update_workflow_metrics(workflow_context, "failed")
+        
+        @workflow_step_completed.connect
+        def handle_step_completed(sender, workflow_context, step, result):
+            self.logger.debug(f"Step completed: {step.step_id}")
+            self._update_step_metrics(workflow_context, step, "completed")
+        
+        @workflow_step_failed.connect
+        def handle_step_failed(sender, workflow_context, step, error):
+            self.logger.warning(f"Step failed: {step.step_id}")
+            self._update_step_metrics(workflow_context, step, "failed")
+    
+    def _update_workflow_metrics(self, workflow_context: WorkflowContext, 
+                               event_type: str) -> None:
+        """
+        Update workflow execution metrics for monitoring and analysis.
+        
+        Args:
+            workflow_context: Workflow context
+            event_type: Type of workflow event
+        """
+        workflow_type = workflow_context.workflow_type
+        
+        if workflow_type not in self._workflow_metrics:
+            self._workflow_metrics[workflow_type] = {
+                "total_executions": 0,
+                "successful_executions": 0,
+                "failed_executions": 0,
+                "average_duration": 0.0,
+                "last_execution": None
+            }
+        
+        metrics = self._workflow_metrics[workflow_type]
+        
+        if event_type == "started":
+            metrics["total_executions"] += 1
+            metrics["last_execution"] = datetime.utcnow().isoformat()
+        elif event_type == "completed":
+            metrics["successful_executions"] += 1
+            if workflow_context.created_at and workflow_context.completed_at:
+                duration = (workflow_context.completed_at - workflow_context.created_at).total_seconds()
+                current_avg = metrics["average_duration"]
+                total_successful = metrics["successful_executions"]
+                metrics["average_duration"] = ((current_avg * (total_successful - 1)) + duration) / total_successful
+        elif event_type == "failed":
+            metrics["failed_executions"] += 1
+    
+    def _update_step_metrics(self, workflow_context: WorkflowContext, 
+                           step: WorkflowStep, event_type: str) -> None:
+        """
+        Update step execution metrics for performance analysis.
+        
+        Args:
+            workflow_context: Workflow context
+            step: Workflow step
+            event_type: Type of step event
+        """
+        # Implementation for step-level metrics tracking
+        pass
+    
+    def get_workflow_status(self, workflow_id: str) -> Optional[WorkflowContext]:
+        """
+        Get current status of a workflow execution.
+        
+        Args:
+            workflow_id: Unique workflow identifier
+        
+        Returns:
+            WorkflowContext if found, None otherwise
+        """
+        return self._active_workflows.get(workflow_id)
+    
+    def get_workflow_metrics(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get workflow execution metrics for monitoring.
+        
+        Returns:
+            Dictionary of workflow metrics by workflow type
+        """
+        return self._workflow_metrics.copy()
     
     def cancel_workflow(self, workflow_id: str) -> bool:
         """
-        Cancel active workflow execution.
+        Cancel an active workflow execution.
         
         Args:
-            workflow_id: Workflow identifier for cancellation
-            
+            workflow_id: Unique workflow identifier
+        
         Returns:
-            True if workflow was cancelled, False if not found or already completed
+            True if workflow was cancelled successfully
         """
-        if workflow_id not in self._active_workflows:
+        workflow_context = self._active_workflows.get(workflow_id)
+        if not workflow_context:
             return False
         
-        workflow = self._active_workflows[workflow_id]
-        workflow.status = WorkflowStatus.CANCELLED
-        workflow.completed_at = datetime.utcnow()
+        if workflow_context.status in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED]:
+            return False
         
-        logger.info(f"Cancelled workflow: {workflow_id}")
+        workflow_context.status = WorkflowStatus.CANCELLED
+        workflow_context.updated_at = datetime.utcnow()
+        
+        self.logger.info(f"Cancelled workflow: {workflow_id}")
         return True
     
-    def get_active_workflows(self) -> List[str]:
-        """
-        Get list of currently active workflow IDs.
-        
-        Returns:
-            List of active workflow identifiers
-        """
-        return list(self._active_workflows.keys())
+    # Workflow step implementations for common business processes
     
-    def cleanup_completed_workflows(self, max_age_hours: int = 24):
+    @workflow_step(
+        step_id="validate_user_access",
+        step_name="Validate User Access Rights",
+        critical=True,
+        required_services=["user_service", "validation_service"]
+    )
+    def validate_user_access_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
         """
-        Clean up completed workflows from memory to prevent memory leaks.
+        Workflow step to validate user access rights for business operations.
         
         Args:
-            max_age_hours: Maximum age in hours for completed workflows to retain
-        """
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+            workflow_context: Current workflow execution context
         
-        # Clean up workflow history
-        expired_workflows = [
-            workflow_id for workflow_id, result in self._workflow_history.items()
-            if result.completed_at and result.completed_at < cutoff_time
+        Returns:
+            Validation result with user access information
+        """
+        user_id = workflow_context.context_data.get("user_id")
+        if not user_id:
+            raise ValidationError("User ID required for access validation")
+        
+        # Validate user through composed user service
+        user_validation_result = self.user_service.validate_user_access(
+            user_id, workflow_context.context_data
+        )
+        
+        # Additional validation through validation service
+        validation_result = self.validation_service.validate_user_permissions(
+            user_id, workflow_context.context_data
+        )
+        
+        return {
+            "user_validation": user_validation_result,
+            "permission_validation": validation_result,
+            "access_granted": user_validation_result and validation_result
+        }
+    
+    @workflow_step(
+        step_id="create_business_entity",
+        step_name="Create Business Entity",
+        rollback_function=lambda ctx: ctx.step_results.get("create_business_entity", {}).get("entity_id"),
+        critical=True,
+        depends_on=["validate_user_access"],
+        required_services=["business_entity_service", "validation_service"]
+    )
+    def create_business_entity_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to create business entity with comprehensive validation.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Created entity information
+        """
+        entity_data = workflow_context.context_data.get("entity_data")
+        if not entity_data:
+            raise ValidationError("Entity data required for creation")
+        
+        # Validate entity data through validation service
+        validation_result = self.validation_service.validate_entity_creation(entity_data)
+        if not validation_result:
+            raise ValidationError("Entity data validation failed")
+        
+        # Create entity through business entity service
+        created_entity = self.business_entity_service.create_entity(
+            entity_data, workflow_context.user_id
+        )
+        
+        return {
+            "entity_id": created_entity.id,
+            "entity_data": created_entity.to_dict(),
+            "validation_result": validation_result
+        }
+    
+    def rollback_business_entity_creation(self, workflow_context: WorkflowContext) -> None:
+        """
+        Rollback function for business entity creation step.
+        
+        Args:
+            workflow_context: Workflow context with rollback information
+        """
+        step_result = workflow_context.step_results.get("create_business_entity")
+        if step_result and "entity_id" in step_result:
+            entity_id = step_result["entity_id"]
+            try:
+                self.business_entity_service.delete_entity(entity_id)
+                self.logger.info(f"Rolled back entity creation: {entity_id}")
+            except Exception as e:
+                self.logger.error(f"Failed to rollback entity creation {entity_id}: {e}")
+    
+    @workflow_step(
+        step_id="establish_entity_relationships",
+        step_name="Establish Entity Relationships",
+        rollback_function=lambda ctx: None,  # Will implement rollback separately
+        critical=False,
+        depends_on=["create_business_entity"],
+        required_services=["business_entity_service", "validation_service"]
+    )
+    def establish_entity_relationships_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to establish business entity relationships.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Relationship establishment results
+        """
+        entity_id = workflow_context.step_results.get("create_business_entity", {}).get("entity_id")
+        if not entity_id:
+            raise ValidationError("Entity ID required for relationship establishment")
+        
+        relationship_data = workflow_context.context_data.get("relationships", [])
+        established_relationships = []
+        
+        for relationship in relationship_data:
+            try:
+                # Validate relationship data
+                validation_result = self.validation_service.validate_relationship_data(relationship)
+                if not validation_result:
+                    continue
+                
+                # Create relationship through business entity service
+                created_relationship = self.business_entity_service.create_relationship(
+                    entity_id, relationship
+                )
+                established_relationships.append({
+                    "relationship_id": created_relationship.id,
+                    "relationship_type": created_relationship.relationship_type,
+                    "target_entity_id": created_relationship.target_entity_id
+                })
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to establish relationship: {e}")
+                continue
+        
+        return {
+            "established_relationships": established_relationships,
+            "total_relationships": len(established_relationships),
+            "requested_relationships": len(relationship_data)
+        }
+    
+    @workflow_step(
+        step_id="validate_business_constraints",
+        step_name="Validate Business Constraints",
+        critical=True,
+        depends_on=["create_business_entity"],
+        required_services=["validation_service", "business_entity_service"]
+    )
+    def validate_business_constraints_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to validate complex business constraints.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Business constraint validation results
+        """
+        entity_id = workflow_context.step_results.get("create_business_entity", {}).get("entity_id")
+        if not entity_id:
+            raise ValidationError("Entity ID required for constraint validation")
+        
+        # Comprehensive business constraint validation
+        constraint_checks = {
+            "entity_data_integrity": False,
+            "relationship_constraints": False,
+            "business_rules_compliance": False,
+            "cross_entity_constraints": False
+        }
+        
+        try:
+            # Validate entity data integrity
+            entity_validation = self.validation_service.validate_entity_integrity(entity_id)
+            constraint_checks["entity_data_integrity"] = entity_validation
+            
+            # Validate relationship constraints
+            relationship_validation = self.validation_service.validate_relationship_constraints(entity_id)
+            constraint_checks["relationship_constraints"] = relationship_validation
+            
+            # Validate business rules compliance
+            business_rules_validation = self.validation_service.validate_business_rules_compliance(
+                entity_id, workflow_context.context_data
+            )
+            constraint_checks["business_rules_compliance"] = business_rules_validation
+            
+            # Validate cross-entity constraints
+            cross_entity_validation = self.business_entity_service.validate_cross_entity_constraints(
+                entity_id, workflow_context.context_data
+            )
+            constraint_checks["cross_entity_constraints"] = cross_entity_validation
+            
+        except Exception as e:
+            self.logger.error(f"Business constraint validation failed: {e}")
+            raise ValidationError(f"Business constraint validation error: {str(e)}")
+        
+        # Check if all constraints pass
+        all_constraints_valid = all(constraint_checks.values())
+        
+        if not all_constraints_valid:
+            failed_constraints = [
+                constraint for constraint, valid in constraint_checks.items() 
+                if not valid
+            ]
+            raise ValidationError(
+                f"Business constraint validation failed: {', '.join(failed_constraints)}"
+            )
+        
+        return {
+            "constraint_checks": constraint_checks,
+            "all_constraints_valid": all_constraints_valid,
+            "validation_timestamp": datetime.utcnow().isoformat()
+        }
+    
+    @workflow_step(
+        step_id="finalize_workflow_operations",
+        step_name="Finalize Workflow Operations",
+        critical=True,
+        depends_on=["validate_business_constraints", "establish_entity_relationships"],
+        required_services=["business_entity_service", "user_service"]
+    )
+    def finalize_workflow_operations_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to finalize all workflow operations.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Finalization results and summary
+        """
+        entity_id = workflow_context.step_results.get("create_business_entity", {}).get("entity_id")
+        if not entity_id:
+            raise ValidationError("Entity ID required for workflow finalization")
+        
+        # Finalize entity status
+        finalization_result = self.business_entity_service.finalize_entity_creation(
+            entity_id, workflow_context.context_data
+        )
+        
+        # Update user activity tracking
+        if workflow_context.user_id:
+            self.user_service.update_user_activity(
+                workflow_context.user_id,
+                {
+                    "activity_type": "workflow_completion",
+                    "workflow_id": workflow_context.workflow_id,
+                    "workflow_type": workflow_context.workflow_type,
+                    "entity_id": entity_id
+                }
+            )
+        
+        # Generate workflow summary
+        workflow_summary = {
+            "workflow_id": workflow_context.workflow_id,
+            "workflow_type": workflow_context.workflow_type,
+            "entity_id": entity_id,
+            "total_steps_executed": len(workflow_context.step_results),
+            "successful_steps": len([
+                result for result in workflow_context.step_results.values()
+                if result.get("status") == WorkflowStepStatus.COMPLETED.name
+            ]),
+            "execution_duration": (
+                datetime.utcnow() - workflow_context.created_at
+            ).total_seconds(),
+            "finalization_result": finalization_result
+        }
+        
+        return workflow_summary
+    
+    # High-level workflow definitions for common business processes
+    
+    def register_default_workflows(self) -> None:
+        """
+        Register default workflow definitions for common business processes.
+        
+        Provides out-of-the-box workflow definitions for standard business
+        operations with comprehensive step coordination and error handling.
+        """
+        # Business entity creation workflow
+        entity_creation_steps = [
+            self.validate_user_access_step._workflow_step,
+            self.create_business_entity_step._workflow_step,
+            self.establish_entity_relationships_step._workflow_step,
+            self.validate_business_constraints_step._workflow_step,
+            self.finalize_workflow_operations_step._workflow_step
         ]
         
-        for workflow_id in expired_workflows:
-            del self._workflow_history[workflow_id]
+        # Update rollback function references for proper workflow context
+        entity_creation_steps[1].rollback_function = self.rollback_business_entity_creation
         
-        logger.debug(f"Cleaned up {len(expired_workflows)} expired workflows")
-
-
-# Utility functions for common workflow patterns
-
-def create_service_step(
-    step_id: str,
-    service_name: str,
-    method_name: str,
-    input_data: Dict[str, Any] = None,
-    **kwargs
-) -> WorkflowStep:
-    """
-    Create workflow step for service method execution.
+        self.register_workflow_definition("entity_creation", entity_creation_steps)
+        
+        # User registration workflow
+        user_registration_steps = [
+            self.validate_user_registration_step._workflow_step,
+            self.create_user_account_step._workflow_step,
+            self.setup_user_profile_step._workflow_step,
+            self.send_welcome_notification_step._workflow_step
+        ]
+        
+        self.register_workflow_definition("user_registration", user_registration_steps)
+        
+        # Complex business operation workflow
+        complex_operation_steps = [
+            self.validate_user_access_step._workflow_step,
+            self.validate_operation_prerequisites_step._workflow_step,
+            self.execute_business_logic_step._workflow_step,
+            self.update_related_entities_step._workflow_step,
+            self.generate_operation_report_step._workflow_step
+        ]
+        
+        self.register_workflow_definition("complex_business_operation", complex_operation_steps)
+        
+        self.logger.info("Registered default workflow definitions")
     
-    Utility function for creating workflow steps that call service methods
-    with automatic service resolution and method binding.
+    # Additional workflow step implementations
     
-    Args:
-        step_id: Unique step identifier
-        service_name: Registered service name
-        method_name: Service method name to call
-        input_data: Input data for method execution
-        **kwargs: Additional step configuration
-        
-    Returns:
-        Configured workflow step for service method execution
-    """
-    def service_method_wrapper(**step_input):
-        # Get workflow orchestrator from Flask app context
-        orchestrator = current_app.workflow_orchestrator
-        service = orchestrator.get_service(service_name)
-        method = getattr(service, method_name)
-        
-        # Remove workflow-specific keys from input
-        clean_input = {k: v for k, v in step_input.items() 
-                      if k not in ['workflow_context', 'session']}
-        
-        return method(**clean_input)
-    
-    return WorkflowStep(
-        step_id=step_id,
-        service_method=service_method_wrapper,
-        input_data=input_data or {},
-        **kwargs
+    @workflow_step(
+        step_id="validate_user_registration",
+        step_name="Validate User Registration Data",
+        critical=True,
+        required_services=["validation_service"]
     )
-
-
-def create_validation_step(
-    step_id: str,
-    validation_rules: List[Callable],
-    input_data: Dict[str, Any] = None,
-    **kwargs
-) -> WorkflowStep:
-    """
-    Create workflow step for data validation.
+    def validate_user_registration_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to validate user registration data.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            User registration validation results
+        """
+        user_data = workflow_context.context_data.get("user_data")
+        if not user_data:
+            raise ValidationError("User data required for registration validation")
+        
+        # Comprehensive user registration validation
+        validation_result = self.validation_service.validate_user_registration(user_data)
+        
+        if not validation_result.get("valid", False):
+            validation_errors = validation_result.get("errors", [])
+            raise ValidationError(f"User registration validation failed: {', '.join(validation_errors)}")
+        
+        return validation_result
     
-    Args:
-        step_id: Unique step identifier
-        validation_rules: List of validation functions
-        input_data: Input data for validation
-        **kwargs: Additional step configuration
-        
-    Returns:
-        Configured workflow step for validation execution
-    """
-    def validation_method(**step_input):
-        data = {**input_data, **step_input} if input_data else step_input
-        
-        for validation_rule in validation_rules:
-            if not validation_rule(data):
-                raise ValueError(f"Validation failed for rule: {validation_rule.__name__}")
-        
-        return True
-    
-    return WorkflowStep(
-        step_id=step_id,
-        service_method=validation_method,
-        input_data=input_data or {},
-        **kwargs
+    @workflow_step(
+        step_id="create_user_account",
+        step_name="Create User Account",
+        rollback_function=lambda ctx: None,  # Will implement rollback separately
+        critical=True,
+        depends_on=["validate_user_registration"],
+        required_services=["user_service"]
     )
-
-
-def create_conditional_step(
-    step_id: str,
-    condition: Callable[[Dict[str, Any]], bool],
-    true_step: WorkflowStep,
-    false_step: Optional[WorkflowStep] = None,
-    **kwargs
-) -> WorkflowStep:
-    """
-    Create conditional workflow step for branching logic.
+    def create_user_account_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to create user account.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Created user account information
+        """
+        user_data = workflow_context.context_data.get("user_data")
+        
+        # Create user through user service
+        created_user = self.user_service.create_user(user_data)
+        
+        return {
+            "user_id": created_user.id,
+            "username": created_user.username,
+            "email": created_user.email,
+            "created_at": created_user.created_at.isoformat()
+        }
     
-    Args:
-        step_id: Unique step identifier
-        condition: Condition function for branching
-        true_step: Step to execute if condition is True
-        false_step: Optional step to execute if condition is False
-        **kwargs: Additional step configuration
+    @workflow_step(
+        step_id="setup_user_profile",
+        step_name="Setup User Profile",
+        critical=False,
+        depends_on=["create_user_account"],
+        required_services=["user_service"]
+    )
+    def setup_user_profile_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to setup user profile.
         
-    Returns:
-        Configured conditional workflow step
-    """
-    def conditional_method(**step_input):
-        workflow_context = step_input.get('workflow_context', {})
+        Args:
+            workflow_context: Current workflow execution context
         
-        if condition(workflow_context):
-            return true_step.service_method(**step_input)
-        elif false_step:
-            return false_step.service_method(**step_input)
+        Returns:
+            User profile setup results
+        """
+        user_id = workflow_context.step_results.get("create_user_account", {}).get("user_id")
+        profile_data = workflow_context.context_data.get("profile_data", {})
+        
+        if user_id and profile_data:
+            profile_result = self.user_service.setup_user_profile(user_id, profile_data)
+            return {"profile_setup": profile_result}
+        
+        return {"profile_setup": "skipped"}
+    
+    @workflow_step(
+        step_id="send_welcome_notification",
+        step_name="Send Welcome Notification",
+        critical=False,
+        depends_on=["create_user_account"],
+        required_services=["user_service"]
+    )
+    def send_welcome_notification_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to send welcome notification.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Notification sending results
+        """
+        user_id = workflow_context.step_results.get("create_user_account", {}).get("user_id")
+        
+        if user_id:
+            notification_result = self.user_service.send_welcome_notification(user_id)
+            return {"notification_sent": notification_result}
+        
+        return {"notification_sent": False}
+    
+    @workflow_step(
+        step_id="validate_operation_prerequisites",
+        step_name="Validate Operation Prerequisites",
+        critical=True,
+        depends_on=["validate_user_access"],
+        required_services=["validation_service", "business_entity_service"]
+    )
+    def validate_operation_prerequisites_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to validate complex operation prerequisites.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Prerequisites validation results
+        """
+        operation_data = workflow_context.context_data.get("operation_data")
+        if not operation_data:
+            raise ValidationError("Operation data required for prerequisite validation")
+        
+        # Validate operation prerequisites
+        prerequisite_checks = self.validation_service.validate_operation_prerequisites(
+            operation_data, workflow_context.user_id
+        )
+        
+        if not prerequisite_checks.get("all_prerequisites_met", False):
+            failed_prerequisites = prerequisite_checks.get("failed_prerequisites", [])
+            raise ValidationError(
+                f"Operation prerequisites not met: {', '.join(failed_prerequisites)}"
+            )
+        
+        return prerequisite_checks
+    
+    @workflow_step(
+        step_id="execute_business_logic",
+        step_name="Execute Core Business Logic",
+        critical=True,
+        depends_on=["validate_operation_prerequisites"],
+        required_services=["business_entity_service", "validation_service"]
+    )
+    def execute_business_logic_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to execute core business logic operations.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Business logic execution results
+        """
+        operation_data = workflow_context.context_data.get("operation_data")
+        operation_type = operation_data.get("operation_type")
+        
+        # Execute business logic based on operation type
+        if operation_type == "entity_update":
+            result = self.business_entity_service.execute_entity_update(
+                operation_data, workflow_context.user_id
+            )
+        elif operation_type == "relationship_management":
+            result = self.business_entity_service.execute_relationship_management(
+                operation_data, workflow_context.user_id
+            )
+        elif operation_type == "data_processing":
+            result = self.business_entity_service.execute_data_processing(
+                operation_data, workflow_context.user_id
+            )
         else:
-            return None
+            raise ValidationError(f"Unknown operation type: {operation_type}")
+        
+        return {
+            "operation_type": operation_type,
+            "execution_result": result,
+            "execution_timestamp": datetime.utcnow().isoformat()
+        }
     
-    return WorkflowStep(
-        step_id=step_id,
-        service_method=conditional_method,
-        conditional_execution=condition,
-        **kwargs
+    @workflow_step(
+        step_id="update_related_entities",
+        step_name="Update Related Entities",
+        critical=False,
+        depends_on=["execute_business_logic"],
+        required_services=["business_entity_service"]
     )
+    def update_related_entities_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to update entities related to the main operation.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Related entity update results
+        """
+        operation_result = workflow_context.step_results.get("execute_business_logic", {})
+        
+        if "affected_entities" in operation_result.get("execution_result", {}):
+            affected_entities = operation_result["execution_result"]["affected_entities"]
+            
+            update_results = []
+            for entity_id in affected_entities:
+                try:
+                    update_result = self.business_entity_service.update_related_entity(
+                        entity_id, workflow_context.context_data
+                    )
+                    update_results.append({
+                        "entity_id": entity_id,
+                        "update_result": update_result
+                    })
+                except Exception as e:
+                    self.logger.warning(f"Failed to update related entity {entity_id}: {e}")
+                    update_results.append({
+                        "entity_id": entity_id,
+                        "update_result": None,
+                        "error": str(e)
+                    })
+            
+            return {
+                "updated_entities": update_results,
+                "total_updates": len(update_results)
+            }
+        
+        return {"updated_entities": [], "total_updates": 0}
+    
+    @workflow_step(
+        step_id="generate_operation_report",
+        step_name="Generate Operation Report",
+        critical=False,
+        depends_on=["execute_business_logic", "update_related_entities"],
+        required_services=["business_entity_service"]
+    )
+    def generate_operation_report_step(self, workflow_context: WorkflowContext) -> Dict[str, Any]:
+        """
+        Workflow step to generate comprehensive operation report.
+        
+        Args:
+            workflow_context: Current workflow execution context
+        
+        Returns:
+            Generated operation report
+        """
+        # Generate comprehensive operation report
+        report_data = {
+            "workflow_summary": {
+                "workflow_id": workflow_context.workflow_id,
+                "workflow_type": workflow_context.workflow_type,
+                "execution_start": workflow_context.created_at.isoformat(),
+                "user_id": workflow_context.user_id
+            },
+            "operation_details": workflow_context.step_results.get("execute_business_logic", {}),
+            "related_entity_updates": workflow_context.step_results.get("update_related_entities", {}),
+            "execution_metrics": {
+                "total_steps": len(workflow_context.step_results),
+                "successful_steps": len([
+                    result for result in workflow_context.step_results.values()
+                    if result.get("status") == WorkflowStepStatus.COMPLETED.name
+                ]),
+                "failed_steps": len([
+                    result for result in workflow_context.step_results.values()
+                    if result.get("status") == WorkflowStepStatus.FAILED.name
+                ])
+            }
+        }
+        
+        # Generate report through business entity service
+        report_result = self.business_entity_service.generate_operation_report(report_data)
+        
+        return {
+            "report_generated": True,
+            "report_id": report_result.get("report_id"),
+            "report_data": report_data
+        }
+    
+    # Utility methods for workflow management
+    
+    def get_active_workflows(self) -> List[Dict[str, Any]]:
+        """
+        Get list of currently active workflows.
+        
+        Returns:
+            List of active workflow contexts
+        """
+        return [
+            workflow_context.to_dict()
+            for workflow_context in self._active_workflows.values()
+        ]
+    
+    def get_workflow_definition(self, workflow_type: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get workflow definition for a specific workflow type.
+        
+        Args:
+            workflow_type: Type of workflow
+        
+        Returns:
+            List of workflow step definitions if found
+        """
+        if workflow_type in self._workflow_definitions:
+            steps = self._workflow_definitions[workflow_type]
+            return [
+                {
+                    "step_id": step.step_id,
+                    "step_name": step.step_name,
+                    "required_services": step.required_services,
+                    "critical": step.critical,
+                    "depends_on": step.depends_on,
+                    "timeout_seconds": step.timeout_seconds
+                }
+                for step in steps
+            ]
+        return None
+    
+    def cleanup_completed_workflows(self, max_age_hours: int = 24) -> int:
+        """
+        Clean up completed workflow contexts to free memory.
+        
+        Args:
+            max_age_hours: Maximum age in hours for completed workflows
+        
+        Returns:
+            Number of workflows cleaned up
+        """
+        current_time = datetime.utcnow()
+        cutoff_time = current_time - timedelta(hours=max_age_hours)
+        
+        workflows_to_remove = []
+        for workflow_id, workflow_context in self._active_workflows.items():
+            if (workflow_context.status in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED] and
+                workflow_context.updated_at < cutoff_time):
+                workflows_to_remove.append(workflow_id)
+        
+        for workflow_id in workflows_to_remove:
+            del self._active_workflows[workflow_id]
+        
+        self.logger.info(f"Cleaned up {len(workflows_to_remove)} completed workflows")
+        return len(workflows_to_remove)
