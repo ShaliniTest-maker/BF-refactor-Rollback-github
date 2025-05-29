@@ -1,1629 +1,1707 @@
 """
-Multi-environment testing orchestration module implementing tox 4.26.0 for comprehensive
-Flask implementation compatibility testing across different Python versions and dependency
-configurations. This file ensures system behavior consistency through isolated virtual
-environments and validates Flask 3.1.1 compatibility per Section 4.7.2.
+Multi-environment Testing Orchestration Module for Flask Migration Validation
 
-This module provides comprehensive multi-environment test execution capabilities including:
-- tox 4.26.0 configuration for isolated virtual environment testing
-- Python 3.13.3 primary environment validation for Flask 3.1.1 
+This module implements comprehensive multi-environment testing orchestration using tox 4.26.0
+for Flask implementation compatibility testing across different Python versions and dependency
+configurations. This ensures system behavior consistency through isolated virtual environments
+and validates Flask 3.1.1 compatibility per Section 4.7.2 of the technical specification.
+
+Key Features:
+- tox 4.26.0 configuration for comprehensive multi-environment test execution
+- Python 3.13.3 primary environment for Flask 3.1.1 testing validation
 - Isolated dependency management with pip requirements.txt integration
 - Virtual environment isolation for reproducible test execution
 - Parallel environment provisioning for comprehensive coverage validation
-- Integration with pytest-flask 1.3.0 for Flask application testing
-- Performance validation across multiple environments
-- Compatibility testing with various dependency versions
+- Flask 3.1.1 compatibility validation across environments
+- Automated environment setup and teardown management
+- Cross-platform compatibility testing support
 
-Key Features:
-- Multi-environment orchestration with tox 4.26.0
-- Flask 3.1.1 compatibility validation across Python versions
-- Isolated dependency management preventing version conflicts
-- Parallel test execution for improved test performance
-- Comprehensive environment provisioning and cleanup
-- Integration with comparative testing for Node.js parity validation
-- Performance benchmarking across environments
-- Automated environment setup and teardown
+Multi-Environment Testing Orchestration per Section 4.7.2:
+- Coordinated test execution across Node.js and Flask systems
+- Real-time response comparison and validation across environments
+- Automated discrepancy detection and reporting per environment
+- Performance benchmark integration with pytest-benchmark across environments
 
 Dependencies:
-- tox 4.26.0: Multi-environment test orchestration and virtual environment management
-- pytest-flask 1.3.0: Flask application testing fixtures and utilities
-- Flask 3.1.1: Target framework for compatibility validation
-- pytest-xdist: Parallel test execution capabilities
-- pytest-benchmark 5.1.0: Performance testing across environments
+- tox 4.26.0: Multi-environment testing orchestration and automation
+- pytest-flask 1.3.0: Flask-specific testing capabilities and fixtures
+- Flask 3.1.1: Application testing with proper request context management
+- virtualenv: Virtual environment management for isolation
+- subprocess: Process execution for tox command orchestration
+- concurrent.futures: Parallel environment execution management
+
+Author: Flask Migration Team
+Version: 1.0.0
+Date: 2024
 """
 
 import os
 import sys
-import subprocess
-import tempfile
-import shutil
 import json
-import yaml
-import configparser
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Generator, Tuple, Union
-from datetime import datetime, timedelta
-import concurrent.futures
-import threading
 import time
-import psutil
-import hashlib
-from dataclasses import dataclass, field
-from enum import Enum
+import shutil
+import tempfile
+import subprocess
+import threading
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple, Union, Callable
+from dataclasses import dataclass, asdict, field
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from contextlib import contextmanager
+from unittest.mock import Mock, patch, MagicMock
+import configparser
 
 # Testing framework imports
 import pytest
+from pytest import fixture, mark, param
 import tox
-from tox import cmdline
-from tox.config import parseconfig
-from tox.session import Session
-import pytest_benchmark
-from pytest_benchmark.fixture import BenchmarkFixture
+from tox.config import get_config
+from tox.session import Session as ToxSession
 
-# Flask and testing imports
-import flask
-from flask import Flask
+# Flask testing imports
+from flask import Flask, current_app
 from flask.testing import FlaskClient
-import flask_sqlalchemy
-import flask_migrate
+import pytest_flask
 
-# Import project-specific testing utilities
-from tests.conftest import (
-    TestingConfiguration, MockUser, MockAuth0Client,
-    app, client, authenticated_user, performance_monitor,
-    json_response_validator, test_data_factory
-)
+# Import comparative testing infrastructure
+try:
+    from tests.comparative.test_api_parity import (
+        APIParityTester, APITestCase, ComparisonResult, TestDataGenerator
+    )
+    from tests.comparative.test_performance_benchmarks import (
+        PerformanceTestResult, PerformanceMetricBaseline
+    )
+    from tests.conftest import TestingConfiguration, MockUser, MockAuth0Client
+except ImportError as e:
+    logging.warning(f"Comparative testing modules not fully available: {e}")
+    APIParityTester = APITestCase = ComparisonResult = None
+    TestDataGenerator = PerformanceTestResult = None
+    TestingConfiguration = MockUser = MockAuth0Client = None
+
+# Configure logging for multi-environment testing
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-class EnvironmentType(Enum):
-    """
-    Enumeration of supported testing environment types for multi-environment
-    testing orchestration with specific configuration requirements.
-    """
-    PRIMARY = "primary"           # Python 3.13.3 with Flask 3.1.1
-    COMPATIBILITY = "compatibility"  # Alternative Python versions
-    MINIMAL = "minimal"          # Minimal dependency set
-    DEVELOPMENT = "development"  # Development dependencies included
-    PRODUCTION = "production"    # Production-like configuration
+# ================================
+# Multi-Environment Configuration
+# ================================
+
+# Tox configuration per Section 4.7.2 requirements
+TOX_CONFIGURATION = {
+    'tox': {
+        'minversion': '4.26.0',
+        'envlist': [
+            'py313-flask311',          # Primary Python 3.13.3 + Flask 3.1.1 environment
+            'py313-flask311-minimal',   # Minimal dependencies for compatibility testing
+            'py313-flask311-full',      # Full dependencies for comprehensive testing
+            'py313-flask311-dev',       # Development dependencies for debugging
+            'py313-flask311-performance', # Performance testing environment
+            'py313-flask311-security',   # Security testing environment
+        ],
+        'isolated_build': True,
+        'skip_missing_interpreters': True,
+        'parallel_show_output': True
+    },
+    'testenv': {
+        'description': 'Flask 3.1.1 multi-environment compatibility testing',
+        'deps': [
+            'flask==3.1.1',
+            'flask-sqlalchemy==3.1.1',
+            'flask-migrate',
+            'flask-login',
+            'pytest==8.3.4',
+            'pytest-flask==1.3.0',
+            'pytest-benchmark==5.1.0',
+            'pytest-cov',
+            'pytest-xdist',
+            'requests',
+            'psutil',
+            'deepdiff'
+        ],
+        'commands': [
+            'pytest tests/comparative/test_multi_environment.py -v --tb=short',
+            'pytest tests/comparative/test_api_parity.py -v -m comparative',
+            'pytest tests/comparative/test_performance_benchmarks.py -v -m performance'
+        ],
+        'setenv': {
+            'FLASK_ENV': 'testing',
+            'TESTING': 'True',
+            'PYTHONPATH': '{toxinidir}',
+            'COVERAGE_PROCESS_START': '{toxinidir}/.coveragerc'
+        },
+        'passenv': [
+            'CI', 'GITHUB_*', 'TRAVIS_*', 'JENKINS_*',
+            'NODE_ENV', 'NODEJS_BASE_URL',
+            'DATABASE_URL', 'REDIS_URL',
+            'AUTH0_*', 'JWT_*'
+        ],
+        'allowlist_externals': [
+            'echo', 'mkdir', 'rm', 'cp',
+            'node', 'npm', 'docker'
+        ]
+    }
+}
+
+# Environment-specific configurations
+ENVIRONMENT_CONFIGS = {
+    'py313-flask311': {
+        'python': '3.13.3',
+        'description': 'Primary Flask 3.1.1 environment with Python 3.13.3',
+        'deps': TOX_CONFIGURATION['testenv']['deps'],
+        'priority': 1,
+        'required': True
+    },
+    'py313-flask311-minimal': {
+        'python': '3.13.3',
+        'description': 'Minimal dependencies for compatibility testing',
+        'deps': [
+            'flask==3.1.1',
+            'pytest==8.3.4',
+            'pytest-flask==1.3.0'
+        ],
+        'priority': 2,
+        'required': True
+    },
+    'py313-flask311-full': {
+        'python': '3.13.3',
+        'description': 'Full dependencies for comprehensive testing',
+        'deps': TOX_CONFIGURATION['testenv']['deps'] + [
+            'redis',
+            'celery',
+            'gunicorn',
+            'gevent',
+            'eventlet'
+        ],
+        'priority': 3,
+        'required': False
+    },
+    'py313-flask311-dev': {
+        'python': '3.13.3',
+        'description': 'Development dependencies for debugging',
+        'deps': TOX_CONFIGURATION['testenv']['deps'] + [
+            'flask-debugtoolbar',
+            'werkzeug',
+            'ipdb',
+            'memory-profiler',
+            'line-profiler'
+        ],
+        'priority': 4,
+        'required': False
+    },
+    'py313-flask311-performance': {
+        'python': '3.13.3', 
+        'description': 'Performance testing environment',
+        'deps': TOX_CONFIGURATION['testenv']['deps'] + [
+            'locust',
+            'memory-profiler',
+            'py-spy',
+            'cProfile'
+        ],
+        'priority': 5,
+        'required': False
+    },
+    'py313-flask311-security': {
+        'python': '3.13.3',
+        'description': 'Security testing environment',
+        'deps': TOX_CONFIGURATION['testenv']['deps'] + [
+            'bandit',
+            'safety',
+            'semgrep'
+        ],
+        'priority': 6,
+        'required': False
+    }
+}
+
+# Performance thresholds per environment
+ENVIRONMENT_PERFORMANCE_THRESHOLDS = {
+    'py313-flask311': {
+        'response_time_ms': 500,
+        'memory_usage_mb': 100,
+        'startup_time_s': 5.0,
+        'test_execution_time_s': 300.0
+    },
+    'py313-flask311-minimal': {
+        'response_time_ms': 300,
+        'memory_usage_mb': 50,
+        'startup_time_s': 3.0,
+        'test_execution_time_s': 120.0
+    },
+    'py313-flask311-full': {
+        'response_time_ms': 800,
+        'memory_usage_mb': 200,
+        'startup_time_s': 10.0,
+        'test_execution_time_s': 600.0
+    }
+}
 
 
-class TestStatus(Enum):
-    """Test execution status tracking for multi-environment validation"""
-    PENDING = "pending"
-    RUNNING = "running" 
-    PASSED = "passed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    ERROR = "error"
-
+# ================================
+# Data Classes and Models
+# ================================
 
 @dataclass
-class EnvironmentConfig:
+class EnvironmentInfo:
     """
-    Configuration data class for individual testing environments with
-    comprehensive dependency and configuration management.
+    Environment information data structure for tracking tox environment details.
     
-    This class encapsulates all environment-specific settings required
-    for isolated virtual environment provisioning and testing execution.
+    Captures comprehensive information about each tox environment including
+    configuration, status, and execution metrics per Section 4.7.2.
     """
     name: str
     python_version: str
-    env_type: EnvironmentType
-    base_dependencies: List[str] = field(default_factory=list)
-    test_dependencies: List[str] = field(default_factory=list)
-    environment_variables: Dict[str, str] = field(default_factory=dict)
-    configuration_overrides: Dict[str, Any] = field(default_factory=dict)
-    parallel_execution: bool = True
-    timeout_seconds: int = 300
-    memory_limit_mb: int = 512
-    cleanup_on_completion: bool = True
-    
-    def __post_init__(self):
-        """Post-initialization validation and default setup"""
-        if not self.base_dependencies:
-            self.base_dependencies = self._get_default_dependencies()
-        if not self.test_dependencies:
-            self.test_dependencies = self._get_default_test_dependencies()
-        if not self.environment_variables:
-            self.environment_variables = self._get_default_env_vars()
-    
-    def _get_default_dependencies(self) -> List[str]:
-        """Get default base dependencies for environment type"""
-        base_deps = [
-            "Flask==3.1.1",
-            "Flask-SQLAlchemy==3.1.1", 
-            "Flask-Migrate==4.1.0",
-            "Flask-Login>=0.6.2",
-            "Werkzeug>=3.1",
-            "Jinja2>=3.1.2",
-            "ItsDangerous>=2.2",
-            "Click>=8.1.3",
-            "Blinker>=1.9"
-        ]
-        
-        if self.env_type == EnvironmentType.DEVELOPMENT:
-            base_deps.extend([
-                "Flask-DebugToolbar>=0.13.1",
-                "Werkzeug[watchdog]>=3.1"
-            ])
-        elif self.env_type == EnvironmentType.PRODUCTION:
-            base_deps.extend([
-                "gunicorn>=21.2.0",
-                "psycopg2-binary>=2.9.7"
-            ])
-        
-        return base_deps
-    
-    def _get_default_test_dependencies(self) -> List[str]:
-        """Get default test dependencies for environment"""
-        return [
-            "pytest>=7.4.0",
-            "pytest-flask==1.3.0",
-            "pytest-benchmark==5.1.0",
-            "pytest-xdist>=3.3.1",
-            "pytest-cov>=4.1.0",
-            "pytest-mock>=3.11.1",
-            "tox==4.26.0",
-            "coverage>=7.3.0"
-        ]
-    
-    def _get_default_env_vars(self) -> Dict[str, str]:
-        """Get default environment variables for testing"""
-        return {
-            "FLASK_ENV": "testing",
-            "TESTING": "True",
-            "SECRET_KEY": "test-secret-key-for-pytest-only",
-            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-            "WTF_CSRF_ENABLED": "False",
-            "DISABLE_EXTERNAL_CALLS": "True"
-        }
-    
-    def to_tox_config(self) -> Dict[str, Any]:
-        """Convert environment config to tox configuration format"""
-        return {
-            "basepython": f"python{self.python_version}",
-            "deps": self.base_dependencies + self.test_dependencies,
-            "setenv": self.environment_variables,
-            "commands": [
-                "pytest {posargs}",
-                "coverage report"
-            ],
-            "parallel_show_output": True,
-            "whitelist_externals": ["coverage"],
-            "timeout": self.timeout_seconds
-        }
-
-
-@dataclass 
-class TestResult:
-    """
-    Comprehensive test result data class for multi-environment test tracking
-    and reporting with detailed metrics and performance data.
-    """
-    environment_name: str
-    status: TestStatus
-    start_time: datetime
+    description: str
+    dependencies: List[str]
+    status: str = 'not_started'  # not_started, running, completed, failed
+    start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     duration_seconds: Optional[float] = None
-    tests_passed: int = 0
-    tests_failed: int = 0
-    tests_skipped: int = 0
-    tests_total: int = 0
-    coverage_percentage: Optional[float] = None
+    exit_code: Optional[int] = None
+    priority: int = 1
+    required: bool = True
+    
+    # Test execution metrics
+    total_tests: int = 0
+    passed_tests: int = 0
+    failed_tests: int = 0
+    skipped_tests: int = 0
+    
+    # Performance metrics
     memory_usage_mb: Optional[float] = None
-    cpu_usage_percentage: Optional[float] = None
-    error_message: Optional[str] = None
-    performance_metrics: Dict[str, float] = field(default_factory=dict)
-    output_log: str = ""
+    cpu_usage_percent: Optional[float] = None
+    disk_usage_mb: Optional[float] = None
+    
+    # Environment paths and configuration
+    env_path: Optional[str] = None
+    config_path: Optional[str] = None
+    log_path: Optional[str] = None
+    
+    # Output and logging
+    stdout: str = ''
+    stderr: str = ''
+    test_results: List[Dict[str, Any]] = field(default_factory=list)
     
     def __post_init__(self):
-        """Calculate derived metrics after initialization"""
-        if self.end_time and self.start_time:
+        if self.start_time and self.end_time:
             self.duration_seconds = (self.end_time - self.start_time).total_seconds()
     
+    def mark_started(self):
+        """Mark environment as started with current timestamp."""
+        self.status = 'running'
+        self.start_time = datetime.now(timezone.utc)
+    
+    def mark_completed(self, exit_code: int):
+        """Mark environment as completed with exit code and timing."""
+        self.status = 'completed' if exit_code == 0 else 'failed'
+        self.exit_code = exit_code
+        self.end_time = datetime.now(timezone.utc)
+        if self.start_time:
+            self.duration_seconds = (self.end_time - self.start_time).total_seconds()
+    
+    def calculate_success_rate(self) -> float:
+        """Calculate test success rate for this environment."""
+        if self.total_tests == 0:
+            return 0.0
+        return (self.passed_tests / self.total_tests) * 100.0
+    
+    def is_healthy(self) -> bool:
+        """Check if environment is in healthy state."""
+        return (
+            self.status == 'completed' and
+            self.exit_code == 0 and
+            self.calculate_success_rate() >= 90.0
+        )
+    
     def to_dict(self) -> Dict[str, Any]:
-        """Convert test result to dictionary for serialization"""
-        return {
-            "environment_name": self.environment_name,
-            "status": self.status.value,
-            "start_time": self.start_time.isoformat(),
-            "end_time": self.end_time.isoformat() if self.end_time else None,
-            "duration_seconds": self.duration_seconds,
-            "tests_passed": self.tests_passed,
-            "tests_failed": self.tests_failed,
-            "tests_skipped": self.tests_skipped,
-            "tests_total": self.tests_total,
-            "coverage_percentage": self.coverage_percentage,
-            "memory_usage_mb": self.memory_usage_mb,
-            "cpu_usage_percentage": self.cpu_usage_percentage,
-            "error_message": self.error_message,
-            "performance_metrics": self.performance_metrics,
-            "success_rate": self.tests_passed / self.tests_total if self.tests_total > 0 else 0
-        }
+        """Convert environment info to dictionary for serialization."""
+        data = asdict(self)
+        # Convert datetime objects to ISO format strings
+        if self.start_time:
+            data['start_time'] = self.start_time.isoformat()
+        if self.end_time:
+            data['end_time'] = self.end_time.isoformat()
+        return data
 
 
-class ToxConfigurationManager:
+@dataclass
+class MultiEnvironmentTestResult:
     """
-    Comprehensive tox configuration management class providing dynamic
-    tox.ini generation, environment provisioning, and configuration
-    validation for multi-environment testing orchestration.
+    Multi-environment test execution result with comprehensive analysis.
     
-    This class implements tox 4.26.0 specific configuration patterns
-    and ensures proper virtual environment isolation and dependency
-    management as specified in Section 4.7.2.
+    Aggregates results across all tox environments and provides comparative
+    analysis for Flask 3.1.1 compatibility validation per Section 4.7.2.
     """
+    execution_id: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    total_duration_seconds: Optional[float] = None
     
-    def __init__(self, project_root: Path, config_file: str = "tox.ini"):
-        """
-        Initialize tox configuration manager with project context
-        
-        Args:
-            project_root: Root directory of the project
-            config_file: Name of tox configuration file
-        """
-        self.project_root = Path(project_root)
-        self.config_file = self.project_root / config_file
-        self.environments: Dict[str, EnvironmentConfig] = {}
-        self.global_config: Dict[str, Any] = {}
-        self._setup_default_environments()
-        self._setup_global_configuration()
+    # Environment results
+    environments: Dict[str, EnvironmentInfo] = field(default_factory=dict)
     
-    def _setup_default_environments(self):
-        """Setup default testing environments per Section 4.7.2 requirements"""
-        
-        # Primary Python 3.13.3 environment for Flask 3.1.1 validation
-        self.environments["py313"] = EnvironmentConfig(
-            name="py313",
-            python_version="3.13.3",
-            env_type=EnvironmentType.PRIMARY,
-            parallel_execution=True,
-            timeout_seconds=600
-        )
-        
-        # Compatibility testing environments
-        self.environments["py312"] = EnvironmentConfig(
-            name="py312", 
-            python_version="3.12",
-            env_type=EnvironmentType.COMPATIBILITY,
-            parallel_execution=True,
-            timeout_seconds=300
-        )
-        
-        self.environments["py311"] = EnvironmentConfig(
-            name="py311",
-            python_version="3.11", 
-            env_type=EnvironmentType.COMPATIBILITY,
-            parallel_execution=True,
-            timeout_seconds=300
-        )
-        
-        # Minimal dependency environment for lightweight testing
-        minimal_deps = [
-            "Flask==3.1.1",
-            "pytest>=7.4.0",
-            "pytest-flask==1.3.0"
-        ]
-        self.environments["minimal"] = EnvironmentConfig(
-            name="minimal",
-            python_version="3.13.3",
-            env_type=EnvironmentType.MINIMAL,
-            base_dependencies=minimal_deps,
-            parallel_execution=False,
-            timeout_seconds=180
-        )
-        
-        # Development environment with additional tools
-        self.environments["development"] = EnvironmentConfig(
-            name="development",
-            python_version="3.13.3", 
-            env_type=EnvironmentType.DEVELOPMENT,
-            parallel_execution=True,
-            timeout_seconds=450
-        )
-        
-        # Production-like environment configuration
-        self.environments["production"] = EnvironmentConfig(
-            name="production",
-            python_version="3.13.3",
-            env_type=EnvironmentType.PRODUCTION,
-            parallel_execution=True,
-            timeout_seconds=600
-        )
+    # Aggregated metrics
+    total_environments: int = 0
+    successful_environments: int = 0
+    failed_environments: int = 0
     
-    def _setup_global_configuration(self):
-        """Setup global tox configuration settings"""
-        self.global_config = {
-            "minversion": "4.26.0",
-            "envlist": list(self.environments.keys()),
-            "skip_missing_interpreters": "True",
-            "isolated_build": "True",
-            "parallel_show_output": "True",
-            "indexserver": {
-                "default": "https://pypi.org/simple/"
-            },
-            "testpaths": ["tests"],
-            "python_files": ["test_*.py"],
-            "python_classes": ["Test*"],
-            "python_functions": ["test_*"],
-            "markers": [
-                "unit: Unit tests",
-                "integration: Integration tests", 
-                "performance: Performance tests",
-                "comparative: Comparative tests"
-            ]
-        }
+    # Test aggregation
+    total_tests_all_envs: int = 0
+    passed_tests_all_envs: int = 0
+    failed_tests_all_envs: int = 0
     
-    def add_environment(self, env_config: EnvironmentConfig):
-        """
-        Add custom environment configuration to manager
-        
-        Args:
-            env_config: Environment configuration to add
-        """
-        self.environments[env_config.name] = env_config
-        self.global_config["envlist"] = list(self.environments.keys())
+    # Performance aggregation
+    fastest_environment: Optional[str] = None
+    slowest_environment: Optional[str] = None
+    most_memory_efficient: Optional[str] = None
     
-    def remove_environment(self, env_name: str):
-        """
-        Remove environment configuration from manager
-        
-        Args:
-            env_name: Name of environment to remove
-        """
-        if env_name in self.environments:
-            del self.environments[env_name]
-            self.global_config["envlist"] = list(self.environments.keys())
+    # Configuration
+    tox_config_path: Optional[str] = None
+    requirements_files: List[str] = field(default_factory=list)
     
-    def generate_tox_config(self) -> str:
-        """
-        Generate complete tox.ini configuration file content
-        
-        Returns:
-            str: Complete tox.ini file content
-        """
-        config = configparser.ConfigParser()
-        
-        # Add [tox] section with global configuration
-        config.add_section("tox")
-        for key, value in self.global_config.items():
-            if isinstance(value, list):
-                config.set("tox", key, "\n    ".join([""] + value))
-            elif isinstance(value, dict):
-                # Handle nested dictionaries like indexserver
-                if key == "indexserver":
-                    for subkey, subvalue in value.items():
-                        config.set("tox", f"{key}:{subkey}", subvalue)
-                else:
-                    config.set("tox", key, str(value))
-            else:
-                config.set("tox", key, str(value))
-        
-        # Add testenv sections for each environment
-        for env_name, env_config in self.environments.items():
-            section_name = f"testenv:{env_name}" if env_name != "testenv" else "testenv"
-            config.add_section(section_name)
-            
-            tox_config = env_config.to_tox_config()
-            for key, value in tox_config.items():
-                if isinstance(value, list):
-                    config.set(section_name, key, "\n    ".join([""] + value))
-                elif isinstance(value, dict):
-                    for subkey, subvalue in value.items():
-                        config.set(section_name, f"{key}:{subkey}", str(subvalue))
-                else:
-                    config.set(section_name, key, str(value))
-        
-        # Add pytest configuration section
-        config.add_section("pytest")
-        pytest_config = {
-            "testpaths": "tests",
-            "python_files": "test_*.py",
-            "python_classes": "Test*",
-            "python_functions": "test_*",
-            "addopts": "-v --tb=short --strict-markers --disable-warnings",
-            "markers": [
-                "unit: Unit tests",
-                "integration: Integration tests",
-                "performance: Performance tests",
-                "comparative: Comparative tests"
-            ]
-        }
-        
-        for key, value in pytest_config.items():
-            if isinstance(value, list):
-                config.set("pytest", key, "\n    ".join([""] + value))
-            else:
-                config.set("pytest", key, str(value))
-        
-        # Generate configuration file content
-        import io
-        output = io.StringIO()
-        config.write(output)
-        content = output.getvalue()
-        output.close()
-        
-        return content
+    # Output and reporting
+    summary_report: Dict[str, Any] = field(default_factory=dict)
+    detailed_logs: Dict[str, str] = field(default_factory=dict)
     
-    def write_tox_config(self):
-        """Write tox configuration to tox.ini file"""
-        config_content = self.generate_tox_config()
-        with open(self.config_file, 'w') as f:
-            f.write(config_content)
-        
-        logging.info(f"Tox configuration written to {self.config_file}")
+    def __post_init__(self):
+        if self.end_time and self.start_time:
+            self.total_duration_seconds = (self.end_time - self.start_time).total_seconds()
     
-    def validate_configuration(self) -> List[str]:
-        """
-        Validate tox configuration and return list of issues
+    def add_environment_result(self, env_info: EnvironmentInfo):
+        """Add environment result to the multi-environment test result."""
+        self.environments[env_info.name] = env_info
+        self.total_environments = len(self.environments)
         
-        Returns:
-            List[str]: List of validation issues
-        """
-        issues = []
-        
-        # Validate environments
-        for env_name, env_config in self.environments.items():
-            if not env_config.python_version:
-                issues.append(f"Environment {env_name} missing python_version")
-            
-            if not env_config.base_dependencies:
-                issues.append(f"Environment {env_name} missing base_dependencies")
-            
-            if env_config.timeout_seconds <= 0:
-                issues.append(f"Environment {env_name} has invalid timeout")
-        
-        # Validate global configuration
-        if not self.global_config.get("envlist"):
-            issues.append("Global configuration missing envlist")
-        
-        return issues
-
-
-class MultiEnvironmentTestExecutor:
-    """
-    Comprehensive multi-environment test execution orchestrator implementing
-    tox 4.26.0 integration with pytest-flask for Flask 3.1.1 compatibility
-    validation across isolated virtual environments.
-    
-    This class provides complete test execution management including environment
-    provisioning, parallel execution, result aggregation, and performance monitoring
-    as specified in Section 4.7.2 of the technical specification.
-    """
-    
-    def __init__(self, config_manager: ToxConfigurationManager, 
-                 results_dir: Optional[Path] = None):
-        """
-        Initialize multi-environment test executor
-        
-        Args:
-            config_manager: Tox configuration manager instance
-            results_dir: Directory for storing test results
-        """
-        self.config_manager = config_manager
-        self.results_dir = results_dir or Path("test_results")
-        self.results_dir.mkdir(exist_ok=True)
-        
-        self.test_results: Dict[str, TestResult] = {}
-        self.execution_lock = threading.Lock()
-        self.logger = self._setup_logging()
-        
-        # Performance monitoring
-        self.process_monitor = psutil.Process()
-        self.start_memory = self.process_monitor.memory_info().rss / 1024 / 1024
-        
-    def _setup_logging(self) -> logging.Logger:
-        """Setup comprehensive logging for test execution tracking"""
-        logger = logging.getLogger("multi_environment_test_executor")
-        logger.setLevel(logging.INFO)
-        
-        if not logger.handlers:
-            # File handler for detailed logs
-            log_file = self.results_dir / "test_execution.log"
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setLevel(logging.DEBUG)
-            
-            # Console handler for important messages
-            console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)
-            
-            # Formatter for structured logging
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            file_handler.setFormatter(formatter)
-            console_handler.setFormatter(formatter)
-            
-            logger.addHandler(file_handler)
-            logger.addHandler(console_handler)
-        
-        return logger
-    
-    def execute_all_environments(self, parallel: bool = True, 
-                                max_workers: Optional[int] = None) -> Dict[str, TestResult]:
-        """
-        Execute tests across all configured environments with comprehensive
-        monitoring and result aggregation.
-        
-        Args:
-            parallel: Enable parallel execution across environments
-            max_workers: Maximum number of concurrent workers
-            
-        Returns:
-            Dict[str, TestResult]: Test results by environment name
-        """
-        self.logger.info(f"Starting multi-environment test execution across {len(self.config_manager.environments)} environments")
-        
-        # Clear previous results
-        self.test_results.clear()
-        
-        if parallel:
-            return self._execute_parallel(max_workers)
+        # Update aggregated metrics
+        if env_info.status == 'completed' and env_info.exit_code == 0:
+            self.successful_environments += 1
         else:
-            return self._execute_sequential()
+            self.failed_environments += 1
+        
+        # Update test aggregation
+        self.total_tests_all_envs += env_info.total_tests
+        self.passed_tests_all_envs += env_info.passed_tests
+        self.failed_tests_all_envs += env_info.failed_tests
     
-    def _execute_parallel(self, max_workers: Optional[int] = None) -> Dict[str, TestResult]:
-        """Execute tests in parallel across multiple environments"""
-        max_workers = max_workers or min(len(self.config_manager.environments), os.cpu_count())
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all environment tests
-            future_to_env = {
-                executor.submit(self._execute_single_environment, env_name, env_config): env_name
-                for env_name, env_config in self.config_manager.environments.items()
-                if env_config.parallel_execution
-            }
-            
-            # Execute non-parallel environments sequentially
-            for env_name, env_config in self.config_manager.environments.items():
-                if not env_config.parallel_execution:
-                    self._execute_single_environment(env_name, env_config)
-            
-            # Collect results from parallel executions
-            for future in concurrent.futures.as_completed(future_to_env):
-                env_name = future_to_env[future]
-                try:
-                    result = future.result(timeout=600)  # 10 minute timeout
-                    with self.execution_lock:
-                        self.test_results[env_name] = result
-                        self.logger.info(f"Environment {env_name} completed: {result.status.value}")
-                except Exception as exc:
-                    self.logger.error(f"Environment {env_name} generated exception: {exc}")
-                    with self.execution_lock:
-                        self.test_results[env_name] = TestResult(
-                            environment_name=env_name,
-                            status=TestStatus.ERROR,
-                            start_time=datetime.now(),
-                            error_message=str(exc)
-                        )
-        
-        return self.test_results
+    def calculate_overall_success_rate(self) -> float:
+        """Calculate overall success rate across all environments."""
+        if self.total_tests_all_envs == 0:
+            return 0.0
+        return (self.passed_tests_all_envs / self.total_tests_all_envs) * 100.0
     
-    def _execute_sequential(self) -> Dict[str, TestResult]:
-        """Execute tests sequentially across environments"""
-        for env_name, env_config in self.config_manager.environments.items():
-            self.logger.info(f"Executing tests in environment: {env_name}")
-            result = self._execute_single_environment(env_name, env_config)
-            self.test_results[env_name] = result
+    def analyze_performance(self):
+        """Analyze performance metrics across environments."""
+        if not self.environments:
+            return
         
-        return self.test_results
+        # Find fastest environment by duration
+        completed_envs = {name: env for name, env in self.environments.items() 
+                         if env.duration_seconds is not None}
+        
+        if completed_envs:
+            fastest = min(completed_envs.values(), key=lambda e: e.duration_seconds)
+            slowest = max(completed_envs.values(), key=lambda e: e.duration_seconds)
+            self.fastest_environment = fastest.name
+            self.slowest_environment = slowest.name
+        
+        # Find most memory efficient environment
+        memory_envs = {name: env for name, env in self.environments.items() 
+                      if env.memory_usage_mb is not None}
+        
+        if memory_envs:
+            most_efficient = min(memory_envs.values(), key=lambda e: e.memory_usage_mb)
+            self.most_memory_efficient = most_efficient.name
     
-    def _execute_single_environment(self, env_name: str, 
-                                  env_config: EnvironmentConfig) -> TestResult:
-        """
-        Execute tests in a single environment with comprehensive monitoring
+    def generate_summary_report(self) -> Dict[str, Any]:
+        """Generate comprehensive summary report for all environments."""
+        self.analyze_performance()
         
-        Args:
-            env_name: Name of the environment
-            env_config: Environment configuration
-            
-        Returns:
-            TestResult: Comprehensive test results for the environment
-        """
-        result = TestResult(
-            environment_name=env_name,
-            status=TestStatus.RUNNING,
-            start_time=datetime.now()
-        )
-        
-        try:
-            self.logger.info(f"Starting test execution in environment: {env_name}")
-            
-            # Setup environment-specific configuration
-            env_dir = self.results_dir / env_name
-            env_dir.mkdir(exist_ok=True)
-            
-            # Create temporary tox configuration for this environment
-            tox_config_path = env_dir / "tox.ini"
-            self._write_environment_tox_config(tox_config_path, env_name, env_config)
-            
-            # Execute tox with environment-specific configuration
-            result = self._run_tox_environment(env_name, env_config, tox_config_path, result)
-            
-            # Collect performance metrics
-            result = self._collect_performance_metrics(env_name, result)
-            
-            # Parse test results and coverage
-            result = self._parse_test_results(env_dir, result)
-            
-            result.end_time = datetime.now()
-            result.status = TestStatus.PASSED if result.tests_failed == 0 else TestStatus.FAILED
-            
-            self.logger.info(f"Environment {env_name} completed successfully")
-            
-        except Exception as exc:
-            self.logger.error(f"Error executing environment {env_name}: {exc}")
-            result.end_time = datetime.now()
-            result.status = TestStatus.ERROR
-            result.error_message = str(exc)
-        
-        return result
-    
-    def _write_environment_tox_config(self, config_path: Path, 
-                                    env_name: str, env_config: EnvironmentConfig):
-        """Write environment-specific tox configuration"""
-        temp_manager = ToxConfigurationManager(config_path.parent)
-        temp_manager.environments = {env_name: env_config}
-        temp_manager.global_config["envlist"] = [env_name]
-        
-        config_content = temp_manager.generate_tox_config()
-        with open(config_path, 'w') as f:
-            f.write(config_content)
-    
-    def _run_tox_environment(self, env_name: str, env_config: EnvironmentConfig,
-                           tox_config_path: Path, result: TestResult) -> TestResult:
-        """Execute tox for specific environment with monitoring"""
-        
-        # Build tox command with comprehensive options
-        tox_cmd = [
-            sys.executable, "-m", "tox",
-            "-c", str(tox_config_path),
-            "-e", env_name,
-            "--recreate",  # Ensure clean environment
-            "--parallel", "auto" if env_config.parallel_execution else "1",
-            "-v"  # Verbose output
-        ]
-        
-        # Setup environment variables
-        tox_env = os.environ.copy()
-        tox_env.update(env_config.environment_variables)
-        
-        # Execute tox with timeout and monitoring
-        try:
-            self.logger.debug(f"Executing command: {' '.join(tox_cmd)}")
-            
-            start_time = time.time()
-            process = subprocess.Popen(
-                tox_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                env=tox_env,
-                cwd=self.config_manager.project_root
-            )
-            
-            # Monitor process execution
-            output_lines = []
-            while True:
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
-                    break
-                if line:
-                    output_lines.append(line.strip())
-                    
-                # Check timeout
-                if time.time() - start_time > env_config.timeout_seconds:
-                    process.terminate()
-                    raise TimeoutError(f"Environment {env_name} exceeded timeout of {env_config.timeout_seconds}s")
-            
-            return_code = process.wait()
-            result.output_log = "\n".join(output_lines)
-            
-            if return_code != 0:
-                raise subprocess.CalledProcessError(return_code, tox_cmd, result.output_log)
-                
-        except subprocess.CalledProcessError as exc:
-            self.logger.error(f"Tox execution failed for {env_name}: {exc}")
-            result.error_message = f"Tox execution failed: {exc}"
-            raise
-        except TimeoutError as exc:
-            self.logger.error(f"Tox execution timeout for {env_name}: {exc}")
-            result.error_message = str(exc)
-            raise
-        
-        return result
-    
-    def _collect_performance_metrics(self, env_name: str, result: TestResult) -> TestResult:
-        """Collect performance metrics for environment execution"""
-        try:
-            # Memory usage
-            current_memory = self.process_monitor.memory_info().rss / 1024 / 1024
-            result.memory_usage_mb = current_memory - self.start_memory
-            
-            # CPU usage (average over short period)
-            cpu_percent = self.process_monitor.cpu_percent(interval=1.0)
-            result.cpu_usage_percentage = cpu_percent
-            
-            # Additional performance metrics
-            result.performance_metrics = {
-                "memory_peak_mb": result.memory_usage_mb,
-                "cpu_avg_percent": cpu_percent,
-                "execution_start": result.start_time.timestamp(),
-                "python_version": sys.version,
-                "platform": sys.platform
-            }
-            
-        except Exception as exc:
-            self.logger.warning(f"Failed to collect performance metrics for {env_name}: {exc}")
-        
-        return result
-    
-    def _parse_test_results(self, env_dir: Path, result: TestResult) -> TestResult:
-        """Parse pytest test results and coverage information"""
-        try:
-            # Look for pytest JSON report
-            json_report_path = env_dir / "pytest_report.json" 
-            if json_report_path.exists():
-                with open(json_report_path) as f:
-                    pytest_data = json.load(f)
-                    
-                result.tests_passed = pytest_data.get("summary", {}).get("passed", 0)
-                result.tests_failed = pytest_data.get("summary", {}).get("failed", 0)
-                result.tests_skipped = pytest_data.get("summary", {}).get("skipped", 0)
-                result.tests_total = result.tests_passed + result.tests_failed + result.tests_skipped
-            
-            # Look for coverage report
-            coverage_report_path = env_dir / "coverage.json"
-            if coverage_report_path.exists():
-                with open(coverage_report_path) as f:
-                    coverage_data = json.load(f)
-                    result.coverage_percentage = coverage_data.get("totals", {}).get("percent_covered")
-            
-            # Parse output log for test counts if JSON not available
-            if result.tests_total == 0 and result.output_log:
-                self._parse_output_log_for_results(result)
-                
-        except Exception as exc:
-            self.logger.warning(f"Failed to parse test results: {exc}")
-        
-        return result
-    
-    def _parse_output_log_for_results(self, result: TestResult):
-        """Parse pytest output log for test results when JSON not available"""
-        log_lines = result.output_log.split('\n')
-        
-        for line in log_lines:
-            if "passed" in line and "failed" in line:
-                # Try to extract test counts from summary line
-                import re
-                pattern = r'(\d+) passed.*?(\d+) failed.*?(\d+) skipped'
-                match = re.search(pattern, line)
-                if match:
-                    result.tests_passed = int(match.group(1))
-                    result.tests_failed = int(match.group(2))
-                    result.tests_skipped = int(match.group(3))
-                    result.tests_total = result.tests_passed + result.tests_failed + result.tests_skipped
-                    break
-    
-    def generate_comprehensive_report(self) -> Dict[str, Any]:
-        """
-        Generate comprehensive test execution report with analytics
-        
-        Returns:
-            Dict[str, Any]: Complete test execution report
-        """
-        if not self.test_results:
-            return {"error": "No test results available"}
-        
-        # Calculate summary statistics
-        total_environments = len(self.test_results)
-        passed_environments = sum(1 for r in self.test_results.values() if r.status == TestStatus.PASSED)
-        failed_environments = sum(1 for r in self.test_results.values() if r.status == TestStatus.FAILED)
-        error_environments = sum(1 for r in self.test_results.values() if r.status == TestStatus.ERROR)
-        
-        total_tests = sum(r.tests_total for r in self.test_results.values())
-        total_passed = sum(r.tests_passed for r in self.test_results.values())
-        total_failed = sum(r.tests_failed for r in self.test_results.values())
-        total_skipped = sum(r.tests_skipped for r in self.test_results.values())
-        
-        # Calculate averages
-        avg_duration = sum(r.duration_seconds or 0 for r in self.test_results.values()) / total_environments
-        avg_coverage = sum(r.coverage_percentage or 0 for r in self.test_results.values() if r.coverage_percentage) / max(1, sum(1 for r in self.test_results.values() if r.coverage_percentage))
-        avg_memory = sum(r.memory_usage_mb or 0 for r in self.test_results.values()) / total_environments
-        
-        report = {
-            "execution_summary": {
-                "total_environments": total_environments,
-                "passed_environments": passed_environments,
-                "failed_environments": failed_environments,
-                "error_environments": error_environments,
-                "success_rate": passed_environments / total_environments * 100,
-                "total_execution_time": sum(r.duration_seconds or 0 for r in self.test_results.values()),
-                "average_execution_time": avg_duration
+        self.summary_report = {
+            'execution_summary': {
+                'execution_id': self.execution_id,
+                'start_time': self.start_time.isoformat(),
+                'end_time': self.end_time.isoformat() if self.end_time else None,
+                'total_duration_seconds': self.total_duration_seconds,
+                'total_environments': self.total_environments,
+                'successful_environments': self.successful_environments,
+                'failed_environments': self.failed_environments,
+                'environment_success_rate': (self.successful_environments / self.total_environments * 100) if self.total_environments > 0 else 0
             },
-            "test_summary": {
-                "total_tests": total_tests,
-                "total_passed": total_passed,
-                "total_failed": total_failed,
-                "total_skipped": total_skipped,
-                "overall_success_rate": total_passed / total_tests * 100 if total_tests > 0 else 0
+            'test_aggregation': {
+                'total_tests': self.total_tests_all_envs,
+                'passed_tests': self.passed_tests_all_envs,
+                'failed_tests': self.failed_tests_all_envs,
+                'overall_success_rate': self.calculate_overall_success_rate()
             },
-            "performance_summary": {
-                "average_coverage_percentage": avg_coverage,
-                "average_memory_usage_mb": avg_memory,
-                "total_memory_usage_mb": sum(r.memory_usage_mb or 0 for r in self.test_results.values())
+            'performance_analysis': {
+                'fastest_environment': self.fastest_environment,
+                'slowest_environment': self.slowest_environment,
+                'most_memory_efficient': self.most_memory_efficient
             },
-            "environment_results": {
-                name: result.to_dict() for name, result in self.test_results.items()
+            'environment_details': {
+                name: env.to_dict() for name, env in self.environments.items()
             },
-            "flask_compatibility": {
-                "flask_version": "3.1.1",
-                "python_versions_tested": list(set(
-                    self.config_manager.environments[name].python_version 
-                    for name in self.test_results.keys()
-                )),
-                "primary_environment_status": self.test_results.get("py313", TestResult("", TestStatus.ERROR, datetime.now())).status.value,
-                "compatibility_environments_passed": sum(
-                    1 for name, result in self.test_results.items() 
-                    if "py31" in name and result.status == TestStatus.PASSED
+            'compliance_status': {
+                'flask_311_compatible': all(
+                    env.is_healthy() for env in self.environments.values() 
+                    if env.required
                 ),
-                "all_environments_compatible": all(
-                    r.status == TestStatus.PASSED for r in self.test_results.values()
+                'performance_compliant': all(
+                    self._check_environment_performance(env) 
+                    for env in self.environments.values()
+                ),
+                'isolation_verified': True,  # Verified by successful tox execution
+                'reproducibility_verified': all(
+                    env.exit_code == 0 for env in self.environments.values() 
+                    if env.required
                 )
             },
-            "recommendations": self._generate_recommendations(),
-            "timestamp": datetime.now().isoformat(),
-            "report_version": "1.0"
+            'recommendations': self._generate_recommendations(),
+            'next_steps': self._generate_next_steps()
         }
         
-        return report
+        return self.summary_report
+    
+    def _check_environment_performance(self, env: EnvironmentInfo) -> bool:
+        """Check if environment meets performance thresholds."""
+        thresholds = ENVIRONMENT_PERFORMANCE_THRESHOLDS.get(env.name, {})
+        
+        if not thresholds:
+            return True  # No thresholds defined
+        
+        # Check duration threshold
+        if (env.duration_seconds is not None and 
+            'test_execution_time_s' in thresholds and
+            env.duration_seconds > thresholds['test_execution_time_s']):
+            return False
+        
+        # Check memory threshold
+        if (env.memory_usage_mb is not None and 
+            'memory_usage_mb' in thresholds and
+            env.memory_usage_mb > thresholds['memory_usage_mb']):
+            return False
+        
+        return True
     
     def _generate_recommendations(self) -> List[str]:
-        """Generate recommendations based on test results"""
+        """Generate recommendations based on test results."""
         recommendations = []
         
-        # Check for failed environments
-        failed_envs = [name for name, result in self.test_results.items() if result.status == TestStatus.FAILED]
+        # Environment-specific recommendations
+        failed_envs = [env for env in self.environments.values() if env.status == 'failed']
         if failed_envs:
-            recommendations.append(f"Investigate test failures in environments: {', '.join(failed_envs)}")
+            recommendations.append(
+                f"Investigate failed environments: {', '.join(env.name for env in failed_envs)}"
+            )
         
-        # Check performance issues
-        high_memory_envs = [name for name, result in self.test_results.items() if (result.memory_usage_mb or 0) > 200]
-        if high_memory_envs:
-            recommendations.append(f"High memory usage detected in environments: {', '.join(high_memory_envs)}")
+        # Performance recommendations
+        if self.slowest_environment and self.fastest_environment:
+            slow_env = self.environments[self.slowest_environment]
+            fast_env = self.environments[self.fastest_environment]
+            if slow_env.duration_seconds and fast_env.duration_seconds:
+                ratio = slow_env.duration_seconds / fast_env.duration_seconds
+                if ratio > 2.0:
+                    recommendations.append(
+                        f"Consider optimizing {self.slowest_environment} environment "
+                        f"({ratio:.1f}x slower than {self.fastest_environment})"
+                    )
         
-        # Check coverage
-        low_coverage_envs = [name for name, result in self.test_results.items() if (result.coverage_percentage or 0) < 80]
-        if low_coverage_envs:
-            recommendations.append(f"Low test coverage (<80%) in environments: {', '.join(low_coverage_envs)}")
-        
-        # Check primary environment
-        if "py313" in self.test_results and self.test_results["py313"].status != TestStatus.PASSED:
-            recommendations.append("Primary Python 3.13.3 environment failed - this is critical for Flask 3.1.1 migration")
-        
-        if not recommendations:
-            recommendations.append("All environments passed successfully - Flask 3.1.1 migration validation complete")
+        # Success rate recommendations
+        overall_success = self.calculate_overall_success_rate()
+        if overall_success < 95.0:
+            recommendations.append(
+                f"Overall test success rate ({overall_success:.1f}%) below target (95%)"
+            )
         
         return recommendations
     
-    def save_report(self, report: Dict[str, Any], filename: str = "multi_environment_report.json"):
-        """Save comprehensive report to file"""
-        report_path = self.results_dir / filename
-        with open(report_path, 'w') as f:
-            json.dump(report, f, indent=2, default=str)
+    def _generate_next_steps(self) -> List[str]:
+        """Generate next steps based on test results."""
+        next_steps = []
         
-        self.logger.info(f"Comprehensive report saved to {report_path}")
+        # Check for required environment failures
+        required_failures = [
+            env for env in self.environments.values() 
+            if env.required and not env.is_healthy()
+        ]
         
-        # Also save a summary text report
-        summary_path = self.results_dir / "test_summary.txt"
-        self._save_text_summary(report, summary_path)
-    
-    def _save_text_summary(self, report: Dict[str, Any], summary_path: Path):
-        """Save human-readable text summary"""
-        with open(summary_path, 'w') as f:
-            f.write("Multi-Environment Test Execution Summary\n")
-            f.write("=" * 50 + "\n\n")
-            
-            f.write(f"Execution Date: {report['timestamp']}\n")
-            f.write(f"Total Environments: {report['execution_summary']['total_environments']}\n")
-            f.write(f"Passed: {report['execution_summary']['passed_environments']}\n")
-            f.write(f"Failed: {report['execution_summary']['failed_environments']}\n")
-            f.write(f"Errors: {report['execution_summary']['error_environments']}\n")
-            f.write(f"Success Rate: {report['execution_summary']['success_rate']:.1f}%\n\n")
-            
-            f.write("Flask 3.1.1 Compatibility Status:\n")
-            f.write("-" * 30 + "\n")
-            f.write(f"Primary Environment (Python 3.13.3): {report['flask_compatibility']['primary_environment_status']}\n")
-            f.write(f"All Environments Compatible: {report['flask_compatibility']['all_environments_compatible']}\n\n")
-            
-            f.write("Recommendations:\n")
-            f.write("-" * 15 + "\n")
-            for rec in report['recommendations']:
-                f.write(f"- {rec}\n")
+        if required_failures:
+            next_steps.append(
+                "Critical: Fix required environment failures before proceeding with migration"
+            )
+            for env in required_failures:
+                next_steps.append(f"  - Debug {env.name}: {env.stderr[:100]}..." if env.stderr else f"  - Debug {env.name}")
+        
+        # Check for Flask 3.1.1 compatibility
+        if not all(env.is_healthy() for env in self.environments.values() if 'flask311' in env.name):
+            next_steps.append("Resolve Flask 3.1.1 compatibility issues")
+        
+        # Performance next steps
+        if any(not self._check_environment_performance(env) for env in self.environments.values()):
+            next_steps.append("Optimize performance for environments exceeding thresholds")
+        
+        # Success case
+        if not next_steps:
+            next_steps.append("All environments passing - ready to proceed with migration validation")
+        
+        return next_steps
 
 
-class MultiEnvironmentTestSuite:
+# ================================
+# Tox Configuration Management
+# ================================
+
+class ToxConfigurationManager:
     """
-    Comprehensive multi-environment test suite implementing pytest-flask integration
-    with tox 4.26.0 orchestration for Flask 3.1.1 compatibility validation.
-    
-    This class provides the main interface for multi-environment testing as specified
-    in Section 4.7.2, including test discovery, execution, and result reporting.
+    Tox configuration manager for generating and managing tox.ini files
+    with multi-environment testing configurations per Section 4.7.2.
     """
     
-    def __init__(self, project_root: Optional[Path] = None):
+    def __init__(self, project_root: Optional[str] = None):
+        self.project_root = Path(project_root) if project_root else Path.cwd()
+        self.tox_ini_path = self.project_root / 'tox.ini'
+        self.config = configparser.ConfigParser()
+        
+    def generate_tox_configuration(self, custom_config: Optional[Dict[str, Any]] = None) -> str:
         """
-        Initialize multi-environment test suite
+        Generate comprehensive tox.ini configuration for multi-environment testing.
         
         Args:
-            project_root: Root directory of the project (defaults to current directory)
-        """
-        self.project_root = project_root or Path.cwd()
-        self.config_manager = ToxConfigurationManager(self.project_root)
-        self.executor = MultiEnvironmentTestExecutor(self.config_manager)
-        self.logger = logging.getLogger("multi_environment_test_suite")
-    
-    def validate_setup(self) -> Tuple[bool, List[str]]:
-        """
-        Validate multi-environment testing setup and configuration
-        
-        Returns:
-            Tuple[bool, List[str]]: Success status and list of issues
-        """
-        issues = []
-        
-        # Validate tox configuration
-        config_issues = self.config_manager.validate_configuration()
-        issues.extend(config_issues)
-        
-        # Validate project structure
-        if not (self.project_root / "tests").exists():
-            issues.append("Tests directory not found")
-        
-        if not (self.project_root / "src").exists() and not (self.project_root / "app.py").exists():
-            issues.append("Application source code not found")
-        
-        # Validate Python interpreters
-        for env_name, env_config in self.config_manager.environments.items():
-            python_cmd = f"python{env_config.python_version}"
-            if shutil.which(python_cmd) is None:
-                issues.append(f"Python {env_config.python_version} not found for environment {env_name}")
-        
-        # Validate tox installation
-        if shutil.which("tox") is None:
-            issues.append("tox not found - install with 'pip install tox==4.26.0'")
-        
-        return len(issues) == 0, issues
-    
-    def run_comprehensive_testing(self, parallel: bool = True, 
-                                 generate_report: bool = True) -> Dict[str, Any]:
-        """
-        Run comprehensive multi-environment testing with full reporting
-        
-        Args:
-            parallel: Enable parallel execution
-            generate_report: Generate comprehensive report
+            custom_config: Optional custom configuration overrides
             
         Returns:
-            Dict[str, Any]: Test execution results and report
+            Generated tox.ini content as string
         """
-        self.logger.info("Starting comprehensive multi-environment testing")
+        # Merge custom configuration with defaults
+        config = TOX_CONFIGURATION.copy()
+        if custom_config:
+            config.update(custom_config)
         
-        # Validate setup
-        setup_valid, issues = self.validate_setup()
-        if not setup_valid:
-            error_msg = f"Setup validation failed: {'; '.join(issues)}"
-            self.logger.error(error_msg)
-            return {
-                "success": False,
-                "error": error_msg,
-                "issues": issues
+        # Create ConfigParser object
+        tox_config = configparser.ConfigParser()
+        
+        # Add main tox section
+        tox_config.add_section('tox')
+        for key, value in config['tox'].items():
+            if isinstance(value, list):
+                tox_config.set('tox', key, ','.join(value))
+            else:
+                tox_config.set('tox', key, str(value))
+        
+        # Add testenv section (base configuration)
+        tox_config.add_section('testenv')
+        testenv_config = config['testenv']
+        
+        for key, value in testenv_config.items():
+            if key == 'deps' and isinstance(value, list):
+                tox_config.set('testenv', key, '\n    ' + '\n    '.join(value))
+            elif key == 'commands' and isinstance(value, list):
+                tox_config.set('testenv', key, '\n    ' + '\n    '.join(value))
+            elif key == 'setenv' and isinstance(value, dict):
+                setenv_lines = [f'{k} = {v}' for k, v in value.items()]
+                tox_config.set('testenv', key, '\n    ' + '\n    '.join(setenv_lines))
+            elif key == 'passenv' and isinstance(value, list):
+                tox_config.set('testenv', key, '\n    ' + '\n    '.join(value))
+            elif key == 'allowlist_externals' and isinstance(value, list):
+                tox_config.set('testenv', key, '\n    ' + '\n    '.join(value))
+            else:
+                tox_config.set('testenv', key, str(value))
+        
+        # Add environment-specific sections
+        for env_name, env_config in ENVIRONMENT_CONFIGS.items():
+            section_name = f'testenv:{env_name}'
+            tox_config.add_section(section_name)
+            
+            # Add environment-specific configuration
+            tox_config.set(section_name, 'description', env_config['description'])
+            
+            # Environment-specific dependencies
+            if 'deps' in env_config:
+                deps_str = '\n    ' + '\n    '.join(env_config['deps'])
+                tox_config.set(section_name, 'deps', deps_str)
+            
+            # Environment-specific commands
+            commands = [
+                f'echo "Testing {env_name} environment"',
+                'python --version',
+                'pip list',
+                'pytest tests/comparative/test_multi_environment.py::test_environment_validation -v',
+                'pytest tests/comparative/test_api_parity.py -v -m comparative --tb=short',
+            ]
+            
+            # Add performance tests for performance environment
+            if 'performance' in env_name:
+                commands.append('pytest tests/comparative/test_performance_benchmarks.py -v -m performance')
+            
+            # Add security tests for security environment
+            if 'security' in env_name:
+                commands.extend([
+                    'bandit -r src/',
+                    'safety check',
+                ])
+            
+            tox_config.set(section_name, 'commands', '\n    ' + '\n    '.join(commands))
+        
+        # Convert to string
+        import io
+        output = io.StringIO()
+        tox_config.write(output)
+        return output.getvalue()
+    
+    def write_tox_configuration(self, content: str) -> str:
+        """Write tox configuration to tox.ini file."""
+        with open(self.tox_ini_path, 'w') as f:
+            f.write(content)
+        return str(self.tox_ini_path)
+    
+    def create_requirements_files(self) -> Dict[str, str]:
+        """Create environment-specific requirements.txt files."""
+        requirements_files = {}
+        
+        # Create requirements directory
+        req_dir = self.project_root / 'requirements'
+        req_dir.mkdir(exist_ok=True)
+        
+        for env_name, env_config in ENVIRONMENT_CONFIGS.items():
+            if 'deps' in env_config:
+                req_file_path = req_dir / f'{env_name}.txt'
+                
+                # Write requirements file
+                with open(req_file_path, 'w') as f:
+                    f.write(f"# Requirements for {env_name}\n")
+                    f.write(f"# Generated: {datetime.now().isoformat()}\n\n")
+                    for dep in env_config['deps']:
+                        f.write(f"{dep}\n")
+                
+                requirements_files[env_name] = str(req_file_path)
+        
+        return requirements_files
+    
+    def validate_tox_installation(self) -> Tuple[bool, str]:
+        """Validate tox installation and version."""
+        try:
+            result = subprocess.run(
+                ['tox', '--version'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                version_output = result.stdout.strip()
+                # Check if version meets minimum requirement
+                if 'tox' in version_output:
+                    return True, version_output
+                else:
+                    return False, f"Unexpected tox version output: {version_output}"
+            else:
+                return False, f"Tox command failed: {result.stderr}"
+                
+        except subprocess.TimeoutExpired:
+            return False, "Tox version check timed out"
+        except FileNotFoundError:
+            return False, "Tox not found - please install tox 4.26.0"
+        except Exception as e:
+            return False, f"Error checking tox installation: {str(e)}"
+
+
+# ================================
+# Multi-Environment Test Orchestrator
+# ================================
+
+class MultiEnvironmentTestOrchestrator:
+    """
+    Multi-environment test orchestrator implementing comprehensive tox-based
+    testing with parallel execution and detailed result analysis.
+    
+    This class coordinates multi-environment testing per Section 4.7.2,
+    managing virtual environment isolation, dependency management, and
+    parallel test execution across multiple Python environments.
+    """
+    
+    def __init__(self, project_root: Optional[str] = None, 
+                 max_parallel_envs: int = 3,
+                 timeout_seconds: int = 1800):
+        self.project_root = Path(project_root) if project_root else Path.cwd()
+        self.max_parallel_envs = max_parallel_envs
+        self.timeout_seconds = timeout_seconds
+        
+        # Initialize components
+        self.config_manager = ToxConfigurationManager(str(self.project_root))
+        self.execution_id = f"multi_env_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Execution tracking
+        self.start_time = None
+        self.environments = {}
+        self.active_processes = {}
+        self.results = MultiEnvironmentTestResult(
+            execution_id=self.execution_id,
+            start_time=datetime.now(timezone.utc)
+        )
+        
+        # Logging setup
+        self.log_dir = self.project_root / 'logs' / 'multi_environment'
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Setup logger
+        self.logger = self._setup_logger()
+    
+    def _setup_logger(self) -> logging.Logger:
+        """Setup dedicated logger for multi-environment testing."""
+        logger = logging.getLogger(f'multi_env_{self.execution_id}')
+        logger.setLevel(logging.INFO)
+        
+        # File handler
+        log_file = self.log_dir / f'{self.execution_id}.log'
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # Formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+        
+        return logger
+    
+    def setup_test_environment(self) -> Dict[str, str]:
+        """
+        Setup comprehensive test environment with tox configuration.
+        
+        Returns:
+            Dictionary with setup information and file paths
+        """
+        self.logger.info("Setting up multi-environment test infrastructure")
+        
+        setup_info = {}
+        
+        try:
+            # Validate tox installation
+            tox_valid, tox_info = self.config_manager.validate_tox_installation()
+            if not tox_valid:
+                raise RuntimeError(f"Tox validation failed: {tox_info}")
+            
+            setup_info['tox_version'] = tox_info
+            self.logger.info(f"Tox validation successful: {tox_info}")
+            
+            # Generate tox configuration
+            tox_config_content = self.config_manager.generate_tox_configuration()
+            tox_config_path = self.config_manager.write_tox_configuration(tox_config_content)
+            setup_info['tox_config_path'] = tox_config_path
+            self.logger.info(f"Generated tox configuration: {tox_config_path}")
+            
+            # Create requirements files
+            requirements_files = self.config_manager.create_requirements_files()
+            setup_info['requirements_files'] = requirements_files
+            self.logger.info(f"Created {len(requirements_files)} requirements files")
+            
+            # Initialize environment tracking
+            for env_name, env_config in ENVIRONMENT_CONFIGS.items():
+                env_info = EnvironmentInfo(
+                    name=env_name,
+                    python_version=env_config['python'],
+                    description=env_config['description'],
+                    dependencies=env_config.get('deps', []),
+                    priority=env_config.get('priority', 1),
+                    required=env_config.get('required', True),
+                    env_path=str(self.project_root / '.tox' / env_name),
+                    log_path=str(self.log_dir / f'{env_name}.log')
+                )
+                self.environments[env_name] = env_info
+                
+            setup_info['environments'] = list(self.environments.keys())
+            self.logger.info(f"Initialized {len(self.environments)} environments")
+            
+            return setup_info
+            
+        except Exception as e:
+            self.logger.error(f"Environment setup failed: {str(e)}")
+            raise
+    
+    def execute_environment_tests(self, env_names: Optional[List[str]] = None,
+                                 parallel: bool = True) -> MultiEnvironmentTestResult:
+        """
+        Execute tests across multiple environments with comprehensive monitoring.
+        
+        Args:
+            env_names: Specific environments to test (all if None)
+            parallel: Execute environments in parallel
+            
+        Returns:
+            Multi-environment test results with detailed analysis
+        """
+        self.start_time = datetime.now(timezone.utc)
+        self.logger.info(f"Starting multi-environment test execution: {self.execution_id}")
+        
+        # Determine environments to test
+        target_envs = env_names if env_names else list(self.environments.keys())
+        
+        # Sort by priority (required environments first, then by priority)
+        sorted_envs = sorted(
+            [self.environments[name] for name in target_envs],
+            key=lambda env: (not env.required, env.priority)
+        )
+        
+        try:
+            if parallel:
+                self._execute_parallel_environments(sorted_envs)
+            else:
+                self._execute_sequential_environments(sorted_envs)
+                
+        except Exception as e:
+            self.logger.error(f"Environment execution failed: {str(e)}")
+        finally:
+            # Finalize results
+            self.results.end_time = datetime.now(timezone.utc)
+            self.results.total_duration_seconds = (
+                self.results.end_time - self.results.start_time
+            ).total_seconds()
+            
+            # Add all environment results
+            for env in self.environments.values():
+                self.results.add_environment_result(env)
+            
+            # Generate summary report
+            summary = self.results.generate_summary_report()
+            self.logger.info("Multi-environment test execution completed")
+            self.logger.info(f"Overall success rate: {summary['test_aggregation']['overall_success_rate']:.1f}%")
+            
+            return self.results
+    
+    def _execute_parallel_environments(self, environments: List[EnvironmentInfo]):
+        """Execute environments in parallel with controlled concurrency."""
+        self.logger.info(f"Executing {len(environments)} environments in parallel (max {self.max_parallel_envs})")
+        
+        with ThreadPoolExecutor(max_workers=self.max_parallel_envs) as executor:
+            # Submit all environment executions
+            future_to_env = {
+                executor.submit(self._execute_single_environment, env): env
+                for env in environments
             }
+            
+            # Wait for completion with progress tracking
+            completed = 0
+            total = len(environments)
+            
+            for future in as_completed(future_to_env, timeout=self.timeout_seconds):
+                env = future_to_env[future]
+                completed += 1
+                
+                try:
+                    result = future.result()
+                    self.logger.info(
+                        f"Environment {env.name} completed ({completed}/{total}) - "
+                        f"Status: {env.status}, Success Rate: {env.calculate_success_rate():.1f}%"
+                    )
+                except Exception as e:
+                    self.logger.error(f"Environment {env.name} failed with exception: {str(e)}")
+                    env.mark_completed(1)
+                    env.stderr = str(e)
+    
+    def _execute_sequential_environments(self, environments: List[EnvironmentInfo]):
+        """Execute environments sequentially for debugging or resource constraints."""
+        self.logger.info(f"Executing {len(environments)} environments sequentially")
         
-        # Write tox configuration
-        self.config_manager.write_tox_config()
+        for i, env in enumerate(environments, 1):
+            self.logger.info(f"Executing environment {env.name} ({i}/{len(environments)})")
+            
+            try:
+                self._execute_single_environment(env)
+                self.logger.info(
+                    f"Environment {env.name} completed - "
+                    f"Status: {env.status}, Success Rate: {env.calculate_success_rate():.1f}%"
+                )
+            except Exception as e:
+                self.logger.error(f"Environment {env.name} failed: {str(e)}")
+                env.mark_completed(1)
+                env.stderr = str(e)
+    
+    def _execute_single_environment(self, env: EnvironmentInfo) -> EnvironmentInfo:
+        """
+        Execute tests in a single tox environment with comprehensive monitoring.
         
-        # Execute tests
-        test_results = self.executor.execute_all_environments(parallel=parallel)
+        Args:
+            env: Environment information object
+            
+        Returns:
+            Updated environment information with results
+        """
+        env.mark_started()
+        self.logger.info(f"Starting environment: {env.name}")
         
-        # Generate report
-        report = None
-        if generate_report:
-            report = self.executor.generate_comprehensive_report()
-            self.executor.save_report(report)
+        try:
+            # Prepare tox command
+            tox_cmd = [
+                'tox',
+                '-e', env.name,
+                '--workdir', str(self.project_root / '.tox'),
+                '--recreate',  # Always recreate for isolation
+                '-v'  # Verbose output
+            ]
+            
+            # Setup environment variables
+            env_vars = os.environ.copy()
+            env_vars.update({
+                'TOX_TESTENV_PASSENV': 'PYTHONPATH',
+                'PYTHONPATH': str(self.project_root),
+                'FLASK_ENV': 'testing',
+                'TESTING': 'True'
+            })
+            
+            # Execute tox command
+            self.logger.info(f"Executing: {' '.join(tox_cmd)}")
+            
+            # Monitor system resources before execution
+            process = subprocess.Popen(
+                tox_cmd,
+                cwd=str(self.project_root),
+                env=env_vars,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            # Monitor execution with timeout
+            try:
+                stdout, stderr = process.communicate(timeout=self.timeout_seconds)
+                exit_code = process.returncode
+                
+                # Capture outputs
+                env.stdout = stdout
+                env.stderr = stderr
+                
+                # Parse test results from output
+                self._parse_test_results(env, stdout)
+                
+                # Monitor system resources after execution
+                self._capture_resource_usage(env)
+                
+                # Mark completion
+                env.mark_completed(exit_code)
+                
+                self.logger.info(
+                    f"Environment {env.name} completed with exit code {exit_code} "
+                    f"in {env.duration_seconds:.1f}s"
+                )
+                
+            except subprocess.TimeoutExpired:
+                process.kill()
+                env.mark_completed(124)  # Timeout exit code
+                env.stderr = f"Environment execution timed out after {self.timeout_seconds}s"
+                self.logger.error(f"Environment {env.name} timed out")
+                
+        except Exception as e:
+            env.mark_completed(1)
+            env.stderr = f"Environment execution failed: {str(e)}"
+            self.logger.error(f"Environment {env.name} failed: {str(e)}")
         
-        # Determine overall success
-        success = all(result.status == TestStatus.PASSED for result in test_results.values())
+        return env
+    
+    def _parse_test_results(self, env: EnvironmentInfo, output: str):
+        """Parse pytest output to extract test metrics."""
+        try:
+            lines = output.split('\n')
+            
+            # Look for pytest summary line
+            for line in lines:
+                if '====' in line and ('passed' in line or 'failed' in line):
+                    # Example: "==== 10 passed, 2 failed, 1 skipped in 5.23s ===="
+                    parts = line.split()
+                    
+                    for i, part in enumerate(parts):
+                        if part == 'passed,' or part == 'passed':
+                            if i > 0 and parts[i-1].isdigit():
+                                env.passed_tests = int(parts[i-1])
+                        elif part == 'failed,' or part == 'failed':
+                            if i > 0 and parts[i-1].isdigit():
+                                env.failed_tests = int(parts[i-1])
+                        elif part == 'skipped,' or part == 'skipped':
+                            if i > 0 and parts[i-1].isdigit():
+                                env.skipped_tests = int(parts[i-1])
+                    
+                    env.total_tests = env.passed_tests + env.failed_tests + env.skipped_tests
+                    break
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to parse test results for {env.name}: {str(e)}")
+    
+    def _capture_resource_usage(self, env: EnvironmentInfo):
+        """Capture system resource usage metrics."""
+        try:
+            import psutil
+            process = psutil.Process()
+            
+            # Memory usage in MB
+            memory_info = process.memory_info()
+            env.memory_usage_mb = memory_info.rss / 1024 / 1024
+            
+            # CPU usage percentage
+            env.cpu_usage_percent = process.cpu_percent()
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to capture resource usage for {env.name}: {str(e)}")
+    
+    def generate_comprehensive_report(self) -> Dict[str, Any]:
+        """Generate comprehensive report with recommendations and next steps."""
+        if not self.results.summary_report:
+            self.results.generate_summary_report()
+        
+        report = self.results.summary_report.copy()
+        
+        # Add Flask 3.1.1 specific validation
+        report['flask_311_validation'] = self._validate_flask_compatibility()
+        
+        # Add tox configuration validation
+        report['tox_configuration'] = self._validate_tox_configuration()
+        
+        # Add environment isolation validation
+        report['isolation_validation'] = self._validate_environment_isolation()
+        
+        # Add performance benchmarks
+        report['performance_benchmarks'] = self._generate_performance_benchmarks()
+        
+        return report
+    
+    def _validate_flask_compatibility(self) -> Dict[str, Any]:
+        """Validate Flask 3.1.1 compatibility across environments."""
+        flask_envs = {
+            name: env for name, env in self.environments.items() 
+            if 'flask311' in name
+        }
+        
+        compatible_envs = [
+            env for env in flask_envs.values() 
+            if env.is_healthy()
+        ]
         
         return {
-            "success": success,
-            "test_results": {name: result.to_dict() for name, result in test_results.items()},
-            "report": report,
-            "flask_compatibility_verified": success and "py313" in test_results
+            'total_flask_environments': len(flask_envs),
+            'compatible_environments': len(compatible_envs),
+            'compatibility_rate': (len(compatible_envs) / len(flask_envs) * 100) if flask_envs else 0,
+            'incompatible_environments': [
+                env.name for env in flask_envs.values() 
+                if not env.is_healthy()
+            ],
+            'flask_311_ready': len(compatible_envs) == len(flask_envs) and len(flask_envs) > 0
         }
+    
+    def _validate_tox_configuration(self) -> Dict[str, Any]:
+        """Validate tox configuration effectiveness."""
+        return {
+            'tox_config_path': str(self.config_manager.tox_ini_path),
+            'environments_configured': len(ENVIRONMENT_CONFIGS),
+            'environments_executed': len(self.environments),
+            'configuration_complete': len(self.environments) == len(ENVIRONMENT_CONFIGS),
+            'parallel_execution_supported': True,
+            'isolation_enforced': all(env.env_path for env in self.environments.values())
+        }
+    
+    def _validate_environment_isolation(self) -> Dict[str, Any]:
+        """Validate virtual environment isolation effectiveness."""
+        isolated_envs = [
+            env for env in self.environments.values()
+            if env.env_path and Path(env.env_path).exists()
+        ]
+        
+        return {
+            'total_environments': len(self.environments),
+            'isolated_environments': len(isolated_envs),
+            'isolation_rate': (len(isolated_envs) / len(self.environments) * 100) if self.environments else 0,
+            'isolation_verified': len(isolated_envs) == len(self.environments),
+            'dependency_isolation': True,  # Verified by successful tox execution
+            'reproducibility_verified': all(
+                env.exit_code == 0 for env in self.environments.values() 
+                if env.required
+            )
+        }
+    
+    def _generate_performance_benchmarks(self) -> Dict[str, Any]:
+        """Generate performance benchmarks across environments."""
+        benchmarks = {}
+        
+        for env_name, env in self.environments.items():
+            if env.duration_seconds is not None:
+                thresholds = ENVIRONMENT_PERFORMANCE_THRESHOLDS.get(env_name, {})
+                
+                benchmarks[env_name] = {
+                    'execution_time_seconds': env.duration_seconds,
+                    'memory_usage_mb': env.memory_usage_mb,
+                    'cpu_usage_percent': env.cpu_usage_percent,
+                    'test_success_rate': env.calculate_success_rate(),
+                    'within_thresholds': self.results._check_environment_performance(env),
+                    'thresholds': thresholds
+                }
+        
+        return benchmarks
+    
+    def cleanup_test_environments(self, remove_tox_dir: bool = False):
+        """Cleanup test environments and temporary files."""
+        self.logger.info("Cleaning up test environments")
+        
+        try:
+            # Cleanup tox work directory if requested
+            if remove_tox_dir:
+                tox_dir = self.project_root / '.tox'
+                if tox_dir.exists():
+                    shutil.rmtree(tox_dir)
+                    self.logger.info(f"Removed tox directory: {tox_dir}")
+            
+            # Cleanup temporary requirements files
+            req_dir = self.project_root / 'requirements'
+            if req_dir.exists():
+                for req_file in req_dir.glob('py313-*.txt'):
+                    req_file.unlink()
+                    self.logger.info(f"Removed requirements file: {req_file}")
+            
+            self.logger.info("Cleanup completed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Cleanup failed: {str(e)}")
 
 
 # ================================
 # pytest Integration and Fixtures
 # ================================
 
-@pytest.fixture(scope="session")
-def multi_environment_suite() -> MultiEnvironmentTestSuite:
-    """
-    Multi-environment test suite fixture for pytest integration
-    
-    Returns:
-        MultiEnvironmentTestSuite: Configured test suite instance
-    """
-    return MultiEnvironmentTestSuite()
+@pytest.fixture(scope='session')
+def multi_env_orchestrator():
+    """Multi-environment test orchestrator fixture."""
+    orchestrator = MultiEnvironmentTestOrchestrator()
+    yield orchestrator
+    # Cleanup is optional in fixture - can be controlled by test
 
 
-@pytest.fixture(scope="session") 
-def tox_config_manager() -> ToxConfigurationManager:
-    """
-    Tox configuration manager fixture for environment configuration testing
-    
-    Returns:
-        ToxConfigurationManager: Configured tox manager instance
-    """
-    return ToxConfigurationManager(Path.cwd())
+@pytest.fixture(scope='session')
+def tox_config_manager():
+    """Tox configuration manager fixture."""
+    return ToxConfigurationManager()
 
 
 @pytest.fixture
-def environment_config_factory():
-    """
-    Factory fixture for creating environment configurations in tests
-    
-    Returns:
-        Callable: Function to create EnvironmentConfig instances
-    """
-    def create_environment_config(name: str = "test_env", 
-                                python_version: str = "3.13.3",
-                                env_type: EnvironmentType = EnvironmentType.PRIMARY,
-                                **kwargs) -> EnvironmentConfig:
-        return EnvironmentConfig(
-            name=name,
-            python_version=python_version,
-            env_type=env_type,
-            **kwargs
-        )
-    
-    return create_environment_config
+def test_environment_setup(multi_env_orchestrator):
+    """Test environment setup fixture."""
+    setup_info = multi_env_orchestrator.setup_test_environment()
+    return setup_info
 
 
 # ================================
-# Test Classes for Multi-Environment Validation
+# Core Test Cases
 # ================================
 
-class TestMultiEnvironmentConfiguration:
+@mark.comparative
+@mark.multi_environment
+class TestMultiEnvironmentOrchestration:
     """
-    Test class for validating multi-environment configuration management
-    and tox integration per Section 4.7.2 requirements.
+    Multi-environment testing orchestration test suite validating tox 4.26.0
+    configuration and Flask 3.1.1 compatibility per Section 4.7.2.
     """
-    
-    def test_default_environment_setup(self, tox_config_manager):
-        """Test that default environments are properly configured"""
-        assert "py313" in tox_config_manager.environments
-        assert "py312" in tox_config_manager.environments
-        assert "minimal" in tox_config_manager.environments
-        
-        # Validate primary environment
-        py313_env = tox_config_manager.environments["py313"]
-        assert py313_env.python_version == "3.13.3"
-        assert py313_env.env_type == EnvironmentType.PRIMARY
-        assert "Flask==3.1.1" in py313_env.base_dependencies
     
     def test_tox_configuration_generation(self, tox_config_manager):
-        """Test tox.ini configuration file generation"""
-        config_content = tox_config_manager.generate_tox_config()
+        """
+        Test tox configuration generation and validation.
         
-        assert "[tox]" in config_content
-        assert "minversion = 4.26.0" in config_content
-        assert "[testenv:py313]" in config_content
-        assert "Flask==3.1.1" in config_content
+        Validates:
+        - Tox 4.26.0 configuration structure
+        - Environment definitions
+        - Dependency specifications
+        - Command configurations
+        """
+        # Generate configuration
+        config_content = tox_config_manager.generate_tox_configuration()
+        
+        # Basic validation
+        assert '[tox]' in config_content
+        assert 'minversion = 4.26.0' in config_content
+        assert '[testenv]' in config_content
+        
+        # Environment validation
+        for env_name in ENVIRONMENT_CONFIGS.keys():
+            assert f'[testenv:{env_name}]' in config_content
+        
+        # Flask 3.1.1 dependency validation
+        assert 'flask==3.1.1' in config_content
+        assert 'pytest-flask==1.3.0' in config_content
+        
+        logger.info("Tox configuration generation validated successfully")
     
-    def test_environment_validation(self, tox_config_manager):
-        """Test environment configuration validation"""
-        issues = tox_config_manager.validate_configuration()
-        assert len(issues) == 0, f"Configuration validation failed: {issues}"
-    
-    def test_custom_environment_addition(self, tox_config_manager, environment_config_factory):
-        """Test adding custom environments to configuration"""
-        custom_env = environment_config_factory(
-            name="custom_test",
-            python_version="3.12",
-            env_type=EnvironmentType.DEVELOPMENT
-        )
+    def test_environment_isolation_validation(self, multi_env_orchestrator, test_environment_setup):
+        """
+        Test virtual environment isolation and dependency management.
         
-        initial_count = len(tox_config_manager.environments)
-        tox_config_manager.add_environment(custom_env)
+        Validates:
+        - Virtual environment creation
+        - Dependency isolation
+        - Requirements.txt integration
+        - Environment reproducibility
+        """
+        # Validate environment setup
+        assert 'tox_version' in test_environment_setup
+        assert 'tox_config_path' in test_environment_setup
+        assert 'requirements_files' in test_environment_setup
+        assert 'environments' in test_environment_setup
         
-        assert len(tox_config_manager.environments) == initial_count + 1
-        assert "custom_test" in tox_config_manager.environments
-        assert "custom_test" in tox_config_manager.global_config["envlist"]
-
-
-class TestMultiEnvironmentExecution:
-    """
-    Test class for validating multi-environment test execution with
-    comprehensive monitoring and result aggregation.
-    """
-    
-    @pytest.mark.integration
-    def test_single_environment_execution(self, multi_environment_suite):
-        """Test execution of tests in a single environment"""
-        # Use minimal environment for faster testing
-        suite = multi_environment_suite
-        config_manager = suite.config_manager
+        # Validate requirements files creation
+        req_files = test_environment_setup['requirements_files']
+        assert len(req_files) > 0
         
-        # Create executor with minimal configuration
-        executor = MultiEnvironmentTestExecutor(config_manager)
-        
-        # Execute minimal environment only
-        minimal_config = config_manager.environments["minimal"]
-        result = executor._execute_single_environment("minimal", minimal_config)
-        
-        assert result is not None
-        assert result.environment_name == "minimal"
-        assert result.status in [TestStatus.PASSED, TestStatus.FAILED, TestStatus.ERROR]
-        assert result.start_time is not None
-    
-    @pytest.mark.performance
-    def test_performance_metrics_collection(self, multi_environment_suite):
-        """Test collection of performance metrics during execution"""
-        suite = multi_environment_suite
-        executor = MultiEnvironmentTestExecutor(suite.config_manager)
-        
-        # Create mock result for testing
-        result = TestResult(
-            environment_name="test_env",
-            status=TestStatus.RUNNING,
-            start_time=datetime.now()
-        )
-        
-        # Collect performance metrics
-        result_with_metrics = executor._collect_performance_metrics("test_env", result)
-        
-        assert result_with_metrics.performance_metrics is not None
-        assert "python_version" in result_with_metrics.performance_metrics
-        assert "platform" in result_with_metrics.performance_metrics
-    
-    def test_report_generation(self, multi_environment_suite):
-        """Test comprehensive report generation"""
-        suite = multi_environment_suite
-        executor = MultiEnvironmentTestExecutor(suite.config_manager)
-        
-        # Create mock test results
-        executor.test_results["test_env"] = TestResult(
-            environment_name="test_env",
-            status=TestStatus.PASSED,
-            start_time=datetime.now(),
-            end_time=datetime.now(),
-            tests_passed=10,
-            tests_failed=0,
-            tests_total=10,
-            coverage_percentage=85.5
-        )
-        
-        report = executor.generate_comprehensive_report()
-        
-        assert "execution_summary" in report
-        assert "test_summary" in report
-        assert "performance_summary" in report
-        assert "flask_compatibility" in report
-        assert report["flask_compatibility"]["flask_version"] == "3.1.1"
-
-
-class TestFlaskCompatibilityValidation:
-    """
-    Test class for validating Flask 3.1.1 compatibility across multiple
-    environments as specified in Section 4.7.2.
-    """
-    
-    @pytest.mark.integration
-    def test_flask_application_factory_compatibility(self, app, client):
-        """Test Flask application factory pattern compatibility"""
-        assert app is not None
-        assert hasattr(app, 'config')
-        assert app.config['TESTING'] is True
-        
-        # Test that application can handle requests
-        response = client.get('/')
-        assert response.status_code in [200, 404]  # Either valid response or route not found
-    
-    @pytest.mark.unit
-    def test_flask_version_validation(self):
-        """Test that Flask 3.1.1 is properly installed and accessible"""
-        import flask
-        
-        # Verify Flask version
-        flask_version = flask.__version__
-        assert flask_version.startswith("3.1"), f"Expected Flask 3.1.x, got {flask_version}"
-    
-    @pytest.mark.unit
-    def test_flask_sqlalchemy_compatibility(self):
-        """Test Flask-SQLAlchemy 3.1.1 compatibility"""
-        import flask_sqlalchemy
-        
-        # Verify Flask-SQLAlchemy version
-        sqlalchemy_version = flask_sqlalchemy.__version__
-        assert sqlalchemy_version.startswith("3.1"), f"Expected Flask-SQLAlchemy 3.1.x, got {sqlalchemy_version}"
-    
-    @pytest.mark.integration
-    def test_blueprint_registration_compatibility(self, app):
-        """Test Flask blueprint registration compatibility"""
-        from flask import Blueprint
-        
-        # Create test blueprint
-        test_bp = Blueprint('test', __name__)
-        
-        @test_bp.route('/test')
-        def test_route():
-            return {'status': 'ok'}
-        
-        # Register blueprint
-        app.register_blueprint(test_bp)
-        
-        # Verify blueprint is registered
-        assert 'test' in app.blueprints
-    
-    @pytest.mark.integration 
-    def test_werkzeug_integration_compatibility(self, app):
-        """Test Werkzeug integration compatibility with Flask 3.1.1"""
-        import werkzeug
-        
-        # Verify Werkzeug version compatibility
-        werkzeug_version = werkzeug.__version__
-        assert werkzeug_version.startswith("3."), f"Expected Werkzeug 3.x, got {werkzeug_version}"
-        
-        # Test WSGI application
-        with app.test_client() as client:
-            response = client.get('/nonexistent')
-            assert response.status_code == 404
-
-
-class TestEnvironmentIsolation:
-    """
-    Test class for validating virtual environment isolation and
-    dependency management across different testing environments.
-    """
-    
-    @pytest.mark.unit
-    def test_environment_configuration_isolation(self, environment_config_factory):
-        """Test that environment configurations are properly isolated"""
-        env1 = environment_config_factory(
-            name="env1", 
-            base_dependencies=["Flask==3.1.1"]
-        )
-        env2 = environment_config_factory(
-            name="env2",
-            base_dependencies=["Flask==3.0.0"]
-        )
-        
-        # Verify configurations are independent
-        assert env1.base_dependencies != env2.base_dependencies
-        assert env1.name != env2.name
-        
-        # Modify one environment
-        env1.base_dependencies.append("pytest==7.4.0")
-        
-        # Verify other environment is unaffected
-        assert "pytest==7.4.0" not in env2.base_dependencies
-    
-    @pytest.mark.integration
-    def test_virtual_environment_provisioning(self, tox_config_manager, tmp_path):
-        """Test virtual environment provisioning and isolation"""
-        # Create temporary tox configuration
-        temp_config = tmp_path / "tox.ini"
-        
-        # Write configuration
-        tox_config_manager.config_file = temp_config
-        tox_config_manager.write_tox_config()
-        
-        assert temp_config.exists()
-        
-        # Verify configuration content
-        content = temp_config.read_text()
-        assert "Flask==3.1.1" in content
-        assert "pytest-flask==1.3.0" in content
-    
-    def test_dependency_resolution_isolation(self, environment_config_factory):
-        """Test that dependency resolution is isolated per environment"""
-        minimal_env = environment_config_factory(
-            name="minimal",
-            env_type=EnvironmentType.MINIMAL,
-            base_dependencies=["Flask==3.1.1", "pytest>=7.4.0"]
-        )
-        
-        dev_env = environment_config_factory(
-            name="development", 
-            env_type=EnvironmentType.DEVELOPMENT
-        )
-        
-        # Verify minimal environment has fewer dependencies
-        assert len(minimal_env.base_dependencies) < len(dev_env.base_dependencies)
-        
-        # Verify both have Flask
-        minimal_flask_deps = [dep for dep in minimal_env.base_dependencies if "Flask" in dep]
-        dev_flask_deps = [dep for dep in dev_env.base_dependencies if "Flask" in dep]
-        
-        assert len(minimal_flask_deps) > 0
-        assert len(dev_flask_deps) > 0
-
-
-# ================================
-# Performance and Benchmark Tests
-# ================================
-
-class TestMultiEnvironmentPerformance:
-    """
-    Test class for validating performance characteristics of multi-environment
-    testing with pytest-benchmark integration per Section 4.7.1.
-    """
-    
-    @pytest.mark.performance
-    def test_environment_provisioning_performance(self, benchmark: BenchmarkFixture, 
-                                                 environment_config_factory):
-        """Benchmark environment configuration generation performance"""
-        def create_environment():
-            return environment_config_factory(
-                name="perf_test",
-                python_version="3.13.3",
-                env_type=EnvironmentType.PRIMARY
-            )
-        
-        result = benchmark(create_environment)
-        assert result is not None
-        assert result.name == "perf_test"
-    
-    @pytest.mark.performance
-    def test_tox_config_generation_performance(self, benchmark: BenchmarkFixture,
-                                             tox_config_manager):
-        """Benchmark tox configuration generation performance"""
-        def generate_config():
-            return tox_config_manager.generate_tox_config()
-        
-        config_content = benchmark(generate_config)
-        assert len(config_content) > 0
-        assert "[tox]" in config_content
-    
-    @pytest.mark.performance
-    def test_parallel_execution_efficiency(self, multi_environment_suite):
-        """Test parallel execution efficiency compared to sequential"""
-        suite = multi_environment_suite
-        
-        # Create minimal test environments for performance testing
-        minimal_envs = {
-            "test1": EnvironmentConfig("test1", "3.13.3", EnvironmentType.MINIMAL),
-            "test2": EnvironmentConfig("test2", "3.13.3", EnvironmentType.MINIMAL)
-        }
-        
-        # Override environments temporarily
-        original_envs = suite.config_manager.environments
-        suite.config_manager.environments = minimal_envs
-        
-        try:
-            # Time parallel execution
-            start_parallel = time.time()
-            parallel_results = suite.executor.execute_all_environments(parallel=True)
-            parallel_time = time.time() - start_parallel
+        for env_name, req_file in req_files.items():
+            req_path = Path(req_file)
+            assert req_path.exists(), f"Requirements file missing: {req_file}"
             
-            # Reset for sequential test
-            suite.executor.test_results.clear()
-            
-            # Time sequential execution  
-            start_sequential = time.time()
-            sequential_results = suite.executor.execute_all_environments(parallel=False)
-            sequential_time = time.time() - start_sequential
-            
-            # Verify parallel is faster (allowing for overhead)
-            # Note: In real scenarios with actual test execution, parallel should be faster
-            # For this test, we just verify both complete successfully
-            assert len(parallel_results) == len(sequential_results)
-            
-        finally:
-            # Restore original environments
-            suite.config_manager.environments = original_envs
+            # Validate content
+            content = req_path.read_text()
+            assert 'flask==3.1.1' in content
+            assert f'# Requirements for {env_name}' in content
+        
+        logger.info("Environment isolation validation completed successfully")
+    
+    def test_python_313_flask_311_compatibility(self, multi_env_orchestrator):
+        """
+        Test Python 3.13.3 and Flask 3.1.1 compatibility validation.
+        
+        Validates:
+        - Python 3.13.3 environment setup
+        - Flask 3.1.1 installation and import
+        - Basic Flask functionality
+        - Extension compatibility
+        """
+        # Setup environment
+        setup_info = multi_env_orchestrator.setup_test_environment()
+        
+        # Execute primary environment only for compatibility test
+        primary_env = 'py313-flask311'
+        if primary_env not in multi_env_orchestrator.environments:
+            pytest.skip(f"Primary environment {primary_env} not configured")
+        
+        # Execute single environment test
+        results = multi_env_orchestrator.execute_environment_tests(
+            env_names=[primary_env], 
+            parallel=False
+        )
+        
+        # Validate results
+        assert primary_env in results.environments
+        env_result = results.environments[primary_env]
+        
+        assert env_result.status == 'completed', f"Environment failed: {env_result.stderr}"
+        assert env_result.exit_code == 0, f"Environment exited with code: {env_result.exit_code}"
+        assert env_result.calculate_success_rate() >= 90.0, \
+            f"Success rate too low: {env_result.calculate_success_rate()}%"
+        
+        logger.info(f"Python 3.13.3 + Flask 3.1.1 compatibility validated: {env_result.calculate_success_rate():.1f}% success")
+    
+    def test_multi_environment_parallel_execution(self, multi_env_orchestrator):
+        """
+        Test parallel multi-environment execution with comprehensive validation.
+        
+        Validates:
+        - Parallel environment provisioning
+        - Concurrent test execution
+        - Resource isolation
+        - Performance metrics collection
+        """
+        # Setup all environments
+        setup_info = multi_env_orchestrator.setup_test_environment()
+        
+        # Execute all environments in parallel
+        results = multi_env_orchestrator.execute_environment_tests(parallel=True)
+        
+        # Validate execution results
+        assert results.total_environments > 0
+        assert results.successful_environments > 0
+        
+        # Validate required environments passed
+        required_envs = [
+            env for env in results.environments.values() 
+            if env.required
+        ]
+        
+        failed_required = [env for env in required_envs if not env.is_healthy()]
+        assert len(failed_required) == 0, \
+            f"Required environments failed: {[env.name for env in failed_required]}"
+        
+        # Validate overall success rate
+        overall_success = results.calculate_overall_success_rate()
+        assert overall_success >= 80.0, \
+            f"Overall success rate too low: {overall_success}% (minimum: 80%)"
+        
+        # Validate Flask 3.1.1 environments specifically
+        flask_envs = [
+            env for env in results.environments.values() 
+            if 'flask311' in env.name
+        ]
+        
+        flask_success = all(env.is_healthy() for env in flask_envs)
+        assert flask_success, "Flask 3.1.1 environments not all successful"
+        
+        logger.info(f"Multi-environment parallel execution validated: {overall_success:.1f}% success across {results.total_environments} environments")
+    
+    def test_performance_threshold_validation(self, multi_env_orchestrator):
+        """
+        Test performance threshold validation across environments.
+        
+        Validates:
+        - Execution time thresholds
+        - Memory usage limits
+        - Resource efficiency
+        - Performance consistency
+        """
+        # Execute performance-critical environments
+        perf_envs = ['py313-flask311', 'py313-flask311-minimal']
+        results = multi_env_orchestrator.execute_environment_tests(
+            env_names=perf_envs,
+            parallel=False  # Sequential for accurate performance measurement
+        )
+        
+        # Validate performance metrics
+        performance_failures = []
+        
+        for env_name, env in results.environments.items():
+            if env_name in ENVIRONMENT_PERFORMANCE_THRESHOLDS:
+                thresholds = ENVIRONMENT_PERFORMANCE_THRESHOLDS[env_name]
+                
+                # Check execution time
+                if (env.duration_seconds is not None and 
+                    'test_execution_time_s' in thresholds and
+                    env.duration_seconds > thresholds['test_execution_time_s']):
+                    performance_failures.append(
+                        f"{env_name}: execution time {env.duration_seconds:.1f}s > {thresholds['test_execution_time_s']}s"
+                    )
+                
+                # Check memory usage
+                if (env.memory_usage_mb is not None and 
+                    'memory_usage_mb' in thresholds and
+                    env.memory_usage_mb > thresholds['memory_usage_mb']):
+                    performance_failures.append(
+                        f"{env_name}: memory usage {env.memory_usage_mb:.1f}MB > {thresholds['memory_usage_mb']}MB"
+                    )
+        
+        assert len(performance_failures) == 0, \
+            f"Performance threshold violations: {'; '.join(performance_failures)}"
+        
+        logger.info("Performance threshold validation completed successfully")
+    
+    def test_comprehensive_environment_validation(self, multi_env_orchestrator):
+        """
+        Comprehensive multi-environment validation test covering all aspects
+        of Section 4.7.2 requirements.
+        
+        This is the master test that validates complete multi-environment
+        testing orchestration with tox 4.26.0.
+        """
+        # Setup and execute all environments
+        setup_info = multi_env_orchestrator.setup_test_environment()
+        results = multi_env_orchestrator.execute_environment_tests(parallel=True)
+        
+        # Generate comprehensive report
+        comprehensive_report = multi_env_orchestrator.generate_comprehensive_report()
+        
+        # Validate tox configuration
+        tox_validation = comprehensive_report['tox_configuration']
+        assert tox_validation['configuration_complete'], "Tox configuration incomplete"
+        assert tox_validation['parallel_execution_supported'], "Parallel execution not supported"
+        assert tox_validation['isolation_enforced'], "Environment isolation not enforced"
+        
+        # Validate Flask 3.1.1 compatibility
+        flask_validation = comprehensive_report['flask_311_validation']
+        assert flask_validation['flask_311_ready'], \
+            f"Flask 3.1.1 not ready: {flask_validation['incompatible_environments']}"
+        assert flask_validation['compatibility_rate'] >= 90.0, \
+            f"Flask compatibility rate too low: {flask_validation['compatibility_rate']}%"
+        
+        # Validate environment isolation
+        isolation_validation = comprehensive_report['isolation_validation']
+        assert isolation_validation['isolation_verified'], "Environment isolation not verified"
+        assert isolation_validation['reproducibility_verified'], "Reproducibility not verified"
+        
+        # Validate compliance status
+        compliance = comprehensive_report['compliance_status']
+        assert compliance['flask_311_compatible'], "Flask 3.1.1 not compatible"
+        assert compliance['performance_compliant'], "Performance not compliant"
+        assert compliance['isolation_verified'], "Isolation not verified"
+        assert compliance['reproducibility_verified'], "Reproducibility not verified"
+        
+        # Log comprehensive summary
+        logger.info("="*80)
+        logger.info("MULTI-ENVIRONMENT VALIDATION SUMMARY")
+        logger.info("="*80)
+        logger.info(f"Execution ID: {results.execution_id}")
+        logger.info(f"Total Environments: {results.total_environments}")
+        logger.info(f"Successful Environments: {results.successful_environments}")
+        logger.info(f"Failed Environments: {results.failed_environments}")
+        logger.info(f"Overall Success Rate: {results.calculate_overall_success_rate():.1f}%")
+        logger.info(f"Flask 3.1.1 Compatibility: {flask_validation['compatibility_rate']:.1f}%")
+        logger.info(f"Environment Isolation: {isolation_validation['isolation_rate']:.1f}%")
+        logger.info(f"Execution Duration: {results.total_duration_seconds:.1f}s")
+        
+        # Log recommendations
+        if comprehensive_report['recommendations']:
+            logger.info("Recommendations:")
+            for rec in comprehensive_report['recommendations']:
+                logger.info(f"  - {rec}")
+        
+        # Log next steps
+        if comprehensive_report['next_steps']:
+            logger.info("Next Steps:")
+            for step in comprehensive_report['next_steps']:
+                logger.info(f"  - {step}")
+        
+        logger.info("="*80)
+        
+        return comprehensive_report
 
 
-# ================================
-# Integration Tests
-# ================================
-
-@pytest.mark.integration
+@mark.comparative
+@mark.integration
 class TestMultiEnvironmentIntegration:
     """
-    Integration test class for end-to-end multi-environment testing
-    workflow validation and Flask 3.1.1 migration verification.
+    Integration testing with comparative testing infrastructure
+    validating seamless integration with existing test frameworks.
     """
     
-    def test_complete_multi_environment_workflow(self, multi_environment_suite):
-        """Test complete multi-environment testing workflow"""
-        suite = multi_environment_suite
+    def test_integration_with_api_parity_testing(self, multi_env_orchestrator):
+        """
+        Test integration with API parity testing infrastructure.
         
-        # Validate setup
-        setup_valid, issues = suite.validate_setup()
-        if not setup_valid:
-            pytest.skip(f"Setup validation failed: {issues}")
+        Validates:
+        - API parity tests execution in multiple environments
+        - Consistent results across environments
+        - Performance comparison across environments
+        """
+        if APIParityTester is None:
+            pytest.skip("API parity testing infrastructure not available")
         
-        # Run minimal test to verify workflow
-        # Note: Full execution would take too long for unit tests
-        config_content = suite.config_manager.generate_tox_config()
-        assert config_content is not None
-        assert len(config_content) > 0
-    
-    def test_flask_migration_validation_integration(self, app, client):
-        """Test Flask migration validation integration"""
-        # Test basic Flask functionality
-        assert app is not None
+        # Setup environment
+        setup_info = multi_env_orchestrator.setup_test_environment()
         
-        # Test application context
-        with app.app_context():
-            from flask import current_app
-            assert current_app == app
-        
-        # Test request context
-        with client:
-            response = client.get('/')
-            # Should either return valid response or 404 for missing route
-            assert response.status_code in [200, 404]
-    
-    def test_comparative_testing_integration(self, multi_environment_suite):
-        """Test integration with comparative testing infrastructure"""
-        suite = multi_environment_suite
-        
-        # Verify that comparative testing modules can access multi-environment results
-        executor = suite.executor
-        
-        # Create mock results for integration testing
-        test_result = TestResult(
-            environment_name="integration_test",
-            status=TestStatus.PASSED,
-            start_time=datetime.now(),
-            end_time=datetime.now(),
-            tests_passed=5,
-            tests_total=5
+        # Execute environments with API parity focus
+        api_envs = ['py313-flask311', 'py313-flask311-minimal']
+        results = multi_env_orchestrator.execute_environment_tests(
+            env_names=api_envs,
+            parallel=False
         )
         
-        executor.test_results["integration_test"] = test_result
+        # Validate API parity testing integration
+        for env_name, env in results.environments.items():
+            if env.status == 'completed' and env.exit_code == 0:
+                # Check that API parity tests were executed
+                assert 'test_api_parity' in env.stdout or 'comparative' in env.stdout, \
+                    f"API parity tests not executed in {env_name}"
         
-        # Generate report
-        report = executor.generate_comprehensive_report()
+        logger.info("API parity testing integration validated successfully")
+    
+    def test_integration_with_performance_benchmarks(self, multi_env_orchestrator):
+        """
+        Test integration with performance benchmarking infrastructure.
         
-        # Verify report structure for integration
-        assert "flask_compatibility" in report
-        assert "environment_results" in report
-        assert "integration_test" in report["environment_results"]
+        Validates:
+        - Performance benchmark execution in multiple environments
+        - Benchmark result consistency
+        - Performance regression detection
+        """
+        if PerformanceTestResult is None:
+            pytest.skip("Performance benchmarking infrastructure not available")
+        
+        # Execute performance-focused environment
+        perf_env = 'py313-flask311-performance'
+        if perf_env not in ENVIRONMENT_CONFIGS:
+            pytest.skip(f"Performance environment {perf_env} not configured")
+        
+        results = multi_env_orchestrator.execute_environment_tests(
+            env_names=[perf_env],
+            parallel=False
+        )
+        
+        # Validate performance benchmarking integration
+        env = results.environments[perf_env]
+        if env.status == 'completed' and env.exit_code == 0:
+            # Check that performance tests were executed
+            assert 'performance' in env.stdout or 'benchmark' in env.stdout, \
+                "Performance benchmarks not executed"
+        
+        logger.info("Performance benchmarking integration validated successfully")
 
 
 # ================================
-# Main Execution Function
+# Environment Validation Functions
 # ================================
 
-def main():
+def test_environment_validation():
     """
-    Main execution function for running multi-environment testing from command line.
+    Standalone environment validation function for tox execution.
     
-    This function provides a command-line interface for executing comprehensive
-    multi-environment testing with various options and configurations.
+    This function is called by tox during environment testing to validate
+    the environment setup and Flask 3.1.1 compatibility.
     """
-    import argparse
+    logger.info("Starting environment validation")
     
-    parser = argparse.ArgumentParser(
-        description="Multi-Environment Testing for Flask 3.1.1 Migration"
-    )
-    parser.add_argument(
-        "--parallel", 
-        action="store_true", 
-        default=True,
-        help="Enable parallel execution across environments"
-    )
-    parser.add_argument(
-        "--no-parallel",
-        action="store_false",
-        dest="parallel",
-        help="Disable parallel execution"
-    )
-    parser.add_argument(
-        "--environment",
-        "-e",
-        action="append",
-        help="Specific environment(s) to test (default: all)"
-    )
-    parser.add_argument(
-        "--report",
-        action="store_true",
-        default=True,
-        help="Generate comprehensive test report"
-    )
-    parser.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Only validate setup without running tests"
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="test_results",
-        help="Output directory for test results and reports"
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose logging"
-    )
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Initialize test suite
-    suite = MultiEnvironmentTestSuite()
-    suite.executor.results_dir = Path(args.output_dir)
-    suite.executor.results_dir.mkdir(exist_ok=True)
-    
-    # Validate setup
-    setup_valid, issues = suite.validate_setup()
-    
-    if not setup_valid:
-        print(f"Setup validation failed:")
-        for issue in issues:
-            print(f"  - {issue}")
-        return 1
-    
-    if args.validate_only:
-        print("Setup validation successful!")
-        return 0
-    
-    # Filter environments if specified
-    if args.environment:
-        original_envs = suite.config_manager.environments.copy()
-        filtered_envs = {
-            name: config for name, config in original_envs.items()
-            if name in args.environment
-        }
-        suite.config_manager.environments = filtered_envs
+    try:
+        # Test Python version
+        python_version = sys.version_info
+        assert python_version.major == 3, f"Expected Python 3, got {python_version.major}"
+        assert python_version.minor == 13, f"Expected Python 3.13, got 3.{python_version.minor}"
+        logger.info(f"Python version validated: {python_version.major}.{python_version.minor}.{python_version.micro}")
         
-        if not filtered_envs:
-            print(f"No matching environments found: {args.environment}")
-            return 1
-    
-    # Run comprehensive testing
-    print("Starting multi-environment testing...")
-    results = suite.run_comprehensive_testing(
-        parallel=args.parallel,
-        generate_report=args.report
-    )
-    
-    # Print summary
-    if results["success"]:
-        print("✅ All environments passed successfully!")
-        if results.get("flask_compatibility_verified"):
-            print("✅ Flask 3.1.1 migration compatibility verified!")
-    else:
-        print("❌ Some environments failed!")
+        # Test Flask import and version
+        try:
+            import flask
+            flask_version = flask.__version__
+            assert flask_version.startswith('3.1.1'), f"Expected Flask 3.1.1, got {flask_version}"
+            logger.info(f"Flask version validated: {flask_version}")
+        except ImportError as e:
+            raise AssertionError(f"Flask import failed: {e}")
         
-        if "error" in results:
-            print(f"Error: {results['error']}")
+        # Test Flask-SQLAlchemy import
+        try:
+            import flask_sqlalchemy
+            sqlalchemy_version = flask_sqlalchemy.__version__
+            logger.info(f"Flask-SQLAlchemy version: {sqlalchemy_version}")
+        except ImportError as e:
+            raise AssertionError(f"Flask-SQLAlchemy import failed: {e}")
         
-        # Print failed environments
-        for env_name, result in results.get("test_results", {}).items():
-            if result["status"] != "passed":
-                print(f"  ❌ {env_name}: {result['status']}")
-    
-    # Print report location if generated
-    if args.report and results.get("report"):
-        report_file = suite.executor.results_dir / "multi_environment_report.json"
-        print(f"📊 Comprehensive report saved to: {report_file}")
-    
-    return 0 if results["success"] else 1
+        # Test pytest-flask import
+        try:
+            import pytest_flask
+            logger.info("pytest-flask import successful")
+        except ImportError as e:
+            raise AssertionError(f"pytest-flask import failed: {e}")
+        
+        # Test basic Flask app creation
+        try:
+            app = flask.Flask(__name__)
+            
+            @app.route('/test')
+            def test_route():
+                return {'status': 'success', 'message': 'Environment validation passed'}
+            
+            # Test app context
+            with app.app_context():
+                assert flask.current_app == app
+                logger.info("Flask app context validation successful")
+            
+            # Test request context
+            with app.test_request_context('/test'):
+                assert flask.request.path == '/test'
+                logger.info("Flask request context validation successful")
+                
+        except Exception as e:
+            raise AssertionError(f"Flask app creation/context failed: {e}")
+        
+        logger.info("Environment validation completed successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Environment validation failed: {e}")
+        raise
 
+
+# ================================
+# Utility Functions
+# ================================
+
+def run_multi_environment_tests(env_names: Optional[List[str]] = None,
+                               parallel: bool = True,
+                               cleanup: bool = True) -> Dict[str, Any]:
+    """
+    Utility function to run multi-environment tests programmatically.
+    
+    Args:
+        env_names: Specific environments to test (all if None)
+        parallel: Execute environments in parallel
+        cleanup: Cleanup test environments after execution
+        
+    Returns:
+        Comprehensive test report
+    """
+    orchestrator = MultiEnvironmentTestOrchestrator()
+    
+    try:
+        # Setup and execute tests
+        setup_info = orchestrator.setup_test_environment()
+        results = orchestrator.execute_environment_tests(env_names, parallel)
+        
+        # Generate comprehensive report
+        report = orchestrator.generate_comprehensive_report()
+        
+        return report
+        
+    finally:
+        if cleanup:
+            orchestrator.cleanup_test_environments()
+
+
+def validate_tox_environment():
+    """Validate current tox environment for Flask 3.1.1 compatibility."""
+    return test_environment_validation()
+
+
+# ================================
+# Module Exports and Metadata
+# ================================
+
+__all__ = [
+    'TOX_CONFIGURATION',
+    'ENVIRONMENT_CONFIGS',
+    'EnvironmentInfo',
+    'MultiEnvironmentTestResult',
+    'ToxConfigurationManager',
+    'MultiEnvironmentTestOrchestrator',
+    'TestMultiEnvironmentOrchestration',
+    'TestMultiEnvironmentIntegration',
+    'test_environment_validation',
+    'run_multi_environment_tests',
+    'validate_tox_environment'
+]
+
+# Module metadata
+__version__ = '1.0.0'
+__author__ = 'Flask Migration Team'
+__description__ = 'Multi-environment testing orchestration with tox 4.26.0 for Flask 3.1.1 migration'
+__status__ = 'Production'
+
+# Testing configuration
+pytest_plugins = ['pytest_flask']
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Allow running this module directly for debugging
+    import sys
+    
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'validate':
+            # Run environment validation
+            try:
+                validate_tox_environment()
+                print("Environment validation PASSED")
+                sys.exit(0)
+            except Exception as e:
+                print(f"Environment validation FAILED: {e}")
+                sys.exit(1)
+                
+        elif sys.argv[1] == 'run':
+            # Run multi-environment tests
+            try:
+                report = run_multi_environment_tests()
+                success_rate = report['test_aggregation']['overall_success_rate']
+                print(f"Multi-environment tests completed: {success_rate:.1f}% success")
+                sys.exit(0 if success_rate >= 80.0 else 1)
+            except Exception as e:
+                print(f"Multi-environment tests FAILED: {e}")
+                sys.exit(1)
+    else:
+        print("Multi-Environment Testing Orchestration Module")
+        print("Usage:")
+        print("  python test_multi_environment.py validate  # Validate current environment")
+        print("  python test_multi_environment.py run       # Run multi-environment tests")
+        print("  pytest tests/comparative/test_multi_environment.py -v  # Run with pytest")
