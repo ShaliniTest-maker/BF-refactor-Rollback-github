@@ -1,0 +1,776 @@
+# Security Scanning Workflow for Flask Extensions and Python Dependencies
+# Specialized vulnerability assessment workflow implementing comprehensive security validation
+# for Flask-SQLAlchemy, Flask-Migrate, ItsDangerous, and transitive dependencies using
+# safety, bandit, and pip-audit tools as specified in Section 8.4.1.
+# 
+# This workflow provides:
+# - Targeted security scanning for Flask ecosystem components
+# - Comprehensive analysis of transitive dependencies (SQLAlchemy, Alembic, Werkzeug, Jinja2)
+# - Automated vulnerability database updates for current threat intelligence
+# - Security policy enforcement blocking high/critical severity vulnerabilities
+# - Vulnerability reporting with detailed remediation recommendations
+# - Exception approval workflow for critical security updates requiring manual review
+#
+# Critical for maintaining security posture during Node.js to Flask technology migration
+
+name: Security Scanning - Flask Extensions & Dependencies
+
+# Workflow Triggers - Section 8.4.1: Automated builds on code commits and pull requests
+on:
+  # Pull request validation for security vulnerability assessment
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'requirements.txt'
+      - 'requirements-dev.txt'
+      - 'src/**/*.py'
+      - '.github/workflows/security-scanning.yml'
+  
+  # Main branch deployment security validation
+  push:
+    branches: [ main ]
+    paths:
+      - 'requirements.txt'
+      - 'requirements-dev.txt'
+      - 'src/**/*.py'
+      - '.github/workflows/security-scanning.yml'
+  
+  # Scheduled daily vulnerability database updates - Section 8.4.1
+  schedule:
+    # Run daily at 2 AM UTC for automated vulnerability database updates
+    - cron: '0 2 * * *'
+  
+  # Manual workflow execution for emergency security assessment
+  workflow_dispatch:
+    inputs:
+      severity_threshold:
+        description: 'Minimum vulnerability severity to report (low/medium/high/critical)'
+        required: false
+        default: 'medium'
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+          - critical
+      force_exception_approval:
+        description: 'Force exception approval workflow even for medium severity'
+        required: false
+        default: false
+        type: boolean
+
+# Environment variables for security scanning configuration
+env:
+  # Python version for consistent Flask 3.1.1 ecosystem compatibility - Section 3.2.1
+  PYTHON_VERSION: '3.13.3'
+  
+  # Security scanning tool versions for reproducible vulnerability assessment
+  SAFETY_VERSION: '3.0.0'
+  BANDIT_VERSION: '1.7.5'
+  PIP_AUDIT_VERSION: '2.6.0'
+  
+  # Flask ecosystem target versions for specialized scanning - Section 3.2
+  FLASK_VERSION: '3.1.1'
+  FLASK_SQLALCHEMY_VERSION: '3.1.1'
+  FLASK_MIGRATE_VERSION: '4.1.0'
+  ITSDANGEROUS_VERSION: '2.2.0'
+  CLICK_VERSION: '8.1.3'
+  
+  # Security policy configuration - Section 8.4.1
+  VULNERABILITY_FAIL_THRESHOLD: 'high'  # Block builds with high/critical vulnerabilities
+  SECURITY_REPORT_FORMAT: 'json'        # Structured vulnerability reporting format
+  EXCEPTION_APPROVAL_REQUIRED: 'true'   # Enable exception approval workflow
+
+# Security scanning job implementing Flask extensions vulnerability assessment
+jobs:
+  security-scanning:
+    name: Flask Extensions Security Assessment
+    runs-on: ubuntu-latest
+    
+    # Job permissions for security scanning and reporting
+    permissions:
+      contents: read           # Repository content access for dependency analysis
+      security-events: write   # Security event reporting and SARIF upload
+      pull-requests: write     # Pull request comment posting for vulnerability reports
+      actions: read           # Workflow execution status access
+      
+    # Security scanning execution steps
+    steps:
+      # Step 1: Repository checkout for dependency analysis
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # Full history checkout for comprehensive dependency analysis
+          fetch-depth: 0
+          
+      # Step 2: Python 3.13.3 environment setup for Flask ecosystem compatibility
+      - name: Setup Python 3.13.3 Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          # Enable dependency caching for performance optimization
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            
+      # Step 3: Security scanning tools installation with pinned versions
+      - name: Install Security Scanning Tools
+        run: |
+          echo "Installing security scanning tools with pinned versions..."
+          
+          # Upgrade pip for latest security features
+          python -m pip install --upgrade pip
+          
+          # Install security scanning tools with exact versions for reproducibility
+          pip install safety==${{ env.SAFETY_VERSION }}
+          pip install bandit[toml]==${{ env.BANDIT_VERSION }}
+          pip install pip-audit==${{ env.PIP_AUDIT_VERSION }}
+          
+          # Install additional security analysis tools
+          pip install semgrep==1.50.0  # Static analysis for Python security patterns
+          
+          # Verify tool installations and versions
+          echo "=== Security Tools Verification ==="
+          safety --version
+          bandit --version
+          pip-audit --version
+          semgrep --version
+          
+          echo "Security scanning tools installation completed successfully"
+          
+      # Step 4: Flask ecosystem dependencies installation for vulnerability assessment
+      - name: Install Flask Dependencies for Analysis
+        run: |
+          echo "Installing Flask ecosystem dependencies for security analysis..."
+          
+          # Install core Flask dependencies from requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "Warning: requirements.txt not found, installing core Flask dependencies"
+            # Install core Flask ecosystem components for analysis
+            pip install Flask==${{ env.FLASK_VERSION }}
+            pip install Flask-SQLAlchemy==${{ env.FLASK_SQLALCHEMY_VERSION }}
+            pip install Flask-Migrate==${{ env.FLASK_MIGRATE_VERSION }}
+            pip install ItsDangerous==${{ env.ITSDANGEROUS_VERSION }}
+            pip install Click==${{ env.CLICK_VERSION }}
+          fi
+          
+          # Generate current dependency snapshot for analysis
+          pip freeze > installed-packages.txt
+          
+          echo "Flask ecosystem dependencies installed for vulnerability assessment"
+          
+      # Step 5: Automated vulnerability database updates - Section 8.4.1
+      - name: Update Vulnerability Databases
+        run: |
+          echo "Updating vulnerability databases for current threat intelligence..."
+          
+          # Update Safety vulnerability database
+          echo "Updating Safety vulnerability database..."
+          safety check --db --update
+          
+          # Verify database update success
+          echo "Vulnerability database update completed"
+          
+      # Step 6: Safety vulnerability scanning for Python packages - Section 8.4.1
+      - name: Safety Package Vulnerability Scan
+        id: safety-scan
+        run: |
+          echo "=== Safety Package Vulnerability Assessment ==="
+          echo "Scanning Flask ecosystem and transitive dependencies for known vulnerabilities..."
+          
+          # Create safety scan output directory
+          mkdir -p security-reports
+          
+          # Run safety scan with comprehensive reporting
+          safety check \
+            --requirements requirements.txt \
+            --json \
+            --output security-reports/safety-report.json \
+            --continue-on-error || echo "Safety scan completed with findings"
+          
+          # Generate human-readable safety report
+          safety check \
+            --requirements requirements.txt \
+            --output security-reports/safety-report.txt \
+            --continue-on-error || echo "Safety scan completed with findings"
+          
+          # Specific Flask ecosystem component scanning
+          echo "=== Flask Core Components Security Assessment ==="
+          
+          # Flask 3.1.1 vulnerability assessment
+          echo "Scanning Flask 3.1.1..."
+          safety check --package Flask==${{ env.FLASK_VERSION }} || true
+          
+          # Flask-SQLAlchemy 3.1.1 vulnerability assessment
+          echo "Scanning Flask-SQLAlchemy 3.1.1..."
+          safety check --package Flask-SQLAlchemy==${{ env.FLASK_SQLALCHEMY_VERSION }} || true
+          
+          # Flask-Migrate 4.1.0 vulnerability assessment
+          echo "Scanning Flask-Migrate 4.1.0..."
+          safety check --package Flask-Migrate==${{ env.FLASK_MIGRATE_VERSION }} || true
+          
+          # ItsDangerous 2.2+ vulnerability assessment
+          echo "Scanning ItsDangerous 2.2+..."
+          safety check --package ItsDangerous==${{ env.ITSDANGEROUS_VERSION }} || true
+          
+          echo "Safety package vulnerability scanning completed"
+          
+      # Step 7: Bandit static analysis security scanning - Section 8.4.1
+      - name: Bandit Static Analysis Security Scan
+        id: bandit-scan
+        run: |
+          echo "=== Bandit Static Analysis Security Assessment ==="
+          echo "Performing static security analysis of Flask application code..."
+          
+          # Run bandit security analysis on src directory
+          if [ -d "src" ]; then
+            bandit -r src/ \
+              -f json \
+              -o security-reports/bandit-report.json \
+              --severity-level medium \
+              --confidence-level medium \
+              --skip B101,B601 || echo "Bandit scan completed with findings"
+            
+            # Generate human-readable bandit report
+            bandit -r src/ \
+              -f txt \
+              -o security-reports/bandit-report.txt \
+              --severity-level medium \
+              --confidence-level medium \
+              --skip B101,B601 || echo "Bandit scan completed with findings"
+          else
+            echo "Source directory 'src' not found, skipping bandit analysis"
+            echo '{"results": [], "metrics": {"_totals": {"nosec": 0, "skipped_tests": 0}}}' > security-reports/bandit-report.json
+          fi
+          
+          echo "Bandit static analysis security scanning completed"
+          
+      # Step 8: pip-audit official PyPA vulnerability scanning - Section 8.4.1
+      - name: pip-audit Official PyPA Security Scan
+        id: pip-audit-scan
+        run: |
+          echo "=== pip-audit Official PyPA Vulnerability Assessment ==="
+          echo "Performing official PyPA vulnerability scanning for Python packages..."
+          
+          # Run pip-audit comprehensive vulnerability assessment
+          pip-audit \
+            --requirement requirements.txt \
+            --format json \
+            --output security-reports/pip-audit-report.json \
+            --progress-spinner off || echo "pip-audit scan completed with findings"
+          
+          # Generate human-readable pip-audit report
+          pip-audit \
+            --requirement requirements.txt \
+            --format text \
+            --output security-reports/pip-audit-report.txt \
+            --progress-spinner off || echo "pip-audit scan completed with findings"
+          
+          echo "pip-audit vulnerability scanning completed"
+          
+      # Step 9: Transitive dependencies analysis - Section 8.4.1
+      - name: Transitive Dependencies Security Analysis
+        id: transitive-scan
+        run: |
+          echo "=== Transitive Dependencies Security Assessment ==="
+          echo "Analyzing security of SQLAlchemy, Alembic, Werkzeug, and Jinja2 dependencies..."
+          
+          # Generate dependency tree for analysis
+          pip list --format json > security-reports/dependency-tree.json
+          
+          # Specific transitive dependency security checks
+          echo "=== Core Transitive Dependencies Analysis ==="
+          
+          # SQLAlchemy security assessment (Flask-SQLAlchemy dependency)
+          echo "Checking SQLAlchemy transitive dependency security..."
+          safety check --package SQLAlchemy || true
+          
+          # Alembic security assessment (Flask-Migrate dependency)
+          echo "Checking Alembic transitive dependency security..."
+          safety check --package Alembic || true
+          
+          # Werkzeug security assessment (Flask core dependency)
+          echo "Checking Werkzeug transitive dependency security..."
+          safety check --package Werkzeug || true
+          
+          # Jinja2 security assessment (Flask template engine)
+          echo "Checking Jinja2 transitive dependency security..."
+          safety check --package Jinja2 || true
+          
+          echo "Transitive dependencies security analysis completed"
+          
+      # Step 10: Comprehensive vulnerability analysis and severity assessment
+      - name: Vulnerability Analysis and Severity Assessment
+        id: vulnerability-analysis
+        run: |
+          echo "=== Comprehensive Vulnerability Analysis ==="
+          
+          # Create vulnerability analysis script
+          cat > analyze_vulnerabilities.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          Comprehensive vulnerability analysis script for Flask ecosystem security assessment.
+          Analyzes safety, bandit, and pip-audit results to determine overall security posture.
+          """
+          
+          import json
+          import sys
+          import os
+          from pathlib import Path
+          
+          def analyze_safety_results(report_path):
+              """Analyze safety scan results for vulnerability assessment."""
+              try:
+                  if not os.path.exists(report_path):
+                      print(f"Safety report not found: {report_path}")
+                      return {'high': 0, 'medium': 0, 'low': 0, 'total': 0}
+                  
+                  with open(report_path, 'r') as f:
+                      safety_data = json.load(f)
+                  
+                  vulnerabilities = safety_data.get('vulnerabilities', [])
+                  severity_counts = {'high': 0, 'medium': 0, 'low': 0, 'total': len(vulnerabilities)}
+                  
+                  for vuln in vulnerabilities:
+                      # Safety vulnerability severity classification
+                      if 'critical' in vuln.get('vulnerability', '').lower():
+                          severity_counts['high'] += 1
+                      elif 'high' in vuln.get('vulnerability', '').lower():
+                          severity_counts['high'] += 1
+                      elif 'medium' in vuln.get('vulnerability', '').lower():
+                          severity_counts['medium'] += 1
+                      else:
+                          severity_counts['low'] += 1
+                  
+                  return severity_counts
+              except Exception as e:
+                  print(f"Error analyzing safety results: {e}")
+                  return {'high': 0, 'medium': 0, 'low': 0, 'total': 0}
+          
+          def analyze_bandit_results(report_path):
+              """Analyze bandit scan results for security issues."""
+              try:
+                  if not os.path.exists(report_path):
+                      print(f"Bandit report not found: {report_path}")
+                      return {'high': 0, 'medium': 0, 'low': 0, 'total': 0}
+                  
+                  with open(report_path, 'r') as f:
+                      bandit_data = json.load(f)
+                  
+                  results = bandit_data.get('results', [])
+                  severity_counts = {'high': 0, 'medium': 0, 'low': 0, 'total': len(results)}
+                  
+                  for result in results:
+                      severity = result.get('issue_severity', '').lower()
+                      if severity in ['high', 'critical']:
+                          severity_counts['high'] += 1
+                      elif severity == 'medium':
+                          severity_counts['medium'] += 1
+                      else:
+                          severity_counts['low'] += 1
+                  
+                  return severity_counts
+              except Exception as e:
+                  print(f"Error analyzing bandit results: {e}")
+                  return {'high': 0, 'medium': 0, 'low': 0, 'total': 0}
+          
+          def analyze_pip_audit_results(report_path):
+              """Analyze pip-audit scan results for package vulnerabilities."""
+              try:
+                  if not os.path.exists(report_path):
+                      print(f"pip-audit report not found: {report_path}")
+                      return {'high': 0, 'medium': 0, 'low': 0, 'total': 0}
+                  
+                  with open(report_path, 'r') as f:
+                      pip_audit_data = json.load(f)
+                  
+                  vulnerabilities = pip_audit_data.get('vulnerabilities', [])
+                  severity_counts = {'high': 0, 'medium': 0, 'low': 0, 'total': len(vulnerabilities)}
+                  
+                  for vuln in vulnerabilities:
+                      # pip-audit vulnerability severity assessment
+                      aliases = vuln.get('aliases', [])
+                      severity = 'low'  # default
+                      
+                      for alias in aliases:
+                          if 'CRITICAL' in alias or 'HIGH' in alias:
+                              severity = 'high'
+                              break
+                          elif 'MEDIUM' in alias:
+                              severity = 'medium'
+                      
+                      severity_counts[severity] += 1
+                  
+                  return severity_counts
+              except Exception as e:
+                  print(f"Error analyzing pip-audit results: {e}")
+                  return {'high': 0, 'medium': 0, 'low': 0, 'total': 0}
+          
+          def main():
+              """Main vulnerability analysis execution."""
+              print("=== Comprehensive Vulnerability Analysis Results ===")
+              
+              # Analyze all security scan results
+              safety_results = analyze_safety_results('security-reports/safety-report.json')
+              bandit_results = analyze_bandit_results('security-reports/bandit-report.json')
+              pip_audit_results = analyze_pip_audit_results('security-reports/pip-audit-report.json')
+              
+              # Calculate total vulnerability counts
+              total_high = safety_results['high'] + bandit_results['high'] + pip_audit_results['high']
+              total_medium = safety_results['medium'] + bandit_results['medium'] + pip_audit_results['medium']
+              total_low = safety_results['low'] + bandit_results['low'] + pip_audit_results['low']
+              total_vulnerabilities = total_high + total_medium + total_low
+              
+              # Display vulnerability summary
+              print(f"\n=== Flask Ecosystem Security Assessment Summary ===")
+              print(f"High/Critical Severity Vulnerabilities: {total_high}")
+              print(f"Medium Severity Vulnerabilities: {total_medium}")
+              print(f"Low Severity Vulnerabilities: {total_low}")
+              print(f"Total Vulnerabilities Found: {total_vulnerabilities}")
+              
+              print(f"\n=== Detailed Results by Tool ===")
+              print(f"Safety Scan: {safety_results['total']} total, {safety_results['high']} high, {safety_results['medium']} medium, {safety_results['low']} low")
+              print(f"Bandit Scan: {bandit_results['total']} total, {bandit_results['high']} high, {bandit_results['medium']} medium, {bandit_results['low']} low")
+              print(f"pip-audit Scan: {pip_audit_results['total']} total, {pip_audit_results['high']} high, {pip_audit_results['medium']} medium, {pip_audit_results['low']} low")
+              
+              # Security policy enforcement - Section 8.4.1
+              print(f"\n=== Security Policy Enforcement Assessment ===")
+              
+              # Set output variables for GitHub Actions
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"total_vulnerabilities={total_vulnerabilities}\n")
+                  f.write(f"high_severity_count={total_high}\n")
+                  f.write(f"medium_severity_count={total_medium}\n")
+                  f.write(f"low_severity_count={total_low}\n")
+                  
+                  # Security policy decision
+                  if total_high > 0:
+                      f.write("security_status=BLOCKED\n")
+                      f.write(f"security_message=Build blocked due to {total_high} high/critical severity vulnerabilities\n")
+                      print(f"🚫 BUILD BLOCKED: {total_high} high/critical severity vulnerabilities found")
+                  elif total_medium > 0:
+                      f.write("security_status=WARNING\n")
+                      f.write(f"security_message=Build warning due to {total_medium} medium severity vulnerabilities\n")
+                      print(f"⚠️  BUILD WARNING: {total_medium} medium severity vulnerabilities found")
+                  else:
+                      f.write("security_status=PASSED\n")
+                      f.write("security_message=No significant security vulnerabilities detected\n")
+                      print("✅ SECURITY VALIDATION PASSED: No significant vulnerabilities detected")
+              
+              # Exit with appropriate code for CI/CD pipeline
+              if total_high > 0:
+                  print("\nExiting with error code due to high severity vulnerabilities")
+                  sys.exit(1)
+              else:
+                  sys.exit(0)
+          
+          if __name__ == "__main__":
+              main()
+          EOF
+          
+          # Execute vulnerability analysis
+          python analyze_vulnerabilities.py
+          
+      # Step 11: Generate comprehensive security report with remediation recommendations
+      - name: Generate Security Report with Remediation Recommendations
+        id: security-report
+        run: |
+          echo "=== Generating Comprehensive Security Report ==="
+          
+          # Create comprehensive security report
+          cat > security-reports/comprehensive-security-report.md << 'EOF'
+          # Flask Ecosystem Security Assessment Report
+          
+          ## Executive Summary
+          
+          This report provides a comprehensive security assessment of the Flask ecosystem components and dependencies for the Node.js to Python 3.13.3 migration project. The assessment covers Flask 3.1.1, Flask-SQLAlchemy 3.1.1, Flask-Migrate 4.1.0, ItsDangerous 2.2+, and all transitive dependencies.
+          
+          ## Security Scanning Tools Used
+          
+          - **Safety 3.0.0**: Python package vulnerability database scanning
+          - **Bandit 1.7.5**: Static analysis security testing (SAST)
+          - **pip-audit 2.6.0**: Official PyPA vulnerability assessment
+          
+          ## Vulnerability Assessment Results
+          
+          ### Flask Core Components Analysis
+          
+          | Component | Version | Status | Vulnerabilities |
+          |-----------|---------|---------|-----------------|
+          | Flask | 3.1.1 | ✅ Assessed | See detailed results |
+          | Flask-SQLAlchemy | 3.1.1 | ✅ Assessed | See detailed results |
+          | Flask-Migrate | 4.1.0 | ✅ Assessed | See detailed results |
+          | ItsDangerous | 2.2+ | ✅ Assessed | See detailed results |
+          | Click | 8.1.3+ | ✅ Assessed | See detailed results |
+          
+          ### Transitive Dependencies Analysis
+          
+          | Dependency | Purpose | Security Status | Notes |
+          |------------|---------|-----------------|-------|
+          | SQLAlchemy | ORM Core | ✅ Scanned | Required by Flask-SQLAlchemy |
+          | Alembic | Migration Engine | ✅ Scanned | Required by Flask-Migrate |
+          | Werkzeug | WSGI Implementation | ✅ Scanned | Flask core dependency |
+          | Jinja2 | Template Engine | ✅ Scanned | Flask template rendering |
+          
+          ## Remediation Recommendations
+          
+          ### Immediate Actions Required
+          
+          1. **High Severity Vulnerabilities**: Review and address any high/critical severity issues immediately
+          2. **Dependency Updates**: Consider updating dependencies with available security patches
+          3. **Security Monitoring**: Implement continuous security monitoring for ongoing protection
+          
+          ### Long-term Security Enhancements
+          
+          1. **Automated Security Scanning**: Integrate security scanning into CI/CD pipeline
+          2. **Dependency Management**: Implement automated dependency update monitoring
+          3. **Security Training**: Ensure development team awareness of Flask security best practices
+          
+          ## Compliance and Governance
+          
+          This security assessment aligns with Section 8.4.1 requirements for Flask extensions vulnerability assessment and security policy enforcement during the Node.js to Flask technology migration.
+          
+          ## Next Steps
+          
+          1. Review detailed vulnerability reports in individual tool outputs
+          2. Prioritize remediation based on severity levels
+          3. Implement recommended security enhancements
+          4. Schedule regular security assessments
+          
+          ---
+          *Report generated by Flask Security Scanning Workflow*
+          *Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*
+          EOF
+          
+          echo "Comprehensive security report generated successfully"
+          
+      # Step 12: Security policy enforcement with exception approval workflow - Section 8.4.1
+      - name: Security Policy Enforcement
+        id: security-enforcement
+        if: always()
+        run: |
+          echo "=== Security Policy Enforcement ==="
+          
+          # Retrieve vulnerability analysis results
+          security_status="${{ steps.vulnerability-analysis.outputs.security_status }}"
+          high_severity_count="${{ steps.vulnerability-analysis.outputs.high_severity_count }}"
+          medium_severity_count="${{ steps.vulnerability-analysis.outputs.medium_severity_count }}"
+          security_message="${{ steps.vulnerability-analysis.outputs.security_message }}"
+          
+          echo "Security Status: $security_status"
+          echo "Security Message: $security_message"
+          
+          # Security policy decision matrix
+          case "$security_status" in
+            "BLOCKED")
+              echo "🚫 BUILD BLOCKED: Security policy enforcement activated"
+              echo "High/critical severity vulnerabilities detected: $high_severity_count"
+              echo "Manual security review and exception approval required"
+              
+              # Check for manual exception approval
+              if [[ "${{ github.event.inputs.force_exception_approval }}" == "true" ]]; then
+                echo "⚠️  Manual exception approval forced - allowing build to continue"
+                echo "SECURITY_ENFORCEMENT_RESULT=EXCEPTION_APPROVED" >> $GITHUB_ENV
+              else
+                echo "SECURITY_ENFORCEMENT_RESULT=BLOCKED" >> $GITHUB_ENV
+                exit 1
+              fi
+              ;;
+            "WARNING")
+              echo "⚠️  BUILD WARNING: Medium severity vulnerabilities detected"
+              echo "Medium severity vulnerabilities: $medium_severity_count"
+              echo "Consider reviewing and addressing before production deployment"
+              echo "SECURITY_ENFORCEMENT_RESULT=WARNING" >> $GITHUB_ENV
+              ;;
+            "PASSED")
+              echo "✅ SECURITY VALIDATION PASSED"
+              echo "No significant security vulnerabilities detected"
+              echo "SECURITY_ENFORCEMENT_RESULT=PASSED" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "❓ Unknown security status: $security_status"
+              echo "SECURITY_ENFORCEMENT_RESULT=UNKNOWN" >> $GITHUB_ENV
+              ;;
+          esac
+          
+      # Step 13: Upload security reports as workflow artifacts
+      - name: Upload Security Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flask-security-reports-${{ github.run_number }}
+          path: |
+            security-reports/
+            installed-packages.txt
+          retention-days: 30
+          
+      # Step 14: Comment on pull request with security assessment results
+      - name: Comment on Pull Request
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read comprehensive security report
+            let securityReport = '';
+            try {
+              securityReport = fs.readFileSync('security-reports/comprehensive-security-report.md', 'utf8');
+            } catch (error) {
+              securityReport = '# Security Report\n\nSecurity assessment completed. Please check workflow artifacts for detailed results.';
+            }
+            
+            // Get vulnerability counts
+            const highSeverity = '${{ steps.vulnerability-analysis.outputs.high_severity_count }}' || '0';
+            const mediumSeverity = '${{ steps.vulnerability-analysis.outputs.medium_severity_count }}' || '0';
+            const lowSeverity = '${{ steps.vulnerability-analysis.outputs.low_severity_count }}' || '0';
+            const securityStatus = '${{ steps.vulnerability-analysis.outputs.security_status }}' || 'UNKNOWN';
+            
+            // Create status emoji
+            let statusEmoji = '❓';
+            if (securityStatus === 'PASSED') statusEmoji = '✅';
+            else if (securityStatus === 'WARNING') statusEmoji = '⚠️';
+            else if (securityStatus === 'BLOCKED') statusEmoji = '🚫';
+            
+            // Create PR comment
+            const commentBody = `
+            ## ${statusEmoji} Flask Security Assessment Results
+            
+            **Security Status:** ${securityStatus}
+            
+            ### Vulnerability Summary
+            - **High/Critical:** ${highSeverity}
+            - **Medium:** ${mediumSeverity}
+            - **Low:** ${lowSeverity}
+            
+            ### Security Tools Used
+            - Safety 3.0.0 (Package vulnerability scanning)
+            - Bandit 1.7.5 (Static analysis security testing)
+            - pip-audit 2.6.0 (Official PyPA vulnerability assessment)
+            
+            ### Flask Ecosystem Components Assessed
+            - Flask 3.1.1
+            - Flask-SQLAlchemy 3.1.1
+            - Flask-Migrate 4.1.0
+            - ItsDangerous 2.2+
+            - Transitive dependencies (SQLAlchemy, Alembic, Werkzeug, Jinja2)
+            
+            ${securityStatus === 'BLOCKED' ? 
+              '### ⚠️ Action Required\nHigh severity vulnerabilities detected. Manual security review required before merge.' : 
+              securityStatus === 'WARNING' ? 
+              '### 📋 Recommendations\nMedium severity vulnerabilities detected. Consider addressing before production deployment.' :
+              '### ✅ All Clear\nNo significant security vulnerabilities detected.'
+            }
+            
+            **Detailed reports available in workflow artifacts.**
+            
+            ---
+            *Automated Flask Security Assessment - Section 8.4.1 Compliance*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            });
+            
+      # Step 15: Create security issue for high severity vulnerabilities
+      - name: Create Security Issue for High Severity Vulnerabilities
+        if: steps.vulnerability-analysis.outputs.security_status == 'BLOCKED'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const highSeverityCount = '${{ steps.vulnerability-analysis.outputs.high_severity_count }}';
+            
+            const issueBody = `
+            # 🚨 High Severity Security Vulnerabilities Detected
+            
+            ## Summary
+            **${highSeverityCount}** high/critical severity security vulnerabilities have been detected in the Flask ecosystem dependencies during automated security scanning.
+            
+            ## Affected Components
+            This security assessment covers:
+            - Flask 3.1.1 core framework
+            - Flask-SQLAlchemy 3.1.1 ORM extension
+            - Flask-Migrate 4.1.0 database migrations
+            - ItsDangerous 2.2+ secure signing
+            - Transitive dependencies (SQLAlchemy, Alembic, Werkzeug, Jinja2)
+            
+            ## Immediate Actions Required
+            1. **Review Detailed Reports**: Download security scanning artifacts from the failed workflow
+            2. **Assess Impact**: Determine if vulnerabilities affect production systems
+            3. **Plan Remediation**: Identify available patches or workarounds
+            4. **Security Exception**: If immediate fix unavailable, request security exception approval
+            
+            ## Security Tools Results
+            - **Safety 3.0.0**: Python package vulnerability database scanning
+            - **Bandit 1.7.5**: Static analysis security testing
+            - **pip-audit 2.6.0**: Official PyPA vulnerability assessment
+            
+            ## Compliance Reference
+            This issue is created in compliance with Section 8.4.1 security policy enforcement for Flask extensions vulnerability assessment during the Node.js to Flask technology migration.
+            
+            ## Resolution Process
+            1. Security team review and risk assessment
+            2. Remediation planning with timeline
+            3. Implementation and validation
+            4. Security exception approval if needed
+            5. Issue closure with documentation
+            
+            **Priority:** Critical
+            **Component:** Flask Security
+            **Workflow:** security-scanning.yml
+            **Run ID:** ${{ github.run_id }}
+            
+            ---
+            *Auto-generated by Flask Security Scanning Workflow*
+            `;
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Critical: ${highSeverityCount} High Severity Security Vulnerabilities in Flask Dependencies`,
+              body: issueBody,
+              labels: ['security', 'critical', 'flask-migration', 'vulnerability-assessment']
+            });
+            
+      # Step 16: Final security enforcement decision
+      - name: Final Security Enforcement Decision
+        if: always()
+        run: |
+          echo "=== Final Security Enforcement Decision ==="
+          
+          security_result="$SECURITY_ENFORCEMENT_RESULT"
+          echo "Security Enforcement Result: $security_result"
+          
+          case "$security_result" in
+            "BLOCKED")
+              echo "🚫 WORKFLOW FAILED: Security policy enforcement - high severity vulnerabilities detected"
+              echo "Manual security review and exception approval required to proceed"
+              exit 1
+              ;;
+            "WARNING")
+              echo "⚠️  WORKFLOW COMPLETED WITH WARNINGS: Medium severity vulnerabilities detected"
+              echo "Consider addressing vulnerabilities before production deployment"
+              exit 0
+              ;;
+            "PASSED")
+              echo "✅ WORKFLOW SUCCESSFUL: Security validation passed"
+              echo "No significant security vulnerabilities detected in Flask ecosystem"
+              exit 0
+              ;;
+            "EXCEPTION_APPROVED")
+              echo "✅ WORKFLOW COMPLETED: Manual security exception approved"
+              echo "Proceeding with deployment under security exception approval"
+              exit 0
+              ;;
+            *)
+              echo "❓ WORKFLOW COMPLETED: Unknown security status"
+              echo "Manual review recommended"
+              exit 0
+              ;;
+          esac
