@@ -1,1208 +1,1243 @@
 """
-Business validation service implementing comprehensive data validation, business rule enforcement,
-and constraint checking across all business operations. This service centralizes validation logic
-using Python dataclasses and type hints while maintaining all original Node.js validation patterns
-through the Service Layer pattern.
+Business Validation Service Implementation
 
-This module provides:
-- Dataclass-based validation schemas with type hints
-- Business rule enforcement and validation logic preservation
-- Input validation and sanitization patterns
-- Database constraint checking and integrity validation
-- Consistent validation error handling across all business operations
+This module implements comprehensive data validation, business rule enforcement, and
+constraint checking across all business operations. The service centralizes validation
+logic using Python dataclasses and type hints while maintaining all original Node.js
+validation patterns through the Service Layer pattern.
 
-Implements Feature F-005 business logic preservation and Section 4.5.1 dataclass integration
-requirements from the technical specification.
+Key Features:
+- Python dataclasses and type hints integration for robust validation per Section 4.5.1
+- Business rule enforcement and validation logic preservation per Feature F-005
+- Data validation and constraint checking per Section 4.12.1 validation rules
+- Input validation and sanitization patterns preservation per Section 2.1.9
+- Consistent validation error handling across all business operations per Section 4.5.3
+- Database integrity validation per Section 6.2.2.2 constraint requirements
+- Service Layer pattern implementation for workflow orchestration per Feature F-006
+
+Technical Specification References:
+- Section 4.5.1: Python dataclasses and type hints integration for robust validation
+- Section 4.12.1: Business Rules and Validation Checkpoints implementation
+- Feature F-005: Business Logic Preservation with validation pattern maintenance
+- Section 2.1.9: Input validation and sanitization patterns preservation
+- Section 4.5.3: Validation error handling with consistent error responses
+- Section 6.2.2.2: Database integrity validation and constraint checking
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Union, Set, Callable, Type
+import re
+import bleach
+import logging
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-import re
-import html
-import json
-import uuid
-import logging
+from typing import (
+    Any, Dict, List, Optional, Union, Type, TypeVar, Generic,
+    get_type_hints, get_origin, get_args
+)
 
-from flask import current_app, g
-from werkzeug.security import safe_str_cmp
-from sqlalchemy import inspect
-from sqlalchemy.exc import IntegrityError, DataError
-from sqlalchemy.orm import sessionmaker
-from marshmallow import Schema, fields, ValidationError as MarshmallowValidationError
+from flask import current_app
+from flask_sqlalchemy import SQLAlchemy
+from injector import inject, singleton
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import BadRequest
 
-# Import logging and error handling utilities
-from ..utils.logging import get_structured_logger
-from ..utils.error_handling import ValidationError, BusinessRuleError, DatabaseConstraintError
+from .base import BaseService, ValidationError, ServiceError
+
+# Type variables for generic validation operations
+T = TypeVar("T")
+ModelType = TypeVar("ModelType")
+DataClassType = TypeVar("DataClassType")
+
+# Logger configuration for validation service operations
+logger = logging.getLogger(__name__)
 
 
 class ValidationSeverity(Enum):
-    """Validation error severity levels for comprehensive error classification."""
-    CRITICAL = "critical"
-    ERROR = "error"
-    WARNING = "warning"
+    """
+    Enumeration of validation severity levels for consistent error categorization.
+    """
     INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
 
 
 class ValidationType(Enum):
-    """Types of validation checks performed by the validation service."""
+    """
+    Enumeration of validation types for comprehensive business rule categorization.
+    """
     DATA_TYPE = "data_type"
     BUSINESS_RULE = "business_rule"
     CONSTRAINT = "constraint"
     SANITIZATION = "sanitization"
+    INTEGRITY = "integrity"
     SECURITY = "security"
-    FORMAT = "format"
 
 
 @dataclass
 class ValidationResult:
     """
-    Comprehensive validation result with detailed error tracking and metadata.
+    Dataclass representing validation result with comprehensive error details.
     
-    Implements Section 4.5.1 dataclass and type hints integration for robust
-    data validation and type safety throughout the validation workflow.
+    Provides structured validation feedback using Python dataclasses and type hints
+    as specified in Section 4.5.1 for robust validation implementation.
+    
+    Attributes:
+        is_valid: Boolean indicating overall validation success
+        errors: List of validation error messages
+        warnings: List of validation warning messages
+        field_errors: Dictionary mapping field names to specific error messages
+        sanitized_data: Cleaned and sanitized input data
+        validation_type: Type of validation performed
+        severity: Overall severity level of validation issues
+        metadata: Additional validation context and details
     """
-    is_valid: bool
-    errors: List[Dict[str, Any]] = field(default_factory=list)
-    warnings: List[Dict[str, Any]] = field(default_factory=list)
-    sanitized_data: Optional[Dict[str, Any]] = None
+    is_valid: bool = True
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    field_errors: Dict[str, List[str]] = field(default_factory=dict)
+    sanitized_data: Dict[str, Any] = field(default_factory=dict)
+    validation_type: ValidationType = ValidationType.DATA_TYPE
+    severity: ValidationSeverity = ValidationSeverity.INFO
     metadata: Dict[str, Any] = field(default_factory=dict)
-    validation_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
-    def add_error(
-        self,
-        field: str,
-        message: str,
-        code: str,
-        severity: ValidationSeverity = ValidationSeverity.ERROR,
-        validation_type: ValidationType = ValidationType.DATA_TYPE,
-        context: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Add validation error with comprehensive metadata."""
-        error = {
-            'field': field,
-            'message': message,
-            'code': code,
-            'severity': severity.value,
-            'type': validation_type.value,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'context': context or {}
-        }
+    def add_error(self, message: str, field_name: Optional[str] = None,
+                  severity: ValidationSeverity = ValidationSeverity.ERROR) -> None:
+        """
+        Add validation error with optional field-specific assignment.
         
-        if severity in [ValidationSeverity.CRITICAL, ValidationSeverity.ERROR]:
-            self.errors.append(error)
-            self.is_valid = False
-        else:
-            self.warnings.append(error)
+        Args:
+            message: Error message describing the validation failure
+            field_name: Optional field name for field-specific errors
+            severity: Severity level of the validation error
+        """
+        self.is_valid = False
+        self.errors.append(message)
+        
+        if field_name:
+            if field_name not in self.field_errors:
+                self.field_errors[field_name] = []
+            self.field_errors[field_name].append(message)
+        
+        # Update overall severity if current error is more severe
+        if severity.value in ["critical", "error"] and self.severity.value in ["info", "warning"]:
+            self.severity = severity
     
-    def add_warning(
-        self,
-        field: str,
-        message: str,
-        code: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Add validation warning without affecting validation status."""
-        self.add_error(
-            field=field,
-            message=message,
-            code=code,
-            severity=ValidationSeverity.WARNING,
-            context=context
+    def add_warning(self, message: str, field_name: Optional[str] = None) -> None:
+        """
+        Add validation warning without affecting validation success.
+        
+        Args:
+            message: Warning message describing the validation concern
+            field_name: Optional field name for field-specific warnings
+        """
+        self.warnings.append(message)
+        
+        if field_name:
+            if field_name not in self.field_errors:
+                self.field_errors[field_name] = []
+            self.field_errors[field_name].append(f"Warning: {message}")
+    
+    def merge(self, other: 'ValidationResult') -> 'ValidationResult':
+        """
+        Merge another validation result into this one.
+        
+        Args:
+            other: Another ValidationResult to merge
+            
+        Returns:
+            Self for method chaining
+        """
+        self.is_valid = self.is_valid and other.is_valid
+        self.errors.extend(other.errors)
+        self.warnings.extend(other.warnings)
+        
+        # Merge field errors
+        for field_name, field_errors in other.field_errors.items():
+            if field_name not in self.field_errors:
+                self.field_errors[field_name] = []
+            self.field_errors[field_name].extend(field_errors)
+        
+        # Update sanitized data
+        self.sanitized_data.update(other.sanitized_data)
+        
+        # Use more severe severity level
+        if other.severity.value in ["critical", "error"] and self.severity.value in ["info", "warning"]:
+            self.severity = other.severity
+        
+        return self
+
+
+@dataclass
+class FieldValidationRule:
+    """
+    Dataclass representing individual field validation rules with comprehensive configuration.
+    
+    Implements Python dataclasses pattern for structured validation rule definition
+    as specified in Section 4.5.1 for type-safe validation configuration.
+    
+    Attributes:
+        field_name: Name of the field to validate
+        required: Whether the field is required
+        data_type: Expected data type for the field
+        min_length: Minimum string length (for string fields)
+        max_length: Maximum string length (for string fields)
+        min_value: Minimum numeric value (for numeric fields)
+        max_value: Maximum numeric value (for numeric fields)
+        pattern: Regular expression pattern for string validation
+        custom_validator: Custom validation function
+        sanitizer: Data sanitization function
+        business_rules: List of business rule validation functions
+        error_message: Custom error message for validation failures
+    """
+    field_name: str
+    required: bool = False
+    data_type: Optional[Type] = None
+    min_length: Optional[int] = None
+    max_length: Optional[int] = None
+    min_value: Optional[Union[int, float, Decimal]] = None
+    max_value: Optional[Union[int, float, Decimal]] = None
+    pattern: Optional[str] = None
+    custom_validator: Optional[callable] = None
+    sanitizer: Optional[callable] = None
+    business_rules: List[callable] = field(default_factory=list)
+    error_message: Optional[str] = None
+
+
+class BaseValidator(ABC):
+    """
+    Abstract base class for implementing field-specific validators.
+    
+    Provides consistent validation interface for all field types while enabling
+    extensible validation patterns for complex business rules.
+    """
+    
+    @abstractmethod
+    def validate(self, value: Any, rule: FieldValidationRule) -> ValidationResult:
+        """
+        Abstract method for field-specific validation implementation.
+        
+        Args:
+            value: Value to validate
+            rule: Validation rule configuration
+            
+        Returns:
+            ValidationResult with validation outcome
+        """
+        pass
+    
+    @abstractmethod
+    def sanitize(self, value: Any) -> Any:
+        """
+        Abstract method for field-specific data sanitization.
+        
+        Args:
+            value: Value to sanitize
+            
+        Returns:
+            Sanitized value
+        """
+        pass
+
+
+class StringValidator(BaseValidator):
+    """
+    String field validator implementing comprehensive text validation and sanitization.
+    
+    Provides input validation and sanitization patterns preservation per Section 2.1.9
+    with HTML sanitization, pattern matching, and length constraints.
+    """
+    
+    def validate(self, value: Any, rule: FieldValidationRule) -> ValidationResult:
+        """
+        Validate string field with comprehensive checks and sanitization.
+        
+        Args:
+            value: String value to validate
+            rule: String validation rule configuration
+            
+        Returns:
+            ValidationResult with validation outcome and sanitized data
+        """
+        result = ValidationResult(validation_type=ValidationType.DATA_TYPE)
+        
+        # Convert to string if not None
+        if value is None:
+            if rule.required:
+                result.add_error(
+                    f"Field '{rule.field_name}' is required",
+                    rule.field_name,
+                    ValidationSeverity.ERROR
+                )
+            return result
+        
+        # Convert to string and sanitize
+        str_value = str(value)
+        sanitized_value = self.sanitize(str_value)
+        result.sanitized_data[rule.field_name] = sanitized_value
+        
+        # Length validation
+        if rule.min_length is not None and len(sanitized_value) < rule.min_length:
+            result.add_error(
+                f"Field '{rule.field_name}' must be at least {rule.min_length} characters",
+                rule.field_name
+            )
+        
+        if rule.max_length is not None and len(sanitized_value) > rule.max_length:
+            result.add_error(
+                f"Field '{rule.field_name}' must be at most {rule.max_length} characters",
+                rule.field_name
+            )
+        
+        # Pattern validation
+        if rule.pattern and sanitized_value:
+            try:
+                if not re.match(rule.pattern, sanitized_value):
+                    error_msg = rule.error_message or f"Field '{rule.field_name}' does not match required pattern"
+                    result.add_error(error_msg, rule.field_name)
+            except re.error as e:
+                result.add_error(
+                    f"Invalid regex pattern for field '{rule.field_name}': {e}",
+                    rule.field_name,
+                    ValidationSeverity.CRITICAL
+                )
+        
+        return result
+    
+    def sanitize(self, value: Any) -> str:
+        """
+        Sanitize string input with HTML cleaning and whitespace normalization.
+        
+        Implements input sanitization patterns preservation per Section 2.1.9
+        with comprehensive security-focused sanitization.
+        
+        Args:
+            value: String value to sanitize
+            
+        Returns:
+            Sanitized string value
+        """
+        if value is None:
+            return ""
+        
+        str_value = str(value)
+        
+        # Strip leading/trailing whitespace
+        str_value = str_value.strip()
+        
+        # HTML sanitization using bleach
+        # Allow basic formatting tags but remove potentially dangerous content
+        allowed_tags = ['b', 'i', 'u', 'em', 'strong', 'p', 'br']
+        allowed_attributes = {}
+        
+        sanitized = bleach.clean(
+            str_value,
+            tags=allowed_tags,
+            attributes=allowed_attributes,
+            strip=True
         )
+        
+        # Normalize whitespace
+        sanitized = re.sub(r'\s+', ' ', sanitized)
+        
+        return sanitized
+
+
+class NumericValidator(BaseValidator):
+    """
+    Numeric field validator implementing comprehensive number validation and type coercion.
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert validation result to dictionary for API responses."""
-        return {
-            'is_valid': self.is_valid,
-            'errors': self.errors,
-            'warnings': self.warnings,
-            'metadata': self.metadata,
-            'validation_timestamp': self.validation_timestamp.isoformat()
-        }
-
-
-@dataclass
-class ValidationRule:
+    Supports integer, float, and Decimal validation with range checking and precision handling.
     """
-    Business rule definition for comprehensive validation enforcement.
     
-    Implements Feature F-005 business logic preservation requirements
-    maintaining all original Node.js validation patterns.
-    """
-    field: str
-    rule_type: ValidationType
-    validator: Callable
-    message: str
-    code: str
-    severity: ValidationSeverity = ValidationSeverity.ERROR
-    conditions: Optional[Dict[str, Any]] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class EntityValidationSchema:
-    """
-    Entity-specific validation schema with comprehensive rule definitions.
+    def validate(self, value: Any, rule: FieldValidationRule) -> ValidationResult:
+        """
+        Validate numeric field with type checking and range validation.
+        
+        Args:
+            value: Numeric value to validate
+            rule: Numeric validation rule configuration
+            
+        Returns:
+            ValidationResult with validation outcome and sanitized data
+        """
+        result = ValidationResult(validation_type=ValidationType.DATA_TYPE)
+        
+        if value is None:
+            if rule.required:
+                result.add_error(
+                    f"Field '{rule.field_name}' is required",
+                    rule.field_name,
+                    ValidationSeverity.ERROR
+                )
+            return result
+        
+        # Type conversion and validation
+        try:
+            if rule.data_type == int:
+                numeric_value = int(value)
+            elif rule.data_type == float:
+                numeric_value = float(value)
+            elif rule.data_type == Decimal:
+                numeric_value = Decimal(str(value))
+            else:
+                # Default to float for unspecified numeric types
+                numeric_value = float(value)
+            
+            result.sanitized_data[rule.field_name] = numeric_value
+            
+            # Range validation
+            if rule.min_value is not None and numeric_value < rule.min_value:
+                result.add_error(
+                    f"Field '{rule.field_name}' must be at least {rule.min_value}",
+                    rule.field_name
+                )
+            
+            if rule.max_value is not None and numeric_value > rule.max_value:
+                result.add_error(
+                    f"Field '{rule.field_name}' must be at most {rule.max_value}",
+                    rule.field_name
+                )
+                
+        except (ValueError, TypeError, InvalidOperation) as e:
+            result.add_error(
+                f"Field '{rule.field_name}' must be a valid number: {e}",
+                rule.field_name
+            )
+        
+        return result
     
-    Provides structured validation rule organization for different entity types
-    supporting complex business workflows and relationship validation.
-    """
-    entity_type: str
-    required_fields: Set[str]
-    validation_rules: List[ValidationRule]
-    relationship_rules: List[ValidationRule] = field(default_factory=list)
-    business_rules: List[ValidationRule] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    def sanitize(self, value: Any) -> Union[int, float, Decimal]:
+        """
+        Sanitize numeric input with type coercion and precision handling.
+        
+        Args:
+            value: Numeric value to sanitize
+            
+        Returns:
+            Sanitized numeric value
+        """
+        if value is None:
+            return 0
+        
+        # Remove whitespace for string numbers
+        if isinstance(value, str):
+            value = value.strip()
+        
+        try:
+            # Try to preserve the most appropriate numeric type
+            if isinstance(value, (int, float, Decimal)):
+                return value
+            elif isinstance(value, str):
+                # Check if it's an integer
+                if '.' not in value and 'e' not in value.lower():
+                    return int(value)
+                else:
+                    return float(value)
+            else:
+                return float(value)
+        except (ValueError, TypeError):
+            return 0
 
 
-class ValidationService:
+class EmailValidator(BaseValidator):
     """
-    Comprehensive business validation service implementing data validation, business rule
+    Email field validator implementing comprehensive email validation and normalization.
+    
+    Provides email-specific validation with format checking, domain validation,
+    and normalization patterns for consistent email handling.
+    """
+    
+    # RFC 5322 compliant email regex pattern
+    EMAIL_PATTERN = re.compile(
+        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    )
+    
+    def validate(self, value: Any, rule: FieldValidationRule) -> ValidationResult:
+        """
+        Validate email field with format checking and domain validation.
+        
+        Args:
+            value: Email value to validate
+            rule: Email validation rule configuration
+            
+        Returns:
+            ValidationResult with validation outcome and sanitized data
+        """
+        result = ValidationResult(validation_type=ValidationType.DATA_TYPE)
+        
+        if value is None:
+            if rule.required:
+                result.add_error(
+                    f"Email field '{rule.field_name}' is required",
+                    rule.field_name,
+                    ValidationSeverity.ERROR
+                )
+            return result
+        
+        # Sanitize email
+        sanitized_email = self.sanitize(value)
+        result.sanitized_data[rule.field_name] = sanitized_email
+        
+        # Format validation
+        if sanitized_email and not self.EMAIL_PATTERN.match(sanitized_email):
+            result.add_error(
+                f"Field '{rule.field_name}' must be a valid email address",
+                rule.field_name
+            )
+        
+        # Additional length checks
+        if len(sanitized_email) > 254:  # RFC 5321 limit
+            result.add_error(
+                f"Email address '{rule.field_name}' is too long (max 254 characters)",
+                rule.field_name
+            )
+        
+        return result
+    
+    def sanitize(self, value: Any) -> str:
+        """
+        Sanitize email input with normalization and case handling.
+        
+        Args:
+            value: Email value to sanitize
+            
+        Returns:
+            Sanitized email string
+        """
+        if value is None:
+            return ""
+        
+        email = str(value).strip().lower()
+        
+        # Remove potentially dangerous characters
+        email = re.sub(r'[<>"\']', '', email)
+        
+        return email
+
+
+class DateTimeValidator(BaseValidator):
+    """
+    DateTime field validator implementing comprehensive date/time validation and parsing.
+    
+    Supports multiple date formats, timezone handling, and range validation for
+    temporal data validation requirements.
+    """
+    
+    def validate(self, value: Any, rule: FieldValidationRule) -> ValidationResult:
+        """
+        Validate datetime field with format parsing and range checking.
+        
+        Args:
+            value: DateTime value to validate
+            rule: DateTime validation rule configuration
+            
+        Returns:
+            ValidationResult with validation outcome and sanitized data
+        """
+        result = ValidationResult(validation_type=ValidationType.DATA_TYPE)
+        
+        if value is None:
+            if rule.required:
+                result.add_error(
+                    f"DateTime field '{rule.field_name}' is required",
+                    rule.field_name,
+                    ValidationSeverity.ERROR
+                )
+            return result
+        
+        # Parse and sanitize datetime
+        try:
+            sanitized_datetime = self.sanitize(value)
+            result.sanitized_data[rule.field_name] = sanitized_datetime
+            
+            # Range validation if min/max values are provided
+            if rule.min_value and isinstance(rule.min_value, datetime):
+                if sanitized_datetime < rule.min_value:
+                    result.add_error(
+                        f"DateTime '{rule.field_name}' must be after {rule.min_value}",
+                        rule.field_name
+                    )
+            
+            if rule.max_value and isinstance(rule.max_value, datetime):
+                if sanitized_datetime > rule.max_value:
+                    result.add_error(
+                        f"DateTime '{rule.field_name}' must be before {rule.max_value}",
+                        rule.field_name
+                    )
+                    
+        except ValueError as e:
+            result.add_error(
+                f"Field '{rule.field_name}' must be a valid datetime: {e}",
+                rule.field_name
+            )
+        
+        return result
+    
+    def sanitize(self, value: Any) -> datetime:
+        """
+        Sanitize datetime input with parsing and timezone normalization.
+        
+        Args:
+            value: DateTime value to sanitize
+            
+        Returns:
+            Sanitized datetime object with UTC timezone
+        """
+        if isinstance(value, datetime):
+            # Ensure UTC timezone
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        
+        if isinstance(value, str):
+            # Try to parse common datetime formats
+            datetime_formats = [
+                '%Y-%m-%d %H:%M:%S',
+                '%Y-%m-%dT%H:%M:%S',
+                '%Y-%m-%dT%H:%M:%SZ',
+                '%Y-%m-%dT%H:%M:%S.%fZ',
+                '%Y-%m-%d',
+                '%m/%d/%Y',
+                '%d/%m/%Y'
+            ]
+            
+            for fmt in datetime_formats:
+                try:
+                    parsed_dt = datetime.strptime(value.strip(), fmt)
+                    return parsed_dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+            
+            # If no format matches, raise error
+            raise ValueError(f"Unable to parse datetime string: {value}")
+        
+        # Try to convert other types
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+
+
+@singleton
+class ValidationService(BaseService):
+    """
+    Business Validation Service implementing comprehensive data validation, business rule
     enforcement, and constraint checking across all business operations.
     
     This service centralizes validation logic using Python dataclasses and type hints
-    while maintaining all original Node.js validation patterns through the Service Layer pattern.
+    while maintaining all original Node.js validation patterns through the Service Layer
+    pattern as specified in Section 4.5.1 and Feature F-005.
     
     Key Features:
-    - Business rule enforcement per Feature F-005
-    - Python dataclasses and type hints integration per Section 4.5.1
-    - Data validation and constraint checking per Section 4.12.1
-    - Input validation and sanitization per Section 2.1.9
-    - Consistent validation error handling per Section 4.5.3
-    - Database integrity validation per Section 6.2.2.2
+    - Python dataclasses and type hints integration for robust validation
+    - Business rule enforcement with consistent validation patterns
+    - Input validation and sanitization preservation from Node.js implementation
+    - Constraint checking with database integrity validation
+    - Consistent validation error handling across all business operations
+    - Service Layer pattern implementation for workflow orchestration
+    
+    Technical Specification References:
+    - Section 4.5.1: Business Logic Preservation Process with dataclasses
+    - Section 4.12.1: Validation Rules Implementation
+    - Feature F-005: Business Logic Preservation
+    - Section 2.1.9: Input validation and sanitization patterns
+    - Section 4.5.3: Validation error handling
+    - Section 6.2.2.2: Database integrity validation
     """
     
-    def __init__(self):
-        """Initialize validation service with comprehensive rule definitions."""
-        self.logger = get_structured_logger(__name__)
-        self._validation_schemas: Dict[str, EntityValidationSchema] = {}
-        self._business_rules: Dict[str, List[ValidationRule]] = {}
-        self._security_patterns = self._initialize_security_patterns()
-        self._sanitization_rules = self._initialize_sanitization_rules()
-        
-        # Initialize entity validation schemas
-        self._initialize_entity_schemas()
-        self._initialize_business_rules()
-        
-        self.logger.info(
-            "Validation service initialized",
-            extra={
-                'schemas_count': len(self._validation_schemas),
-                'business_rules_count': sum(len(rules) for rules in self._business_rules.values()),
-                'service': 'validation_service'
-            }
-        )
-    
-    def _initialize_security_patterns(self) -> Dict[str, re.Pattern]:
+    @inject
+    def __init__(self, db: SQLAlchemy):
         """
-        Initialize security validation patterns for injection detection.
-        
-        Implements Section 2.1.9 input validation and sanitization patterns
-        for comprehensive security validation.
-        """
-        return {
-            'sql_injection': re.compile(
-                r'(?i)(union|select|insert|update|delete|drop|create|alter|exec|execute|declare|script)',
-                re.IGNORECASE
-            ),
-            'xss_script': re.compile(
-                r'<script[^>]*>.*?</script>|javascript:|vbscript:|onload=|onerror=',
-                re.IGNORECASE | re.DOTALL
-            ),
-            'html_tags': re.compile(r'<[^>]+>'),
-            'email_pattern': re.compile(
-                r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            ),
-            'phone_pattern': re.compile(r'^\+?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}$'),
-            'uuid_pattern': re.compile(
-                r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-                re.IGNORECASE
-            ),
-            'alphanumeric': re.compile(r'^[a-zA-Z0-9_-]+$'),
-            'numeric': re.compile(r'^[0-9]+$'),
-            'decimal': re.compile(r'^[0-9]+(\.[0-9]+)?$')
-        }
-    
-    def _initialize_sanitization_rules(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Initialize data sanitization rules for input processing.
-        
-        Maintains input validation and sanitization patterns from original
-        Node.js implementation per Section 2.1.9 requirements.
-        """
-        return {
-            'string': {
-                'max_length': 10000,
-                'trim_whitespace': True,
-                'html_escape': True,
-                'remove_null_chars': True
-            },
-            'email': {
-                'max_length': 255,
-                'normalize_case': True,
-                'trim_whitespace': True
-            },
-            'phone': {
-                'remove_formatting': True,
-                'normalize_format': True
-            },
-            'numeric': {
-                'remove_non_numeric': True,
-                'validate_range': True
-            },
-            'text': {
-                'max_length': 50000,
-                'preserve_newlines': True,
-                'html_escape': True
-            }
-        }
-    
-    def _initialize_entity_schemas(self) -> None:
-        """
-        Initialize validation schemas for all entity types.
-        
-        Implements comprehensive entity validation supporting complex business
-        workflows and relationship validation per Section 6.2.2.1.
-        """
-        # User entity validation schema
-        user_rules = [
-            ValidationRule(
-                field='username',
-                rule_type=ValidationType.FORMAT,
-                validator=self._validate_username,
-                message='Username must be 3-50 characters and contain only letters, numbers, and underscores',
-                code='INVALID_USERNAME_FORMAT'
-            ),
-            ValidationRule(
-                field='email',
-                rule_type=ValidationType.FORMAT,
-                validator=self._validate_email,
-                message='Invalid email format',
-                code='INVALID_EMAIL_FORMAT'
-            ),
-            ValidationRule(
-                field='password',
-                rule_type=ValidationType.SECURITY,
-                validator=self._validate_password_strength,
-                message='Password must be at least 8 characters with uppercase, lowercase, number, and special character',
-                code='WEAK_PASSWORD'
-            )
-        ]
-        
-        self._validation_schemas['user'] = EntityValidationSchema(
-            entity_type='user',
-            required_fields={'username', 'email', 'password'},
-            validation_rules=user_rules
-        )
-        
-        # Business Entity validation schema
-        business_entity_rules = [
-            ValidationRule(
-                field='name',
-                rule_type=ValidationType.FORMAT,
-                validator=self._validate_entity_name,
-                message='Entity name must be 1-255 characters',
-                code='INVALID_ENTITY_NAME'
-            ),
-            ValidationRule(
-                field='description',
-                rule_type=ValidationType.FORMAT,
-                validator=self._validate_entity_description,
-                message='Description cannot exceed 1000 characters',
-                code='INVALID_ENTITY_DESCRIPTION'
-            ),
-            ValidationRule(
-                field='owner_id',
-                rule_type=ValidationType.CONSTRAINT,
-                validator=self._validate_owner_exists,
-                message='Owner must be a valid user',
-                code='INVALID_OWNER_REFERENCE'
-            )
-        ]
-        
-        self._validation_schemas['business_entity'] = EntityValidationSchema(
-            entity_type='business_entity',
-            required_fields={'name', 'owner_id'},
-            validation_rules=business_entity_rules
-        )
-        
-        # Entity Relationship validation schema
-        relationship_rules = [
-            ValidationRule(
-                field='source_entity_id',
-                rule_type=ValidationType.CONSTRAINT,
-                validator=self._validate_entity_exists,
-                message='Source entity must exist',
-                code='INVALID_SOURCE_ENTITY'
-            ),
-            ValidationRule(
-                field='target_entity_id',
-                rule_type=ValidationType.CONSTRAINT,
-                validator=self._validate_entity_exists,
-                message='Target entity must exist',
-                code='INVALID_TARGET_ENTITY'
-            ),
-            ValidationRule(
-                field='relationship_type',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_relationship_type,
-                message='Invalid relationship type',
-                code='INVALID_RELATIONSHIP_TYPE'
-            )
-        ]
-        
-        self._validation_schemas['entity_relationship'] = EntityValidationSchema(
-            entity_type='entity_relationship',
-            required_fields={'source_entity_id', 'target_entity_id', 'relationship_type'},
-            validation_rules=relationship_rules
-        )
-    
-    def _initialize_business_rules(self) -> None:
-        """
-        Initialize business rules for comprehensive business logic validation.
-        
-        Implements Feature F-005 business logic preservation maintaining
-        all existing business rules from the Node.js implementation.
-        """
-        # User business rules
-        user_business_rules = [
-            ValidationRule(
-                field='username',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_username_uniqueness,
-                message='Username already exists',
-                code='DUPLICATE_USERNAME'
-            ),
-            ValidationRule(
-                field='email',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_email_uniqueness,
-                message='Email address already registered',
-                code='DUPLICATE_EMAIL'
-            )
-        ]
-        
-        # Business entity business rules
-        entity_business_rules = [
-            ValidationRule(
-                field='status',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_entity_status_transition,
-                message='Invalid status transition',
-                code='INVALID_STATUS_TRANSITION'
-            ),
-            ValidationRule(
-                field='owner_id',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_ownership_permissions,
-                message='Insufficient permissions for entity ownership',
-                code='INSUFFICIENT_OWNERSHIP_PERMISSIONS'
-            )
-        ]
-        
-        # Relationship business rules
-        relationship_business_rules = [
-            ValidationRule(
-                field='circular_reference',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_no_circular_relationships,
-                message='Circular relationships are not allowed',
-                code='CIRCULAR_RELATIONSHIP_DETECTED'
-            ),
-            ValidationRule(
-                field='relationship_limit',
-                rule_type=ValidationType.BUSINESS_RULE,
-                validator=self._validate_relationship_count_limit,
-                message='Maximum relationship count exceeded',
-                code='RELATIONSHIP_LIMIT_EXCEEDED'
-            )
-        ]
-        
-        self._business_rules = {
-            'user': user_business_rules,
-            'business_entity': entity_business_rules,
-            'entity_relationship': relationship_business_rules
-        }
-    
-    def validate_entity(
-        self,
-        entity_type: str,
-        data: Dict[str, Any],
-        context: Optional[Dict[str, Any]] = None,
-        include_business_rules: bool = True
-    ) -> ValidationResult:
-        """
-        Comprehensive entity validation with business rule enforcement.
+        Initialize validation service with Flask-SQLAlchemy database instance.
         
         Args:
-            entity_type: Type of entity being validated
-            data: Entity data to validate
-            context: Additional validation context
-            include_business_rules: Whether to include business rule validation
+            db: Flask-SQLAlchemy database instance for integrity validation
+        """
+        super().__init__(db)
+        
+        # Initialize field validators
+        self._validators: Dict[Type, BaseValidator] = {
+            str: StringValidator(),
+            int: NumericValidator(),
+            float: NumericValidator(),
+            Decimal: NumericValidator(),
+            datetime: DateTimeValidator()
+        }
+        
+        # Email validator for email-specific fields
+        self._email_validator = EmailValidator()
+        
+        # Cache for validation rules to improve performance
+        self._validation_cache: Dict[str, Dict[str, FieldValidationRule]] = {}
+        
+        # Business rule registry for dynamic rule loading
+        self._business_rules: Dict[str, List[callable]] = {}
+        
+        self.logger.info("Initialized ValidationService with comprehensive validation patterns")
+    
+    def validate_business_rules(self, data: Dict[str, Any]) -> bool:
+        """
+        Validate business rules for the validation service domain.
+        
+        Args:
+            data: Data to validate against business rules
             
         Returns:
-            ValidationResult with comprehensive validation details
+            True if validation passes
             
-        Implements:
-        - Section 4.5.1: Dataclass and type hints integration
-        - Section 4.12.1: Data validation and constraint checking
-        - Feature F-005: Business logic preservation
+        Raises:
+            ValidationError: When business rules are violated
         """
-        result = ValidationResult(is_valid=True)
-        context = context or {}
+        # Basic validation service business rules
+        if not isinstance(data, dict):
+            raise ValidationError("Validation data must be a dictionary")
         
-        try:
-            # Log validation start
-            self.logger.info(
-                "Starting entity validation",
-                extra={
-                    'entity_type': entity_type,
-                    'data_keys': list(data.keys()),
-                    'include_business_rules': include_business_rules,
-                    'service': 'validation_service'
-                }
-            )
+        # Validate that critical validation fields are present for validation operations
+        if 'validation_type' in data:
+            valid_types = [vt.value for vt in ValidationType]
+            if data['validation_type'] not in valid_types:
+                raise ValidationError(f"Invalid validation type. Must be one of: {valid_types}")
+        
+        return True
+    
+    def validate_field(self, field_name: str, value: Any, 
+                      validation_rule: FieldValidationRule) -> ValidationResult:
+        """
+        Validate individual field with comprehensive validation logic.
+        
+        Implements field-level validation with type checking, business rules,
+        and sanitization as specified in Section 4.5.1 validation patterns.
+        
+        Args:
+            field_name: Name of the field being validated
+            value: Value to validate
+            validation_rule: Validation rule configuration
             
-            # Get validation schema
-            schema = self._validation_schemas.get(entity_type)
-            if not schema:
+        Returns:
+            ValidationResult with validation outcome and sanitized data
+        """
+        self.log_service_operation(f"Validating field: {field_name}", {"type": type(value).__name__})
+        
+        # Get appropriate validator for the field type
+        validator = self._get_validator_for_type(validation_rule.data_type)
+        
+        # Perform type-specific validation
+        result = validator.validate(value, validation_rule)
+        
+        # Apply custom validator if provided
+        if validation_rule.custom_validator and result.is_valid:
+            try:
+                custom_result = validation_rule.custom_validator(value, validation_rule)
+                if isinstance(custom_result, ValidationResult):
+                    result.merge(custom_result)
+                elif not custom_result:
+                    result.add_error(
+                        f"Custom validation failed for field '{field_name}'",
+                        field_name
+                    )
+            except Exception as e:
                 result.add_error(
-                    field='entity_type',
-                    message=f'Unknown entity type: {entity_type}',
-                    code='UNKNOWN_ENTITY_TYPE',
-                    severity=ValidationSeverity.CRITICAL
+                    f"Custom validator error for field '{field_name}': {e}",
+                    field_name,
+                    ValidationSeverity.CRITICAL
                 )
-                return result
-            
-            # Sanitize input data
-            sanitized_data = self._sanitize_data(data, entity_type)
-            result.sanitized_data = sanitized_data
-            
-            # Validate required fields
-            self._validate_required_fields(schema, sanitized_data, result)
-            
-            # Validate data types and formats
-            self._validate_data_types(schema, sanitized_data, result, context)
-            
-            # Validate constraints
-            self._validate_constraints(schema, sanitized_data, result, context)
-            
-            # Validate business rules if requested
-            if include_business_rules:
-                self._validate_business_rules(entity_type, sanitized_data, result, context)
-            
-            # Validate relationships if applicable
-            if schema.relationship_rules:
-                self._validate_relationships(schema, sanitized_data, result, context)
-            
-            # Add validation metadata
-            result.metadata.update({
-                'entity_type': entity_type,
-                'validation_count': len(schema.validation_rules),
-                'business_rule_count': len(self._business_rules.get(entity_type, [])),
-                'context': context
-            })
-            
-            # Log validation completion
-            self.logger.info(
-                "Entity validation completed",
-                extra={
-                    'entity_type': entity_type,
-                    'is_valid': result.is_valid,
-                    'error_count': len(result.errors),
-                    'warning_count': len(result.warnings),
-                    'service': 'validation_service'
-                }
-            )
-            
-        except Exception as e:
-            self.logger.error(
-                "Entity validation failed with exception",
-                extra={
-                    'entity_type': entity_type,
-                    'error': str(e),
-                    'service': 'validation_service'
-                }
-            )
-            result.add_error(
-                field='validation',
-                message='Internal validation error occurred',
-                code='VALIDATION_EXCEPTION',
-                severity=ValidationSeverity.CRITICAL,
-                context={'exception': str(e)}
-            )
         
-        return result
-    
-    def validate_input_data(
-        self,
-        data: Dict[str, Any],
-        validation_rules: Optional[List[ValidationRule]] = None,
-        strict_mode: bool = False
-    ) -> ValidationResult:
-        """
-        Validate and sanitize input data with comprehensive security checks.
-        
-        Implements Section 2.1.9 input validation and sanitization patterns
-        maintaining security standards from the Node.js implementation.
-        
-        Args:
-            data: Input data to validate
-            validation_rules: Custom validation rules
-            strict_mode: Enable strict validation mode
-            
-        Returns:
-            ValidationResult with sanitized data and validation details
-        """
-        result = ValidationResult(is_valid=True)
-        
-        try:
-            # Log input validation start
-            self.logger.info(
-                "Starting input data validation",
-                extra={
-                    'data_keys': list(data.keys()),
-                    'strict_mode': strict_mode,
-                    'custom_rules_count': len(validation_rules) if validation_rules else 0,
-                    'service': 'validation_service'
-                }
-            )
-            
-            # Sanitize input data
-            sanitized_data = {}
-            for key, value in data.items():
+        # Apply business rules if provided
+        for business_rule in validation_rule.business_rules:
+            if result.is_valid:
                 try:
-                    sanitized_value = self._sanitize_value(key, value, strict_mode)
-                    sanitized_data[key] = sanitized_value
-                    
-                    # Security validation
-                    if isinstance(value, str):
-                        self._validate_security_patterns(key, value, result)
-                        
+                    rule_result = business_rule(value, validation_rule)
+                    if isinstance(rule_result, ValidationResult):
+                        result.merge(rule_result)
+                    elif not rule_result:
+                        result.add_error(
+                            f"Business rule validation failed for field '{field_name}'",
+                            field_name
+                        )
                 except Exception as e:
                     result.add_error(
-                        field=key,
-                        message=f'Sanitization failed: {str(e)}',
-                        code='SANITIZATION_ERROR',
-                        validation_type=ValidationType.SANITIZATION
+                        f"Business rule error for field '{field_name}': {e}",
+                        field_name,
+                        ValidationSeverity.ERROR
                     )
-            
-            result.sanitized_data = sanitized_data
-            
-            # Apply custom validation rules
-            if validation_rules:
-                for rule in validation_rules:
-                    try:
-                        field_value = sanitized_data.get(rule.field)
-                        if field_value is not None:
-                            if not rule.validator(field_value, sanitized_data):
-                                result.add_error(
-                                    field=rule.field,
-                                    message=rule.message,
-                                    code=rule.code,
-                                    severity=rule.severity,
-                                    validation_type=rule.rule_type
-                                )
-                    except Exception as e:
-                        result.add_error(
-                            field=rule.field,
-                            message=f'Custom validation failed: {str(e)}',
-                            code='CUSTOM_VALIDATION_ERROR',
-                            validation_type=rule.rule_type
-                        )
-            
-            # Log input validation completion
-            self.logger.info(
-                "Input data validation completed",
-                extra={
-                    'is_valid': result.is_valid,
-                    'sanitized_fields_count': len(sanitized_data),
-                    'error_count': len(result.errors),
-                    'service': 'validation_service'
-                }
-            )
-            
-        except Exception as e:
-            self.logger.error(
-                "Input data validation failed",
-                extra={
-                    'error': str(e),
-                    'service': 'validation_service'
-                }
-            )
-            result.add_error(
-                field='input_validation',
-                message='Input validation failed',
-                code='INPUT_VALIDATION_ERROR',
-                severity=ValidationSeverity.CRITICAL
-            )
+        
+        self.log_service_operation(
+            f"Field validation completed for: {field_name}",
+            {"valid": result.is_valid, "errors": len(result.errors)}
+        )
         
         return result
     
-    def validate_database_constraints(
-        self,
-        model_class: Type,
-        data: Dict[str, Any],
-        session = None
-    ) -> ValidationResult:
+    def validate_data(self, data: Dict[str, Any], 
+                     validation_rules: Dict[str, FieldValidationRule],
+                     entity_type: Optional[str] = None) -> ValidationResult:
         """
-        Validate database constraints and referential integrity.
+        Validate complete data dictionary with comprehensive business rule enforcement.
         
-        Implements Section 6.2.2.2 constraint checking with database integrity
-        validation ensuring data consistency across all operations.
+        Implements comprehensive data validation as specified in Section 4.12.1
+        with business rule enforcement and consistent error handling.
         
         Args:
-            model_class: SQLAlchemy model class
-            data: Data to validate against constraints
-            session: Database session for constraint checking
+            data: Data dictionary to validate
+            validation_rules: Dictionary of field validation rules
+            entity_type: Optional entity type for business rule context
             
         Returns:
-            ValidationResult with constraint validation details
+            ValidationResult with comprehensive validation outcome
         """
-        result = ValidationResult(is_valid=True)
+        self.log_service_operation(
+            f"Validating data for entity: {entity_type or 'unknown'}",
+            {"fields": len(data), "rules": len(validation_rules)}
+        )
+        
+        overall_result = ValidationResult(validation_type=ValidationType.BUSINESS_RULE)
+        
+        # Validate each field according to its rules
+        for field_name, rule in validation_rules.items():
+            field_value = data.get(field_name)
+            field_result = self.validate_field(field_name, field_value, rule)
+            overall_result.merge(field_result)
+        
+        # Check for required fields that are missing
+        for field_name, rule in validation_rules.items():
+            if rule.required and field_name not in data:
+                overall_result.add_error(
+                    f"Required field '{field_name}' is missing",
+                    field_name,
+                    ValidationSeverity.ERROR
+                )
+        
+        # Apply entity-specific business rules if available
+        if entity_type and entity_type in self._business_rules:
+            for business_rule in self._business_rules[entity_type]:
+                try:
+                    rule_result = business_rule(data, validation_rules)
+                    if isinstance(rule_result, ValidationResult):
+                        overall_result.merge(rule_result)
+                    elif not rule_result:
+                        overall_result.add_error(
+                            f"Entity business rule validation failed for {entity_type}",
+                            severity=ValidationSeverity.ERROR
+                        )
+                except Exception as e:
+                    overall_result.add_error(
+                        f"Entity business rule error for {entity_type}: {e}",
+                        severity=ValidationSeverity.CRITICAL
+                    )
+        
+        self.log_service_operation(
+            f"Data validation completed for entity: {entity_type or 'unknown'}",
+            {
+                "valid": overall_result.is_valid,
+                "errors": len(overall_result.errors),
+                "warnings": len(overall_result.warnings)
+            }
+        )
+        
+        return overall_result
+    
+    def validate_database_constraints(self, model_class: Type, 
+                                    data: Dict[str, Any]) -> ValidationResult:
+        """
+        Validate database integrity constraints before persistence operations.
+        
+        Implements database integrity validation per Section 6.2.2.2 with
+        constraint checking and referential integrity validation.
+        
+        Args:
+            model_class: SQLAlchemy model class for constraint validation
+            data: Data to validate against database constraints
+            
+        Returns:
+            ValidationResult with database constraint validation outcome
+        """
+        self.log_service_operation(
+            f"Validating database constraints for model: {model_class.__name__}",
+            {"fields": len(data)}
+        )
+        
+        result = ValidationResult(validation_type=ValidationType.CONSTRAINT)
         
         try:
-            # Log constraint validation start
-            self.logger.info(
-                "Starting database constraint validation",
-                extra={
-                    'model_class': model_class.__name__,
-                    'data_keys': list(data.keys()),
-                    'service': 'validation_service'
-                }
-            )
+            # Check unique constraints
+            self._validate_unique_constraints(model_class, data, result)
             
-            # Get model inspection for constraint validation
-            inspector = inspect(model_class)
+            # Check foreign key constraints
+            self._validate_foreign_key_constraints(model_class, data, result)
             
-            # Validate column constraints
-            for column in inspector.columns:
-                column_name = column.name
-                column_value = data.get(column_name)
-                
-                # Check nullable constraints
-                if not column.nullable and column_value is None:
-                    result.add_error(
-                        field=column_name,
-                        message=f'{column_name} is required',
-                        code='NULL_CONSTRAINT_VIOLATION',
-                        validation_type=ValidationType.CONSTRAINT
-                    )
-                
-                # Check string length constraints
-                if hasattr(column.type, 'length') and column.type.length:
-                    if isinstance(column_value, str) and len(column_value) > column.type.length:
-                        result.add_error(
-                            field=column_name,
-                            message=f'{column_name} exceeds maximum length of {column.type.length}',
-                            code='LENGTH_CONSTRAINT_VIOLATION',
-                            validation_type=ValidationType.CONSTRAINT
-                        )
-                
-                # Check unique constraints
-                if column.unique and column_value is not None and session:
-                    existing = session.query(model_class).filter(
-                        getattr(model_class, column_name) == column_value
-                    ).first()
-                    
-                    if existing:
-                        result.add_error(
-                            field=column_name,
-                            message=f'{column_name} must be unique',
-                            code='UNIQUE_CONSTRAINT_VIOLATION',
-                            validation_type=ValidationType.CONSTRAINT
-                        )
+            # Check check constraints
+            self._validate_check_constraints(model_class, data, result)
             
-            # Validate foreign key constraints
-            for relationship in inspector.relationships:
-                fk_column = None
-                for fk in relationship.local_columns:
-                    fk_column = fk.name
-                    break
-                
-                if fk_column and fk_column in data:
-                    fk_value = data[fk_column]
-                    if fk_value is not None and session:
-                        # Check if referenced entity exists
-                        related_model = relationship.mapper.class_
-                        exists = session.query(related_model).filter(
-                            related_model.id == fk_value
-                        ).first()
-                        
-                        if not exists:
-                            result.add_error(
-                                field=fk_column,
-                                message=f'Referenced {related_model.__name__} does not exist',
-                                code='FOREIGN_KEY_CONSTRAINT_VIOLATION',
-                                validation_type=ValidationType.CONSTRAINT
-                            )
-            
-            # Log constraint validation completion
-            self.logger.info(
-                "Database constraint validation completed",
-                extra={
-                    'model_class': model_class.__name__,
-                    'is_valid': result.is_valid,
-                    'constraint_errors': len(result.errors),
-                    'service': 'validation_service'
-                }
-            )
+            # Check not null constraints
+            self._validate_not_null_constraints(model_class, data, result)
             
         except Exception as e:
-            self.logger.error(
-                "Database constraint validation failed",
-                extra={
-                    'model_class': model_class.__name__ if model_class else 'unknown',
-                    'error': str(e),
-                    'service': 'validation_service'
-                }
-            )
             result.add_error(
-                field='database_constraints',
-                message='Database constraint validation failed',
-                code='CONSTRAINT_VALIDATION_ERROR',
+                f"Database constraint validation error: {e}",
                 severity=ValidationSeverity.CRITICAL
             )
+            self.logger.error(f"Database constraint validation failed: {e}", exc_info=True)
+        
+        self.log_service_operation(
+            f"Database constraint validation completed for: {model_class.__name__}",
+            {"valid": result.is_valid, "constraint_errors": len(result.errors)}
+        )
         
         return result
     
-    def _sanitize_data(self, data: Dict[str, Any], entity_type: str) -> Dict[str, Any]:
+    def sanitize_input(self, data: Dict[str, Any], 
+                      sanitization_rules: Optional[Dict[str, callable]] = None) -> Dict[str, Any]:
         """
-        Comprehensive data sanitization with entity-specific rules.
+        Sanitize input data with comprehensive security-focused cleaning.
         
-        Maintains input validation and sanitization patterns from original
-        Node.js implementation per Section 2.1.9 requirements.
+        Implements input sanitization patterns preservation per Section 2.1.9
+        with HTML cleaning, script removal, and data normalization.
+        
+        Args:
+            data: Data dictionary to sanitize
+            sanitization_rules: Optional custom sanitization rules per field
+            
+        Returns:
+            Sanitized data dictionary
         """
-        sanitized = {}
+        self.log_service_operation(
+            "Sanitizing input data",
+            {"fields": len(data), "custom_rules": len(sanitization_rules or {})}
+        )
         
-        for key, value in data.items():
+        sanitized_data = {}
+        
+        for field_name, value in data.items():
             try:
-                sanitized[key] = self._sanitize_value(key, value)
+                # Apply custom sanitization rule if available
+                if sanitization_rules and field_name in sanitization_rules:
+                    sanitized_value = sanitization_rules[field_name](value)
+                else:
+                    # Apply default sanitization based on type
+                    sanitized_value = self._sanitize_by_type(value)
+                
+                sanitized_data[field_name] = sanitized_value
+                
             except Exception as e:
-                self.logger.warning(
-                    "Value sanitization failed",
-                    extra={
-                        'field': key,
-                        'error': str(e),
-                        'service': 'validation_service'
-                    }
-                )
-                sanitized[key] = value  # Keep original if sanitization fails
+                self.logger.warning(f"Sanitization failed for field {field_name}: {e}")
+                # Keep original value if sanitization fails
+                sanitized_data[field_name] = value
         
-        return sanitized
+        self.log_service_operation(
+            "Input sanitization completed",
+            {"original_fields": len(data), "sanitized_fields": len(sanitized_data)}
+        )
+        
+        return sanitized_data
     
-    def _sanitize_value(self, field_name: str, value: Any, strict_mode: bool = False) -> Any:
+    def register_business_rule(self, entity_type: str, rule_function: callable) -> None:
         """
-        Sanitize individual field value based on type and security requirements.
+        Register business rule for specific entity type.
+        
+        Enables dynamic business rule registration for entity-specific validation
+        as specified in Feature F-005 business logic preservation.
+        
+        Args:
+            entity_type: Entity type identifier
+            rule_function: Callable business rule validation function
+        """
+        if entity_type not in self._business_rules:
+            self._business_rules[entity_type] = []
+        
+        self._business_rules[entity_type].append(rule_function)
+        
+        self.log_service_operation(
+            f"Registered business rule for entity: {entity_type}",
+            {"total_rules": len(self._business_rules[entity_type])}
+        )
+    
+    def create_validation_rules(self, dataclass_type: Type[DataClassType]) -> Dict[str, FieldValidationRule]:
+        """
+        Create validation rules from dataclass type hints and annotations.
+        
+        Implements Python dataclasses integration per Section 4.5.1 with
+        automatic validation rule generation from type hints.
+        
+        Args:
+            dataclass_type: Dataclass type to analyze for validation rules
+            
+        Returns:
+            Dictionary of field validation rules
+        """
+        self.log_service_operation(
+            f"Creating validation rules from dataclass: {dataclass_type.__name__}"
+        )
+        
+        if dataclass_type.__name__ in self._validation_cache:
+            return self._validation_cache[dataclass_type.__name__]
+        
+        validation_rules = {}
+        
+        # Get type hints for the dataclass
+        type_hints = get_type_hints(dataclass_type)
+        
+        # Get dataclass fields
+        dataclass_fields = fields(dataclass_type)
+        
+        for field_info in dataclass_fields:
+            field_name = field_info.name
+            field_type = type_hints.get(field_name, str)
+            
+            # Handle Optional types
+            is_optional = False
+            if get_origin(field_type) is Union:
+                args = get_args(field_type)
+                if len(args) == 2 and type(None) in args:
+                    is_optional = True
+                    field_type = next(arg for arg in args if arg is not type(None))
+            
+            # Create validation rule
+            rule = FieldValidationRule(
+                field_name=field_name,
+                required=not is_optional and field_info.default == dataclass.MISSING,
+                data_type=field_type
+            )
+            
+            # Apply default constraints based on type
+            if field_type == str:
+                rule.max_length = 255  # Default string length limit
+            elif field_type in (int, float):
+                pass  # No default constraints for numbers
+            elif field_type == datetime:
+                pass  # No default constraints for datetime
+            
+            validation_rules[field_name] = rule
+        
+        # Cache the validation rules
+        self._validation_cache[dataclass_type.__name__] = validation_rules
+        
+        self.log_service_operation(
+            f"Created validation rules for dataclass: {dataclass_type.__name__}",
+            {"rules_count": len(validation_rules)}
+        )
+        
+        return validation_rules
+    
+    def validate_with_dataclass(self, data: Dict[str, Any], 
+                               dataclass_type: Type[DataClassType]) -> ValidationResult:
+        """
+        Validate data using dataclass type hints and create validated instance.
+        
+        Combines Python dataclasses with validation service for type-safe
+        business object creation as specified in Section 4.5.1.
+        
+        Args:
+            data: Data dictionary to validate
+            dataclass_type: Target dataclass type for validation
+            
+        Returns:
+            ValidationResult with validated dataclass instance
+        """
+        self.log_service_operation(
+            f"Validating data with dataclass: {dataclass_type.__name__}",
+            {"input_fields": len(data)}
+        )
+        
+        # Get or create validation rules for the dataclass
+        validation_rules = self.create_validation_rules(dataclass_type)
+        
+        # Validate the data
+        result = self.validate_data(data, validation_rules, dataclass_type.__name__)
+        
+        # If validation passes, create the dataclass instance
+        if result.is_valid:
+            try:
+                # Use sanitized data if available, otherwise original data
+                instance_data = result.sanitized_data if result.sanitized_data else data
+                
+                # Filter data to only include fields defined in the dataclass
+                filtered_data = {
+                    k: v for k, v in instance_data.items()
+                    if k in validation_rules
+                }
+                
+                # Create dataclass instance
+                instance = dataclass_type(**filtered_data)
+                result.metadata['dataclass_instance'] = instance
+                
+            except TypeError as e:
+                result.add_error(
+                    f"Failed to create {dataclass_type.__name__} instance: {e}",
+                    severity=ValidationSeverity.CRITICAL
+                )
+        
+        self.log_service_operation(
+            f"Dataclass validation completed for: {dataclass_type.__name__}",
+            {"valid": result.is_valid, "instance_created": 'dataclass_instance' in result.metadata}
+        )
+        
+        return result
+    
+    def _get_validator_for_type(self, data_type: Optional[Type]) -> BaseValidator:
+        """
+        Get appropriate validator for the specified data type.
+        
+        Args:
+            data_type: Data type to get validator for
+            
+        Returns:
+            BaseValidator instance for the type
+        """
+        if data_type in self._validators:
+            return self._validators[data_type]
+        
+        # Default to string validator for unknown types
+        return self._validators[str]
+    
+    def _sanitize_by_type(self, value: Any) -> Any:
+        """
+        Apply type-appropriate sanitization to a value.
+        
+        Args:
+            value: Value to sanitize
+            
+        Returns:
+            Sanitized value
         """
         if value is None:
             return None
         
-        # String sanitization
+        # Determine type and apply appropriate sanitization
         if isinstance(value, str):
-            # Remove null characters
-            value = value.replace('\x00', '')
-            
-            # Trim whitespace
-            value = value.strip()
-            
-            # HTML escape for security
-            value = html.escape(value)
-            
-            # Length limits
-            if len(value) > 10000:  # Default max length
-                value = value[:10000]
-            
-            # Email-specific sanitization
-            if 'email' in field_name.lower():
-                value = value.lower()
-                if len(value) > 255:
-                    value = value[:255]
-            
-            # Phone-specific sanitization
-            if 'phone' in field_name.lower():
-                value = re.sub(r'[^\d+\-\(\)\s]', '', value)
-        
-        # Numeric sanitization
-        elif isinstance(value, (int, float)):
-            # Range validation for numeric values
-            if abs(value) > 1e15:  # Reasonable numeric limit
-                raise ValueError(f"Numeric value {value} exceeds safe range")
-        
-        # List/Array sanitization
-        elif isinstance(value, list):
-            if len(value) > 1000:  # Reasonable array size limit
-                value = value[:1000]
-            value = [self._sanitize_value(f"{field_name}_item", item, strict_mode) for item in value]
-        
-        # Dictionary sanitization
-        elif isinstance(value, dict):
-            if len(value) > 100:  # Reasonable object size limit
-                value = dict(list(value.items())[:100])
-            value = {k: self._sanitize_value(k, v, strict_mode) for k, v in value.items()}
-        
-        return value
+            return self._validators[str].sanitize(value)
+        elif isinstance(value, (int, float, Decimal)):
+            return self._validators[type(value)].sanitize(value)
+        elif isinstance(value, datetime):
+            return self._validators[datetime].sanitize(value)
+        else:
+            # Default string sanitization for unknown types
+            return self._validators[str].sanitize(str(value))
     
-    def _validate_security_patterns(self, field: str, value: str, result: ValidationResult) -> None:
+    def _validate_unique_constraints(self, model_class: Type, 
+                                   data: Dict[str, Any], 
+                                   result: ValidationResult) -> None:
         """
-        Validate input against security patterns for injection detection.
+        Validate unique constraints for database model.
+        
+        Args:
+            model_class: SQLAlchemy model class
+            data: Data to validate
+            result: ValidationResult to update with constraint violations
         """
-        # SQL injection detection
-        if self._security_patterns['sql_injection'].search(value):
-            result.add_error(
-                field=field,
-                message='Potential SQL injection detected',
-                code='SQL_INJECTION_DETECTED',
-                severity=ValidationSeverity.CRITICAL,
-                validation_type=ValidationType.SECURITY
-            )
-        
-        # XSS detection
-        if self._security_patterns['xss_script'].search(value):
-            result.add_error(
-                field=field,
-                message='Potential XSS attack detected',
-                code='XSS_DETECTED',
-                severity=ValidationSeverity.CRITICAL,
-                validation_type=ValidationType.SECURITY
-            )
-    
-    def _validate_required_fields(
-        self,
-        schema: EntityValidationSchema,
-        data: Dict[str, Any],
-        result: ValidationResult
-    ) -> None:
-        """Validate that all required fields are present."""
-        for field in schema.required_fields:
-            if field not in data or data[field] is None or data[field] == '':
-                result.add_error(
-                    field=field,
-                    message=f'{field} is required',
-                    code='REQUIRED_FIELD_MISSING',
-                    validation_type=ValidationType.CONSTRAINT
-                )
-    
-    def _validate_data_types(
-        self,
-        schema: EntityValidationSchema,
-        data: Dict[str, Any],
-        result: ValidationResult,
-        context: Dict[str, Any]
-    ) -> None:
-        """Execute data type and format validation rules."""
-        for rule in schema.validation_rules:
-            if rule.rule_type in [ValidationType.DATA_TYPE, ValidationType.FORMAT]:
-                field_value = data.get(rule.field)
-                if field_value is not None:
-                    try:
-                        if not rule.validator(field_value, data, context):
-                            result.add_error(
-                                field=rule.field,
-                                message=rule.message,
-                                code=rule.code,
-                                severity=rule.severity,
-                                validation_type=rule.rule_type
-                            )
-                    except Exception as e:
-                        result.add_error(
-                            field=rule.field,
-                            message=f'Validation error: {str(e)}',
-                            code='VALIDATION_EXCEPTION',
-                            validation_type=rule.rule_type
-                        )
-    
-    def _validate_constraints(
-        self,
-        schema: EntityValidationSchema,
-        data: Dict[str, Any],
-        result: ValidationResult,
-        context: Dict[str, Any]
-    ) -> None:
-        """Execute constraint validation rules."""
-        for rule in schema.validation_rules:
-            if rule.rule_type == ValidationType.CONSTRAINT:
-                field_value = data.get(rule.field)
-                if field_value is not None:
-                    try:
-                        if not rule.validator(field_value, data, context):
-                            result.add_error(
-                                field=rule.field,
-                                message=rule.message,
-                                code=rule.code,
-                                severity=rule.severity,
-                                validation_type=rule.rule_type
-                            )
-                    except Exception as e:
-                        result.add_error(
-                            field=rule.field,
-                            message=f'Constraint validation error: {str(e)}',
-                            code='CONSTRAINT_VALIDATION_EXCEPTION',
-                            validation_type=rule.rule_type
-                        )
-    
-    def _validate_business_rules(
-        self,
-        entity_type: str,
-        data: Dict[str, Any],
-        result: ValidationResult,
-        context: Dict[str, Any]
-    ) -> None:
-        """
-        Execute business rule validation.
-        
-        Implements Feature F-005 business logic preservation maintaining
-        all existing business rules from the Node.js implementation.
-        """
-        business_rules = self._business_rules.get(entity_type, [])
-        
-        for rule in business_rules:
-            try:
-                if not rule.validator(data, context):
-                    result.add_error(
-                        field=rule.field,
-                        message=rule.message,
-                        code=rule.code,
-                        severity=rule.severity,
-                        validation_type=rule.rule_type
-                    )
-            except Exception as e:
-                result.add_error(
-                    field=rule.field,
-                    message=f'Business rule validation error: {str(e)}',
-                    code='BUSINESS_RULE_EXCEPTION',
-                    validation_type=rule.rule_type
-                )
-    
-    def _validate_relationships(
-        self,
-        schema: EntityValidationSchema,
-        data: Dict[str, Any],
-        result: ValidationResult,
-        context: Dict[str, Any]
-    ) -> None:
-        """Execute relationship validation rules."""
-        for rule in schema.relationship_rules:
-            try:
-                if not rule.validator(data, context):
-                    result.add_error(
-                        field=rule.field,
-                        message=rule.message,
-                        code=rule.code,
-                        severity=rule.severity,
-                        validation_type=rule.rule_type
-                    )
-            except Exception as e:
-                result.add_error(
-                    field=rule.field,
-                    message=f'Relationship validation error: {str(e)}',
-                    code='RELATIONSHIP_VALIDATION_EXCEPTION',
-                    validation_type=rule.rule_type
-                )
-    
-    # Individual validation methods for specific fields and rules
-    
-    def _validate_username(self, value: str, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate username format and length."""
-        if not isinstance(value, str):
-            return False
-        
-        # Length check
-        if not (3 <= len(value) <= 50):
-            return False
-        
-        # Format check - alphanumeric and underscores only
-        return self._security_patterns['alphanumeric'].match(value) is not None
-    
-    def _validate_email(self, value: str, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate email format."""
-        if not isinstance(value, str):
-            return False
-        
-        return self._security_patterns['email_pattern'].match(value) is not None
-    
-    def _validate_password_strength(self, value: str, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate password strength requirements."""
-        if not isinstance(value, str):
-            return False
-        
-        # Minimum length
-        if len(value) < 8:
-            return False
-        
-        # Check for required character types
-        has_upper = any(c.isupper() for c in value)
-        has_lower = any(c.islower() for c in value)
-        has_digit = any(c.isdigit() for c in value)
-        has_special = any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in value)
-        
-        return has_upper and has_lower and has_digit and has_special
-    
-    def _validate_entity_name(self, value: str, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate business entity name."""
-        if not isinstance(value, str):
-            return False
-        
-        return 1 <= len(value.strip()) <= 255
-    
-    def _validate_entity_description(self, value: str, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate business entity description."""
-        if value is None:
-            return True  # Description is optional
-        
-        if not isinstance(value, str):
-            return False
-        
-        return len(value) <= 1000
-    
-    def _validate_owner_exists(self, value: Any, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate that the owner user exists in the database."""
-        # This would typically query the database
-        # For now, just validate the ID format
-        try:
-            user_id = int(value)
-            return user_id > 0
-        except (ValueError, TypeError):
-            return False
-    
-    def _validate_entity_exists(self, value: Any, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate that the referenced entity exists."""
-        try:
-            entity_id = int(value)
-            return entity_id > 0
-        except (ValueError, TypeError):
-            return False
-    
-    def _validate_relationship_type(self, value: str, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate relationship type against allowed values."""
-        allowed_types = {'parent', 'child', 'sibling', 'related', 'depends_on', 'contains'}
-        return value in allowed_types
-    
-    # Business rule validation methods
-    
-    def _validate_username_uniqueness(self, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate username uniqueness across the system."""
-        # This would typically query the database
-        # Implementation would depend on having access to the database session
-        return True  # Placeholder
-    
-    def _validate_email_uniqueness(self, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate email uniqueness across the system."""
-        # This would typically query the database
-        # Implementation would depend on having access to the database session
-        return True  # Placeholder
-    
-    def _validate_entity_status_transition(self, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate entity status transition rules."""
-        current_status = context.get('current_status') if context else None
-        new_status = data.get('status')
-        
-        if not current_status:
-            return True  # New entity
-        
-        # Define allowed transitions
-        allowed_transitions = {
-            'draft': ['active', 'deleted'],
-            'active': ['inactive', 'deleted'],
-            'inactive': ['active', 'deleted'],
-            'deleted': []  # No transitions from deleted
-        }
-        
-        return new_status in allowed_transitions.get(current_status, [])
-    
-    def _validate_ownership_permissions(self, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate user permissions for entity ownership."""
-        # This would typically check user roles and permissions
-        return True  # Placeholder
-    
-    def _validate_no_circular_relationships(self, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate that relationship doesn't create circular dependencies."""
-        source_id = data.get('source_entity_id')
-        target_id = data.get('target_entity_id')
-        
-        # Basic check - entity cannot reference itself
-        return source_id != target_id
-    
-    def _validate_relationship_count_limit(self, data: Dict[str, Any], context: Dict[str, Any] = None) -> bool:
-        """Validate relationship count limits per entity."""
-        # This would typically query the database to count existing relationships
-        return True  # Placeholder
-    
-    def create_custom_validation_rule(
-        self,
-        field: str,
-        validator: Callable,
-        message: str,
-        code: str,
-        rule_type: ValidationType = ValidationType.BUSINESS_RULE,
-        severity: ValidationSeverity = ValidationSeverity.ERROR
-    ) -> ValidationRule:
-        """
-        Create custom validation rule for specific business requirements.
-        
-        Enables extension of validation logic for custom business scenarios
-        while maintaining consistent validation patterns.
-        """
-        return ValidationRule(
-            field=field,
-            rule_type=rule_type,
-            validator=validator,
-            message=message,
-            code=code,
-            severity=severity
-        )
-    
-    def add_entity_validation_rule(
-        self,
-        entity_type: str,
-        rule: ValidationRule
-    ) -> bool:
-        """
-        Add custom validation rule to existing entity schema.
-        
-        Allows dynamic extension of validation logic for specific
-        business requirements while maintaining schema integrity.
-        """
-        try:
-            if entity_type in self._validation_schemas:
-                self._validation_schemas[entity_type].validation_rules.append(rule)
+        # Get unique constraints from the model
+        for constraint in model_class.__table__.constraints:
+            if hasattr(constraint, 'columns') and len(constraint.columns) == 1:
+                column = list(constraint.columns)[0]
+                field_name = column.name
                 
-                self.logger.info(
-                    "Custom validation rule added",
-                    extra={
-                        'entity_type': entity_type,
-                        'rule_field': rule.field,
-                        'rule_code': rule.code,
-                        'service': 'validation_service'
-                    }
-                )
-                return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(
-                "Failed to add validation rule",
-                extra={
-                    'entity_type': entity_type,
-                    'rule_field': rule.field,
-                    'error': str(e),
-                    'service': 'validation_service'
-                }
-            )
-            return False
+                if field_name in data and data[field_name] is not None:
+                    # Check if value already exists
+                    existing = self.session.query(model_class).filter(
+                        getattr(model_class, field_name) == data[field_name]
+                    ).first()
+                    
+                    if existing:
+                        result.add_error(
+                            f"Value for field '{field_name}' already exists",
+                            field_name
+                        )
     
-    def get_validation_schema(self, entity_type: str) -> Optional[EntityValidationSchema]:
-        """Get validation schema for specified entity type."""
-        return self._validation_schemas.get(entity_type)
+    def _validate_foreign_key_constraints(self, model_class: Type,
+                                        data: Dict[str, Any],
+                                        result: ValidationResult) -> None:
+        """
+        Validate foreign key constraints for database model.
+        
+        Args:
+            model_class: SQLAlchemy model class
+            data: Data to validate
+            result: ValidationResult to update with constraint violations
+        """
+        # Get foreign key constraints from the model
+        for column in model_class.__table__.columns:
+            if column.foreign_keys:
+                field_name = column.name
+                
+                if field_name in data and data[field_name] is not None:
+                    # Get the referenced table and column
+                    fk = list(column.foreign_keys)[0]
+                    referenced_table = fk.column.table
+                    referenced_column = fk.column
+                    
+                    # Check if referenced record exists
+                    query = text(f"SELECT 1 FROM {referenced_table.name} WHERE {referenced_column.name} = :value")
+                    exists = self.session.execute(query, {"value": data[field_name]}).first()
+                    
+                    if not exists:
+                        result.add_error(
+                            f"Referenced record for field '{field_name}' does not exist",
+                            field_name
+                        )
     
-    def get_supported_entity_types(self) -> List[str]:
-        """Get list of supported entity types for validation."""
-        return list(self._validation_schemas.keys())
+    def _validate_check_constraints(self, model_class: Type,
+                                  data: Dict[str, Any],
+                                  result: ValidationResult) -> None:
+        """
+        Validate check constraints for database model.
+        
+        Args:
+            model_class: SQLAlchemy model class
+            data: Data to validate
+            result: ValidationResult to update with constraint violations
+        """
+        # Check constraints are typically handled by the database
+        # but we can validate common patterns here
+        for column in model_class.__table__.columns:
+            field_name = column.name
+            
+            if field_name in data:
+                value = data[field_name]
+                
+                # Validate length constraints
+                if hasattr(column.type, 'length') and column.type.length:
+                    if isinstance(value, str) and len(value) > column.type.length:
+                        result.add_error(
+                            f"Field '{field_name}' exceeds maximum length of {column.type.length}",
+                            field_name
+                        )
+    
+    def _validate_not_null_constraints(self, model_class: Type,
+                                     data: Dict[str, Any],
+                                     result: ValidationResult) -> None:
+        """
+        Validate not null constraints for database model.
+        
+        Args:
+            model_class: SQLAlchemy model class
+            data: Data to validate
+            result: ValidationResult to update with constraint violations
+        """
+        for column in model_class.__table__.columns:
+            field_name = column.name
+            
+            # Skip primary key and timestamp fields that are auto-populated
+            if column.primary_key or field_name in ('created_at', 'updated_at'):
+                continue
+            
+            if not column.nullable:
+                if field_name not in data or data[field_name] is None:
+                    result.add_error(
+                        f"Field '{field_name}' cannot be null",
+                        field_name
+                    )
 
 
-# Service instance for global access
-validation_service = ValidationService()
+# Export validation service and related classes for application use
+__all__ = [
+    'ValidationService',
+    'ValidationResult',
+    'FieldValidationRule',
+    'ValidationSeverity',
+    'ValidationType',
+    'BaseValidator',
+    'StringValidator',
+    'NumericValidator',
+    'EmailValidator',
+    'DateTimeValidator'
+]
