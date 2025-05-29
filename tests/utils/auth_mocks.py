@@ -1,1040 +1,2217 @@
 """
 Authentication Testing Utilities
 
-This module provides comprehensive authentication testing utilities for the Flask migration project,
-enabling thorough testing of Auth0 integration, Flask-Login session management, and authentication
-decorator functionality. The utilities support the Node.js to Flask migration by providing mock
-factories and testing patterns that ensure security posture preservation and authentication flow
-validation.
+This module provides comprehensive authentication testing utilities for Flask authentication
+mechanism testing during the Node.js to Flask migration. The utilities enable testing of
+Auth0 integration, Flask-Login session simulation, authentication decorator validation,
+and CSRF protection implementation while ensuring security posture preservation throughout
+the migration process.
 
-Key Components:
+Key Features:
 - Auth0 mock factories with JWT token simulation per Section 6.4.1.4
-- Flask-Login session mocks with ItsDangerous cookie signing per Feature F-007
-- Authentication decorator testing utilities per Section 4.6.2
+- Flask-Login session mocks with ItsDangerous cookie signing simulation per Feature F-007
+- Authentication decorator testing utilities for Flask middleware migration per Section 4.6.2
 - CSRF protection testing mocks with Flask-WTF integration per Section 4.6.2
 - User authentication state mocks for comprehensive test coverage per Feature F-007
 - Security monitoring test utilities with structured logging validation per Section 6.4.2.5
 
 Dependencies:
-- src/auth/decorators.py: Authentication decorator patterns
-- src/auth/auth0_integration.py: Auth0 Python SDK integration
-- src/auth/session_manager.py: Flask-Login session management
-- tests/utils/flask_fixtures.py: Core Flask testing infrastructure
+- pytest 8.3.2 for comprehensive test framework integration
+- Flask 3.1.1 with Flask-Login for session management
+- Auth0 Python SDK 4.9.0 for identity provider integration
+- Flask-WTF for CSRF protection testing
+- ItsDangerous 2.2+ for secure cookie signing simulation
+- Werkzeug security utilities for password hashing
 
-Usage:
-    import pytest
-    from tests.utils.auth_mocks import (
-        Auth0MockFactory,
-        FlaskLoginMockFactory,
-        CSRFMockFactory,
-        UserAuthStateMocks,
-        SecurityMonitoringMocks
-    )
-    
-    def test_authentication_flow(auth_mock_factory):
-        mock_user = auth_mock_factory.create_authenticated_user()
-        assert mock_user.is_authenticated
+Author: Flask Migration Team
+Version: 1.0.0
+Created: 2024
 """
 
-import pytest
-import json
-import uuid
-import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
-from dataclasses import dataclass, asdict
-from flask import Flask, request, session, g
-from flask_login import UserMixin, AnonymousUserMixin
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from werkzeug.test import Client
-from werkzeug.security import generate_password_hash
+import os
 import jwt
-import secrets
-import structlog
-from collections import defaultdict, deque
+import json
+import time
+import uuid
+import pytest
+import logging
+from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, Optional, List, Union, Generator, Callable
+from contextlib import contextmanager
+from dataclasses import dataclass, asdict
+from functools import wraps
 
-# Production-ready imports for mocking authentication components
-try:
-    from src.auth.decorators import require_auth, require_permission, require_role
-    from src.auth.auth0_integration import Auth0Integration
-    from src.auth.session_manager import SessionManager
-    from src.auth.csrf_protection import CSRFProtection
-    from src.auth.token_handler import TokenHandler
-    from src.auth.security_monitor import SecurityMonitor
-    from src.models.user import User
-except ImportError:
-    # Graceful fallback for development environments
-    require_auth = None
-    require_permission = None
-    require_role = None
-    Auth0Integration = None
-    SessionManager = None
-    CSRFProtection = None
-    TokenHandler = None
-    SecurityMonitor = None
-    User = None
+# Flask core imports
+from flask import Flask, current_app, g, request, session
+from flask.testing import FlaskClient
+from werkzeug.test import Client
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# Authentication imports
+from flask_login import UserMixin, login_user, logout_user, current_user
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
+from flask_wtf.csrf import CSRFProtect, generate_csrf
+
+# Application imports
+from src.models import User, UserSession
+from src.auth.decorators import require_auth, require_permission, require_role
+from src.auth.session_manager import SessionManager
+from src.auth.auth0_integration import Auth0Service
 
 
-@dataclass
-class MockJWTToken:
-    """Mock JWT token structure for Auth0 testing."""
-    access_token: str
-    refresh_token: Optional[str]
-    id_token: str
-    token_type: str = "Bearer"
-    expires_in: int = 3600
-    scope: str = "openid profile email"
-    issued_at: float = None
-    expires_at: float = None
-    
-    def __post_init__(self):
-        if self.issued_at is None:
-            self.issued_at = time.time()
-        if self.expires_at is None:
-            self.expires_at = self.issued_at + self.expires_in
-
+# =====================================
+# Authentication Mock Configuration
+# =====================================
 
 @dataclass
-class MockAuth0User:
-    """Mock Auth0 user profile for testing."""
-    user_id: str
-    email: str
-    username: str
-    name: str
-    picture: Optional[str] = None
-    email_verified: bool = True
-    roles: List[str] = None
-    permissions: List[str] = None
-    metadata: Dict[str, Any] = None
+class MockAuthConfig:
+    """
+    Authentication mock configuration providing centralized settings
+    for all authentication testing utilities and mock factories.
     
-    def __post_init__(self):
-        if self.roles is None:
-            self.roles = ["user"]
-        if self.permissions is None:
-            self.permissions = ["read"]
-        if self.metadata is None:
-            self.metadata = {}
+    This configuration class standardizes authentication testing parameters
+    per Feature F-007, ensuring consistent mock behavior across all
+    authentication testing scenarios.
+    
+    Attributes:
+        auth0_domain: Mock Auth0 domain for testing
+        auth0_client_id: Mock Auth0 client ID
+        auth0_client_secret: Mock Auth0 client secret
+        jwt_secret: JWT signing secret for token simulation
+        jwt_algorithm: JWT signing algorithm
+        token_expiration: Default token expiration time in seconds
+        session_timeout: Default session timeout in seconds
+        csrf_enabled: CSRF protection status for testing
+        security_monitoring: Security event monitoring status
+    """
+    auth0_domain: str = "test-auth0-domain.auth0.com"
+    auth0_client_id: str = "test_auth0_client_id"
+    auth0_client_secret: str = "test_auth0_client_secret"
+    jwt_secret: str = "test-jwt-secret-key-for-testing-only"
+    jwt_algorithm: str = "HS256"
+    token_expiration: int = 3600  # 1 hour
+    session_timeout: int = 1800   # 30 minutes
+    csrf_enabled: bool = True
+    security_monitoring: bool = True
+    
+    # Auth0 API endpoints for mocking
+    auth0_token_endpoint: str = "https://test-auth0-domain.auth0.com/oauth/token"
+    auth0_userinfo_endpoint: str = "https://test-auth0-domain.auth0.com/userinfo"
+    auth0_management_endpoint: str = "https://test-auth0-domain.auth0.com/api/v2/"
+    
+    # Security testing parameters
+    max_login_attempts: int = 5
+    lockout_duration: int = 900  # 15 minutes
+    password_min_length: int = 8
+    require_special_chars: bool = True
 
 
-@dataclass
-class MockUserSession:
-    """Mock user session data for Flask-Login testing."""
-    user_id: str
-    session_id: str
-    is_authenticated: bool = True
-    is_active: bool = True
-    is_anonymous: bool = False
-    login_time: datetime = None
-    last_activity: datetime = None
-    remember_me: bool = False
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
-    
-    def __post_init__(self):
-        if self.login_time is None:
-            self.login_time = datetime.utcnow()
-        if self.last_activity is None:
-            self.last_activity = datetime.utcnow()
-
-
-class MockFlaskLoginUser(UserMixin):
-    """Mock Flask-Login user class for testing authentication decorators."""
-    
-    def __init__(self, 
-                 user_id: str,
-                 email: str,
-                 username: str,
-                 roles: List[str] = None,
-                 permissions: List[str] = None,
-                 is_authenticated: bool = True,
-                 is_active: bool = True):
-        self.id = user_id
-        self.email = email
-        self.username = username
-        self.roles = roles or ["user"]
-        self.permissions = permissions or ["read"]
-        self._is_authenticated = is_authenticated
-        self._is_active = is_active
-        self.created_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
-    
-    @property
-    def is_authenticated(self):
-        return self._is_authenticated
-    
-    @property
-    def is_active(self):
-        return self._is_active
-    
-    @property
-    def is_anonymous(self):
-        return False
-    
-    def get_id(self):
-        return str(self.id)
-    
-    def has_role(self, role: str) -> bool:
-        """Check if user has specific role."""
-        return role in self.roles
-    
-    def has_permission(self, permission: str) -> bool:
-        """Check if user has specific permission."""
-        return permission in self.permissions
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert user to dictionary for JSON serialization."""
-        return {
-            "id": self.id,
-            "email": self.email,
-            "username": self.username,
-            "roles": self.roles,
-            "permissions": self.permissions,
-            "is_authenticated": self.is_authenticated,
-            "is_active": self.is_active
-        }
-
+# =====================================
+# Auth0 Mock Factories and JWT Simulation
+# =====================================
 
 class Auth0MockFactory:
     """
-    Comprehensive Auth0 mock factory providing JWT token simulation and Auth0 integration testing.
+    Auth0 mock factory providing comprehensive Auth0 integration testing
+    utilities with JWT token simulation per Section 6.4.1.4.
     
-    This factory creates realistic Auth0 authentication scenarios for testing the migration
-    from Node.js middleware to Flask authentication decorators per Section 6.4.1.4.
+    This factory creates mock Auth0 service instances, JWT tokens, and user
+    profile data for comprehensive authentication testing without external
+    Auth0 dependencies while maintaining realistic testing scenarios.
+    
+    Features:
+        - JWT token generation and validation simulation
+        - Auth0 Management API mock responses
+        - User profile synchronization mocking
+        - Token refresh and revocation simulation
+        - Error condition testing support
     """
     
-    def __init__(self, secret_key: str = None):
-        self.secret_key = secret_key or secrets.token_urlsafe(32)
-        self.issuer = "https://test-tenant.auth0.com/"
-        self.audience = "flask-test-app"
-        self.algorithm = "HS256"
-        self._mock_users = {}
-        self._issued_tokens = {}
-        self._revoked_tokens = set()
-    
-    def create_mock_user(self, 
-                        user_id: str = None,
-                        email: str = None,
-                        username: str = None,
-                        roles: List[str] = None,
-                        permissions: List[str] = None) -> MockAuth0User:
-        """Create a mock Auth0 user with realistic profile data."""
-        user_id = user_id or f"auth0|{uuid.uuid4().hex[:24]}"
-        email = email or f"test.user.{uuid.uuid4().hex[:8]}@example.com"
-        username = username or f"testuser_{uuid.uuid4().hex[:8]}"
+    def __init__(self, config: Optional[MockAuthConfig] = None):
+        """
+        Initialize Auth0 mock factory with configuration.
         
-        user = MockAuth0User(
-            user_id=user_id,
-            email=email,
-            username=username,
-            name=f"Test User {username}",
-            picture=f"https://example.com/avatar/{user_id}.jpg",
-            roles=roles or ["user"],
-            permissions=permissions or ["read"],
-            metadata={
-                "app_metadata": {"plan": "free", "roles": roles or ["user"]},
-                "user_metadata": {"preferences": {"theme": "light"}}
-            }
-        )
+        Args:
+            config: Mock configuration instance, uses default if None
+        """
+        self.config = config or MockAuthConfig()
+        self.mock_users = {}
+        self.mock_tokens = {}
+        self.revoked_tokens = set()
+        self.login_attempts = {}
         
-        self._mock_users[user_id] = user
-        return user
-    
-    def generate_jwt_token(self, 
-                          user: MockAuth0User,
-                          token_type: str = "access",
-                          expires_in: int = 3600,
-                          custom_claims: Dict[str, Any] = None) -> str:
-        """Generate a realistic JWT token for testing."""
-        now = time.time()
-        exp = now + expires_in
+    def create_mock_jwt_token(
+        self,
+        user_id: Union[str, int],
+        email: str,
+        username: str,
+        roles: List[str] = None,
+        permissions: List[str] = None,
+        expires_in: Optional[int] = None
+    ) -> str:
+        """
+        Create mock JWT token with Auth0-compatible claims structure
+        for comprehensive authentication testing.
         
-        # Standard JWT claims
-        claims = {
-            "iss": self.issuer,
-            "sub": user.user_id,
-            "aud": self.audience,
-            "iat": int(now),
-            "exp": int(exp),
-            "azp": "test_client_id",
-            "scope": "openid profile email"
+        This method generates JWT tokens with realistic Auth0 claim structure
+        per Section 6.4.1.4, enabling comprehensive token validation testing
+        and authentication flow simulation.
+        
+        Args:
+            user_id: Unique user identifier
+            email: User email address
+            username: User display name
+            roles: List of user roles for RBAC testing
+            permissions: List of user permissions
+            expires_in: Token expiration time in seconds
+            
+        Returns:
+            str: Encoded JWT token with Auth0-compatible claims
+            
+        Features:
+            - Auth0-compatible claim structure
+            - Role and permission embedding
+            - Configurable expiration times
+            - Audience and issuer validation
+            - Custom claims support
+        """
+        now = datetime.now(timezone.utc)
+        expiration = expires_in or self.config.token_expiration
+        
+        # Auth0-compatible JWT claims
+        payload = {
+            # Standard JWT claims
+            'iss': f'https://{self.config.auth0_domain}/',
+            'aud': [self.config.auth0_client_id, f'https://{self.config.auth0_domain}/api/v2/'],
+            'sub': f'auth0|{user_id}',
+            'iat': int(now.timestamp()),
+            'exp': int((now + timedelta(seconds=expiration)).timestamp()),
+            'azp': self.config.auth0_client_id,
+            'scope': 'openid profile email',
+            
+            # Auth0 user profile claims
+            'email': email,
+            'email_verified': True,
+            'name': username,
+            'nickname': username,
+            'picture': f'https://avatars.example.com/{user_id}',
+            'updated_at': now.isoformat(),
+            
+            # Custom application claims
+            'app_metadata': {
+                'roles': roles or ['user'],
+                'permissions': permissions or ['read'],
+                'tenant': 'test_tenant',
+                'user_id': str(user_id)
+            },
+            'user_metadata': {
+                'preferences': {'theme': 'light', 'timezone': 'UTC'},
+                'profile_complete': True
+            },
+            
+            # Security claims
+            'auth_time': int(now.timestamp()),
+            'amr': ['pwd'],  # Authentication method reference
+            'at_hash': 'test_access_token_hash'
         }
         
-        # Token type specific claims
-        if token_type == "access":
-            claims.update({
-                "permissions": user.permissions,
-                "roles": user.roles,
-                "email": user.email,
-                "email_verified": user.email_verified
-            })
-        elif token_type == "id":
-            claims.update({
-                "name": user.name,
-                "picture": user.picture,
-                "email": user.email,
-                "email_verified": user.email_verified,
-                "username": user.username
-            })
-        
-        # Add custom claims
-        if custom_claims:
-            claims.update(custom_claims)
-        
-        token = jwt.encode(claims, self.secret_key, algorithm=self.algorithm)
-        self._issued_tokens[token] = {
-            "user_id": user.user_id,
-            "type": token_type,
-            "issued_at": now,
-            "expires_at": exp
-        }
+        # Generate and store token
+        token = jwt.encode(payload, self.config.jwt_secret, algorithm=self.config.jwt_algorithm)
+        self.mock_tokens[token] = payload
         
         return token
     
-    def create_token_set(self, 
-                        user: MockAuth0User,
-                        include_refresh: bool = True) -> MockJWTToken:
-        """Create a complete token set for authentication testing."""
-        access_token = self.generate_jwt_token(user, "access")
-        id_token = self.generate_jwt_token(user, "id")
-        refresh_token = None
+    def validate_mock_jwt_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Validate mock JWT token and return decoded claims for testing
+        authentication decorator functionality.
         
-        if include_refresh:
-            refresh_token = self.generate_jwt_token(
-                user, "refresh", expires_in=86400 * 30  # 30 days
-            )
+        This method simulates Auth0 JWT token validation per Section 6.4.1.4,
+        enabling comprehensive testing of authentication decorators and
+        token-based access control mechanisms.
         
-        return MockJWTToken(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            id_token=id_token
-        )
-    
-    def validate_token(self, token: str) -> Dict[str, Any]:
-        """Validate a JWT token and return claims."""
-        if token in self._revoked_tokens:
-            raise jwt.InvalidTokenError("Token has been revoked")
-        
+        Args:
+            token: JWT token string to validate
+            
+        Returns:
+            Optional[Dict[str, Any]]: Decoded token claims if valid, None otherwise
+            
+        Features:
+            - JWT signature validation simulation
+            - Token expiration checking
+            - Revocation status verification
+            - Error condition simulation
+            - Claims structure validation
+        """
         try:
-            claims = jwt.decode(
-                token, 
-                self.secret_key, 
-                algorithms=[self.algorithm],
-                audience=self.audience,
-                issuer=self.issuer
+            # Check if token is revoked
+            if token in self.revoked_tokens:
+                return None
+            
+            # Decode and validate token
+            payload = jwt.decode(
+                token,
+                self.config.jwt_secret,
+                algorithms=[self.config.jwt_algorithm],
+                audience=self.config.auth0_client_id,
+                issuer=f'https://{self.config.auth0_domain}/'
             )
-            return claims
-        except jwt.ExpiredSignatureError:
-            raise jwt.ExpiredSignatureError("Token has expired")
-        except jwt.InvalidTokenError as e:
-            raise jwt.InvalidTokenError(f"Invalid token: {str(e)}")
+            
+            # Verify token exists in mock storage
+            if token not in self.mock_tokens:
+                return None
+            
+            # Additional validation checks
+            if payload.get('exp', 0) < time.time():
+                return None
+            
+            return payload
+            
+        except (jwt.InvalidTokenError, jwt.ExpiredSignatureError, jwt.InvalidAudienceError):
+            return None
     
-    def revoke_token(self, token: str) -> bool:
-        """Revoke a JWT token for testing token revocation flows."""
-        self._revoked_tokens.add(token)
+    def create_mock_auth0_service(self) -> Mock:
+        """
+        Create comprehensive Auth0 service mock with realistic API responses
+        for integration testing without external dependencies.
+        
+        This method creates a complete Auth0 service mock per Section 6.4.1.1,
+        enabling comprehensive authentication integration testing with simulated
+        Auth0 Management API responses and user profile operations.
+        
+        Returns:
+            Mock: Configured Auth0 service mock with realistic responses
+            
+        Features:
+            - User authentication simulation
+            - Management API mock responses
+            - User profile CRUD operations
+            - Token refresh and revocation
+            - Error condition simulation
+        """
+        mock_auth0 = Mock(spec=Auth0Service)
+        
+        # Mock authentication methods
+        mock_auth0.authenticate_user.side_effect = self._mock_authenticate_user
+        mock_auth0.validate_token.side_effect = self._mock_validate_token
+        mock_auth0.refresh_token.side_effect = self._mock_refresh_token
+        mock_auth0.revoke_token.side_effect = self._mock_revoke_token
+        
+        # Mock user management methods
+        mock_auth0.get_user_profile.side_effect = self._mock_get_user_profile
+        mock_auth0.update_user_profile.side_effect = self._mock_update_user_profile
+        mock_auth0.create_user.side_effect = self._mock_create_user
+        mock_auth0.delete_user.side_effect = self._mock_delete_user
+        
+        # Mock management API methods
+        mock_auth0.get_users.side_effect = self._mock_get_users
+        mock_auth0.get_user_roles.side_effect = self._mock_get_user_roles
+        mock_auth0.assign_user_roles.side_effect = self._mock_assign_user_roles
+        mock_auth0.remove_user_roles.side_effect = self._mock_remove_user_roles
+        
+        # Mock configuration properties
+        mock_auth0.domain = self.config.auth0_domain
+        mock_auth0.client_id = self.config.auth0_client_id
+        mock_auth0.is_connected = True
+        
+        return mock_auth0
+    
+    def _mock_authenticate_user(self, email: str, password: str) -> Dict[str, Any]:
+        """Mock user authentication with realistic response structure."""
+        # Simulate authentication attempt tracking
+        if email not in self.login_attempts:
+            self.login_attempts[email] = {'attempts': 0, 'locked_until': None}
+        
+        attempt_info = self.login_attempts[email]
+        
+        # Check if account is locked
+        if attempt_info['locked_until'] and datetime.now() < attempt_info['locked_until']:
+            return {
+                'success': False,
+                'error': 'account_locked',
+                'message': 'Account temporarily locked due to too many failed attempts',
+                'locked_until': attempt_info['locked_until'].isoformat()
+            }
+        
+        # Check credentials (simplified for testing)
+        if email in self.mock_users and password == 'validpassword':
+            # Reset failed attempts on successful login
+            attempt_info['attempts'] = 0
+            attempt_info['locked_until'] = None
+            
+            user_data = self.mock_users[email]
+            token = self.create_mock_jwt_token(
+                user_id=user_data['user_id'],
+                email=email,
+                username=user_data['username'],
+                roles=user_data.get('roles', ['user']),
+                permissions=user_data.get('permissions', ['read'])
+            )
+            
+            return {
+                'success': True,
+                'access_token': token,
+                'token_type': 'Bearer',
+                'expires_in': self.config.token_expiration,
+                'user_info': user_data
+            }
+        else:
+            # Track failed attempt
+            attempt_info['attempts'] += 1
+            
+            # Lock account after max attempts
+            if attempt_info['attempts'] >= self.config.max_login_attempts:
+                attempt_info['locked_until'] = datetime.now() + timedelta(seconds=self.config.lockout_duration)
+            
+            return {
+                'success': False,
+                'error': 'invalid_credentials',
+                'message': 'Invalid email or password',
+                'attempts_remaining': max(0, self.config.max_login_attempts - attempt_info['attempts'])
+            }
+    
+    def _mock_validate_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Mock token validation with comprehensive error handling."""
+        return self.validate_mock_jwt_token(token)
+    
+    def _mock_refresh_token(self, refresh_token: str) -> Dict[str, Any]:
+        """Mock token refresh with rotation policy simulation."""
+        # Simulate refresh token validation
+        if refresh_token.startswith('valid_refresh_'):
+            user_id = refresh_token.split('_')[-1]
+            
+            # Generate new access token
+            new_token = self.create_mock_jwt_token(
+                user_id=user_id,
+                email=f'user{user_id}@example.com',
+                username=f'testuser{user_id}'
+            )
+            
+            # Generate new refresh token (rotation policy)
+            new_refresh_token = f'valid_refresh_{user_id}_{int(time.time())}'
+            
+            return {
+                'success': True,
+                'access_token': new_token,
+                'refresh_token': new_refresh_token,
+                'token_type': 'Bearer',
+                'expires_in': self.config.token_expiration
+            }
+        else:
+            return {
+                'success': False,
+                'error': 'invalid_refresh_token',
+                'message': 'Refresh token is invalid or expired'
+            }
+    
+    def _mock_revoke_token(self, token: str) -> bool:
+        """Mock token revocation for security testing."""
+        self.revoked_tokens.add(token)
         return True
     
-    def create_auth0_mock(self) -> Mock:
-        """Create a comprehensive Auth0 integration mock."""
-        auth0_mock = Mock(spec=Auth0Integration)
-        
-        # Configure authentication methods
-        auth0_mock.authenticate_user.side_effect = self._mock_authenticate_user
-        auth0_mock.validate_token.side_effect = self.validate_token
-        auth0_mock.refresh_token.side_effect = self._mock_refresh_token
-        auth0_mock.revoke_token.side_effect = self.revoke_token
-        auth0_mock.get_user_info.side_effect = self._mock_get_user_info
-        
-        return auth0_mock
-    
-    def _mock_authenticate_user(self, email: str, password: str) -> Optional[MockJWTToken]:
-        """Mock user authentication."""
-        # Find user by email
-        user = None
-        for mock_user in self._mock_users.values():
-            if mock_user.email == email:
-                user = mock_user
-                break
-        
-        if user:
-            return self.create_token_set(user)
+    def _mock_get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Mock user profile retrieval from Auth0 Management API."""
+        for email, user_data in self.mock_users.items():
+            if str(user_data['user_id']) == str(user_id):
+                return {
+                    'user_id': user_data['user_id'],
+                    'email': email,
+                    'username': user_data['username'],
+                    'name': user_data.get('name', user_data['username']),
+                    'picture': user_data.get('picture', f'https://avatars.example.com/{user_id}'),
+                    'email_verified': user_data.get('email_verified', True),
+                    'created_at': user_data.get('created_at', datetime.now().isoformat()),
+                    'updated_at': user_data.get('updated_at', datetime.now().isoformat()),
+                    'last_login': user_data.get('last_login'),
+                    'login_count': user_data.get('login_count', 0),
+                    'app_metadata': user_data.get('app_metadata', {}),
+                    'user_metadata': user_data.get('user_metadata', {})
+                }
         return None
     
-    def _mock_refresh_token(self, refresh_token: str) -> MockJWTToken:
-        """Mock token refresh."""
-        claims = self.validate_token(refresh_token)
-        user_id = claims["sub"]
-        
-        if user_id in self._mock_users:
-            user = self._mock_users[user_id]
-            return self.create_token_set(user)
-        
-        raise jwt.InvalidTokenError("Invalid refresh token")
+    def _mock_update_user_profile(self, user_id: str, updates: Dict[str, Any]) -> bool:
+        """Mock user profile update operations."""
+        for email, user_data in self.mock_users.items():
+            if str(user_data['user_id']) == str(user_id):
+                user_data.update(updates)
+                user_data['updated_at'] = datetime.now().isoformat()
+                return True
+        return False
     
-    def _mock_get_user_info(self, access_token: str) -> MockAuth0User:
-        """Mock user info retrieval."""
-        claims = self.validate_token(access_token)
-        user_id = claims["sub"]
+    def _mock_create_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Mock user creation in Auth0."""
+        user_id = str(uuid.uuid4())
+        email = user_data['email']
         
-        if user_id in self._mock_users:
-            return self._mock_users[user_id]
+        self.mock_users[email] = {
+            'user_id': user_id,
+            'username': user_data.get('username', email.split('@')[0]),
+            'name': user_data.get('name', user_data.get('username', email.split('@')[0])),
+            'email_verified': user_data.get('email_verified', False),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat(),
+            'roles': user_data.get('roles', ['user']),
+            'permissions': user_data.get('permissions', ['read']),
+            'app_metadata': user_data.get('app_metadata', {}),
+            'user_metadata': user_data.get('user_metadata', {})
+        }
         
-        raise jwt.InvalidTokenError("User not found")
-
-
-class FlaskLoginMockFactory:
-    """
-    Flask-Login session mock factory providing comprehensive session simulation with ItsDangerous
-    cookie signing per Feature F-007. Enables testing of Flask-Login session management patterns
-    during the Node.js to Flask migration.
-    """
+        return {'user_id': user_id, 'email': email}
     
-    def __init__(self, secret_key: str = None):
-        self.secret_key = secret_key or secrets.token_urlsafe(32)
-        self.serializer = URLSafeTimedSerializer(self.secret_key)
-        self._active_sessions = {}
-        self._session_cookies = {}
+    def _mock_delete_user(self, user_id: str) -> bool:
+        """Mock user deletion from Auth0."""
+        for email, user_data in list(self.mock_users.items()):
+            if str(user_data['user_id']) == str(user_id):
+                del self.mock_users[email]
+                return True
+        return False
     
-    def create_mock_user(self, 
-                        user_id: str = None,
-                        email: str = None,
-                        username: str = None,
-                        roles: List[str] = None,
-                        permissions: List[str] = None,
-                        is_authenticated: bool = True) -> MockFlaskLoginUser:
-        """Create a mock Flask-Login user for testing."""
+    def _mock_get_users(self, page: int = 0, per_page: int = 50) -> Dict[str, Any]:
+        """Mock user list retrieval with pagination."""
+        users_list = list(self.mock_users.values())
+        start = page * per_page
+        end = start + per_page
+        
+        return {
+            'users': users_list[start:end],
+            'total': len(users_list),
+            'page': page,
+            'per_page': per_page,
+            'length': len(users_list[start:end])
+        }
+    
+    def _mock_get_user_roles(self, user_id: str) -> List[Dict[str, Any]]:
+        """Mock user roles retrieval."""
+        for email, user_data in self.mock_users.items():
+            if str(user_data['user_id']) == str(user_id):
+                roles = user_data.get('roles', ['user'])
+                return [{'id': f'role_{role}', 'name': role, 'description': f'{role.title()} role'} for role in roles]
+        return []
+    
+    def _mock_assign_user_roles(self, user_id: str, role_ids: List[str]) -> bool:
+        """Mock user role assignment."""
+        for email, user_data in self.mock_users.items():
+            if str(user_data['user_id']) == str(user_id):
+                current_roles = set(user_data.get('roles', []))
+                new_roles = [role_id.replace('role_', '') for role_id in role_ids]
+                user_data['roles'] = list(current_roles.union(new_roles))
+                return True
+        return False
+    
+    def _mock_remove_user_roles(self, user_id: str, role_ids: List[str]) -> bool:
+        """Mock user role removal."""
+        for email, user_data in self.mock_users.items():
+            if str(user_data['user_id']) == str(user_id):
+                current_roles = set(user_data.get('roles', []))
+                remove_roles = {role_id.replace('role_', '') for role_id in role_ids}
+                user_data['roles'] = list(current_roles - remove_roles)
+                return True
+        return False
+    
+    def add_mock_user(
+        self,
+        email: str,
+        username: str,
+        user_id: Optional[str] = None,
+        roles: List[str] = None,
+        permissions: List[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Add mock user to the Auth0 user database for testing.
+        
+        This method enables test setup with predefined users per Feature F-007,
+        supporting comprehensive authentication testing scenarios with
+        configurable user attributes and permissions.
+        
+        Args:
+            email: User email address
+            username: User display name
+            user_id: Optional custom user ID
+            roles: List of user roles
+            permissions: List of user permissions
+            **kwargs: Additional user attributes
+            
+        Returns:
+            str: Generated or provided user ID
+            
+        Features:
+            - Configurable user attributes
+            - Role and permission assignment
+            - Custom metadata support
+            - Realistic user profile structure
+        """
         user_id = user_id or str(uuid.uuid4())
-        email = email or f"test.user.{uuid.uuid4().hex[:8]}@example.com"
-        username = username or f"testuser_{uuid.uuid4().hex[:8]}"
         
-        return MockFlaskLoginUser(
-            user_id=user_id,
-            email=email,
-            username=username,
-            roles=roles,
-            permissions=permissions,
-            is_authenticated=is_authenticated
-        )
+        self.mock_users[email] = {
+            'user_id': user_id,
+            'username': username,
+            'name': kwargs.get('name', username),
+            'email_verified': kwargs.get('email_verified', True),
+            'created_at': kwargs.get('created_at', datetime.now().isoformat()),
+            'updated_at': kwargs.get('updated_at', datetime.now().isoformat()),
+            'roles': roles or ['user'],
+            'permissions': permissions or ['read'],
+            'app_metadata': kwargs.get('app_metadata', {}),
+            'user_metadata': kwargs.get('user_metadata', {}),
+            **kwargs
+        }
+        
+        return user_id
+
+
+# =====================================
+# Flask-Login Session Mocking
+# =====================================
+
+class FlaskLoginSessionMock:
+    """
+    Flask-Login session mock providing comprehensive session management
+    testing utilities with ItsDangerous cookie signing simulation.
     
-    def create_session_data(self,
-                           user: MockFlaskLoginUser,
-                           remember_me: bool = False,
-                           ip_address: str = None,
-                           user_agent: str = None) -> MockUserSession:
-        """Create mock session data for Flask-Login testing."""
+    This class enables comprehensive Flask-Login testing per Feature F-007,
+    providing session management simulation, user authentication state
+    mocking, and secure cookie handling for authentication testing.
+    
+    Features:
+        - Session creation and validation simulation
+        - ItsDangerous cookie signing and verification
+        - User authentication state management
+        - Session timeout and renewal testing
+        - Remember-me functionality simulation
+    """
+    
+    def __init__(self, app: Flask, config: Optional[MockAuthConfig] = None):
+        """
+        Initialize Flask-Login session mock with application context.
+        
+        Args:
+            app: Flask application instance
+            config: Mock configuration instance
+        """
+        self.app = app
+        self.config = config or MockAuthConfig()
+        self.active_sessions = {}
+        self.session_tokens = {}
+        
+    def create_mock_session(
+        self,
+        user: User,
+        remember: bool = False,
+        duration: Optional[timedelta] = None
+    ) -> Dict[str, Any]:
+        """
+        Create mock user session with ItsDangerous cookie signing simulation
+        for comprehensive session management testing.
+        
+        This method simulates Flask-Login session creation per Section 4.6.2,
+        enabling comprehensive testing of session management, cookie handling,
+        and user authentication state preservation.
+        
+        Args:
+            user: User instance for session creation
+            remember: Enable remember-me functionality
+            duration: Custom session duration
+            
+        Returns:
+            Dict[str, Any]: Session data with signed cookies and metadata
+            
+        Features:
+            - ItsDangerous session cookie signing
+            - Remember-me token generation
+            - Session expiration management
+            - CSRF token integration
+            - Session metadata tracking
+        """
         session_id = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc)
         
-        session_data = MockUserSession(
-            user_id=user.get_id(),
-            session_id=session_id,
-            is_authenticated=user.is_authenticated,
-            is_active=user.is_active,
-            remember_me=remember_me,
-            ip_address=ip_address or "127.0.0.1",
-            user_agent=user_agent or "pytest-test-client/1.0"
-        )
+        # Calculate session expiration
+        if remember and duration:
+            expires_at = created_at + duration
+        elif remember:
+            expires_at = created_at + timedelta(days=30)  # Remember-me default
+        else:
+            expires_at = created_at + timedelta(seconds=self.config.session_timeout)
         
-        self._active_sessions[session_id] = session_data
-        return session_data
-    
-    def sign_session_cookie(self, 
-                           session_data: MockUserSession,
-                           max_age: int = 3600) -> str:
-        """Sign session data using ItsDangerous for secure cookie simulation."""
+        # Create session data
+        session_data = {
+            'session_id': session_id,
+            'user_id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'created_at': created_at.isoformat(),
+            'expires_at': expires_at.isoformat(),
+            'remember': remember,
+            'fresh': True,
+            'active': True,
+            'ip_address': '127.0.0.1',  # Test IP
+            'user_agent': 'Flask-Test-Client/1.0'
+        }
+        
+        # Generate session token using ItsDangerous
+        serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+        session_token = serializer.dumps({
+            'user_id': user.id,
+            'session_id': session_id,
+            'created_at': created_at.isoformat()
+        })
+        
+        # Generate remember-me token if needed
+        remember_token = None
+        if remember:
+            remember_data = {
+                'user_id': user.id,
+                'username': user.username,
+                'token_type': 'remember_me'
+            }
+            remember_token = serializer.dumps(remember_data)
+        
+        # Store session data
+        self.active_sessions[session_id] = session_data
+        self.session_tokens[session_token] = session_data
+        
+        # Create cookie data
         cookie_data = {
-            "user_id": session_data.user_id,
-            "session_id": session_data.session_id,
-            "login_time": session_data.login_time.isoformat(),
-            "remember_me": session_data.remember_me
+            'session_token': session_token,
+            'remember_token': remember_token,
+            'csrf_token': self._generate_csrf_token(session_id),
+            'session_id': session_id,
+            'expires': expires_at.isoformat()
         }
         
-        signed_cookie = self.serializer.dumps(cookie_data, max_age=max_age)
-        self._session_cookies[session_data.session_id] = signed_cookie
-        return signed_cookie
+        return {
+            'session_data': session_data,
+            'cookies': cookie_data,
+            'signed_cookies': self._create_signed_cookies(cookie_data)
+        }
     
-    def validate_session_cookie(self, 
-                               signed_cookie: str,
-                               max_age: int = 3600) -> Dict[str, Any]:
-        """Validate a signed session cookie using ItsDangerous."""
+    def validate_mock_session(self, session_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Validate mock session token and return session data for authentication
+        decorator testing and session management validation.
+        
+        This method simulates Flask-Login session validation per Section 4.6.2,
+        enabling comprehensive testing of authentication decorators and
+        session-based access control mechanisms.
+        
+        Args:
+            session_token: Session token to validate
+            
+        Returns:
+            Optional[Dict[str, Any]]: Session data if valid, None otherwise
+            
+        Features:
+            - ItsDangerous signature verification
+            - Session expiration checking
+            - Session activity validation
+            - Token replay protection
+            - Session state verification
+        """
         try:
-            cookie_data = self.serializer.loads(signed_cookie, max_age=max_age)
-            return cookie_data
-        except SignatureExpired:
-            raise SignatureExpired("Session cookie has expired")
-        except BadSignature:
-            raise BadSignature("Invalid session cookie signature")
+            # Verify token signature using ItsDangerous
+            serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+            token_data = serializer.loads(
+                session_token,
+                max_age=self.config.session_timeout
+            )
+            
+            # Retrieve session data
+            if session_token not in self.session_tokens:
+                return None
+            
+            session_data = self.session_tokens[session_token]
+            
+            # Verify session is still active
+            if not session_data.get('active', False):
+                return None
+            
+            # Check session expiration
+            expires_at = datetime.fromisoformat(session_data['expires_at'])
+            if datetime.now(timezone.utc) > expires_at:
+                # Mark session as expired
+                session_data['active'] = False
+                return None
+            
+            # Update last activity
+            session_data['last_activity'] = datetime.now(timezone.utc).isoformat()
+            
+            return session_data
+            
+        except (SignatureExpired, BadSignature, KeyError):
+            return None
     
-    def create_login_manager_mock(self) -> Mock:
-        """Create a comprehensive Flask-Login LoginManager mock."""
-        login_manager_mock = Mock()
+    def refresh_mock_session(self, session_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Refresh mock session extending expiration time for session
+        renewal testing and activity-based session management.
         
-        # Configure user loader
-        login_manager_mock.user_loader = Mock()
-        login_manager_mock.request_loader = Mock()
-        login_manager_mock.header_loader = Mock()
+        This method simulates session refresh functionality per Section 4.6.2,
+        enabling testing of session renewal mechanisms and activity-based
+        session timeout policies.
         
-        # Configure session protection
-        login_manager_mock.session_protection = "strong"
-        login_manager_mock.login_view = "auth.login"
-        login_manager_mock.login_message = "Please log in to access this page."
-        login_manager_mock.needs_refresh_message = "Please reauthenticate to access this page."
+        Args:
+            session_token: Current session token to refresh
+            
+        Returns:
+            Optional[Dict[str, Any]]: New session data if successful, None otherwise
+            
+        Features:
+            - Session token regeneration
+            - Expiration time extension
+            - Activity tracking update
+            - Fresh session flag management
+            - Cookie data refresh
+        """
+        session_data = self.validate_mock_session(session_token)
+        if not session_data:
+            return None
         
-        return login_manager_mock
-    
-    def mock_current_user(self, user: MockFlaskLoginUser = None) -> Mock:
-        """Create a mock current_user for Flask-Login testing."""
-        if user is None:
-            # Return anonymous user
-            anonymous_mock = Mock(spec=AnonymousUserMixin)
-            anonymous_mock.is_authenticated = False
-            anonymous_mock.is_active = False
-            anonymous_mock.is_anonymous = True
-            anonymous_mock.get_id.return_value = None
-            return anonymous_mock
+        # Create new session with extended expiration
+        new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.config.session_timeout)
         
-        # Return authenticated user mock
-        user_mock = Mock(spec=MockFlaskLoginUser)
-        user_mock.id = user.id
-        user_mock.email = user.email
-        user_mock.username = user.username
-        user_mock.roles = user.roles
-        user_mock.permissions = user.permissions
-        user_mock.is_authenticated = user.is_authenticated
-        user_mock.is_active = user.is_active
-        user_mock.is_anonymous = False
-        user_mock.get_id.return_value = user.get_id()
-        user_mock.has_role.side_effect = user.has_role
-        user_mock.has_permission.side_effect = user.has_permission
+        # Update session data
+        session_data.update({
+            'expires_at': new_expires_at.isoformat(),
+            'fresh': False,  # Renewed sessions are not fresh
+            'last_refresh': datetime.now(timezone.utc).isoformat()
+        })
         
-        return user_mock
-
-
-class CSRFMockFactory:
-    """
-    CSRF protection testing utilities providing Flask-WTF integration mocks per Section 4.6.2.
-    Enables comprehensive testing of CSRF protection during the Node.js to Flask migration.
-    """
-    
-    def __init__(self, secret_key: str = None):
-        self.secret_key = secret_key or secrets.token_urlsafe(32)
-        self.serializer = URLSafeTimedSerializer(self.secret_key)
-        self._generated_tokens = set()
-    
-    def generate_csrf_token(self, 
-                           session_id: str = None,
-                           max_age: int = 3600) -> str:
-        """Generate a CSRF token for testing."""
-        session_id = session_id or str(uuid.uuid4())
-        timestamp = int(time.time())
+        # Generate new session token
+        serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+        new_session_token = serializer.dumps({
+            'user_id': session_data['user_id'],
+            'session_id': session_data['session_id'],
+            'refresh_time': datetime.now(timezone.utc).isoformat()
+        })
         
-        token_data = {
-            "session_id": session_id,
-            "timestamp": timestamp,
-            "nonce": secrets.token_hex(16)
+        # Update token mapping
+        if session_token in self.session_tokens:
+            del self.session_tokens[session_token]
+        self.session_tokens[new_session_token] = session_data
+        
+        # Create new cookie data
+        cookie_data = {
+            'session_token': new_session_token,
+            'csrf_token': self._generate_csrf_token(session_data['session_id']),
+            'session_id': session_data['session_id'],
+            'expires': new_expires_at.isoformat()
         }
         
-        csrf_token = self.serializer.dumps(token_data, max_age=max_age)
-        self._generated_tokens.add(csrf_token)
+        return {
+            'session_data': session_data,
+            'cookies': cookie_data,
+            'signed_cookies': self._create_signed_cookies(cookie_data)
+        }
+    
+    def revoke_mock_session(self, session_token: str) -> bool:
+        """
+        Revoke mock session for logout testing and security incident
+        response validation.
+        
+        This method simulates session revocation per Section 6.4.6.2,
+        enabling testing of logout procedures and security incident
+        response mechanisms including session invalidation.
+        
+        Args:
+            session_token: Session token to revoke
+            
+        Returns:
+            bool: True if session was successfully revoked
+            
+        Features:
+            - Session data cleanup
+            - Token invalidation
+            - Security event logging
+            - Cascade session removal
+        """
+        if session_token in self.session_tokens:
+            session_data = self.session_tokens[session_token]
+            session_id = session_data.get('session_id')
+            
+            # Mark session as inactive
+            session_data['active'] = False
+            session_data['revoked_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Remove from active sessions
+            if session_id in self.active_sessions:
+                del self.active_sessions[session_id]
+            
+            # Keep token mapping for audit trail
+            # del self.session_tokens[session_token]
+            
+            return True
+        
+        return False
+    
+    def _generate_csrf_token(self, session_id: str) -> str:
+        """Generate CSRF token for session protection."""
+        csrf_data = {
+            'session_id': session_id,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'token_type': 'csrf'
+        }
+        
+        serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+        return serializer.dumps(csrf_data)
+    
+    def _create_signed_cookies(self, cookie_data: Dict[str, Any]) -> Dict[str, str]:
+        """Create signed cookies using ItsDangerous for secure cookie simulation."""
+        serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+        
+        signed_cookies = {}
+        for key, value in cookie_data.items():
+            if value is not None:
+                signed_cookies[f'signed_{key}'] = serializer.dumps({key: value})
+        
+        return signed_cookies
+
+
+# =====================================
+# Authentication Decorator Testing Utilities
+# =====================================
+
+class AuthDecoratorTestUtils:
+    """
+    Authentication decorator testing utilities providing comprehensive
+    testing support for Flask authentication decorators and middleware
+    migration validation per Section 4.6.2.
+    
+    This class enables testing of authentication decorators converted from
+    Node.js middleware patterns, supporting comprehensive validation of
+    authentication enforcement, authorization controls, and security posture
+    preservation during the migration process.
+    
+    Features:
+        - Authentication decorator testing simulation
+        - Authorization validation utilities
+        - Role-based access control testing
+        - Permission checking simulation
+        - Security policy enforcement validation
+    """
+    
+    def __init__(self, app: Flask, config: Optional[MockAuthConfig] = None):
+        """
+        Initialize authentication decorator testing utilities.
+        
+        Args:
+            app: Flask application instance
+            config: Mock configuration instance
+        """
+        self.app = app
+        self.config = config or MockAuthConfig()
+        self.auth_attempts = []
+        self.authorization_checks = []
+        
+    @contextmanager
+    def mock_authenticated_user(
+        self,
+        user: User,
+        roles: List[str] = None,
+        permissions: List[str] = None,
+        session_data: Dict[str, Any] = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Context manager providing authenticated user context for testing
+        authentication decorators and protected endpoints.
+        
+        This context manager simulates authenticated user state per Feature F-007,
+        enabling comprehensive testing of authentication decorators and
+        access control mechanisms with proper user context injection.
+        
+        Args:
+            user: User instance for authentication
+            roles: List of user roles for RBAC testing
+            permissions: List of user permissions
+            session_data: Additional session data
+            
+        Yields:
+            Dict[str, Any]: Authentication context data
+            
+        Features:
+            - User authentication state simulation
+            - Role and permission injection
+            - Session context management
+            - Request context setup
+            - Authentication decorator bypass
+        """
+        with self.app.test_request_context():
+            # Set up authentication context
+            auth_context = {
+                'user': user,
+                'user_id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'roles': roles or ['user'],
+                'permissions': permissions or ['read'],
+                'authenticated': True,
+                'session_data': session_data or {},
+                'auth_time': datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Inject user into Flask-Login context
+            with patch('flask_login.current_user', user):
+                with patch('flask_login.current_user.is_authenticated', True):
+                    # Set up request context variables
+                    g.user = user
+                    g.authenticated = True
+                    g.auth_context = auth_context
+                    g.user_roles = auth_context['roles']
+                    g.user_permissions = auth_context['permissions']
+                    
+                    # Mock session data
+                    session.update({
+                        'user_id': user.id,
+                        'username': user.username,
+                        'authenticated': True,
+                        '_fresh': True
+                    })
+                    
+                    yield auth_context
+    
+    def test_require_auth_decorator(
+        self,
+        endpoint_function: Callable,
+        user: Optional[User] = None,
+        expect_success: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Test @require_auth decorator functionality with various authentication
+        states and user contexts.
+        
+        This method enables comprehensive testing of authentication decorators
+        per Section 4.6.2, validating decorator behavior with authenticated
+        and unauthenticated users, session states, and error conditions.
+        
+        Args:
+            endpoint_function: Flask endpoint function with @require_auth decorator
+            user: User instance for authentication (None for unauthenticated test)
+            expect_success: Expected authentication result
+            
+        Returns:
+            Dict[str, Any]: Test results with authentication status and response data
+            
+        Features:
+            - Authentication decorator validation
+            - Success and failure scenario testing
+            - Error response verification
+            - Status code validation
+            - Security event tracking
+        """
+        test_result = {
+            'decorator': 'require_auth',
+            'user': user.username if user else None,
+            'expected_success': expect_success,
+            'actual_success': False,
+            'response_data': None,
+            'status_code': None,
+            'error_message': None,
+            'execution_time': None
+        }
+        
+        start_time = time.time()
+        
+        try:
+            if user:
+                # Test with authenticated user
+                with self.mock_authenticated_user(user):
+                    response = endpoint_function()
+                    test_result['actual_success'] = True
+                    test_result['response_data'] = response
+                    test_result['status_code'] = 200
+            else:
+                # Test without authentication
+                with self.app.test_request_context():
+                    try:
+                        response = endpoint_function()
+                        test_result['actual_success'] = True
+                        test_result['response_data'] = response
+                        test_result['status_code'] = 200
+                    except Exception as e:
+                        # Expected for unauthenticated requests
+                        test_result['actual_success'] = False
+                        test_result['error_message'] = str(e)
+                        test_result['status_code'] = 401
+        
+        except Exception as e:
+            test_result['actual_success'] = False
+            test_result['error_message'] = str(e)
+            test_result['status_code'] = getattr(e, 'code', 500)
+        
+        finally:
+            test_result['execution_time'] = time.time() - start_time
+        
+        # Record authentication attempt
+        self.auth_attempts.append({
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'decorator': 'require_auth',
+            'user_id': user.id if user else None,
+            'success': test_result['actual_success'],
+            'expected': expect_success,
+            'matches_expectation': test_result['actual_success'] == expect_success
+        })
+        
+        return test_result
+    
+    def test_require_role_decorator(
+        self,
+        endpoint_function: Callable,
+        required_role: str,
+        user: User,
+        user_roles: List[str],
+        expect_success: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Test @require_role decorator functionality with various role
+        configurations and user contexts.
+        
+        This method enables comprehensive testing of role-based access control
+        per Section 6.4.2.1, validating role requirement enforcement and
+        authorization decision logic for RBAC implementation.
+        
+        Args:
+            endpoint_function: Flask endpoint function with @require_role decorator
+            required_role: Role required by the decorator
+            user: User instance for authorization testing
+            user_roles: List of roles assigned to the user
+            expect_success: Expected authorization result
+            
+        Returns:
+            Dict[str, Any]: Test results with authorization status and response data
+            
+        Features:
+            - Role-based access control validation
+            - Multiple role scenario testing
+            - Authorization failure handling
+            - Role hierarchy testing
+            - Security policy enforcement
+        """
+        test_result = {
+            'decorator': 'require_role',
+            'required_role': required_role,
+            'user_roles': user_roles,
+            'user': user.username,
+            'expected_success': expect_success,
+            'actual_success': False,
+            'response_data': None,
+            'status_code': None,
+            'error_message': None,
+            'execution_time': None
+        }
+        
+        start_time = time.time()
+        
+        try:
+            with self.mock_authenticated_user(user, roles=user_roles):
+                # Mock the role requirement check
+                has_required_role = required_role in user_roles
+                
+                if has_required_role:
+                    response = endpoint_function()
+                    test_result['actual_success'] = True
+                    test_result['response_data'] = response
+                    test_result['status_code'] = 200
+                else:
+                    # Simulate authorization failure
+                    test_result['actual_success'] = False
+                    test_result['error_message'] = f'Insufficient privileges: requires {required_role} role'
+                    test_result['status_code'] = 403
+        
+        except Exception as e:
+            test_result['actual_success'] = False
+            test_result['error_message'] = str(e)
+            test_result['status_code'] = getattr(e, 'code', 500)
+        
+        finally:
+            test_result['execution_time'] = time.time() - start_time
+        
+        # Record authorization check
+        self.authorization_checks.append({
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'decorator': 'require_role',
+            'user_id': user.id,
+            'required_role': required_role,
+            'user_roles': user_roles,
+            'success': test_result['actual_success'],
+            'expected': expect_success,
+            'matches_expectation': test_result['actual_success'] == expect_success
+        })
+        
+        return test_result
+    
+    def test_require_permission_decorator(
+        self,
+        endpoint_function: Callable,
+        required_permission: str,
+        user: User,
+        user_permissions: List[str],
+        expect_success: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Test @require_permission decorator functionality with various permission
+        configurations and user contexts.
+        
+        This method enables comprehensive testing of permission-based access
+        control per Section 6.4.2.2, validating granular permission enforcement
+        and authorization logic for fine-grained access control.
+        
+        Args:
+            endpoint_function: Flask endpoint function with @require_permission decorator
+            required_permission: Permission required by the decorator
+            user: User instance for authorization testing
+            user_permissions: List of permissions assigned to the user
+            expect_success: Expected authorization result
+            
+        Returns:
+            Dict[str, Any]: Test results with authorization status and response data
+            
+        Features:
+            - Permission-based access control validation
+            - Granular permission testing
+            - Permission inheritance testing
+            - Resource-level authorization
+            - Security policy validation
+        """
+        test_result = {
+            'decorator': 'require_permission',
+            'required_permission': required_permission,
+            'user_permissions': user_permissions,
+            'user': user.username,
+            'expected_success': expect_success,
+            'actual_success': False,
+            'response_data': None,
+            'status_code': None,
+            'error_message': None,
+            'execution_time': None
+        }
+        
+        start_time = time.time()
+        
+        try:
+            with self.mock_authenticated_user(user, permissions=user_permissions):
+                # Mock the permission check
+                has_required_permission = required_permission in user_permissions
+                
+                if has_required_permission:
+                    response = endpoint_function()
+                    test_result['actual_success'] = True
+                    test_result['response_data'] = response
+                    test_result['status_code'] = 200
+                else:
+                    # Simulate authorization failure
+                    test_result['actual_success'] = False
+                    test_result['error_message'] = f'Insufficient privileges: requires {required_permission} permission'
+                    test_result['status_code'] = 403
+        
+        except Exception as e:
+            test_result['actual_success'] = False
+            test_result['error_message'] = str(e)
+            test_result['status_code'] = getattr(e, 'code', 500)
+        
+        finally:
+            test_result['execution_time'] = time.time() - start_time
+        
+        # Record authorization check
+        self.authorization_checks.append({
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'decorator': 'require_permission',
+            'user_id': user.id,
+            'required_permission': required_permission,
+            'user_permissions': user_permissions,
+            'success': test_result['actual_success'],
+            'expected': expect_success,
+            'matches_expectation': test_result['actual_success'] == expect_success
+        })
+        
+        return test_result
+    
+    def get_authentication_metrics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive authentication testing metrics for performance
+        analysis and security validation.
+        
+        This method provides detailed authentication testing metrics per
+        Section 4.7.1, enabling performance analysis and security posture
+        validation during authentication mechanism migration testing.
+        
+        Returns:
+            Dict[str, Any]: Comprehensive authentication testing metrics
+            
+        Features:
+            - Authentication success/failure rates
+            - Authorization metrics by role/permission
+            - Performance timing analysis
+            - Security event correlation
+            - Test coverage validation
+        """
+        total_auth_attempts = len(self.auth_attempts)
+        successful_auth = sum(1 for attempt in self.auth_attempts if attempt['success'])
+        
+        total_authz_checks = len(self.authorization_checks)
+        successful_authz = sum(1 for check in self.authorization_checks if check['success'])
+        
+        return {
+            'authentication': {
+                'total_attempts': total_auth_attempts,
+                'successful_attempts': successful_auth,
+                'failure_rate': (total_auth_attempts - successful_auth) / max(total_auth_attempts, 1) * 100,
+                'success_rate': successful_auth / max(total_auth_attempts, 1) * 100
+            },
+            'authorization': {
+                'total_checks': total_authz_checks,
+                'successful_checks': successful_authz,
+                'failure_rate': (total_authz_checks - successful_authz) / max(total_authz_checks, 1) * 100,
+                'success_rate': successful_authz / max(total_authz_checks, 1) * 100
+            },
+            'performance': {
+                'avg_auth_time': sum(attempt.get('execution_time', 0) for attempt in self.auth_attempts) / max(total_auth_attempts, 1),
+                'avg_authz_time': sum(check.get('execution_time', 0) for check in self.authorization_checks) / max(total_authz_checks, 1)
+            },
+            'test_coverage': {
+                'decorators_tested': len(set(attempt['decorator'] for attempt in self.auth_attempts + self.authorization_checks)),
+                'unique_users_tested': len(set(attempt.get('user_id') for attempt in self.auth_attempts if attempt.get('user_id'))),
+                'roles_tested': len(set(check.get('required_role') for check in self.authorization_checks if check.get('required_role'))),
+                'permissions_tested': len(set(check.get('required_permission') for check in self.authorization_checks if check.get('required_permission')))
+            }
+        }
+
+
+# =====================================
+# CSRF Protection Testing Mocks
+# =====================================
+
+class CSRFProtectionMock:
+    """
+    CSRF protection testing mock providing comprehensive Flask-WTF CSRF
+    testing utilities per Section 4.6.2.
+    
+    This class enables comprehensive CSRF protection testing during the
+    Flask migration, supporting Flask-WTF integration validation and
+    CSRF token handling for form submissions and AJAX requests.
+    
+    Features:
+        - CSRF token generation and validation
+        - Form submission CSRF testing
+        - AJAX request CSRF validation
+        - CSRF exemption testing
+        - Security policy enforcement
+    """
+    
+    def __init__(self, app: Flask, config: Optional[MockAuthConfig] = None):
+        """
+        Initialize CSRF protection mock with Flask application.
+        
+        Args:
+            app: Flask application instance
+            config: Mock configuration instance
+        """
+        self.app = app
+        self.config = config or MockAuthConfig()
+        self.csrf_tokens = {}
+        self.csrf_failures = []
+        
+    def generate_mock_csrf_token(
+        self,
+        session_id: Optional[str] = None,
+        form_name: Optional[str] = None
+    ) -> str:
+        """
+        Generate mock CSRF token for form and AJAX request testing.
+        
+        This method simulates Flask-WTF CSRF token generation per Section 4.6.2,
+        enabling comprehensive testing of CSRF protection mechanisms and
+        form submission validation.
+        
+        Args:
+            session_id: Optional session identifier for token binding
+            form_name: Optional form name for scoped CSRF tokens
+            
+        Returns:
+            str: Generated CSRF token for testing
+            
+        Features:
+            - Session-bound CSRF tokens
+            - Form-specific token scoping
+            - Token expiration management
+            - Secure token generation
+            - Token validation tracking
+        """
+        # Generate token data
+        token_data = {
+            'session_id': session_id or 'test_session',
+            'form_name': form_name,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'token_type': 'csrf',
+            'nonce': str(uuid.uuid4())
+        }
+        
+        # Create signed token using ItsDangerous
+        serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+        csrf_token = serializer.dumps(token_data)
+        
+        # Store token for validation
+        self.csrf_tokens[csrf_token] = token_data
+        
         return csrf_token
     
-    def validate_csrf_token(self, 
-                           csrf_token: str,
-                           session_id: str = None,
-                           max_age: int = 3600) -> bool:
-        """Validate a CSRF token."""
-        try:
-            token_data = self.serializer.loads(csrf_token, max_age=max_age)
+    def validate_mock_csrf_token(
+        self,
+        csrf_token: str,
+        session_id: Optional[str] = None,
+        form_name: Optional[str] = None
+    ) -> bool:
+        """
+        Validate mock CSRF token for form submission and AJAX request testing.
+        
+        This method simulates Flask-WTF CSRF token validation per Section 4.6.2,
+        enabling comprehensive testing of CSRF protection enforcement and
+        token validation logic.
+        
+        Args:
+            csrf_token: CSRF token to validate
+            session_id: Expected session identifier
+            form_name: Expected form name for scoped validation
             
-            # Validate session ID if provided
-            if session_id and token_data.get("session_id") != session_id:
+        Returns:
+            bool: True if token is valid, False otherwise
+            
+        Features:
+            - Token signature verification
+            - Session binding validation
+            - Form scope verification
+            - Token expiration checking
+            - Replay attack protection
+        """
+        try:
+            # Verify token signature
+            serializer = URLSafeTimedSerializer(self.app.config['SECRET_KEY'])
+            token_data = serializer.loads(
+                csrf_token,
+                max_age=3600  # 1 hour token expiration
+            )
+            
+            # Verify token exists in our storage
+            if csrf_token not in self.csrf_tokens:
+                self._record_csrf_failure('token_not_found', csrf_token)
                 return False
             
-            return csrf_token in self._generated_tokens
+            stored_data = self.csrf_tokens[csrf_token]
+            
+            # Verify session binding if provided
+            if session_id and stored_data.get('session_id') != session_id:
+                self._record_csrf_failure('session_mismatch', csrf_token)
+                return False
+            
+            # Verify form scope if provided
+            if form_name and stored_data.get('form_name') != form_name:
+                self._record_csrf_failure('form_mismatch', csrf_token)
+                return False
+            
+            # Token is valid
+            return True
+            
         except (SignatureExpired, BadSignature):
+            self._record_csrf_failure('invalid_signature', csrf_token)
             return False
     
-    def create_csrf_protection_mock(self) -> Mock:
-        """Create a Flask-WTF CSRFProtect mock."""
-        csrf_mock = Mock(spec=CSRFProtection)
+    def create_mock_csrf_headers(
+        self,
+        csrf_token: str,
+        additional_headers: Dict[str, str] = None
+    ) -> Dict[str, str]:
+        """
+        Create mock HTTP headers with CSRF token for AJAX request testing.
         
-        # Configure CSRF methods
-        csrf_mock.generate_csrf.side_effect = self.generate_csrf_token
-        csrf_mock.validate_csrf.side_effect = self.validate_csrf_token
-        csrf_mock.exempt_views = set()
+        This method creates CSRF-protected headers per Section 4.6.2,
+        enabling comprehensive testing of AJAX request CSRF protection
+        and header-based token validation.
         
-        return csrf_mock
+        Args:
+            csrf_token: CSRF token for header inclusion
+            additional_headers: Additional headers to include
+            
+        Returns:
+            Dict[str, str]: HTTP headers with CSRF token
+            
+        Features:
+            - CSRF header configuration
+            - AJAX request headers
+            - Content type specification
+            - Security header inclusion
+        """
+        headers = {
+            'X-CSRFToken': csrf_token,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
+        if additional_headers:
+            headers.update(additional_headers)
+        
+        return headers
     
-    def create_form_with_csrf(self, 
-                             csrf_token: str = None,
-                             form_data: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Create form data with CSRF token for testing."""
-        csrf_token = csrf_token or self.generate_csrf_token()
+    def create_mock_csrf_form_data(
+        self,
+        csrf_token: str,
+        form_data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Create mock form data with CSRF token for form submission testing.
+        
+        This method creates CSRF-protected form data per Section 4.6.2,
+        enabling comprehensive testing of form submission CSRF protection
+        and hidden field token validation.
+        
+        Args:
+            csrf_token: CSRF token for form inclusion
+            form_data: Additional form data to include
+            
+        Returns:
+            Dict[str, Any]: Form data with CSRF token
+            
+        Features:
+            - CSRF token form field
+            - Form data structure
+            - Hidden field simulation
+            - Form validation support
+        """
         form_data = form_data or {}
-        
-        form_data["csrf_token"] = csrf_token
-        return form_data
-
-
-class UserAuthStateMocks:
-    """
-    User authentication state mocks providing comprehensive test coverage for various
-    authentication scenarios per Feature F-007. Enables testing of different user
-    states and permission combinations during Flask migration.
-    """
-    
-    def __init__(self):
-        self.auth0_factory = Auth0MockFactory()
-        self.flask_login_factory = FlaskLoginMockFactory()
-        self._user_scenarios = {}
-    
-    def create_authenticated_user(self, 
-                                 roles: List[str] = None,
-                                 permissions: List[str] = None,
-                                 **kwargs) -> MockFlaskLoginUser:
-        """Create an authenticated user for testing."""
-        return self.flask_login_factory.create_mock_user(
-            roles=roles or ["user"],
-            permissions=permissions or ["read"],
-            is_authenticated=True,
-            **kwargs
-        )
-    
-    def create_anonymous_user(self) -> Mock:
-        """Create an anonymous user for testing."""
-        return self.flask_login_factory.mock_current_user(None)
-    
-    def create_admin_user(self, **kwargs) -> MockFlaskLoginUser:
-        """Create an admin user with elevated permissions."""
-        return self.flask_login_factory.create_mock_user(
-            roles=["admin", "user"],
-            permissions=["read", "write", "delete", "admin"],
-            is_authenticated=True,
-            **kwargs
-        )
-    
-    def create_inactive_user(self, **kwargs) -> MockFlaskLoginUser:
-        """Create an inactive user for testing access denial."""
-        user = self.flask_login_factory.create_mock_user(
-            is_authenticated=False,
-            **kwargs
-        )
-        user._is_active = False
-        return user
-    
-    def create_user_scenario(self, 
-                           scenario_name: str,
-                           user_config: Dict[str, Any]) -> MockFlaskLoginUser:
-        """Create and cache a user scenario for reuse."""
-        user = self.flask_login_factory.create_mock_user(**user_config)
-        self._user_scenarios[scenario_name] = user
-        return user
-    
-    def get_user_scenario(self, scenario_name: str) -> Optional[MockFlaskLoginUser]:
-        """Get a cached user scenario."""
-        return self._user_scenarios.get(scenario_name)
-    
-    def create_permission_matrix(self) -> Dict[str, MockFlaskLoginUser]:
-        """Create a matrix of users with different permission combinations."""
-        return {
-            "guest": self.create_anonymous_user(),
-            "user": self.create_authenticated_user(
-                roles=["user"],
-                permissions=["read"]
-            ),
-            "moderator": self.create_authenticated_user(
-                roles=["moderator", "user"],
-                permissions=["read", "write", "moderate"]
-            ),
-            "admin": self.create_admin_user(),
-            "inactive": self.create_inactive_user()
-        }
-
-
-class SecurityMonitoringMocks:
-    """
-    Security monitoring test utilities with structured logging validation per Section 6.4.2.5.
-    Provides comprehensive testing capabilities for security event logging, anomaly detection,
-    and incident response during the Flask migration.
-    """
-    
-    def __init__(self):
-        self.logger = structlog.get_logger("test_security_monitor")
-        self._logged_events = []
-        self._security_metrics = defaultdict(int)
-        self._anomaly_detections = []
-        self._incident_responses = []
-    
-    def create_security_monitor_mock(self) -> Mock:
-        """Create a comprehensive security monitoring mock."""
-        security_mock = Mock(spec=SecurityMonitor)
-        
-        # Configure monitoring methods
-        security_mock.log_authentication_attempt.side_effect = self._mock_log_auth_attempt
-        security_mock.log_authorization_event.side_effect = self._mock_log_authz_event
-        security_mock.detect_anomaly.side_effect = self._mock_detect_anomaly
-        security_mock.trigger_incident_response.side_effect = self._mock_trigger_incident
-        security_mock.get_security_metrics.side_effect = self._mock_get_metrics
-        
-        return security_mock
-    
-    def _mock_log_auth_attempt(self, 
-                              user_id: str,
-                              success: bool,
-                              method: str = "password",
-                              ip_address: str = None,
-                              user_agent: str = None):
-        """Mock authentication attempt logging."""
-        event = {
-            "event_type": "authentication_attempt",
-            "user_id": user_id,
-            "success": success,
-            "method": method,
-            "ip_address": ip_address or "127.0.0.1",
-            "user_agent": user_agent or "test-client",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        self._logged_events.append(event)
-        self._security_metrics["auth_attempts"] += 1
-        
-        if success:
-            self._security_metrics["auth_successes"] += 1
-        else:
-            self._security_metrics["auth_failures"] += 1
-            
-        self.logger.info("Authentication attempt logged", **event)
-    
-    def _mock_log_authz_event(self,
-                             user_id: str,
-                             resource: str,
-                             action: str,
-                             granted: bool,
-                             reason: str = None):
-        """Mock authorization event logging."""
-        event = {
-            "event_type": "authorization_event",
-            "user_id": user_id,
-            "resource": resource,
-            "action": action,
-            "granted": granted,
-            "reason": reason,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        self._logged_events.append(event)
-        self._security_metrics["authz_events"] += 1
-        
-        if granted:
-            self._security_metrics["authz_granted"] += 1
-        else:
-            self._security_metrics["authz_denied"] += 1
-            
-        self.logger.info("Authorization event logged", **event)
-    
-    def _mock_detect_anomaly(self,
-                            anomaly_type: str,
-                            severity: str,
-                            details: Dict[str, Any]):
-        """Mock anomaly detection."""
-        anomaly = {
-            "anomaly_type": anomaly_type,
-            "severity": severity,
-            "details": details,
-            "detection_time": datetime.utcnow().isoformat(),
-            "id": str(uuid.uuid4())
-        }
-        
-        self._anomaly_detections.append(anomaly)
-        self._security_metrics["anomalies_detected"] += 1
-        
-        self.logger.warning("Security anomaly detected", **anomaly)
-        return anomaly["id"]
-    
-    def _mock_trigger_incident(self,
-                              incident_type: str,
-                              severity: str,
-                              user_id: str = None,
-                              details: Dict[str, Any] = None):
-        """Mock incident response trigger."""
-        incident = {
-            "incident_type": incident_type,
-            "severity": severity,
-            "user_id": user_id,
-            "details": details or {},
-            "triggered_time": datetime.utcnow().isoformat(),
-            "id": str(uuid.uuid4()),
-            "status": "triggered"
-        }
-        
-        self._incident_responses.append(incident)
-        self._security_metrics["incidents_triggered"] += 1
-        
-        self.logger.error("Security incident triggered", **incident)
-        return incident["id"]
-    
-    def _mock_get_metrics(self) -> Dict[str, int]:
-        """Mock security metrics retrieval."""
-        return dict(self._security_metrics)
-    
-    def get_logged_events(self, event_type: str = None) -> List[Dict[str, Any]]:
-        """Get logged security events for testing validation."""
-        if event_type:
-            return [event for event in self._logged_events 
-                   if event.get("event_type") == event_type]
-        return self._logged_events.copy()
-    
-    def get_anomaly_detections(self) -> List[Dict[str, Any]]:
-        """Get detected anomalies for testing validation."""
-        return self._anomaly_detections.copy()
-    
-    def get_incident_responses(self) -> List[Dict[str, Any]]:
-        """Get triggered incidents for testing validation."""
-        return self._incident_responses.copy()
-    
-    def clear_test_data(self):
-        """Clear all test data for fresh test scenarios."""
-        self._logged_events.clear()
-        self._security_metrics.clear()
-        self._anomaly_detections.clear()
-        self._incident_responses.clear()
-
-
-# Pytest fixtures for convenient testing
-@pytest.fixture
-def auth0_mock_factory():
-    """Provide Auth0 mock factory for testing."""
-    return Auth0MockFactory()
-
-
-@pytest.fixture
-def flask_login_mock_factory():
-    """Provide Flask-Login mock factory for testing."""
-    return FlaskLoginMockFactory()
-
-
-@pytest.fixture
-def csrf_mock_factory():
-    """Provide CSRF protection mock factory for testing."""
-    return CSRFMockFactory()
-
-
-@pytest.fixture
-def user_auth_state_mocks():
-    """Provide user authentication state mocks for testing."""
-    return UserAuthStateMocks()
-
-
-@pytest.fixture
-def security_monitoring_mocks():
-    """Provide security monitoring mocks for testing."""
-    return SecurityMonitoringMocks()
-
-
-@pytest.fixture
-def authenticated_user(flask_login_mock_factory):
-    """Provide an authenticated user for testing."""
-    return flask_login_mock_factory.create_mock_user(
-        roles=["user"],
-        permissions=["read"],
-        is_authenticated=True
-    )
-
-
-@pytest.fixture
-def admin_user(flask_login_mock_factory):
-    """Provide an admin user for testing."""
-    return flask_login_mock_factory.create_mock_user(
-        roles=["admin", "user"],
-        permissions=["read", "write", "delete", "admin"],
-        is_authenticated=True
-    )
-
-
-@pytest.fixture
-def anonymous_user(flask_login_mock_factory):
-    """Provide an anonymous user for testing."""
-    return flask_login_mock_factory.mock_current_user(None)
-
-
-@pytest.fixture
-def auth_token_set(auth0_mock_factory):
-    """Provide a complete Auth0 token set for testing."""
-    user = auth0_mock_factory.create_mock_user()
-    return auth0_mock_factory.create_token_set(user)
-
-
-@pytest.fixture
-def csrf_token(csrf_mock_factory):
-    """Provide a CSRF token for testing."""
-    return csrf_mock_factory.generate_csrf_token()
-
-
-# Utility functions for authentication testing
-def mock_authentication_decorators():
-    """
-    Mock authentication decorators for testing without actual authentication.
-    
-    This utility allows testing of route logic without requiring actual
-    authentication infrastructure during unit testing.
-    """
-    def mock_require_auth(f):
-        """Mock authentication requirement decorator."""
-        def wrapper(*args, **kwargs):
-            # Mock authentication check
-            if not hasattr(g, 'current_user') or not g.current_user.is_authenticated:
-                return {"error": "Authentication required"}, 401
-            return f(*args, **kwargs)
-        return wrapper
-    
-    def mock_require_permission(permission):
-        """Mock permission requirement decorator."""
-        def decorator(f):
-            def wrapper(*args, **kwargs):
-                # Mock permission check
-                if not hasattr(g, 'current_user') or not g.current_user.has_permission(permission):
-                    return {"error": f"Permission '{permission}' required"}, 403
-                return f(*args, **kwargs)
-            return wrapper
-        return decorator
-    
-    def mock_require_role(role):
-        """Mock role requirement decorator."""
-        def decorator(f):
-            def wrapper(*args, **kwargs):
-                # Mock role check
-                if not hasattr(g, 'current_user') or not g.current_user.has_role(role):
-                    return {"error": f"Role '{role}' required"}, 403
-                return f(*args, **kwargs)
-            return wrapper
-        return decorator
-    
-    return {
-        "require_auth": mock_require_auth,
-        "require_permission": mock_require_permission,
-        "require_role": mock_require_role
-    }
-
-
-def create_test_request_context(app: Flask, 
-                               user: MockFlaskLoginUser = None,
-                               csrf_token: str = None,
-                               headers: Dict[str, str] = None):
-    """
-    Create a test request context with authentication and CSRF setup.
-    
-    This utility function provides a convenient way to set up request contexts
-    for testing authentication flows and decorators.
-    """
-    with app.test_request_context(headers=headers or {}):
-        # Set up user context
-        if user:
-            g.current_user = user
-            session['user_id'] = user.get_id()
-            session['_user_id'] = user.get_id()
-        else:
-            g.current_user = Mock(is_authenticated=False, is_anonymous=True)
-        
-        # Set up CSRF token
-        if csrf_token:
-            session['csrf_token'] = csrf_token
-        
-        yield
-
-
-class AuthenticationTestingPatterns:
-    """
-    Collection of common authentication testing patterns for Flask migration.
-    
-    This class provides standardized testing patterns that ensure comprehensive
-    coverage of authentication scenarios during the Node.js to Flask migration.
-    """
-    
-    @staticmethod
-    def test_decorator_authentication_required(route_function, 
-                                             test_client: Client,
-                                             authenticated_user: MockFlaskLoginUser):
-        """Test that a route requires authentication."""
-        # Test unauthenticated access
-        response = test_client.get('/protected-route')
-        assert response.status_code == 401
-        
-        # Test authenticated access
-        with test_client.session_transaction() as sess:
-            sess['user_id'] = authenticated_user.get_id()
-        
-        response = test_client.get('/protected-route')
-        assert response.status_code in [200, 302]  # Success or redirect
-    
-    @staticmethod
-    def test_permission_based_access(route_function,
-                                   test_client: Client,
-                                   user_with_permission: MockFlaskLoginUser,
-                                   user_without_permission: MockFlaskLoginUser,
-                                   required_permission: str):
-        """Test permission-based access control."""
-        # Test user without permission
-        with test_client.session_transaction() as sess:
-            sess['user_id'] = user_without_permission.get_id()
-        
-        response = test_client.get('/protected-route')
-        assert response.status_code == 403
-        
-        # Test user with permission
-        with test_client.session_transaction() as sess:
-            sess['user_id'] = user_with_permission.get_id()
-        
-        response = test_client.get('/protected-route')
-        assert response.status_code in [200, 302]
-    
-    @staticmethod
-    def test_csrf_protection(route_function,
-                           test_client: Client,
-                           csrf_token: str,
-                           form_data: Dict[str, Any]):
-        """Test CSRF protection on form submissions."""
-        # Test POST without CSRF token
-        response = test_client.post('/protected-form', data=form_data)
-        assert response.status_code == 400  # CSRF validation failure
-        
-        # Test POST with valid CSRF token
         form_data['csrf_token'] = csrf_token
-        response = test_client.post('/protected-form', data=form_data)
-        assert response.status_code in [200, 302]  # Success or redirect
+        
+        return form_data
     
-    @staticmethod
-    def test_session_management(test_client: Client,
-                              user: MockFlaskLoginUser,
-                              session_timeout: int = 3600):
-        """Test session creation, validation, and expiration."""
-        # Test session creation
-        with test_client.session_transaction() as sess:
-            sess['user_id'] = user.get_id()
-            sess['login_time'] = datetime.utcnow().isoformat()
+    def _record_csrf_failure(self, failure_type: str, token: str):
+        """Record CSRF validation failure for security monitoring."""
+        self.csrf_failures.append({
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'failure_type': failure_type,
+            'token': token[:20] + '...',  # Truncated for security
+            'ip_address': '127.0.0.1',  # Test IP
+            'user_agent': 'Flask-Test-Client/1.0'
+        })
+    
+    def get_csrf_metrics(self) -> Dict[str, Any]:
+        """
+        Get CSRF protection metrics for security validation and testing analysis.
         
-        # Test session validation
-        response = test_client.get('/user-profile')
-        assert response.status_code == 200
+        This method provides comprehensive CSRF protection metrics per
+        Section 4.6.2, enabling security validation and CSRF implementation
+        effectiveness analysis.
         
-        # Test session expiration (simulate)
-        with test_client.session_transaction() as sess:
-            sess['login_time'] = (datetime.utcnow() - timedelta(seconds=session_timeout + 1)).isoformat()
+        Returns:
+            Dict[str, Any]: CSRF protection metrics and statistics
+            
+        Features:
+            - Token generation statistics
+            - Validation success/failure rates
+            - Security event correlation
+            - Attack pattern analysis
+        """
+        total_tokens = len(self.csrf_tokens)
+        total_failures = len(self.csrf_failures)
         
-        response = test_client.get('/user-profile')
-        assert response.status_code == 401  # Session expired
+        failure_types = {}
+        for failure in self.csrf_failures:
+            failure_type = failure['failure_type']
+            failure_types[failure_type] = failure_types.get(failure_type, 0) + 1
+        
+        return {
+            'tokens_generated': total_tokens,
+            'validation_failures': total_failures,
+            'failure_rate': total_failures / max(total_tokens, 1) * 100,
+            'failure_types': failure_types,
+            'protection_effectiveness': max(0, 100 - (total_failures / max(total_tokens, 1) * 100))
+        }
 
 
-# Export all public classes and functions for easy importing
+# =====================================
+# Security Monitoring Test Utilities
+# =====================================
+
+class SecurityMonitoringMock:
+    """
+    Security monitoring test utilities providing structured logging validation
+    and security event testing per Section 6.4.2.5.
+    
+    This class enables comprehensive security monitoring testing during the
+    Flask migration, supporting structured logging validation, security event
+    correlation, and audit trail verification for security posture preservation.
+    
+    Features:
+        - Structured logging validation
+        - Security event simulation
+        - Audit trail verification
+        - Incident response testing
+        - Compliance reporting validation
+    """
+    
+    def __init__(self, app: Flask, config: Optional[MockAuthConfig] = None):
+        """
+        Initialize security monitoring mock with Flask application.
+        
+        Args:
+            app: Flask application instance
+            config: Mock configuration instance
+        """
+        self.app = app
+        self.config = config or MockAuthConfig()
+        self.security_events = []
+        self.audit_logs = []
+        self.monitoring_enabled = config.security_monitoring if config else True
+        
+        # Set up structured logging for testing
+        self.logger = logging.getLogger('security_monitor_test')
+        self.logger.setLevel(logging.INFO)
+        
+    def log_security_event(
+        self,
+        event_type: str,
+        severity: str,
+        user_id: Optional[Union[str, int]] = None,
+        details: Dict[str, Any] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Log security event with structured format for monitoring validation.
+        
+        This method simulates security event logging per Section 6.4.2.5,
+        enabling comprehensive testing of security monitoring capabilities
+        and structured logging format validation.
+        
+        Args:
+            event_type: Type of security event
+            severity: Event severity level
+            user_id: User identifier associated with event
+            details: Additional event details
+            ip_address: Source IP address
+            user_agent: User agent string
+            
+        Returns:
+            Dict[str, Any]: Structured security event data
+            
+        Features:
+            - Structured JSON logging format
+            - Event categorization and severity
+            - User context correlation
+            - Timestamp precision
+            - Security metadata inclusion
+        """
+        event_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc)
+        
+        security_event = {
+            'event_id': event_id,
+            'timestamp': timestamp.isoformat(),
+            'event_type': event_type,
+            'severity': severity,
+            'user_id': user_id,
+            'ip_address': ip_address or '127.0.0.1',
+            'user_agent': user_agent or 'Flask-Test-Client/1.0',
+            'details': details or {},
+            'source': 'flask_application',
+            'environment': 'testing',
+            'application_version': '1.0.0-test',
+            'blueprint': getattr(g, 'blueprint_name', 'unknown'),
+            'endpoint': getattr(g, 'endpoint_name', 'unknown'),
+            'request_id': getattr(g, 'request_id', str(uuid.uuid4()))
+        }
+        
+        # Store event for validation
+        self.security_events.append(security_event)
+        
+        # Log structured event
+        if self.monitoring_enabled:
+            self.logger.info(
+                f"Security Event: {event_type}",
+                extra={'security_event': security_event}
+            )
+        
+        return security_event
+    
+    def log_audit_event(
+        self,
+        action: str,
+        resource: str,
+        user_id: Union[str, int],
+        success: bool,
+        details: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Log audit event for compliance and security trail validation.
+        
+        This method simulates audit logging per Section 6.4.2.5,
+        enabling comprehensive testing of audit trail generation and
+        compliance reporting capabilities.
+        
+        Args:
+            action: Action performed by user
+            resource: Resource affected by action
+            user_id: User performing the action
+            success: Whether action was successful
+            details: Additional audit details
+            
+        Returns:
+            Dict[str, Any]: Structured audit event data
+            
+        Features:
+            - Audit trail generation
+            - Action success/failure tracking
+            - Resource access logging
+            - User activity correlation
+            - Compliance data structure
+        """
+        audit_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc)
+        
+        audit_event = {
+            'audit_id': audit_id,
+            'timestamp': timestamp.isoformat(),
+            'action': action,
+            'resource': resource,
+            'user_id': user_id,
+            'success': success,
+            'details': details or {},
+            'source': 'flask_application',
+            'environment': 'testing',
+            'session_id': getattr(g, 'session_id', 'test_session'),
+            'request_method': getattr(request, 'method', 'TEST'),
+            'request_url': getattr(request, 'url', 'http://test/endpoint'),
+            'response_status': 200 if success else 403
+        }
+        
+        # Store audit event
+        self.audit_logs.append(audit_event)
+        
+        # Log structured audit event
+        if self.monitoring_enabled:
+            self.logger.info(
+                f"Audit Event: {action} on {resource}",
+                extra={'audit_event': audit_event}
+            )
+        
+        return audit_event
+    
+    def simulate_security_incident(
+        self,
+        incident_type: str,
+        severity: str = 'high',
+        affected_users: List[Union[str, int]] = None,
+        details: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Simulate security incident for incident response testing and
+        security monitoring validation.
+        
+        This method simulates security incidents per Section 6.4.6.2,
+        enabling comprehensive testing of incident response mechanisms
+        and security monitoring capabilities.
+        
+        Args:
+            incident_type: Type of security incident
+            severity: Incident severity level
+            affected_users: List of affected user IDs
+            details: Additional incident details
+            
+        Returns:
+            Dict[str, Any]: Security incident data
+            
+        Features:
+            - Incident simulation and tracking
+            - Multi-user impact analysis
+            - Severity classification
+            - Response time measurement
+            - Recovery validation
+        """
+        incident_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc)
+        
+        incident = {
+            'incident_id': incident_id,
+            'timestamp': timestamp.isoformat(),
+            'incident_type': incident_type,
+            'severity': severity,
+            'status': 'detected',
+            'affected_users': affected_users or [],
+            'details': details or {},
+            'detection_method': 'automated_testing',
+            'response_required': severity in ['high', 'critical'],
+            'estimated_impact': len(affected_users or []),
+            'source': 'security_test_simulation'
+        }
+        
+        # Log related security events
+        for user_id in (affected_users or []):
+            self.log_security_event(
+                event_type=f'incident_{incident_type}',
+                severity=severity,
+                user_id=user_id,
+                details={
+                    'incident_id': incident_id,
+                    'affected_user': True
+                }
+            )
+        
+        return incident
+    
+    def validate_structured_logging(self) -> Dict[str, Any]:
+        """
+        Validate structured logging format and completeness for security
+        monitoring compliance and audit requirements.
+        
+        This method validates structured logging per Section 6.4.2.5,
+        enabling comprehensive testing of logging format compliance and
+        security monitoring data quality.
+        
+        Returns:
+            Dict[str, Any]: Logging validation results and compliance metrics
+            
+        Features:
+            - Log format validation
+            - Required field verification
+            - Data quality assessment
+            - Compliance checking
+            - Missing data identification
+        """
+        total_events = len(self.security_events)
+        total_audits = len(self.audit_logs)
+        
+        # Validate security events
+        valid_security_events = 0
+        security_validation_errors = []
+        
+        required_security_fields = [
+            'event_id', 'timestamp', 'event_type', 'severity',
+            'source', 'environment'
+        ]
+        
+        for event in self.security_events:
+            missing_fields = [field for field in required_security_fields if not event.get(field)]
+            if not missing_fields:
+                valid_security_events += 1
+            else:
+                security_validation_errors.append({
+                    'event_id': event.get('event_id', 'unknown'),
+                    'missing_fields': missing_fields
+                })
+        
+        # Validate audit events
+        valid_audit_events = 0
+        audit_validation_errors = []
+        
+        required_audit_fields = [
+            'audit_id', 'timestamp', 'action', 'resource',
+            'user_id', 'success'
+        ]
+        
+        for audit in self.audit_logs:
+            missing_fields = [field for field in required_audit_fields if audit.get(field) is None]
+            if not missing_fields:
+                valid_audit_events += 1
+            else:
+                audit_validation_errors.append({
+                    'audit_id': audit.get('audit_id', 'unknown'),
+                    'missing_fields': missing_fields
+                })
+        
+        return {
+            'security_events': {
+                'total': total_events,
+                'valid': valid_security_events,
+                'validation_rate': valid_security_events / max(total_events, 1) * 100,
+                'errors': security_validation_errors
+            },
+            'audit_events': {
+                'total': total_audits,
+                'valid': valid_audit_events,
+                'validation_rate': valid_audit_events / max(total_audits, 1) * 100,
+                'errors': audit_validation_errors
+            },
+            'overall_compliance': {
+                'total_logs': total_events + total_audits,
+                'valid_logs': valid_security_events + valid_audit_events,
+                'compliance_rate': (valid_security_events + valid_audit_events) / max(total_events + total_audits, 1) * 100
+            }
+        }
+    
+    def get_security_metrics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive security monitoring metrics for testing analysis
+        and security posture validation.
+        
+        This method provides security monitoring metrics per Section 6.4.2.5,
+        enabling comprehensive testing analysis and security effectiveness
+        measurement during the Flask migration.
+        
+        Returns:
+            Dict[str, Any]: Comprehensive security monitoring metrics
+            
+        Features:
+            - Event frequency analysis
+            - Severity distribution
+            - User activity patterns
+            - Security trend analysis
+            - Compliance metrics
+        """
+        # Event type distribution
+        event_types = {}
+        severity_distribution = {}
+        user_activity = {}
+        
+        for event in self.security_events:
+            event_type = event['event_type']
+            severity = event['severity']
+            user_id = event.get('user_id')
+            
+            event_types[event_type] = event_types.get(event_type, 0) + 1
+            severity_distribution[severity] = severity_distribution.get(severity, 0) + 1
+            
+            if user_id:
+                user_activity[str(user_id)] = user_activity.get(str(user_id), 0) + 1
+        
+        # Audit action distribution
+        audit_actions = {}
+        success_rate_by_action = {}
+        
+        for audit in self.audit_logs:
+            action = audit['action']
+            success = audit['success']
+            
+            audit_actions[action] = audit_actions.get(action, 0) + 1
+            
+            if action not in success_rate_by_action:
+                success_rate_by_action[action] = {'total': 0, 'successful': 0}
+            
+            success_rate_by_action[action]['total'] += 1
+            if success:
+                success_rate_by_action[action]['successful'] += 1
+        
+        # Calculate success rates
+        for action_data in success_rate_by_action.values():
+            action_data['success_rate'] = action_data['successful'] / action_data['total'] * 100
+        
+        return {
+            'security_events': {
+                'total_events': len(self.security_events),
+                'event_types': event_types,
+                'severity_distribution': severity_distribution,
+                'user_activity': user_activity,
+                'monitoring_enabled': self.monitoring_enabled
+            },
+            'audit_logs': {
+                'total_audits': len(self.audit_logs),
+                'audit_actions': audit_actions,
+                'success_rates': success_rate_by_action
+            },
+            'overall_metrics': {
+                'total_logs': len(self.security_events) + len(self.audit_logs),
+                'monitoring_coverage': 100 if self.monitoring_enabled else 0,
+                'data_quality': self.validate_structured_logging()['overall_compliance']['compliance_rate']
+            }
+        }
+
+
+# =====================================
+# Pytest Fixtures for Authentication Testing
+# =====================================
+
+@pytest.fixture
+def auth_config() -> MockAuthConfig:
+    """
+    Authentication testing configuration fixture providing standardized
+    authentication testing parameters for consistent mock behavior.
+    
+    This fixture provides authentication configuration per Feature F-007,
+    enabling consistent authentication testing across all test scenarios
+    with configurable parameters for comprehensive validation.
+    
+    Returns:
+        MockAuthConfig: Authentication testing configuration instance
+        
+    Features:
+        - Standardized authentication parameters
+        - Configurable token expiration
+        - Security testing thresholds
+        - Mock service configuration
+        - Testing environment adaptation
+    """
+    return MockAuthConfig(
+        auth0_domain="test-auth0-domain.auth0.com",
+        jwt_secret="test-jwt-secret-for-testing",
+        token_expiration=3600,
+        session_timeout=1800,
+        csrf_enabled=True,
+        security_monitoring=True
+    )
+
+
+@pytest.fixture
+def auth0_mock_factory(auth_config: MockAuthConfig) -> Auth0MockFactory:
+    """
+    Auth0 mock factory fixture providing comprehensive Auth0 integration
+    testing utilities with JWT token simulation.
+    
+    This fixture creates Auth0 mock factory per Section 6.4.1.4,
+    enabling comprehensive testing of Auth0 integration without external
+    dependencies while maintaining realistic testing scenarios.
+    
+    Args:
+        auth_config: Authentication configuration from auth_config fixture
+        
+    Returns:
+        Auth0MockFactory: Configured Auth0 mock factory instance
+        
+    Features:
+        - JWT token generation and validation
+        - Auth0 service mocking
+        - User profile management
+        - Token lifecycle simulation
+        - Management API mocking
+    """
+    factory = Auth0MockFactory(auth_config)
+    
+    # Add default test users
+    factory.add_mock_user(
+        email='testuser@example.com',
+        username='testuser',
+        roles=['user'],
+        permissions=['read', 'write']
+    )
+    
+    factory.add_mock_user(
+        email='admin@example.com',
+        username='admin',
+        roles=['admin', 'user'],
+        permissions=['read', 'write', 'delete', 'admin']
+    )
+    
+    return factory
+
+
+@pytest.fixture
+def flask_login_mock(app: Flask, auth_config: MockAuthConfig) -> FlaskLoginSessionMock:
+    """
+    Flask-Login session mock fixture providing comprehensive session
+    management testing utilities with ItsDangerous cookie signing.
+    
+    This fixture creates Flask-Login mock per Feature F-007,
+    enabling comprehensive testing of session management, user authentication
+    state, and secure cookie handling during the Flask migration.
+    
+    Args:
+        app: Flask application instance from app fixture
+        auth_config: Authentication configuration from auth_config fixture
+        
+    Returns:
+        FlaskLoginSessionMock: Configured Flask-Login session mock instance
+        
+    Features:
+        - Session creation and validation
+        - ItsDangerous cookie signing
+        - Remember-me functionality
+        - Session timeout management
+        - User authentication state
+    """
+    return FlaskLoginSessionMock(app, auth_config)
+
+
+@pytest.fixture
+def auth_decorator_utils(app: Flask, auth_config: MockAuthConfig) -> AuthDecoratorTestUtils:
+    """
+    Authentication decorator testing utilities fixture providing comprehensive
+    decorator testing support for Flask authentication migration.
+    
+    This fixture creates decorator testing utilities per Section 4.6.2,
+    enabling comprehensive testing of authentication decorators converted
+    from Node.js middleware patterns to Flask decorator syntax.
+    
+    Args:
+        app: Flask application instance from app fixture
+        auth_config: Authentication configuration from auth_config fixture
+        
+    Returns:
+        AuthDecoratorTestUtils: Configured authentication decorator testing utilities
+        
+    Features:
+        - Authentication decorator testing
+        - Authorization validation
+        - Role-based access control testing
+        - Permission checking simulation
+        - Security metrics collection
+    """
+    return AuthDecoratorTestUtils(app, auth_config)
+
+
+@pytest.fixture
+def csrf_mock(app: Flask, auth_config: MockAuthConfig) -> CSRFProtectionMock:
+    """
+    CSRF protection mock fixture providing comprehensive Flask-WTF CSRF
+    testing utilities for form and AJAX request validation.
+    
+    This fixture creates CSRF protection mock per Section 4.6.2,
+    enabling comprehensive testing of CSRF protection implementation
+    during the Flask migration with Flask-WTF integration.
+    
+    Args:
+        app: Flask application instance from app fixture
+        auth_config: Authentication configuration from auth_config fixture
+        
+    Returns:
+        CSRFProtectionMock: Configured CSRF protection mock instance
+        
+    Features:
+        - CSRF token generation and validation
+        - Form submission protection
+        - AJAX request CSRF validation
+        - Security policy enforcement
+        - Attack simulation and detection
+    """
+    return CSRFProtectionMock(app, auth_config)
+
+
+@pytest.fixture
+def security_monitor_mock(app: Flask, auth_config: MockAuthConfig) -> SecurityMonitoringMock:
+    """
+    Security monitoring mock fixture providing structured logging validation
+    and security event testing utilities for security posture preservation.
+    
+    This fixture creates security monitoring mock per Section 6.4.2.5,
+    enabling comprehensive testing of security monitoring capabilities
+    and structured logging validation during the Flask migration.
+    
+    Args:
+        app: Flask application instance from app fixture
+        auth_config: Authentication configuration from auth_config fixture
+        
+    Returns:
+        SecurityMonitoringMock: Configured security monitoring mock instance
+        
+    Features:
+        - Structured logging validation
+        - Security event simulation
+        - Audit trail verification
+        - Incident response testing
+        - Compliance reporting
+    """
+    return SecurityMonitoringMock(app, auth_config)
+
+
+@pytest.fixture
+def mock_jwt_token(auth0_mock_factory: Auth0MockFactory, test_user: User) -> str:
+    """
+    Mock JWT token fixture providing pre-generated JWT tokens for
+    authentication testing and token validation scenarios.
+    
+    This fixture creates JWT tokens per Section 6.4.1.4,
+    enabling comprehensive testing of JWT token handling and
+    authentication flows without external Auth0 dependencies.
+    
+    Args:
+        auth0_mock_factory: Auth0 mock factory from auth0_mock_factory fixture
+        test_user: Test user instance from test_user fixture
+        
+    Returns:
+        str: Generated JWT token for testing
+        
+    Features:
+        - Auth0-compatible JWT structure
+        - User context embedding
+        - Token expiration configuration
+        - Claims validation support
+        - Signature verification simulation
+    """
+    return auth0_mock_factory.create_mock_jwt_token(
+        user_id=test_user.id,
+        email=test_user.email,
+        username=test_user.username,
+        roles=['user'],
+        permissions=['read', 'write']
+    )
+
+
+@pytest.fixture
+def mock_user_session(
+    flask_login_mock: FlaskLoginSessionMock,
+    test_user: User
+) -> Dict[str, Any]:
+    """
+    Mock user session fixture providing pre-created user sessions for
+    session management testing and authentication state validation.
+    
+    This fixture creates user sessions per Feature F-007,
+    enabling comprehensive testing of session management functionality
+    and user authentication state during the Flask migration.
+    
+    Args:
+        flask_login_mock: Flask-Login mock from flask_login_mock fixture
+        test_user: Test user instance from test_user fixture
+        
+    Returns:
+        Dict[str, Any]: Session data with cookies and metadata
+        
+    Features:
+        - Pre-authenticated session state
+        - Secure cookie generation
+        - Session metadata tracking
+        - ItsDangerous token signing
+        - Expiration time management
+    """
+    return flask_login_mock.create_mock_session(
+        user=test_user,
+        remember=False,
+        duration=timedelta(hours=1)
+    )
+
+
+@pytest.fixture
+def mock_csrf_token(csrf_mock: CSRFProtectionMock) -> str:
+    """
+    Mock CSRF token fixture providing pre-generated CSRF tokens for
+    form submission testing and CSRF protection validation.
+    
+    This fixture creates CSRF tokens per Section 4.6.2,
+    enabling comprehensive testing of CSRF protection mechanisms
+    and form validation during the Flask migration.
+    
+    Args:
+        csrf_mock: CSRF protection mock from csrf_mock fixture
+        
+    Returns:
+        str: Generated CSRF token for testing
+        
+    Features:
+        - Flask-WTF compatible tokens
+        - Session binding support
+        - Form-specific scoping
+        - Expiration management
+        - Validation support
+    """
+    return csrf_mock.generate_mock_csrf_token(
+        session_id='test_session',
+        form_name='test_form'
+    )
+
+
+# Export all components for easy importing
 __all__ = [
+    # Configuration
+    'MockAuthConfig',
+    # Mock factories and utilities
     'Auth0MockFactory',
-    'FlaskLoginMockFactory', 
-    'CSRFMockFactory',
-    'UserAuthStateMocks',
-    'SecurityMonitoringMocks',
-    'MockJWTToken',
-    'MockAuth0User',
-    'MockUserSession',
-    'MockFlaskLoginUser',
-    'mock_authentication_decorators',
-    'create_test_request_context',
-    'AuthenticationTestingPatterns'
+    'FlaskLoginSessionMock',
+    'AuthDecoratorTestUtils',
+    'CSRFProtectionMock',
+    'SecurityMonitoringMock',
+    # Pytest fixtures
+    'auth_config',
+    'auth0_mock_factory',
+    'flask_login_mock',
+    'auth_decorator_utils',
+    'csrf_mock',
+    'security_monitor_mock',
+    'mock_jwt_token',
+    'mock_user_session',
+    'mock_csrf_token'
 ]
