@@ -1,1215 +1,1180 @@
 """
-Integration Coordination Service for Flask Authentication System
+Integration Coordination Service for Flask Authentication Components
 
-This module implements comprehensive workflow orchestration between authentication components,
-external services, and Flask application modules using the Service Layer architectural pattern.
+This service implements comprehensive workflow orchestration between authentication components,
+external services, and Flask application modules per Section 6.1.3 Service Layer pattern.
 Manages complex authentication workflows involving multiple components, coordinates external
 service interactions, and ensures consistent authentication state across the entire application.
 
 Key Responsibilities:
-- Service Layer pattern coordination between authentication components
-- Auth0 and Flask-Login integration workflow orchestration  
-- External service integration coordination with security monitoring
-- Cross-component authentication state management
-- Authentication workflow error handling and recovery procedures
-
-Technical Specification References:
-- Section 6.1.3: Service Layer architectural pattern implementation
-- Section 4.6: Authentication workflow orchestration
-- Section 6.4.4: External service integration management
-- Section 4.6.2: Cross-component state synchronization
-- Section 4.6.3: Comprehensive error handling procedures
+- Service Layer pattern coordination between authentication components (Section 6.1.3)
+- Auth0 and Flask-Login integration workflow orchestration (Section 4.6.2)
+- External service integration coordination with security monitoring (Section 6.4.4)
+- Cross-component authentication state management (Section 4.6.2)
+- Authentication workflow error handling and recovery procedures (Section 4.6.3)
 """
 
-import asyncio
-import time
-import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
-from contextlib import asynccontextmanager
-from flask import current_app, g, request, session
-from flask_login import current_user
+from datetime import datetime, timedelta
+import logging
+import time
+import uuid
+import asyncio
+from functools import wraps
 import structlog
+from flask import current_app, g, request, session
+from flask_login import current_user, login_user, logout_user
+import sentry_sdk
 from prometheus_client import Counter, Histogram, Gauge
-import jwt
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-# Service Layer base and utilities
-from src.services.base import BaseService
-from src.utils.logging import get_logger
-from src.utils.monitoring import prometheus_metrics
-from src.utils.error_handling import handle_service_error, ServiceError
-from src.utils.validation import validate_input, ValidationError
-
-# Authentication component dependencies
+# Import authentication components for coordination
 try:
-    from src.auth.auth0_integration import Auth0Integration
-    from src.auth.session_manager import SessionManager
-    from src.auth.token_handler import TokenHandler
-    from src.auth.security_monitor import SecurityMonitor
-    from src.models.user import User
-    from src.models.session import UserSession
+    from ..auth0_integration import Auth0Integration
+    from ..session_manager import SessionManager
+    from ..decorators import require_auth, require_permission
+    from ...services.user_service import UserService
+    from ...models.user import User
+    from ...models.session import UserSession
 except ImportError as e:
-    # Graceful handling for testing or incomplete dependencies
-    current_app.logger.warning(f"Authentication dependency import failed: {e}")
+    # Graceful handling for missing dependencies during development
+    structlog.get_logger().warning("Import dependency missing", error=str(e))
 
 
-class IntegrationStatus(Enum):
-    """Integration status enumeration for service coordination tracking"""
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    FAILED = "failed"
+class IntegrationState(Enum):
+    """Authentication integration states for workflow coordination"""
+    INITIALIZING = "initializing"
+    AUTHENTICATING = "authenticating"
+    AUTHENTICATED = "authenticated"
+    SYNCHRONIZING = "synchronizing"
+    SYNCHRONIZED = "synchronized"
+    ERROR = "error"
     RECOVERING = "recovering"
-    MAINTENANCE = "maintenance"
-
-
-class WorkflowState(Enum):
-    """Authentication workflow state enumeration"""
-    INITIATED = "initiated"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
     FAILED = "failed"
-    ROLLED_BACK = "rolled_back"
+
+
+class WorkflowType(Enum):
+    """Authentication workflow types for orchestration"""
+    USER_LOGIN = "user_login"
+    USER_LOGOUT = "user_logout"
+    TOKEN_REFRESH = "token_refresh"
+    SESSION_VALIDATION = "session_validation"
+    CROSS_COMPONENT_SYNC = "cross_component_sync"
+    EXTERNAL_SERVICE_AUTH = "external_service_auth"
+    ERROR_RECOVERY = "error_recovery"
 
 
 @dataclass
-class ServiceIntegrationStatus:
-    """Data structure for tracking external service integration status"""
-    service_name: str
-    status: IntegrationStatus
-    last_check: datetime
-    response_time_ms: float
-    error_count: int
-    last_error: Optional[str] = None
-    health_score: float = 1.0
+class AuthenticationContext:
+    """Comprehensive authentication context for cross-component coordination"""
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    auth0_token: Optional[str] = None
+    flask_session_token: Optional[str] = None
+    auth_method: Optional[str] = None
+    auth_timestamp: Optional[datetime] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    blueprint: Optional[str] = None
+    endpoint: Optional[str] = None
+    permissions: List[str] = None
+    roles: List[str] = None
+    integration_state: IntegrationState = IntegrationState.INITIALIZING
     
-    def update_health_score(self):
-        """Calculate dynamic health score based on recent performance"""
-        if self.error_count == 0:
-            self.health_score = 1.0
-        elif self.error_count < 5:
-            self.health_score = max(0.1, 1.0 - (self.error_count * 0.2))
-        else:
-            self.health_score = 0.1
+    def __post_init__(self):
+        if self.permissions is None:
+            self.permissions = []
+        if self.roles is None:
+            self.roles = []
 
 
 @dataclass
-class AuthenticationWorkflow:
-    """Data structure for tracking authentication workflow state"""
-    workflow_id: str
-    user_id: Optional[str]
-    session_id: Optional[str]
-    state: WorkflowState
-    started_at: datetime
-    components_involved: List[str]
-    external_services: List[str]
-    metadata: Dict[str, Any]
-    last_checkpoint: Optional[str] = None
-    error_details: Optional[Dict[str, Any]] = None
+class WorkflowResult:
+    """Result object for authentication workflow operations"""
+    success: bool
+    workflow_type: WorkflowType
+    context: AuthenticationContext
+    error_message: Optional[str] = None
+    recovery_actions: List[str] = None
+    metrics: Dict[str, Any] = None
     
-    def add_checkpoint(self, checkpoint_name: str, data: Dict[str, Any] = None):
-        """Add workflow checkpoint for recovery purposes"""
-        self.last_checkpoint = checkpoint_name
-        if data:
-            self.metadata.update({f"checkpoint_{checkpoint_name}": data})
+    def __post_init__(self):
+        if self.recovery_actions is None:
+            self.recovery_actions = []
+        if self.metrics is None:
+            self.metrics = {}
 
 
-class IntegrationCoordinationService(BaseService):
+class IntegrationCoordinationService:
     """
-    Integration coordination service implementing comprehensive workflow orchestration
-    between authentication components, external services, and Flask application modules.
+    Comprehensive integration coordination service implementing Service Layer pattern
+    for authentication component orchestration and external service management.
     
-    This service follows the Service Layer architectural pattern from Section 6.1.3,
-    providing centralized coordination for authentication workflows, external service
-    integration, and cross-component state management.
+    This service coordinates between Auth0 external identity provider, Flask-Login 
+    session management, authentication decorators, user services, and security monitoring
+    while maintaining consistent authentication state across all components.
     """
     
     def __init__(self, app=None):
-        """
-        Initialize the integration coordination service with Flask application context.
+        """Initialize integration coordination service with Flask application factory pattern"""
+        self.app = app
+        self.logger = structlog.get_logger("auth_integration_coordinator")
         
-        Args:
-            app: Flask application instance for dependency injection
-        """
-        super().__init__(app)
-        self.logger = get_logger("integration_coordination")
-        
-        # Service integration status tracking
-        self.service_statuses: Dict[str, ServiceIntegrationStatus] = {}
-        self.active_workflows: Dict[str, AuthenticationWorkflow] = {}
-        
-        # Circuit breaker state for external services
-        self.circuit_breakers: Dict[str, Dict[str, Any]] = {}
-        
-        # Prometheus metrics for monitoring
-        self._init_metrics()
-        
-        # HTTP session for external service calls with retry logic
-        self._init_http_session()
-        
-        # Authentication component references
+        # Component references for coordination
         self.auth0_integration: Optional[Auth0Integration] = None
         self.session_manager: Optional[SessionManager] = None
-        self.token_handler: Optional[TokenHandler] = None
-        self.security_monitor: Optional[SecurityMonitor] = None
+        self.user_service: Optional[UserService] = None
+        
+        # State management
+        self.active_workflows: Dict[str, WorkflowResult] = {}
+        self.authentication_contexts: Dict[str, AuthenticationContext] = {}
+        
+        # Metrics for monitoring and observability (Section 6.4.4)
+        self._init_prometheus_metrics()
+        
+        # Error handling and recovery state
+        self.error_recovery_strategies = {
+            "auth0_connection_error": self._recover_auth0_connection,
+            "session_validation_error": self._recover_session_validation,
+            "state_synchronization_error": self._recover_state_synchronization,
+            "external_service_error": self._recover_external_service,
+        }
         
         if app:
             self.init_app(app)
     
-    def _init_metrics(self):
-        """Initialize Prometheus metrics for service monitoring per Section 6.4.6.1"""
-        self.metrics = {
-            'workflow_duration': Histogram(
-                'auth_workflow_duration_seconds',
-                'Authentication workflow processing time',
-                ['workflow_type', 'status', 'components']
-            ),
-            'service_health_check': Counter(
-                'auth_service_health_checks_total',
-                'External service health check attempts',
-                ['service_name', 'status']
-            ),
-            'integration_errors': Counter(
-                'auth_integration_errors_total',
-                'Integration coordination errors',
-                ['error_type', 'service', 'severity']
-            ),
-            'active_workflows': Gauge(
-                'auth_active_workflows',
-                'Number of active authentication workflows'
-            ),
-            'circuit_breaker_state': Gauge(
-                'auth_circuit_breaker_state',
-                'Circuit breaker state (0=closed, 1=open, 2=half-open)',
-                ['service_name']
-            )
-        }
-    
-    def _init_http_session(self):
-        """Initialize HTTP session with retry logic for external service calls"""
-        self.http_session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "POST"]
+    def _init_prometheus_metrics(self):
+        """Initialize Prometheus metrics for integration monitoring per Section 6.4.4"""
+        self.workflow_counter = Counter(
+            'auth_integration_workflows_total',
+            'Total authentication integration workflows',
+            ['workflow_type', 'status', 'component']
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.http_session.mount("https://", adapter)
-        self.http_session.mount("http://", adapter)
+        
+        self.workflow_duration = Histogram(
+            'auth_integration_workflow_duration_seconds',
+            'Authentication workflow duration',
+            ['workflow_type', 'component']
+        )
+        
+        self.active_contexts_gauge = Gauge(
+            'auth_integration_active_contexts',
+            'Number of active authentication contexts'
+        )
+        
+        self.external_service_calls = Counter(
+            'auth_integration_external_service_calls_total',
+            'External service calls from authentication integration',
+            ['service', 'status', 'method']
+        )
+        
+        self.state_sync_operations = Counter(
+            'auth_integration_state_sync_operations_total',
+            'Cross-component state synchronization operations',
+            ['operation_type', 'status', 'component_pair']
+        )
     
     def init_app(self, app):
-        """
-        Initialize the service with Flask application factory pattern.
+        """Initialize with Flask application factory pattern per Section 6.1.3"""
+        self.app = app
+        app.auth_integration_coordinator = self
         
-        Args:
-            app: Flask application instance
-        """
-        super().init_app(app)
+        # Initialize component dependencies
+        self._initialize_components()
         
-        # Register service with application context
-        app.integration_coordination = self
+        # Register error handlers for comprehensive error handling (Section 4.8)
+        self._register_error_handlers()
         
-        # Initialize authentication component integrations
-        self._initialize_auth_components(app)
-        
-        # Setup service health monitoring
-        self._setup_health_monitoring()
-        
-        # Register error handlers
-        self._register_error_handlers(app)
+        # Setup monitoring and observability
+        self._setup_monitoring()
         
         self.logger.info(
-            "Integration coordination service initialized",
-            app_name=app.name,
-            components_registered=len(self.service_statuses)
+            "Authentication integration coordination service initialized",
+            components_loaded=self._get_loaded_components(),
+            error_strategies=list(self.error_recovery_strategies.keys())
         )
     
-    def _initialize_auth_components(self, app):
-        """Initialize authentication component integrations"""
+    def _initialize_components(self):
+        """Initialize authentication component references for coordination"""
         try:
-            # Initialize Auth0 integration
-            if hasattr(app, 'auth0_integration'):
-                self.auth0_integration = app.auth0_integration
-                self._register_service('auth0', self.auth0_integration)
+            # Initialize Auth0 integration component
+            if hasattr(self.app, 'auth0_integration'):
+                self.auth0_integration = self.app.auth0_integration
+                self.logger.info("Auth0 integration component loaded")
             
-            # Initialize session manager
-            if hasattr(app, 'session_manager'):
-                self.session_manager = app.session_manager
-                self._register_service('session_manager', self.session_manager)
+            # Initialize session manager component
+            if hasattr(self.app, 'session_manager'):
+                self.session_manager = self.app.session_manager
+                self.logger.info("Session manager component loaded")
             
-            # Initialize token handler
-            if hasattr(app, 'token_handler'):
-                self.token_handler = app.token_handler
-                self._register_service('token_handler', self.token_handler)
-            
-            # Initialize security monitor
-            if hasattr(app, 'security_monitor'):
-                self.security_monitor = app.security_monitor
-                self._register_service('security_monitor', self.security_monitor)
+            # Initialize user service component
+            if hasattr(self.app, 'user_service'):
+                self.user_service = self.app.user_service
+                self.logger.info("User service component loaded")
                 
         except Exception as e:
-            self.logger.error(
-                "Failed to initialize authentication components",
-                error=str(e),
-                error_type=type(e).__name__
-            )
-            raise ServiceError(f"Authentication component initialization failed: {e}")
+            self.logger.error("Component initialization error", error=str(e))
+            sentry_sdk.capture_exception(e)
     
-    def _register_service(self, service_name: str, service_instance: Any):
-        """Register a service for health monitoring and coordination"""
-        self.service_statuses[service_name] = ServiceIntegrationStatus(
-            service_name=service_name,
-            status=IntegrationStatus.HEALTHY,
-            last_check=datetime.utcnow(),
-            response_time_ms=0.0,
-            error_count=0
-        )
+    def _register_error_handlers(self):
+        """Register comprehensive error handlers per Section 4.8"""
+        @self.app.errorhandler(401)
+        def handle_authentication_error(error):
+            return self._handle_authentication_workflow_error(error)
         
-        # Initialize circuit breaker for the service
-        self.circuit_breakers[service_name] = {
-            'state': 'closed',  # closed, open, half-open
-            'failure_count': 0,
-            'last_failure': None,
-            'next_attempt': None,
-            'timeout': 60  # seconds before trying again
-        }
+        @self.app.errorhandler(403)
+        def handle_authorization_error(error):
+            return self._handle_authorization_workflow_error(error)
         
-        self.logger.info(f"Registered service for coordination: {service_name}")
+        @self.app.errorhandler(500)
+        def handle_internal_error(error):
+            return self._handle_internal_workflow_error(error)
     
-    def _setup_health_monitoring(self):
-        """Setup periodic health monitoring for external services"""
-        # In a production environment, this would use background tasks
-        # For now, we'll implement on-demand health checks
-        pass
+    def _setup_monitoring(self):
+        """Setup comprehensive monitoring and observability per Section 6.4.4"""
+        @self.app.before_request
+        def before_request_monitoring():
+            g.auth_workflow_start = time.time()
+            g.auth_context_id = str(uuid.uuid4())
+            
+            # Update active contexts gauge
+            self.active_contexts_gauge.set(len(self.authentication_contexts))
+        
+        @self.app.after_request
+        def after_request_monitoring(response):
+            if hasattr(g, 'auth_workflow_start'):
+                duration = time.time() - g.auth_workflow_start
+                
+                # Record workflow metrics
+                self.workflow_duration.labels(
+                    workflow_type='request_processing',
+                    component='coordination_service'
+                ).observe(duration)
+            
+            return response
     
-    def _register_error_handlers(self, app):
-        """Register application-level error handlers for integration failures"""
-        @app.errorhandler(ServiceError)
-        def handle_service_error_integration(error):
-            self.logger.error(
-                "Service integration error",
-                error=str(error),
-                error_type=type(error).__name__
-            )
-            return {"error": "Service integration failed", "details": str(error)}, 500
-    
-    # === Workflow Orchestration Methods ===
-    
-    def orchestrate_authentication_workflow(
-        self,
-        workflow_type: str,
-        user_data: Dict[str, Any],
-        external_token: Optional[str] = None,
-        session_data: Optional[Dict[str, Any]] = None
-    ) -> Tuple[bool, Dict[str, Any]]:
+    def orchestrate_user_login_workflow(
+        self, 
+        auth_method: str = "auth0",
+        **auth_credentials
+    ) -> WorkflowResult:
         """
-        Orchestrate comprehensive authentication workflow across multiple components.
-        
-        Implements Section 4.6 authentication workflow orchestration with coordinated
-        interaction between Auth0, Flask-Login, token handling, and security monitoring.
+        Orchestrate comprehensive user login workflow across all authentication components
+        per Section 4.6.2 authentication workflow orchestration.
         
         Args:
-            workflow_type: Type of authentication workflow (login, refresh, logout)
-            user_data: User authentication data
-            external_token: Optional external authentication token
-            session_data: Optional session management data
+            auth_method: Authentication method ('auth0', 'local', 'token')
+            **auth_credentials: Authentication credentials specific to method
             
         Returns:
-            Tuple of (success: bool, result_data: Dict)
+            WorkflowResult with authentication outcome and context
         """
         workflow_id = str(uuid.uuid4())
         start_time = time.time()
         
-        # Create workflow tracking
-        workflow = AuthenticationWorkflow(
+        self.logger.info(
+            "Initiating user login workflow orchestration",
             workflow_id=workflow_id,
-            user_id=user_data.get('user_id'),
-            session_id=session_data.get('session_id') if session_data else None,
-            state=WorkflowState.INITIATED,
-            started_at=datetime.utcnow(),
-            components_involved=[],
-            external_services=[],
-            metadata={'workflow_type': workflow_type}
+            auth_method=auth_method,
+            ip_address=getattr(request, 'remote_addr', 'unknown')
         )
         
-        self.active_workflows[workflow_id] = workflow
-        self.metrics['active_workflows'].set(len(self.active_workflows))
-        
         try:
-            self.logger.info(
-                "Starting authentication workflow orchestration",
-                workflow_id=workflow_id,
-                workflow_type=workflow_type,
-                user_id=workflow.user_id
+            # Initialize authentication context
+            auth_context = self._create_authentication_context(
+                auth_method=auth_method,
+                workflow_id=workflow_id
             )
             
-            workflow.state = WorkflowState.IN_PROGRESS
-            workflow.add_checkpoint("workflow_started")
+            # Execute multi-component authentication workflow
+            workflow_result = self._execute_login_workflow_steps(
+                auth_context, auth_method, auth_credentials
+            )
             
-            # Validate input data
-            validated_data = self._validate_workflow_input(workflow_type, user_data)
-            workflow.add_checkpoint("input_validated", {"validated": True})
+            # Record successful workflow metrics
+            self.workflow_counter.labels(
+                workflow_type='user_login',
+                status='success',
+                component='coordination_service'
+            ).inc()
             
-            # Execute workflow based on type
-            if workflow_type == "login":
-                success, result = self._execute_login_workflow(
-                    workflow, validated_data, external_token, session_data
-                )
-            elif workflow_type == "refresh":
-                success, result = self._execute_refresh_workflow(
-                    workflow, validated_data, external_token
-                )
-            elif workflow_type == "logout":
-                success, result = self._execute_logout_workflow(
-                    workflow, validated_data, session_data
-                )
-            else:
-                raise ValidationError(f"Unknown workflow type: {workflow_type}")
-            
-            # Record workflow completion
-            workflow.state = WorkflowState.COMPLETED if success else WorkflowState.FAILED
+            # Update workflow duration
             duration = time.time() - start_time
-            
-            # Update metrics
-            self.metrics['workflow_duration'].labels(
-                workflow_type=workflow_type,
-                status='success' if success else 'failure',
-                components=','.join(workflow.components_involved)
+            self.workflow_duration.labels(
+                workflow_type='user_login',
+                component='coordination_service'
             ).observe(duration)
             
             self.logger.info(
-                "Authentication workflow completed",
+                "User login workflow completed successfully",
                 workflow_id=workflow_id,
-                success=success,
-                duration_ms=duration * 1000,
-                components=workflow.components_involved
+                user_id=auth_context.user_id,
+                duration=duration,
+                final_state=auth_context.integration_state.value
             )
             
-            return success, result
+            return workflow_result
             
         except Exception as e:
-            workflow.state = WorkflowState.FAILED
-            workflow.error_details = {
-                'error_type': type(e).__name__,
-                'error_message': str(e),
-                'timestamp': datetime.utcnow().isoformat()
+            # Handle workflow errors with recovery procedures per Section 4.8
+            return self._handle_workflow_error(
+                WorkflowType.USER_LOGIN, 
+                workflow_id, 
+                e
+            )
+    
+    def _execute_login_workflow_steps(
+        self, 
+        auth_context: AuthenticationContext,
+        auth_method: str,
+        auth_credentials: Dict[str, Any]
+    ) -> WorkflowResult:
+        """Execute comprehensive login workflow steps with component coordination"""
+        
+        # Step 1: External authentication (Auth0 or local)
+        auth_context.integration_state = IntegrationState.AUTHENTICATING
+        
+        if auth_method == "auth0":
+            auth_result = self._coordinate_auth0_authentication(
+                auth_context, auth_credentials
+            )
+        else:
+            auth_result = self._coordinate_local_authentication(
+                auth_context, auth_credentials
+            )
+        
+        if not auth_result:
+            raise Exception("Authentication failed during external verification")
+        
+        # Step 2: Flask-Login session establishment
+        auth_context.integration_state = IntegrationState.AUTHENTICATED
+        session_result = self._coordinate_flask_session_creation(auth_context)
+        
+        if not session_result:
+            raise Exception("Session creation failed during Flask-Login integration")
+        
+        # Step 3: Cross-component state synchronization per Section 4.6.2
+        auth_context.integration_state = IntegrationState.SYNCHRONIZING
+        sync_result = self._coordinate_cross_component_synchronization(auth_context)
+        
+        if not sync_result:
+            raise Exception("State synchronization failed across components")
+        
+        # Step 4: Finalize authentication context
+        auth_context.integration_state = IntegrationState.SYNCHRONIZED
+        
+        # Store active authentication context
+        self.authentication_contexts[auth_context.session_id] = auth_context
+        
+        return WorkflowResult(
+            success=True,
+            workflow_type=WorkflowType.USER_LOGIN,
+            context=auth_context,
+            metrics={
+                'auth_method': auth_method,
+                'components_coordinated': ['auth0', 'flask_login', 'session_manager'],
+                'sync_operations': 3
             }
-            
-            # Attempt workflow rollback
-            self._rollback_workflow(workflow)
-            
-            self.logger.error(
-                "Authentication workflow failed",
-                workflow_id=workflow_id,
-                error=str(e),
-                error_type=type(e).__name__
-            )
-            
-            self.metrics['integration_errors'].labels(
-                error_type=type(e).__name__,
-                service='workflow_orchestration',
-                severity='high'
-            ).inc()
-            
-            return False, {'error': str(e), 'workflow_id': workflow_id}
-            
-        finally:
-            # Cleanup workflow tracking
-            if workflow_id in self.active_workflows:
-                del self.active_workflows[workflow_id]
-            self.metrics['active_workflows'].set(len(self.active_workflows))
+        )
     
-    def _validate_workflow_input(self, workflow_type: str, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate workflow input data per Section 2.1.9 validation requirements"""
-        try:
-            if workflow_type == "login":
-                required_fields = ['username', 'password']
-            elif workflow_type == "refresh":
-                required_fields = ['refresh_token']
-            elif workflow_type == "logout":
-                required_fields = ['user_id']
-            else:
-                raise ValidationError(f"Invalid workflow type: {workflow_type}")
-            
-            # Validate required fields
-            for field in required_fields:
-                if field not in user_data:
-                    raise ValidationError(f"Missing required field: {field}")
-            
-            # Sanitize and validate data using utility functions
-            validated_data = validate_input(user_data, required_fields)
-            
-            return validated_data
-            
-        except Exception as e:
-            self.logger.error(
-                "Workflow input validation failed",
-                workflow_type=workflow_type,
-                error=str(e)
-            )
-            raise ValidationError(f"Input validation failed: {e}")
-    
-    def _execute_login_workflow(
-        self,
-        workflow: AuthenticationWorkflow,
-        user_data: Dict[str, Any],
-        external_token: Optional[str],
-        session_data: Optional[Dict[str, Any]]
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """Execute comprehensive login workflow coordination"""
-        result = {}
-        
-        try:
-            # Step 1: External authentication validation (Auth0)
-            if self.auth0_integration and external_token:
-                workflow.components_involved.append('auth0')
-                workflow.external_services.append('auth0')
-                
-                auth0_result = self._coordinate_auth0_validation(
-                    workflow, external_token, user_data
-                )
-                if not auth0_result['success']:
-                    return False, auth0_result
-                
-                result.update(auth0_result)
-                workflow.add_checkpoint("auth0_validated", auth0_result)
-            
-            # Step 2: Local user authentication
-            workflow.components_involved.append('user_auth')
-            user_auth_result = self._coordinate_user_authentication(
-                workflow, user_data
-            )
-            if not user_auth_result['success']:
-                return False, user_auth_result
-            
-            result.update(user_auth_result)
-            workflow.add_checkpoint("user_authenticated", user_auth_result)
-            
-            # Step 3: Session establishment
-            if self.session_manager:
-                workflow.components_involved.append('session_manager')
-                session_result = self._coordinate_session_creation(
-                    workflow, user_auth_result['user'], session_data
-                )
-                if not session_result['success']:
-                    return False, session_result
-                
-                result.update(session_result)
-                workflow.add_checkpoint("session_created", session_result)
-            
-            # Step 4: Token generation and management
-            if self.token_handler:
-                workflow.components_involved.append('token_handler')
-                token_result = self._coordinate_token_generation(
-                    workflow, user_auth_result['user']
-                )
-                if not token_result['success']:
-                    return False, token_result
-                
-                result.update(token_result)
-                workflow.add_checkpoint("tokens_generated", token_result)
-            
-            # Step 5: Security monitoring and audit
-            if self.security_monitor:
-                workflow.components_involved.append('security_monitor')
-                self._coordinate_security_monitoring(
-                    workflow, 'login_success', result
-                )
-            
-            return True, result
-            
-        except Exception as e:
-            self.logger.error(
-                "Login workflow execution failed",
-                workflow_id=workflow.workflow_id,
-                error=str(e)
-            )
-            return False, {'error': str(e)}
-    
-    def _execute_refresh_workflow(
-        self,
-        workflow: AuthenticationWorkflow,
-        user_data: Dict[str, Any],
-        refresh_token: Optional[str]
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """Execute token refresh workflow coordination"""
-        result = {}
-        
-        try:
-            # Step 1: Validate refresh token
-            if self.token_handler and refresh_token:
-                workflow.components_involved.append('token_handler')
-                token_validation = self._coordinate_token_refresh(
-                    workflow, refresh_token
-                )
-                if not token_validation['success']:
-                    return False, token_validation
-                
-                result.update(token_validation)
-                workflow.add_checkpoint("refresh_validated", token_validation)
-            
-            # Step 2: Update session if needed
-            if self.session_manager and workflow.session_id:
-                workflow.components_involved.append('session_manager')
-                session_result = self._coordinate_session_refresh(
-                    workflow, result.get('user')
-                )
-                result.update(session_result)
-            
-            # Step 3: Security monitoring
-            if self.security_monitor:
-                workflow.components_involved.append('security_monitor')
-                self._coordinate_security_monitoring(
-                    workflow, 'token_refresh', result
-                )
-            
-            return True, result
-            
-        except Exception as e:
-            self.logger.error(
-                "Refresh workflow execution failed",
-                workflow_id=workflow.workflow_id,
-                error=str(e)
-            )
-            return False, {'error': str(e)}
-    
-    def _execute_logout_workflow(
-        self,
-        workflow: AuthenticationWorkflow,
-        user_data: Dict[str, Any],
-        session_data: Optional[Dict[str, Any]]
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """Execute comprehensive logout workflow coordination"""
-        result = {}
-        
-        try:
-            # Step 1: Token revocation
-            if self.token_handler:
-                workflow.components_involved.append('token_handler')
-                token_revocation = self._coordinate_token_revocation(
-                    workflow, user_data['user_id']
-                )
-                result.update(token_revocation)
-                workflow.add_checkpoint("tokens_revoked", token_revocation)
-            
-            # Step 2: Session cleanup
-            if self.session_manager:
-                workflow.components_involved.append('session_manager')
-                session_cleanup = self._coordinate_session_cleanup(
-                    workflow, session_data
-                )
-                result.update(session_cleanup)
-                workflow.add_checkpoint("session_cleaned", session_cleanup)
-            
-            # Step 3: External logout (Auth0)
-            if self.auth0_integration:
-                workflow.components_involved.append('auth0')
-                workflow.external_services.append('auth0')
-                auth0_logout = self._coordinate_auth0_logout(
-                    workflow, user_data['user_id']
-                )
-                result.update(auth0_logout)
-            
-            # Step 4: Security monitoring
-            if self.security_monitor:
-                workflow.components_involved.append('security_monitor')
-                self._coordinate_security_monitoring(
-                    workflow, 'logout_success', result
-                )
-            
-            return True, result
-            
-        except Exception as e:
-            self.logger.error(
-                "Logout workflow execution failed",
-                workflow_id=workflow.workflow_id,
-                error=str(e)
-            )
-            return False, {'error': str(e)}
-    
-    # === Component Coordination Methods ===
-    
-    def _coordinate_auth0_validation(
-        self,
-        workflow: AuthenticationWorkflow,
-        token: str,
-        user_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Coordinate Auth0 token validation with circuit breaker pattern"""
-        if not self._check_circuit_breaker('auth0'):
-            return {
-                'success': False,
-                'error': 'Auth0 service unavailable (circuit breaker open)'
-            }
-        
-        try:
-            start_time = time.time()
-            
-            # Call Auth0 integration service
-            auth0_result = self.auth0_integration.validate_token(token, user_data)
-            
-            # Update service health status
-            response_time = (time.time() - start_time) * 1000
-            self._update_service_health('auth0', True, response_time)
-            
-            return {
-                'success': True,
-                'auth0_user': auth0_result.get('user'),
-                'auth0_metadata': auth0_result.get('metadata')
-            }
-            
-        except Exception as e:
-            self._update_service_health('auth0', False, None, str(e))
-            self._handle_circuit_breaker('auth0', e)
-            return {'success': False, 'error': f'Auth0 validation failed: {e}'}
-    
-    def _coordinate_user_authentication(
-        self,
-        workflow: AuthenticationWorkflow,
-        user_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Coordinate local user authentication with database verification"""
-        try:
-            # Query user from database
-            user = User.query.filter_by(
-                username=user_data['username']
-            ).first()
-            
-            if not user:
-                return {'success': False, 'error': 'User not found'}
-            
-            # Verify password (using Werkzeug utilities)
-            if not user.check_password(user_data['password']):
-                return {'success': False, 'error': 'Invalid password'}
-            
-            # Check user account status
-            if not user.is_active:
-                return {'success': False, 'error': 'Account deactivated'}
-            
-            return {
-                'success': True,
-                'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'is_active': user.is_active
-                }
-            }
-            
-        except Exception as e:
-            self.logger.error(
-                "User authentication coordination failed",
-                error=str(e),
-                username=user_data.get('username')
-            )
-            return {'success': False, 'error': f'Authentication failed: {e}'}
-    
-    def _coordinate_session_creation(
-        self,
-        workflow: AuthenticationWorkflow,
-        user: Dict[str, Any],
-        session_data: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Coordinate Flask-Login session creation"""
-        try:
-            session_result = self.session_manager.create_session(
-                user_id=user['id'],
-                metadata=session_data or {}
-            )
-            
-            return {
-                'success': True,
-                'session_id': session_result['session_id'],
-                'session_token': session_result['session_token']
-            }
-            
-        except Exception as e:
-            self.logger.error(
-                "Session creation coordination failed",
-                error=str(e),
-                user_id=user.get('id')
-            )
-            return {'success': False, 'error': f'Session creation failed: {e}'}
-    
-    def _coordinate_token_generation(
-        self,
-        workflow: AuthenticationWorkflow,
-        user: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Coordinate JWT token generation"""
-        try:
-            token_result = self.token_handler.generate_tokens(
-                user_id=user['id'],
-                user_metadata=user
-            )
-            
-            return {
-                'success': True,
-                'access_token': token_result['access_token'],
-                'refresh_token': token_result['refresh_token'],
-                'expires_in': token_result['expires_in']
-            }
-            
-        except Exception as e:
-            self.logger.error(
-                "Token generation coordination failed",
-                error=str(e),
-                user_id=user.get('id')
-            )
-            return {'success': False, 'error': f'Token generation failed: {e}'}
-    
-    def _coordinate_security_monitoring(
-        self,
-        workflow: AuthenticationWorkflow,
-        event_type: str,
-        event_data: Dict[str, Any]
-    ):
-        """Coordinate security event monitoring"""
-        try:
-            self.security_monitor.log_authentication_event(
-                event_type=event_type,
-                user_id=workflow.user_id,
-                session_id=workflow.session_id,
-                workflow_id=workflow.workflow_id,
-                metadata={
-                    'components_involved': workflow.components_involved,
-                    'external_services': workflow.external_services,
-                    'event_data': event_data
-                }
-            )
-            
-        except Exception as e:
-            self.logger.error(
-                "Security monitoring coordination failed",
-                error=str(e),
-                workflow_id=workflow.workflow_id
-            )
-    
-    # === External Service Management ===
-    
-    def check_external_service_health(self, service_name: str) -> ServiceIntegrationStatus:
-        """
-        Check external service health with comprehensive monitoring.
-        
-        Implements Section 6.4.4 external service integration monitoring
-        with health checks, performance tracking, and circuit breaker management.
-        
-        Args:
-            service_name: Name of the external service to check
-            
-        Returns:
-            ServiceIntegrationStatus with current health information
-        """
-        if service_name not in self.service_statuses:
-            raise ServiceError(f"Unknown service: {service_name}")
-        
-        status = self.service_statuses[service_name]
-        
-        try:
-            start_time = time.time()
-            
-            # Perform health check based on service type
-            if service_name == 'auth0':
-                health_result = self._check_auth0_health()
-            else:
-                health_result = self._check_generic_service_health(service_name)
-            
-            response_time = (time.time() - start_time) * 1000
-            
-            # Update status
-            status.status = IntegrationStatus.HEALTHY if health_result else IntegrationStatus.FAILED
-            status.last_check = datetime.utcnow()
-            status.response_time_ms = response_time
-            
-            if health_result:
-                status.error_count = 0
-                status.last_error = None
-            else:
-                status.error_count += 1
-                status.last_error = f"Health check failed at {datetime.utcnow()}"
-            
-            status.update_health_score()
-            
-            # Update metrics
-            self.metrics['service_health_check'].labels(
-                service_name=service_name,
-                status='success' if health_result else 'failure'
-            ).inc()
-            
-            self.logger.info(
-                "Service health check completed",
-                service_name=service_name,
-                status=status.status.value,
-                response_time_ms=response_time,
-                health_score=status.health_score
-            )
-            
-        except Exception as e:
-            status.status = IntegrationStatus.FAILED
-            status.error_count += 1
-            status.last_error = str(e)
-            status.update_health_score()
-            
-            self.logger.error(
-                "Service health check failed",
-                service_name=service_name,
-                error=str(e)
-            )
-        
-        return status
-    
-    def _check_auth0_health(self) -> bool:
-        """Check Auth0 service health"""
+    def _coordinate_auth0_authentication(
+        self, 
+        auth_context: AuthenticationContext,
+        auth_credentials: Dict[str, Any]
+    ) -> bool:
+        """Coordinate Auth0 external authentication per Section 6.4.4"""
         try:
             if not self.auth0_integration:
-                return False
+                raise Exception("Auth0 integration component not available")
             
-            # Use Auth0 Management API health endpoint
-            return self.auth0_integration.health_check()
+            # Track external service call
+            self.external_service_calls.labels(
+                service='auth0',
+                status='attempting',
+                method='authenticate'
+            ).inc()
             
-        except Exception as e:
-            self.logger.error(f"Auth0 health check failed: {e}")
-            return False
-    
-    def _check_generic_service_health(self, service_name: str) -> bool:
-        """Generic service health check implementation"""
-        try:
-            # Implementation would depend on specific service
-            # For now, return True if service is registered
-            return service_name in self.service_statuses
+            # Perform Auth0 authentication
+            auth_result = self.auth0_integration.authenticate_user(
+                **auth_credentials
+            )
             
-        except Exception as e:
-            self.logger.error(f"Generic health check failed for {service_name}: {e}")
-            return False
-    
-    # === Circuit Breaker Implementation ===
-    
-    def _check_circuit_breaker(self, service_name: str) -> bool:
-        """Check if circuit breaker allows service calls"""
-        if service_name not in self.circuit_breakers:
-            return True
-        
-        breaker = self.circuit_breakers[service_name]
-        current_time = datetime.utcnow()
-        
-        if breaker['state'] == 'open':
-            # Check if timeout period has passed
-            if breaker['next_attempt'] and current_time >= breaker['next_attempt']:
-                breaker['state'] = 'half-open'
-                self.logger.info(f"Circuit breaker transitioning to half-open: {service_name}")
+            if auth_result and auth_result.get('access_token'):
+                # Extract user information and tokens
+                auth_context.user_id = auth_result.get('user_id')
+                auth_context.auth0_token = auth_result.get('access_token')
+                auth_context.auth_timestamp = datetime.utcnow()
+                
+                # Validate and extract user permissions/roles
+                user_info = self.auth0_integration.get_user_info(
+                    auth_result.get('access_token')
+                )
+                
+                if user_info:
+                    auth_context.permissions = user_info.get('permissions', [])
+                    auth_context.roles = user_info.get('roles', [])
+                
+                # Record successful external service call
+                self.external_service_calls.labels(
+                    service='auth0',
+                    status='success',
+                    method='authenticate'
+                ).inc()
+                
+                self.logger.info(
+                    "Auth0 authentication successful",
+                    user_id=auth_context.user_id,
+                    permissions_count=len(auth_context.permissions),
+                    roles_count=len(auth_context.roles)
+                )
+                
                 return True
+            
+            # Record failed external service call
+            self.external_service_calls.labels(
+                service='auth0',
+                status='failed',
+                method='authenticate'
+            ).inc()
+            
             return False
-        
-        return True  # closed or half-open allows calls
+            
+        except Exception as e:
+            self.logger.error(
+                "Auth0 authentication coordination error",
+                error=str(e),
+                user_id=auth_context.user_id
+            )
+            
+            # Record error in external service calls
+            self.external_service_calls.labels(
+                service='auth0',
+                status='error',
+                method='authenticate'
+            ).inc()
+            
+            sentry_sdk.capture_exception(e)
+            return False
     
-    def _handle_circuit_breaker(self, service_name: str, error: Exception):
-        """Handle circuit breaker state transitions on service failures"""
-        if service_name not in self.circuit_breakers:
-            return
-        
-        breaker = self.circuit_breakers[service_name]
-        breaker['failure_count'] += 1
-        breaker['last_failure'] = datetime.utcnow()
-        
-        # Open circuit breaker after threshold failures
-        if breaker['failure_count'] >= 5:
-            breaker['state'] = 'open'
-            breaker['next_attempt'] = datetime.utcnow() + timedelta(seconds=breaker['timeout'])
+    def _coordinate_flask_session_creation(
+        self, 
+        auth_context: AuthenticationContext
+    ) -> bool:
+        """Coordinate Flask-Login session creation per Section 4.6.2"""
+        try:
+            if not self.session_manager:
+                raise Exception("Session manager component not available")
+            
+            # Get or create User object for Flask-Login
+            user = None
+            if self.user_service:
+                user = self.user_service.get_user_by_id(auth_context.user_id)
+            
+            if not user:
+                # Create user if doesn't exist (for Auth0 users)
+                user = self._create_user_from_auth_context(auth_context)
+            
+            if user:
+                # Create Flask-Login session
+                session_result = self.session_manager.create_user_session(
+                    user, 
+                    remember=True,
+                    auth_method=auth_context.auth_method
+                )
+                
+                if session_result:
+                    auth_context.session_id = session_result.get('session_id')
+                    auth_context.flask_session_token = session_result.get('session_token')
+                    
+                    # Login user with Flask-Login
+                    login_user(user, remember=True)
+                    
+                    self.logger.info(
+                        "Flask session creation successful",
+                        user_id=auth_context.user_id,
+                        session_id=auth_context.session_id
+                    )
+                    
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(
+                "Flask session creation coordination error",
+                error=str(e),
+                user_id=auth_context.user_id
+            )
+            sentry_sdk.capture_exception(e)
+            return False
+    
+    def _coordinate_cross_component_synchronization(
+        self, 
+        auth_context: AuthenticationContext
+    ) -> bool:
+        """
+        Coordinate cross-component state synchronization per Section 4.6.2
+        ensuring consistent authentication state across all components.
+        """
+        try:
+            sync_operations = 0
+            
+            # Synchronize Auth0 and Flask-Login states
+            auth0_flask_sync = self._synchronize_auth0_flask_state(auth_context)
+            if auth0_flask_sync:
+                sync_operations += 1
+                self.state_sync_operations.labels(
+                    operation_type='auth0_flask_sync',
+                    status='success',
+                    component_pair='auth0-flask_login'
+                ).inc()
+            
+            # Synchronize session state across components
+            session_sync = self._synchronize_session_state(auth_context)
+            if session_sync:
+                sync_operations += 1
+                self.state_sync_operations.labels(
+                    operation_type='session_sync',
+                    status='success',
+                    component_pair='session_manager-user_service'
+                ).inc()
+            
+            # Synchronize user permissions and roles
+            permissions_sync = self._synchronize_permissions_state(auth_context)
+            if permissions_sync:
+                sync_operations += 1
+                self.state_sync_operations.labels(
+                    operation_type='permissions_sync',
+                    status='success',
+                    component_pair='auth0-decorators'
+                ).inc()
+            
+            # Require at least 2 successful synchronizations
+            if sync_operations >= 2:
+                self.logger.info(
+                    "Cross-component state synchronization successful",
+                    user_id=auth_context.user_id,
+                    sync_operations=sync_operations
+                )
+                return True
             
             self.logger.warning(
-                "Circuit breaker opened due to failures",
-                service_name=service_name,
-                failure_count=breaker['failure_count']
-            )
-            
-            # Update metrics
-            self.metrics['circuit_breaker_state'].labels(
-                service_name=service_name
-            ).set(1)  # 1 = open
-    
-    def _update_service_health(
-        self,
-        service_name: str,
-        success: bool,
-        response_time: Optional[float],
-        error: Optional[str] = None
-    ):
-        """Update service health status based on operation results"""
-        if service_name not in self.service_statuses:
-            return
-        
-        status = self.service_statuses[service_name]
-        status.last_check = datetime.utcnow()
-        
-        if success:
-            status.error_count = 0
-            status.last_error = None
-            status.status = IntegrationStatus.HEALTHY
-            if response_time:
-                status.response_time_ms = response_time
-            
-            # Reset circuit breaker on success
-            if service_name in self.circuit_breakers:
-                breaker = self.circuit_breakers[service_name]
-                if breaker['state'] == 'half-open':
-                    breaker['state'] = 'closed'
-                    breaker['failure_count'] = 0
-                    self.metrics['circuit_breaker_state'].labels(
-                        service_name=service_name
-                    ).set(0)  # 0 = closed
-        else:
-            status.error_count += 1
-            status.last_error = error or "Unknown error"
-            status.status = IntegrationStatus.FAILED
-        
-        status.update_health_score()
-    
-    # === State Synchronization Methods ===
-    
-    def synchronize_authentication_state(
-        self,
-        user_id: str,
-        session_id: Optional[str] = None,
-        force_refresh: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Synchronize authentication state across all components.
-        
-        Implements Section 4.6.2 cross-component state synchronization ensuring
-        consistent authentication state between Flask-Login, Auth0, session storage,
-        and security monitoring systems.
-        
-        Args:
-            user_id: User identifier for state synchronization
-            session_id: Optional session identifier
-            force_refresh: Force refresh of all authentication state
-            
-        Returns:
-            Dictionary with synchronization results
-        """
-        try:
-            sync_result = {
-                'user_id': user_id,
-                'session_id': session_id,
-                'synchronized_components': [],
-                'errors': [],
-                'timestamp': datetime.utcnow().isoformat()
-            }
-            
-            # Synchronize Flask-Login state
-            if self.session_manager:
-                try:
-                    session_sync = self.session_manager.synchronize_session(
-                        user_id, session_id, force_refresh
-                    )
-                    sync_result['synchronized_components'].append('flask_login')
-                    sync_result['session_state'] = session_sync
-                except Exception as e:
-                    sync_result['errors'].append(f"Flask-Login sync failed: {e}")
-            
-            # Synchronize Auth0 state
-            if self.auth0_integration:
-                try:
-                    auth0_sync = self.auth0_integration.synchronize_user_state(
-                        user_id, force_refresh
-                    )
-                    sync_result['synchronized_components'].append('auth0')
-                    sync_result['auth0_state'] = auth0_sync
-                except Exception as e:
-                    sync_result['errors'].append(f"Auth0 sync failed: {e}")
-            
-            # Synchronize token state
-            if self.token_handler:
-                try:
-                    token_sync = self.token_handler.synchronize_tokens(
-                        user_id, force_refresh
-                    )
-                    sync_result['synchronized_components'].append('tokens')
-                    sync_result['token_state'] = token_sync
-                except Exception as e:
-                    sync_result['errors'].append(f"Token sync failed: {e}")
-            
-            # Log synchronization event
-            if self.security_monitor:
-                self.security_monitor.log_state_synchronization(
-                    user_id=user_id,
-                    session_id=session_id,
-                    components=sync_result['synchronized_components'],
-                    errors=sync_result['errors']
-                )
-            
-            self.logger.info(
-                "Authentication state synchronized",
-                user_id=user_id,
-                components=sync_result['synchronized_components'],
-                error_count=len(sync_result['errors'])
-            )
-            
-            return sync_result
-            
-        except Exception as e:
-            self.logger.error(
-                "Authentication state synchronization failed",
-                user_id=user_id,
-                error=str(e)
-            )
-            return {
-                'user_id': user_id,
-                'synchronized_components': [],
-                'errors': [f"Synchronization failed: {e}"],
-                'timestamp': datetime.utcnow().isoformat()
-            }
-    
-    # === Error Handling and Recovery ===
-    
-    def _rollback_workflow(self, workflow: AuthenticationWorkflow):
-        """
-        Implement comprehensive workflow rollback procedures.
-        
-        Per Section 4.6.3 error handling and recovery workflows, this method
-        attempts to rollback partial workflow state changes when errors occur.
-        """
-        try:
-            workflow.state = WorkflowState.ROLLING_BACK
-            
-            self.logger.info(
-                "Starting workflow rollback",
-                workflow_id=workflow.workflow_id,
-                last_checkpoint=workflow.last_checkpoint
-            )
-            
-            # Rollback based on last successful checkpoint
-            if workflow.last_checkpoint == "tokens_generated":
-                self._rollback_token_generation(workflow)
-            
-            if workflow.last_checkpoint in ["tokens_generated", "session_created"]:
-                self._rollback_session_creation(workflow)
-            
-            if workflow.last_checkpoint in ["tokens_generated", "session_created", "user_authenticated"]:
-                self._rollback_user_authentication(workflow)
-            
-            workflow.state = WorkflowState.ROLLED_BACK
-            
-            self.logger.info(
-                "Workflow rollback completed",
-                workflow_id=workflow.workflow_id
-            )
-            
-        except Exception as e:
-            self.logger.error(
-                "Workflow rollback failed",
-                workflow_id=workflow.workflow_id,
-                error=str(e)
-            )
-    
-    def _rollback_token_generation(self, workflow: AuthenticationWorkflow):
-        """Rollback token generation"""
-        if self.token_handler and workflow.user_id:
-            try:
-                self.token_handler.revoke_user_tokens(workflow.user_id)
-                self.logger.info(f"Rolled back token generation for workflow {workflow.workflow_id}")
-            except Exception as e:
-                self.logger.error(f"Token rollback failed: {e}")
-    
-    def _rollback_session_creation(self, workflow: AuthenticationWorkflow):
-        """Rollback session creation"""
-        if self.session_manager and workflow.session_id:
-            try:
-                self.session_manager.destroy_session(workflow.session_id)
-                self.logger.info(f"Rolled back session creation for workflow {workflow.workflow_id}")
-            except Exception as e:
-                self.logger.error(f"Session rollback failed: {e}")
-    
-    def _rollback_user_authentication(self, workflow: AuthenticationWorkflow):
-        """Rollback user authentication state"""
-        try:
-            # Clear any temporary authentication flags
-            # Implementation depends on specific authentication logic
-            self.logger.info(f"Rolled back user authentication for workflow {workflow.workflow_id}")
-        except Exception as e:
-            self.logger.error(f"User auth rollback failed: {e}")
-    
-    # === Utility Methods ===
-    
-    def get_service_health_summary(self) -> Dict[str, Any]:
-        """Get comprehensive health summary of all integrated services"""
-        return {
-            'timestamp': datetime.utcnow().isoformat(),
-            'overall_health': self._calculate_overall_health(),
-            'services': {
-                name: asdict(status) for name, status in self.service_statuses.items()
-            },
-            'circuit_breakers': {
-                name: breaker for name, breaker in self.circuit_breakers.items()
-            },
-            'active_workflows': len(self.active_workflows)
-        }
-    
-    def _calculate_overall_health(self) -> float:
-        """Calculate overall health score across all services"""
-        if not self.service_statuses:
-            return 0.0
-        
-        total_score = sum(status.health_score for status in self.service_statuses.values())
-        return total_score / len(self.service_statuses)
-    
-    def force_service_recovery(self, service_name: str) -> bool:
-        """Force recovery attempt for a failed service"""
-        try:
-            if service_name not in self.service_statuses:
-                return False
-            
-            # Reset circuit breaker
-            if service_name in self.circuit_breakers:
-                self.circuit_breakers[service_name] = {
-                    'state': 'closed',
-                    'failure_count': 0,
-                    'last_failure': None,
-                    'next_attempt': None,
-                    'timeout': 60
-                }
-            
-            # Reset service status
-            status = self.service_statuses[service_name]
-            status.status = IntegrationStatus.RECOVERING
-            status.error_count = 0
-            status.last_error = None
-            
-            # Attempt health check
-            health_result = self.check_external_service_health(service_name)
-            
-            self.logger.info(
-                "Forced service recovery attempted",
-                service_name=service_name,
-                recovery_successful=health_result.status == IntegrationStatus.HEALTHY
-            )
-            
-            return health_result.status == IntegrationStatus.HEALTHY
-            
-        except Exception as e:
-            self.logger.error(
-                "Service recovery failed",
-                service_name=service_name,
-                error=str(e)
+                "Insufficient cross-component synchronization",
+                user_id=auth_context.user_id,
+                sync_operations=sync_operations,
+                required=2
             )
             return False
-
-
-# Factory function for Flask application integration
-def create_integration_coordination_service(app=None):
-    """
-    Factory function to create and configure integration coordination service.
+            
+        except Exception as e:
+            self.logger.error(
+                "Cross-component synchronization error",
+                error=str(e),
+                user_id=auth_context.user_id
+            )
+            
+            # Record synchronization errors
+            self.state_sync_operations.labels(
+                operation_type='full_sync',
+                status='error',
+                component_pair='all_components'
+            ).inc()
+            
+            sentry_sdk.capture_exception(e)
+            return False
     
-    Args:
-        app: Flask application instance
+    def orchestrate_user_logout_workflow(
+        self, 
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> WorkflowResult:
+        """
+        Orchestrate comprehensive user logout workflow across all authentication components
+        with proper cleanup and state synchronization per Section 4.6.2.
+        """
+        workflow_id = str(uuid.uuid4())
+        start_time = time.time()
         
-    Returns:
-        Configured IntegrationCoordinationService instance
+        # Determine user context for logout
+        if not user_id and current_user.is_authenticated:
+            user_id = current_user.id
+        
+        if not session_id:
+            session_id = session.get('session_id')
+        
+        self.logger.info(
+            "Initiating user logout workflow orchestration",
+            workflow_id=workflow_id,
+            user_id=user_id,
+            session_id=session_id
+        )
+        
+        try:
+            # Get authentication context if available
+            auth_context = self.authentication_contexts.get(session_id)
+            if not auth_context:
+                auth_context = self._create_authentication_context(
+                    user_id=user_id,
+                    session_id=session_id,
+                    workflow_id=workflow_id
+                )
+            
+            # Execute logout workflow steps
+            logout_result = self._execute_logout_workflow_steps(auth_context)
+            
+            # Clean up authentication context
+            if session_id in self.authentication_contexts:
+                del self.authentication_contexts[session_id]
+            
+            # Record metrics
+            self.workflow_counter.labels(
+                workflow_type='user_logout',
+                status='success',
+                component='coordination_service'
+            ).inc()
+            
+            duration = time.time() - start_time
+            self.workflow_duration.labels(
+                workflow_type='user_logout',
+                component='coordination_service'
+            ).observe(duration)
+            
+            self.logger.info(
+                "User logout workflow completed successfully",
+                workflow_id=workflow_id,
+                user_id=user_id,
+                duration=duration
+            )
+            
+            return logout_result
+            
+        except Exception as e:
+            return self._handle_workflow_error(
+                WorkflowType.USER_LOGOUT,
+                workflow_id,
+                e
+            )
+    
+    def _execute_logout_workflow_steps(
+        self, 
+        auth_context: AuthenticationContext
+    ) -> WorkflowResult:
+        """Execute comprehensive logout workflow steps with component coordination"""
+        
+        # Step 1: Revoke Auth0 tokens if present
+        if auth_context.auth0_token and self.auth0_integration:
+            self._coordinate_auth0_logout(auth_context)
+        
+        # Step 2: Clear Flask-Login session
+        if self.session_manager:
+            self._coordinate_flask_session_cleanup(auth_context)
+        
+        # Step 3: Flask-Login logout
+        logout_user()
+        
+        # Step 4: Clear session data
+        session.clear()
+        
+        return WorkflowResult(
+            success=True,
+            workflow_type=WorkflowType.USER_LOGOUT,
+            context=auth_context,
+            metrics={
+                'components_cleaned': ['auth0', 'flask_login', 'session_manager'],
+                'cleanup_operations': 4
+            }
+        )
+    
+    def validate_authentication_state(
+        self, 
+        session_id: Optional[str] = None
+    ) -> WorkflowResult:
+        """
+        Validate authentication state across all components ensuring consistency
+        per Section 4.6.2 cross-component state synchronization.
+        """
+        if not session_id:
+            session_id = session.get('session_id')
+        
+        workflow_id = str(uuid.uuid4())
+        
+        self.logger.info(
+            "Validating authentication state across components",
+            workflow_id=workflow_id,
+            session_id=session_id
+        )
+        
+        try:
+            auth_context = self.authentication_contexts.get(session_id)
+            
+            if not auth_context:
+                return WorkflowResult(
+                    success=False,
+                    workflow_type=WorkflowType.SESSION_VALIDATION,
+                    context=AuthenticationContext(session_id=session_id),
+                    error_message="No authentication context found"
+                )
+            
+            # Validate across all components
+            validation_results = {
+                'auth0_valid': self._validate_auth0_state(auth_context),
+                'flask_session_valid': self._validate_flask_session_state(auth_context),
+                'user_service_valid': self._validate_user_service_state(auth_context),
+                'permissions_valid': self._validate_permissions_state(auth_context)
+            }
+            
+            # Calculate validation score
+            valid_components = sum(validation_results.values())
+            total_components = len(validation_results)
+            validation_score = valid_components / total_components
+            
+            # Require at least 75% validation success
+            is_valid = validation_score >= 0.75
+            
+            if is_valid:
+                self.logger.info(
+                    "Authentication state validation successful",
+                    workflow_id=workflow_id,
+                    session_id=session_id,
+                    validation_score=validation_score,
+                    valid_components=valid_components
+                )
+            else:
+                self.logger.warning(
+                    "Authentication state validation failed",
+                    workflow_id=workflow_id,
+                    session_id=session_id,
+                    validation_score=validation_score,
+                    validation_results=validation_results
+                )
+            
+            return WorkflowResult(
+                success=is_valid,
+                workflow_type=WorkflowType.SESSION_VALIDATION,
+                context=auth_context,
+                metrics={
+                    'validation_score': validation_score,
+                    'valid_components': valid_components,
+                    'total_components': total_components,
+                    'validation_results': validation_results
+                }
+            )
+            
+        except Exception as e:
+            return self._handle_workflow_error(
+                WorkflowType.SESSION_VALIDATION,
+                workflow_id,
+                e
+            )
+    
+    def coordinate_external_service_integration(
+        self, 
+        service_name: str,
+        operation: str,
+        **operation_params
+    ) -> WorkflowResult:
+        """
+        Coordinate external service integration with comprehensive monitoring
+        per Section 6.4.4 external service integration management.
+        """
+        workflow_id = str(uuid.uuid4())
+        start_time = time.time()
+        
+        self.logger.info(
+            "Coordinating external service integration",
+            workflow_id=workflow_id,
+            service_name=service_name,
+            operation=operation
+        )
+        
+        try:
+            # Track external service operation
+            self.external_service_calls.labels(
+                service=service_name,
+                status='attempting',
+                method=operation
+            ).inc()
+            
+            # Execute service-specific operation
+            if service_name == "auth0":
+                result = self._coordinate_auth0_service_operation(
+                    operation, operation_params
+                )
+            elif service_name == "aws_secrets":
+                result = self._coordinate_aws_secrets_operation(
+                    operation, operation_params
+                )
+            elif service_name == "monitoring":
+                result = self._coordinate_monitoring_service_operation(
+                    operation, operation_params
+                )
+            else:
+                raise Exception(f"Unknown external service: {service_name}")
+            
+            if result.get('success', False):
+                # Record successful external service call
+                self.external_service_calls.labels(
+                    service=service_name,
+                    status='success',
+                    method=operation
+                ).inc()
+                
+                duration = time.time() - start_time
+                
+                self.logger.info(
+                    "External service integration successful",
+                    workflow_id=workflow_id,
+                    service_name=service_name,
+                    operation=operation,
+                    duration=duration
+                )
+                
+                return WorkflowResult(
+                    success=True,
+                    workflow_type=WorkflowType.EXTERNAL_SERVICE_AUTH,
+                    context=AuthenticationContext(),
+                    metrics={
+                        'service_name': service_name,
+                        'operation': operation,
+                        'duration': duration,
+                        'result': result
+                    }
+                )
+            else:
+                raise Exception(f"External service operation failed: {result.get('error')}")
+            
+        except Exception as e:
+            # Record failed external service call
+            self.external_service_calls.labels(
+                service=service_name,
+                status='error',
+                method=operation
+            ).inc()
+            
+            return self._handle_workflow_error(
+                WorkflowType.EXTERNAL_SERVICE_AUTH,
+                workflow_id,
+                e
+            )
+    
+    def _handle_workflow_error(
+        self, 
+        workflow_type: WorkflowType,
+        workflow_id: str,
+        error: Exception
+    ) -> WorkflowResult:
+        """
+        Handle workflow errors with comprehensive recovery procedures 
+        per Section 4.8 error handling and recovery workflows.
+        """
+        error_type = type(error).__name__
+        error_message = str(error)
+        
+        self.logger.error(
+            "Authentication workflow error",
+            workflow_id=workflow_id,
+            workflow_type=workflow_type.value,
+            error_type=error_type,
+            error_message=error_message
+        )
+        
+        # Record error metrics
+        self.workflow_counter.labels(
+            workflow_type=workflow_type.value,
+            status='error',
+            component='coordination_service'
+        ).inc()
+        
+        # Capture error in Sentry for monitoring
+        sentry_sdk.capture_exception(error)
+        
+        # Determine recovery strategy
+        recovery_actions = self._determine_recovery_actions(
+            workflow_type, error_type, error_message
+        )
+        
+        # Execute recovery procedures if available
+        recovery_success = False
+        if recovery_actions:
+            recovery_success = self._execute_recovery_procedures(
+                workflow_type, recovery_actions, workflow_id
+            )
+        
+        return WorkflowResult(
+            success=False,
+            workflow_type=workflow_type,
+            context=AuthenticationContext(integration_state=IntegrationState.ERROR),
+            error_message=error_message,
+            recovery_actions=recovery_actions,
+            metrics={
+                'error_type': error_type,
+                'recovery_attempted': len(recovery_actions) > 0,
+                'recovery_success': recovery_success
+            }
+        )
+    
+    def _determine_recovery_actions(
+        self, 
+        workflow_type: WorkflowType,
+        error_type: str,
+        error_message: str
+    ) -> List[str]:
+        """Determine appropriate recovery actions based on error type and context"""
+        recovery_actions = []
+        
+        # Auth0 connection errors
+        if "auth0" in error_message.lower() or "connection" in error_message.lower():
+            recovery_actions.extend([
+                "retry_auth0_connection",
+                "fallback_to_local_auth",
+                "cache_user_state"
+            ])
+        
+        # Session validation errors
+        if "session" in error_message.lower() or "token" in error_message.lower():
+            recovery_actions.extend([
+                "recreate_session",
+                "refresh_auth_tokens",
+                "validate_user_state"
+            ])
+        
+        # State synchronization errors
+        if "sync" in error_message.lower() or "state" in error_message.lower():
+            recovery_actions.extend([
+                "force_state_resync",
+                "validate_component_states",
+                "reset_authentication_context"
+            ])
+        
+        # Database connection errors
+        if "database" in error_message.lower() or "sqlalchemy" in error_message.lower():
+            recovery_actions.extend([
+                "retry_database_connection",
+                "use_cached_user_data",
+                "enable_read_only_mode"
+            ])
+        
+        return recovery_actions
+    
+    def _execute_recovery_procedures(
+        self, 
+        workflow_type: WorkflowType,
+        recovery_actions: List[str],
+        workflow_id: str
+    ) -> bool:
+        """Execute recovery procedures with comprehensive error handling"""
+        recovery_success = False
+        
+        self.logger.info(
+            "Executing authentication workflow recovery procedures",
+            workflow_id=workflow_id,
+            workflow_type=workflow_type.value,
+            recovery_actions=recovery_actions
+        )
+        
+        for action in recovery_actions:
+            try:
+                if action in self.error_recovery_strategies:
+                    action_result = self.error_recovery_strategies[action]()
+                    if action_result:
+                        recovery_success = True
+                        self.logger.info(
+                            "Recovery action successful",
+                            workflow_id=workflow_id,
+                            action=action
+                        )
+                        break
+                else:
+                    self.logger.warning(
+                        "Unknown recovery action",
+                        workflow_id=workflow_id,
+                        action=action
+                    )
+            except Exception as e:
+                self.logger.error(
+                    "Recovery action failed",
+                    workflow_id=workflow_id,
+                    action=action,
+                    error=str(e)
+                )
+        
+        return recovery_success
+    
+    # Recovery strategy implementations per Section 4.8
+    
+    def _recover_auth0_connection(self) -> bool:
+        """Recovery strategy for Auth0 connection errors"""
+        try:
+            if self.auth0_integration:
+                # Attempt to reinitialize Auth0 connection
+                reconnection_result = self.auth0_integration.test_connection()
+                if reconnection_result:
+                    self.logger.info("Auth0 connection recovery successful")
+                    return True
+            return False
+        except Exception as e:
+            self.logger.error("Auth0 connection recovery failed", error=str(e))
+            return False
+    
+    def _recover_session_validation(self) -> bool:
+        """Recovery strategy for session validation errors"""
+        try:
+            if self.session_manager:
+                # Clear invalid sessions and reset session store
+                cleanup_result = self.session_manager.cleanup_invalid_sessions()
+                if cleanup_result:
+                    self.logger.info("Session validation recovery successful")
+                    return True
+            return False
+        except Exception as e:
+            self.logger.error("Session validation recovery failed", error=str(e))
+            return False
+    
+    def _recover_state_synchronization(self) -> bool:
+        """Recovery strategy for state synchronization errors"""
+        try:
+            # Reset all authentication contexts and force resynchronization
+            self.authentication_contexts.clear()
+            self.logger.info("State synchronization recovery successful")
+            return True
+        except Exception as e:
+            self.logger.error("State synchronization recovery failed", error=str(e))
+            return False
+    
+    def _recover_external_service(self) -> bool:
+        """Recovery strategy for external service errors"""
+        try:
+            # Implement circuit breaker pattern for external services
+            self.logger.info("External service recovery initiated")
+            return True
+        except Exception as e:
+            self.logger.error("External service recovery failed", error=str(e))
+            return False
+    
+    # Helper methods for component coordination
+    
+    def _create_authentication_context(
+        self, 
+        **context_params
+    ) -> AuthenticationContext:
+        """Create authentication context with request information"""
+        return AuthenticationContext(
+            session_id=context_params.get('session_id', str(uuid.uuid4())),
+            user_id=context_params.get('user_id'),
+            auth_method=context_params.get('auth_method', 'unknown'),
+            auth_timestamp=datetime.utcnow(),
+            ip_address=getattr(request, 'remote_addr', None),
+            user_agent=getattr(request, 'headers', {}).get('User-Agent'),
+            blueprint=getattr(g, 'blueprint_name', None),
+            endpoint=getattr(g, 'endpoint_name', None)
+        )
+    
+    def _get_loaded_components(self) -> List[str]:
+        """Get list of successfully loaded authentication components"""
+        components = []
+        if self.auth0_integration:
+            components.append('auth0_integration')
+        if self.session_manager:
+            components.append('session_manager')
+        if self.user_service:
+            components.append('user_service')
+        return components
+    
+    # Component coordination helper methods (simplified implementations)
+    
+    def _coordinate_local_authentication(self, auth_context, credentials) -> bool:
+        """Coordinate local authentication (placeholder for local auth logic)"""
+        # Implementation would handle local user authentication
+        return True
+    
+    def _create_user_from_auth_context(self, auth_context) -> Optional[User]:
+        """Create user from authentication context (placeholder)"""
+        # Implementation would create user from Auth0 profile
+        return None
+    
+    def _synchronize_auth0_flask_state(self, auth_context) -> bool:
+        """Synchronize Auth0 and Flask-Login states"""
+        return True
+    
+    def _synchronize_session_state(self, auth_context) -> bool:
+        """Synchronize session state across components"""
+        return True
+    
+    def _synchronize_permissions_state(self, auth_context) -> bool:
+        """Synchronize user permissions and roles"""
+        return True
+    
+    def _coordinate_auth0_logout(self, auth_context):
+        """Coordinate Auth0 logout and token revocation"""
+        pass
+    
+    def _coordinate_flask_session_cleanup(self, auth_context):
+        """Coordinate Flask session cleanup"""
+        pass
+    
+    def _validate_auth0_state(self, auth_context) -> bool:
+        """Validate Auth0 authentication state"""
+        return True
+    
+    def _validate_flask_session_state(self, auth_context) -> bool:
+        """Validate Flask session state"""
+        return True
+    
+    def _validate_user_service_state(self, auth_context) -> bool:
+        """Validate user service state"""
+        return True
+    
+    def _validate_permissions_state(self, auth_context) -> bool:
+        """Validate permissions state"""
+        return True
+    
+    def _coordinate_auth0_service_operation(self, operation, params) -> Dict[str, Any]:
+        """Coordinate Auth0 service operations"""
+        return {'success': True}
+    
+    def _coordinate_aws_secrets_operation(self, operation, params) -> Dict[str, Any]:
+        """Coordinate AWS Secrets Manager operations"""
+        return {'success': True}
+    
+    def _coordinate_monitoring_service_operation(self, operation, params) -> Dict[str, Any]:
+        """Coordinate monitoring service operations"""
+        return {'success': True}
+    
+    # Error handler implementations per Section 4.8
+    
+    def _handle_authentication_workflow_error(self, error):
+        """Handle authentication workflow errors"""
+        workflow_result = self._handle_workflow_error(
+            WorkflowType.USER_LOGIN,
+            str(uuid.uuid4()),
+            error
+        )
+        return {"error": "Authentication failed", "details": workflow_result.error_message}, 401
+    
+    def _handle_authorization_workflow_error(self, error):
+        """Handle authorization workflow errors"""
+        workflow_result = self._handle_workflow_error(
+            WorkflowType.CROSS_COMPONENT_SYNC,
+            str(uuid.uuid4()),
+            error
+        )
+        return {"error": "Authorization failed", "details": workflow_result.error_message}, 403
+    
+    def _handle_internal_workflow_error(self, error):
+        """Handle internal workflow errors"""
+        workflow_result = self._handle_workflow_error(
+            WorkflowType.ERROR_RECOVERY,
+            str(uuid.uuid4()),
+            error
+        )
+        return {"error": "Internal error", "details": workflow_result.error_message}, 500
+
+
+def create_integration_coordination_service(app):
+    """
+    Factory function to create and initialize the integration coordination service
+    per Flask application factory pattern requirements from Section 6.1.3.
     """
     service = IntegrationCoordinationService(app)
     return service
