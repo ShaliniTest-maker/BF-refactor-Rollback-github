@@ -1,1304 +1,1242 @@
 """
-User Service Implementation
+User Service Layer Implementation for User Management Workflows
 
-This module implements the Service Layer pattern for comprehensive user management
-workflows including registration, authentication, profile management, and user entity
-operations. Maintains functional equivalence with original Node.js business rules
-while leveraging Flask ecosystem capabilities.
+This module implements the UserService class following the Service Layer pattern
+as specified in Feature F-005 and F-006. The service orchestrates complex user-related
+business processes including registration, authentication, profile management, and user
+entity operations while maintaining functional equivalence with original Node.js user
+business rules.
 
 Key Features:
-- User registration and authentication business logic preservation (Feature F-005)
-- Service Layer pattern implementation for workflow orchestration (Feature F-006)
-- Flask-Login integration for session management (Feature F-007)
-- User entity relationship mapping for complex business workflows (Section 6.2.2.1)
-- Python 3.13.3 business logic implementation with functional equivalence (Section 5.2.3)
+- User registration and authentication workflow orchestration per Feature F-007
+- Flask-Login integration for session management per Section 4.6.1
+- User entity relationship management per Section 6.2.2.1
+- Comprehensive user profile management with validation
+- Service Layer pattern implementation for clean abstraction
+- Business logic preservation maintaining Node.js functional equivalence
 
-Architecture:
-- Inherits from BaseService for transaction boundary management
-- Integrates with Flask-SQLAlchemy for data persistence
-- Utilizes authentication utilities for security operations
-- Implements comprehensive error handling and validation
-- Supports dependency injection patterns for clean separation
+Architecture Integration:
+- Flask-SQLAlchemy integration for database operations per Section 5.2.3
+- BaseService inheritance for transaction boundary management
+- Flask-Login user loader integration for authentication decorators
+- ItsDangerous token management for secure operations
+- User session lifecycle coordination with UserSession model
+- Comprehensive error handling and validation per Section 4.5.3
 
-Dependencies:
-- Flask-SQLAlchemy models: User, UserSession, BusinessEntity, EntityRelationship
-- Authentication utilities: session_manager, password_utils
-- Common utilities: validation, error_handling, logging
-- Base service class for consistent service patterns
+Business Logic Coverage:
+- User account creation with validation and security controls
+- User authentication with credential validation and session management
+- User profile updates with business rule enforcement
+- User entity ownership and relationship management
+- User session management and security operations
+- Password management with secure hashing and validation
 """
 
-from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any, Tuple
-from dataclasses import dataclass
-from enum import Enum
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from flask import current_app, request
-from flask_login import login_user, logout_user, current_user
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import joinedload
+# Flask and Flask extensions
+from flask import current_app, g
+from flask_login import UserMixin, login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# Import base service for transaction management and service patterns
-from .base import BaseService
+# SQLAlchemy for database operations
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import selectinload, joinedload
 
-# Import database models for user operations
+# Base service and dependencies
+from .base import BaseService, ServiceError, ValidationError, TransactionError, retry_on_failure
+from .validation_service import ValidationService
+
+# Models for user management
 from ..models.user import User
-from ..models.session import UserSession
+from ..models.session import UserSession, create_user_session
 from ..models.business_entity import BusinessEntity
-from ..models.entity_relationship import EntityRelationship
 
-# Import authentication utilities for security operations
-from ..auth.session_manager import SessionManager
-from ..auth.password_utils import PasswordUtils
-from ..auth.security_monitor import SecurityMonitor
+# Type hints for better code documentation
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..models.entity_relationship import EntityRelationship
 
-# Import common utilities for cross-cutting concerns
-from ..utils.validation import ValidationUtils
-from ..utils.error_handling import (
-    UserServiceError, ValidationError, AuthenticationError,
-    UserNotFoundError, DuplicateUserError, SessionError
-)
-from ..utils.logging import StructuredLogger
-from ..utils.datetime import DateTimeUtils
+# Logger configuration
+logger = logging.getLogger(__name__)
 
 
-class UserStatus(Enum):
-    """User account status enumeration for business logic control."""
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-    SUSPENDED = "suspended"
-    PENDING_VERIFICATION = "pending_verification"
-    LOCKED = "locked"
+class UserRegistrationError(ServiceError):
+    """Exception raised when user registration fails."""
+    pass
 
 
-class RegistrationStatus(Enum):
-    """User registration workflow status tracking."""
-    SUCCESS = "success"
-    EMAIL_EXISTS = "email_exists"
-    USERNAME_EXISTS = "username_exists"
-    VALIDATION_FAILED = "validation_failed"
-    SYSTEM_ERROR = "system_error"
+class UserAuthenticationError(ServiceError):
+    """Exception raised when user authentication fails."""
+    pass
 
 
-@dataclass
-class UserRegistrationData:
-    """Data transfer object for user registration operations."""
-    username: str
-    email: str
-    password: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    profile_data: Optional[Dict[str, Any]] = None
+class UserProfileError(ServiceError):
+    """Exception raised when user profile operations fail."""
+    pass
 
 
-@dataclass
-class UserAuthenticationData:
-    """Data transfer object for user authentication operations."""
-    identifier: str  # username or email
-    password: str
-    remember_me: bool = False
-    device_info: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class UserProfileData:
-    """Data transfer object for user profile update operations."""
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[str] = None
-    profile_data: Optional[Dict[str, Any]] = None
-    status: Optional[UserStatus] = None
-
-
-@dataclass
-class UserServiceResult:
-    """Standardized service operation result with comprehensive metadata."""
-    success: bool
-    data: Optional[Any] = None
-    message: Optional[str] = None
-    error_code: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+class UserSessionError(ServiceError):
+    """Exception raised when user session operations fail."""
+    pass
 
 
 class UserService(BaseService):
     """
-    Comprehensive user management service implementing Service Layer pattern.
+    User Service implementing business logic for user management workflows.
     
-    This service orchestrates complex user-related business processes through
-    systematic workflow management while maintaining functional equivalence
-    with original Node.js user business rules. Provides clean abstraction
-    for user operations across multiple Flask blueprints.
+    This service orchestrates complex user-related business processes through the
+    Service Layer pattern while maintaining functional equivalence with original
+    Node.js user business rules. Provides clean abstraction for user operations
+    across multiple Flask blueprints.
     
-    Key Responsibilities:
-    - User lifecycle management (registration, activation, deactivation)
-    - Authentication and session management with Flask-Login integration
-    - Profile management and user data operations
-    - User entity relationship coordination
-    - Business rule enforcement and validation
-    - Security monitoring and audit trail generation
+    Features:
+        - User registration workflow with comprehensive validation
+        - User authentication with Flask-Login session management
+        - User profile management with business rule enforcement
+        - User entity relationship coordination and ownership management
+        - User session lifecycle management with security controls
+        - Password management with secure hashing and validation policies
+        - Integration with Flask authentication decorators and Auth0
+    
+    Service Composition:
+        - ValidationService for comprehensive input validation
+        - UserSession model for session management
+        - BusinessEntity model for entity ownership coordination
+        - Flask-Login integration for authentication state management
+    
+    Example Usage:
+        >>> user_service = current_app.injector.get(UserService)
+        >>> 
+        >>> # User registration
+        >>> user_data = {
+        ...     'username': 'john_doe',
+        ...     'email': 'john@example.com',
+        ...     'password': 'SecurePassword123!'
+        ... }
+        >>> user = user_service.register_user(user_data)
+        >>> 
+        >>> # User authentication
+        >>> authenticated_user = user_service.authenticate_user('john_doe', 'SecurePassword123!')
+        >>> if authenticated_user:
+        ...     session_token = user_service.create_user_session(authenticated_user.id)
+        >>> 
+        >>> # User profile update
+        >>> profile_updates = {'email': 'john.doe@example.com'}
+        >>> updated_user = user_service.update_user_profile(user.id, profile_updates)
     """
     
-    def __init__(self, 
-                 session_manager: Optional[SessionManager] = None,
-                 password_utils: Optional[PasswordUtils] = None,
-                 security_monitor: Optional[SecurityMonitor] = None):
+    def __init__(self, *args, **kwargs):
         """
-        Initialize user service with dependency injection support.
+        Initialize UserService with required dependencies.
         
-        Args:
-            session_manager: Flask-Login session management utility
-            password_utils: Password security and validation utility
-            security_monitor: Security event monitoring utility
+        Inherits from BaseService for transaction boundary management and
+        Flask-SQLAlchemy session handling. Initializes validation service
+        composition for business rule enforcement.
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         
-        # Initialize service dependencies with proper injection support
-        self.session_manager = session_manager or SessionManager()
-        self.password_utils = password_utils or PasswordUtils()
-        self.security_monitor = security_monitor or SecurityMonitor()
+        # Service composition for validation
+        self._validation_service = None
         
-        # Initialize validation and utility components
-        self.validation_utils = ValidationUtils()
-        self.logger = StructuredLogger(__name__)
-        self.datetime_utils = DateTimeUtils()
+        # User-specific caching for performance optimization
+        self._user_cache_prefix = "user_service"
         
-        # Business logic configuration from Flask application
-        self.config = {
-            'password_min_length': current_app.config.get('PASSWORD_MIN_LENGTH', 8),
-            'session_timeout_hours': current_app.config.get('SESSION_TIMEOUT_HOURS', 24),
-            'max_login_attempts': current_app.config.get('MAX_LOGIN_ATTEMPTS', 5),
-            'account_lockout_duration': current_app.config.get('ACCOUNT_LOCKOUT_DURATION', 30),
-            'enable_remember_me': current_app.config.get('ENABLE_REMEMBER_ME', True),
-            'audit_user_operations': current_app.config.get('AUDIT_USER_OPERATIONS', True)
+        # Business rule configuration
+        self._password_policy = {
+            'min_length': 8,
+            'require_uppercase': True,
+            'require_lowercase': True,
+            'require_digit': True,
+            'require_special': True,
+            'max_length': 128
         }
-
-    # =============================================================================
-    # User Registration and Lifecycle Management
-    # =============================================================================
-    
-    def register_user(self, registration_data: UserRegistrationData) -> UserServiceResult:
-        """
-        Register new user with comprehensive validation and business logic.
         
-        Implements complete user registration workflow including:
-        - Input validation and sanitization
-        - Duplicate user checking (email and username)
-        - Password security validation and hashing
-        - User account creation with proper status management
-        - Initial session creation for authenticated user experience
-        - Security event logging and audit trail generation
+        # Session configuration
+        self._default_session_hours = 24
+        self._remember_me_hours = 168  # 7 days
+        
+        self.logger.info("UserService initialized with comprehensive business logic support")
+    
+    @property
+    def validation_service(self) -> ValidationService:
+        """
+        Get validation service instance through service composition.
+        
+        Returns:
+            ValidationService: Validation service for business rule enforcement
+        """
+        if self._validation_service is None:
+            self._validation_service = self.compose_service(ValidationService)
+        return self._validation_service
+    
+    def validate_business_rules(self, data: Dict[str, Any]) -> bool:
+        """
+        Validate user-specific business rules.
+        
+        Implements abstract method from BaseService for user-specific validation
+        including username policies, email format validation, and password security.
         
         Args:
-            registration_data: User registration information with validation
-            
+            data: User data to validate
+        
         Returns:
-            UserServiceResult: Registration outcome with user data or error details
-            
+            bool: True if validation passes
+        
         Raises:
-            ValidationError: Invalid input data or business rule violations
-            DuplicateUserError: Email or username already exists
-            UserServiceError: System-level registration failures
+            ValidationError: When business rules are violated
         """
         try:
-            self.logger.info("Starting user registration workflow", extra={
-                'username': registration_data.username,
-                'email': registration_data.email,
-                'operation': 'user_registration'
-            })
+            # Username validation
+            if 'username' in data:
+                username = data['username']
+                if not self._validate_username(username):
+                    raise ValidationError("Username does not meet business requirements")
             
-            # Phase 1: Comprehensive input validation
-            validation_result = self._validate_registration_data(registration_data)
-            if not validation_result.success:
-                return UserServiceResult(
-                    success=False,
-                    message=validation_result.message,
-                    error_code="VALIDATION_FAILED",
-                    metadata={'validation_errors': validation_result.metadata}
-                )
+            # Email validation
+            if 'email' in data:
+                email = data['email']
+                if not self._validate_email_format(email):
+                    raise ValidationError("Email format does not meet business requirements")
             
-            # Phase 2: Business rule enforcement - duplicate checking
-            duplicate_check = self._check_user_duplicates(
-                registration_data.email, 
-                registration_data.username
-            )
-            if not duplicate_check.success:
-                return duplicate_check
+            # Password validation
+            if 'password' in data:
+                password = data['password']
+                if not self._validate_password_policy(password):
+                    raise ValidationError("Password does not meet security policy requirements")
             
-            # Phase 3: Password security processing
-            password_hash = self.password_utils.hash_password(
-                registration_data.password,
-                salt_length=16
-            )
+            self.logger.debug("User business rule validation passed")
+            return True
             
-            # Phase 4: Database transaction for user creation
-            with self.get_transaction() as transaction:
-                try:
-                    # Create user entity with comprehensive field mapping
-                    new_user = User(
-                        username=registration_data.username.lower().strip(),
-                        email=registration_data.email.lower().strip(),
-                        password_hash=password_hash,
-                        first_name=registration_data.first_name,
-                        last_name=registration_data.last_name,
-                        status=UserStatus.ACTIVE.value,
-                        is_active=True,
-                        created_at=self.datetime_utils.utc_now(),
-                        updated_at=self.datetime_utils.utc_now(),
-                        profile_data=registration_data.profile_data or {}
-                    )
-                    
-                    # Add to session and flush for ID generation
-                    self.db.session.add(new_user)
-                    self.db.session.flush()
-                    
-                    # Create initial user session for immediate authentication
-                    initial_session = self._create_user_session(
-                        new_user,
-                        device_info=getattr(registration_data, 'device_info', None)
-                    )
-                    
-                    # Commit transaction for consistency
-                    transaction.commit()
-                    
-                    # Security monitoring and audit logging
-                    self.security_monitor.log_user_registration(new_user.id, {
-                        'username': new_user.username,
-                        'email': new_user.email,
-                        'registration_timestamp': new_user.created_at.isoformat(),
-                        'initial_session_id': initial_session.id if initial_session else None
-                    })
-                    
-                    self.logger.info("User registration completed successfully", extra={
-                        'user_id': new_user.id,
-                        'username': new_user.username,
-                        'operation': 'user_registration_success'
-                    })
-                    
-                    return UserServiceResult(
-                        success=True,
-                        data=self._serialize_user_data(new_user),
-                        message="User registered successfully",
-                        metadata={
-                            'user_id': new_user.id,
-                            'session_created': initial_session is not None,
-                            'registration_timestamp': new_user.created_at.isoformat()
-                        }
-                    )
-                    
-                except IntegrityError as e:
-                    transaction.rollback()
-                    self.logger.error("Database integrity error during registration", 
-                                    extra={'error': str(e), 'operation': 'user_registration_error'})
-                    
-                    # Determine specific constraint violation
-                    if 'username' in str(e):
-                        return UserServiceResult(
-                            success=False,
-                            message="Username already exists",
-                            error_code="USERNAME_EXISTS"
-                        )
-                    elif 'email' in str(e):
-                        return UserServiceResult(
-                            success=False,
-                            message="Email already exists",
-                            error_code="EMAIL_EXISTS"
-                        )
-                    else:
-                        raise UserServiceError("Database constraint violation during registration")
-                        
+        except ValidationError:
+            raise
         except Exception as e:
-            self.logger.error("Unexpected error during user registration", 
-                            extra={'error': str(e), 'operation': 'user_registration_error'})
-            raise UserServiceError(f"Registration failed: {str(e)}")
+            self.logger.error(f"Unexpected error in business rule validation: {e}")
+            raise ValidationError(f"Business rule validation failed: {str(e)}")
     
-    def activate_user(self, user_id: int, activation_token: Optional[str] = None) -> UserServiceResult:
+    def _validate_username(self, username: str) -> bool:
         """
-        Activate user account with optional token validation.
+        Validate username according to business rules.
         
         Args:
-            user_id: Target user identifier
-            activation_token: Optional activation token for verification
-            
+            username: Username to validate
+        
         Returns:
-            UserServiceResult: Activation outcome with updated user data
+            bool: True if username is valid
         """
-        try:
-            with self.get_transaction() as transaction:
-                user = self._get_user_by_id(user_id)
-                if not user:
-                    return UserServiceResult(
-                        success=False,
-                        message="User not found",
-                        error_code="USER_NOT_FOUND"
-                    )
-                
-                # Validate activation token if provided
-                if activation_token:
-                    if not self._validate_activation_token(user, activation_token):
-                        return UserServiceResult(
-                            success=False,
-                            message="Invalid activation token",
-                            error_code="INVALID_TOKEN"
-                        )
-                
-                # Update user status to active
-                user.status = UserStatus.ACTIVE.value
-                user.is_active = True
-                user.updated_at = self.datetime_utils.utc_now()
-                
-                transaction.commit()
-                
-                self.security_monitor.log_user_activation(user.id)
-                
-                return UserServiceResult(
-                    success=True,
-                    data=self._serialize_user_data(user),
-                    message="User activated successfully"
-                )
-                
-        except Exception as e:
-            self.logger.error("Error during user activation", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"User activation failed: {str(e)}")
+        if not username or not isinstance(username, str):
+            return False
+        
+        # Username length requirements
+        if len(username) < 3 or len(username) > 80:
+            return False
+        
+        # Username character requirements (alphanumeric, underscore, hyphen)
+        username_pattern = r'^[a-zA-Z0-9_-]+$'
+        if not re.match(username_pattern, username):
+            return False
+        
+        # Username must start with letter or number
+        if not username[0].isalnum():
+            return False
+        
+        return True
     
-    def deactivate_user(self, user_id: int, reason: Optional[str] = None) -> UserServiceResult:
+    def _validate_email_format(self, email: str) -> bool:
         """
-        Deactivate user account and invalidate all sessions.
+        Validate email format according to business rules.
         
         Args:
-            user_id: Target user identifier
-            reason: Optional deactivation reason for audit purposes
-            
-        Returns:
-            UserServiceResult: Deactivation outcome
-        """
-        try:
-            with self.get_transaction() as transaction:
-                user = self._get_user_by_id(user_id)
-                if not user:
-                    return UserServiceResult(
-                        success=False,
-                        message="User not found",
-                        error_code="USER_NOT_FOUND"
-                    )
-                
-                # Update user status to inactive
-                user.status = UserStatus.INACTIVE.value
-                user.is_active = False
-                user.updated_at = self.datetime_utils.utc_now()
-                
-                # Invalidate all active user sessions
-                self._invalidate_all_user_sessions(user_id)
-                
-                transaction.commit()
-                
-                self.security_monitor.log_user_deactivation(user.id, reason)
-                
-                return UserServiceResult(
-                    success=True,
-                    message="User deactivated successfully",
-                    metadata={'reason': reason}
-                )
-                
-        except Exception as e:
-            self.logger.error("Error during user deactivation", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"User deactivation failed: {str(e)}")
-
-    # =============================================================================
-    # Authentication and Session Management
-    # =============================================================================
-    
-    def authenticate_user(self, auth_data: UserAuthenticationData) -> UserServiceResult:
-        """
-        Authenticate user with comprehensive security checks and session management.
+            email: Email address to validate
         
-        Implements complete authentication workflow including:
-        - User identification by username or email
-        - Password validation with security monitoring
-        - Account lockout protection and attempt tracking
-        - Flask-Login session creation and management
-        - Security event logging and audit trail generation
+        Returns:
+            bool: True if email format is valid
+        """
+        if not email or not isinstance(email, str):
+            return False
+        
+        # Basic email format validation
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, email):
+            return False
+        
+        # Email length requirements
+        if len(email) < 5 or len(email) > 120:
+            return False
+        
+        return True
+    
+    def _validate_password_policy(self, password: str) -> bool:
+        """
+        Validate password according to security policy.
         
         Args:
-            auth_data: Authentication credentials and options
-            
+            password: Password to validate
+        
         Returns:
-            UserServiceResult: Authentication outcome with session data
-            
+            bool: True if password meets policy requirements
+        """
+        if not password or not isinstance(password, str):
+            return False
+        
+        policy = self._password_policy
+        
+        # Length requirements
+        if len(password) < policy['min_length'] or len(password) > policy['max_length']:
+            return False
+        
+        # Character requirements
+        if policy['require_uppercase'] and not any(c.isupper() for c in password):
+            return False
+        
+        if policy['require_lowercase'] and not any(c.islower() for c in password):
+            return False
+        
+        if policy['require_digit'] and not any(c.isdigit() for c in password):
+            return False
+        
+        if policy['require_special'] and not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in password):
+            return False
+        
+        return True
+    
+    @retry_on_failure(max_retries=3)
+    def register_user(self, user_data: Dict[str, Any], 
+                     auto_login: bool = False,
+                     request_context: Optional[Dict[str, Any]] = None) -> User:
+        """
+        Register new user with comprehensive validation and security controls.
+        
+        Implements user registration workflow with business rule validation,
+        duplicate checking, secure password hashing, and optional auto-login
+        functionality. Maintains functional equivalence with Node.js registration.
+        
+        Args:
+            user_data: User registration data containing username, email, password
+            auto_login: Whether to automatically log in user after registration
+            request_context: Request context for session creation (user_agent, ip_address)
+        
+        Returns:
+            User: Created user instance
+        
         Raises:
-            AuthenticationError: Invalid credentials or account issues
-            UserServiceError: System-level authentication failures
+            UserRegistrationError: When registration fails due to validation or constraints
+            ValidationError: When input validation fails
+            TransactionError: When database operations fail
+        
+        Example:
+            >>> user_data = {
+            ...     'username': 'john_doe',
+            ...     'email': 'john@example.com',
+            ...     'password': 'SecurePassword123!'
+            ... }
+            >>> user = user_service.register_user(user_data, auto_login=True)
+            >>> print(f"Registered user: {user.username}")
         """
         try:
-            self.logger.info("Starting user authentication workflow", extra={
-                'identifier': auth_data.identifier,
-                'remember_me': auth_data.remember_me,
-                'operation': 'user_authentication'
-            })
+            self.log_service_operation("User registration initiated", {'username': user_data.get('username')})
             
-            # Phase 1: User identification and retrieval
-            user = self._get_user_by_identifier(auth_data.identifier)
-            if not user:
-                # Security: Log failed authentication attempt
-                self.security_monitor.log_authentication_failure(
-                    auth_data.identifier, 
-                    "user_not_found"
-                )
-                return UserServiceResult(
-                    success=False,
-                    message="Invalid credentials",
-                    error_code="AUTHENTICATION_FAILED"
-                )
+            # Validate required fields
+            required_fields = ['username', 'email', 'password']
+            validated_data = self.validate_input(user_data, required_fields)
             
-            # Phase 2: Account status validation
-            account_check = self._validate_account_status(user)
-            if not account_check.success:
-                return account_check
+            # Business rule validation
+            self.validate_business_rules(validated_data)
             
-            # Phase 3: Password verification with security monitoring
-            if not self.password_utils.verify_password(
-                auth_data.password, 
-                user.password_hash
-            ):
-                # Handle failed authentication attempt
-                self._handle_failed_authentication(user, auth_data.identifier)
-                return UserServiceResult(
-                    success=False,
-                    message="Invalid credentials",
-                    error_code="AUTHENTICATION_FAILED"
+            # Check for existing users
+            existing_user = self._check_user_existence(
+                validated_data['username'], 
+                validated_data['email']
+            )
+            if existing_user:
+                raise UserRegistrationError(
+                    f"User already exists with username or email"
                 )
             
-            # Phase 4: Successful authentication processing
-            with self.get_transaction() as transaction:
-                # Reset failed login attempts on successful authentication
-                user.failed_login_attempts = 0
-                user.last_login_at = self.datetime_utils.utc_now()
-                user.updated_at = self.datetime_utils.utc_now()
-                
-                # Create new user session
-                user_session = self._create_user_session(
-                    user, 
-                    device_info=auth_data.device_info
+            # Create user within transaction boundary
+            with self.transaction_boundary():
+                # Create user instance
+                user = User(
+                    username=validated_data['username'].strip().lower(),
+                    email=validated_data['email'].strip().lower(),
+                    password=validated_data['password']
                 )
                 
-                # Flask-Login integration for session management
-                login_success = login_user(
-                    user, 
-                    remember=auth_data.remember_me and self.config['enable_remember_me']
-                )
+                # Add additional user fields if provided
+                if 'is_active' in validated_data:
+                    user.is_active = bool(validated_data['is_active'])
                 
-                if not login_success:
-                    transaction.rollback()
-                    raise AuthenticationError("Flask-Login session creation failed")
+                # Save user to database
+                self.session.add(user)
+                self.session.flush()  # Get user ID without committing
                 
-                transaction.commit()
+                # Auto-login if requested
+                session_token = None
+                if auto_login:
+                    session_token = self._create_user_session_internal(
+                        user.id, 
+                        request_context
+                    )
+                    
+                    # Flask-Login integration
+                    login_user(user)
                 
-                # Security monitoring and audit logging
-                self.security_monitor.log_successful_authentication(user.id, {
-                    'session_id': user_session.id if user_session else None,
-                    'remember_me': auth_data.remember_me,
-                    'device_info': auth_data.device_info,
-                    'authentication_timestamp': user.last_login_at.isoformat()
-                })
-                
-                self.logger.info("User authentication completed successfully", extra={
-                    'user_id': user.id,
-                    'username': user.username,
-                    'session_id': user_session.id if user_session else None,
-                    'operation': 'user_authentication_success'
-                })
-                
-                return UserServiceResult(
-                    success=True,
-                    data=self._serialize_user_data(user),
-                    message="Authentication successful",
-                    metadata={
-                        'session_id': user_session.id if user_session else None,
-                        'remember_me': auth_data.remember_me,
-                        'last_login': user.last_login_at.isoformat()
+                self.log_service_operation(
+                    "User registration completed", 
+                    {
+                        'user_id': user.id,
+                        'username': user.username,
+                        'auto_login': auto_login
                     }
                 )
                 
+                # Clear user cache
+                self._invalidate_user_cache(user.id)
+                
+                return user
+                
+        except ValidationError:
+            raise
+        except IntegrityError as e:
+            self.handle_integrity_error(e, "user registration")
         except Exception as e:
-            self.logger.error("Unexpected error during user authentication", 
-                            extra={'error': str(e), 'operation': 'user_authentication_error'})
-            raise UserServiceError(f"Authentication failed: {str(e)}")
+            self.logger.error(f"User registration failed: {e}")
+            raise UserRegistrationError(
+                "User registration failed due to system error",
+                original_error=e
+            )
     
-    def logout_user(self, user_id: Optional[int] = None) -> UserServiceResult:
+    def _check_user_existence(self, username: str, email: str) -> Optional[User]:
         """
-        Logout user and invalidate current session.
+        Check if user already exists with given username or email.
         
         Args:
-            user_id: Optional user ID, defaults to current authenticated user
-            
+            username: Username to check
+            email: Email to check
+        
         Returns:
-            UserServiceResult: Logout outcome
+            Optional[User]: Existing user if found, None otherwise
+        """
+        return User.query.filter(
+            (User.username == username.strip().lower()) |
+            (User.email == email.strip().lower())
+        ).first()
+    
+    @retry_on_failure(max_retries=3)
+    def authenticate_user(self, identifier: str, password: str,
+                         remember_me: bool = False,
+                         request_context: Optional[Dict[str, Any]] = None) -> Optional[User]:
+        """
+        Authenticate user with credentials and create session.
+        
+        Implements user authentication workflow with credential validation,
+        Flask-Login integration, and session management. Supports username
+        or email identification with secure password verification.
+        
+        Args:
+            identifier: Username or email for authentication
+            password: Plain text password for verification
+            remember_me: Whether to create extended session for remember-me functionality
+            request_context: Request context for session creation
+        
+        Returns:
+            Optional[User]: Authenticated user if credentials are valid, None otherwise
+        
+        Raises:
+            UserAuthenticationError: When authentication fails due to system error
+            ValidationError: When input validation fails
+        
+        Example:
+            >>> user = user_service.authenticate_user('john_doe', 'SecurePassword123!')
+            >>> if user:
+            ...     print(f"Authenticated: {user.username}")
+            ... else:
+            ...     print("Authentication failed")
         """
         try:
-            # Determine target user for logout
-            target_user_id = user_id or (current_user.id if current_user.is_authenticated else None)
+            self.log_service_operation("User authentication initiated", {'identifier': identifier})
             
-            if not target_user_id:
-                return UserServiceResult(
-                    success=False,
-                    message="No user session to logout",
-                    error_code="NO_ACTIVE_SESSION"
-                )
+            # Input validation
+            if not identifier or not password:
+                self.logger.warning("Authentication failed: missing credentials")
+                return None
             
-            # Invalidate current user session
-            if hasattr(current_user, 'id') and current_user.id == target_user_id:
-                self._invalidate_current_session()
+            # Find user by username or email
+            user = User.find_by_credentials(identifier.strip(), password)
+            
+            if not user:
+                self.logger.warning(f"Authentication failed for identifier: {identifier}")
+                return None
+            
+            # Check user active status
+            if not user.is_active:
+                self.logger.warning(f"Authentication failed: user {user.id} is inactive")
+                return None
+            
+            # Create user session
+            session_hours = self._remember_me_hours if remember_me else self._default_session_hours
+            session_token = self._create_user_session_internal(
+                user.id,
+                request_context,
+                expires_in_hours=session_hours
+            )
+            
+            # Flask-Login integration
+            login_user(user, remember=remember_me)
+            
+            # Update user last accessed time
+            user.updated_at = datetime.now(timezone.utc)
+            self.session.commit()
+            
+            self.log_service_operation(
+                "User authentication successful", 
+                {
+                    'user_id': user.id,
+                    'username': user.username,
+                    'remember_me': remember_me
+                }
+            )
+            
+            return user
+            
+        except Exception as e:
+            self.logger.error(f"User authentication error: {e}")
+            raise UserAuthenticationError(
+                "Authentication failed due to system error",
+                original_error=e
+            )
+    
+    def _create_user_session_internal(self, user_id: int,
+                                    request_context: Optional[Dict[str, Any]] = None,
+                                    expires_in_hours: int = None) -> str:
+        """
+        Internal method to create user session with context.
+        
+        Args:
+            user_id: User ID for session creation
+            request_context: Request context with user_agent, ip_address
+            expires_in_hours: Session expiration in hours
+        
+        Returns:
+            str: Session token
+        
+        Raises:
+            UserSessionError: When session creation fails
+        """
+        try:
+            if expires_in_hours is None:
+                expires_in_hours = self._default_session_hours
+            
+            # Extract context information
+            user_agent = None
+            ip_address = None
+            
+            if request_context:
+                user_agent = request_context.get('user_agent')
+                ip_address = request_context.get('ip_address')
+            
+            # Create session using UserSession model
+            session = UserSession.create_session(
+                user_id=user_id,
+                expires_in_hours=expires_in_hours,
+                user_agent=user_agent,
+                ip_address=ip_address
+            )
+            
+            return session.session_token
+            
+        except Exception as e:
+            self.logger.error(f"Session creation failed for user {user_id}: {e}")
+            raise UserSessionError(
+                "Failed to create user session",
+                original_error=e
+            )
+    
+    @retry_on_failure(max_retries=2)
+    def logout_user(self, user_id: Optional[int] = None,
+                   invalidate_all_sessions: bool = False) -> bool:
+        """
+        Logout user and invalidate sessions.
+        
+        Implements user logout workflow with session invalidation and
+        Flask-Login integration. Supports single session or all session
+        invalidation for security purposes.
+        
+        Args:
+            user_id: User ID to logout (uses current user if None)
+            invalidate_all_sessions: Whether to invalidate all user sessions
+        
+        Returns:
+            bool: True if logout successful
+        
+        Raises:
+            UserSessionError: When logout operations fail
+        
+        Example:
+            >>> success = user_service.logout_user(user_id=1, invalidate_all_sessions=True)
+            >>> if success:
+            ...     print("User logged out successfully")
+        """
+        try:
+            # Get user ID from current user if not provided
+            if user_id is None:
+                if hasattr(current_user, 'id'):
+                    user_id = current_user.id
+                else:
+                    user_id = self.get_current_user_id()
+            
+            if not user_id:
+                self.logger.warning("Logout attempted without valid user ID")
+                return False
+            
+            self.log_service_operation("User logout initiated", {'user_id': user_id})
+            
+            # Invalidate sessions
+            if invalidate_all_sessions:
+                invalidated_count = UserSession.invalidate_user_sessions(user_id)
+                self.logger.info(f"Invalidated {invalidated_count} sessions for user {user_id}")
+            else:
+                # Invalidate current session only
+                current_session_id = getattr(g, 'current_session_id', None)
+                if current_session_id:
+                    UserSession.invalidate_user_sessions(
+                        user_id, 
+                        exclude_session_id=current_session_id
+                    )
             
             # Flask-Login logout
             logout_user()
             
-            self.security_monitor.log_user_logout(target_user_id)
+            # Clear user cache
+            self._invalidate_user_cache(user_id)
             
-            return UserServiceResult(
-                success=True,
-                message="Logout successful"
-            )
-            
-        except Exception as e:
-            self.logger.error("Error during user logout", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Logout failed: {str(e)}")
-
-    # =============================================================================
-    # Profile Management and User Data Operations
-    # =============================================================================
-    
-    def get_user_profile(self, user_id: int) -> UserServiceResult:
-        """
-        Retrieve comprehensive user profile with related data.
-        
-        Args:
-            user_id: Target user identifier
-            
-        Returns:
-            UserServiceResult: User profile data with relationships
-        """
-        try:
-            user = self._get_user_by_id_with_relationships(user_id)
-            if not user:
-                return UserServiceResult(
-                    success=False,
-                    message="User not found",
-                    error_code="USER_NOT_FOUND"
-                )
-            
-            profile_data = self._serialize_user_profile(user)
-            
-            return UserServiceResult(
-                success=True,
-                data=profile_data,
-                message="Profile retrieved successfully"
-            )
-            
-        except Exception as e:
-            self.logger.error("Error retrieving user profile", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Profile retrieval failed: {str(e)}")
-    
-    def update_user_profile(self, user_id: int, profile_data: UserProfileData) -> UserServiceResult:
-        """
-        Update user profile with validation and business logic.
-        
-        Args:
-            user_id: Target user identifier
-            profile_data: Profile update information
-            
-        Returns:
-            UserServiceResult: Update outcome with refreshed profile data
-        """
-        try:
-            with self.get_transaction() as transaction:
-                user = self._get_user_by_id(user_id)
-                if not user:
-                    return UserServiceResult(
-                        success=False,
-                        message="User not found",
-                        error_code="USER_NOT_FOUND"
-                    )
-                
-                # Validate profile update data
-                validation_result = self._validate_profile_update(profile_data, user)
-                if not validation_result.success:
-                    return validation_result
-                
-                # Apply profile updates
-                if profile_data.first_name is not None:
-                    user.first_name = profile_data.first_name.strip()
-                
-                if profile_data.last_name is not None:
-                    user.last_name = profile_data.last_name.strip()
-                
-                if profile_data.email is not None:
-                    # Check for email duplicates
-                    if self._email_exists(profile_data.email, exclude_user_id=user_id):
-                        return UserServiceResult(
-                            success=False,
-                            message="Email already exists",
-                            error_code="EMAIL_EXISTS"
-                        )
-                    user.email = profile_data.email.lower().strip()
-                
-                if profile_data.profile_data is not None:
-                    user.profile_data = {**(user.profile_data or {}), **profile_data.profile_data}
-                
-                if profile_data.status is not None:
-                    user.status = profile_data.status.value
-                
-                user.updated_at = self.datetime_utils.utc_now()
-                
-                transaction.commit()
-                
-                self.security_monitor.log_profile_update(user.id, {
-                    'updated_fields': [k for k, v in profile_data.__dict__.items() if v is not None],
-                    'update_timestamp': user.updated_at.isoformat()
-                })
-                
-                return UserServiceResult(
-                    success=True,
-                    data=self._serialize_user_data(user),
-                    message="Profile updated successfully"
-                )
-                
-        except Exception as e:
-            self.logger.error("Error updating user profile", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Profile update failed: {str(e)}")
-    
-    def change_user_password(self, user_id: int, current_password: str, new_password: str) -> UserServiceResult:
-        """
-        Change user password with validation and security checks.
-        
-        Args:
-            user_id: Target user identifier
-            current_password: Current password for verification
-            new_password: New password to set
-            
-        Returns:
-            UserServiceResult: Password change outcome
-        """
-        try:
-            with self.get_transaction() as transaction:
-                user = self._get_user_by_id(user_id)
-                if not user:
-                    return UserServiceResult(
-                        success=False,
-                        message="User not found",
-                        error_code="USER_NOT_FOUND"
-                    )
-                
-                # Verify current password
-                if not self.password_utils.verify_password(current_password, user.password_hash):
-                    self.security_monitor.log_password_change_failure(user.id, "invalid_current_password")
-                    return UserServiceResult(
-                        success=False,
-                        message="Current password is incorrect",
-                        error_code="INVALID_PASSWORD"
-                    )
-                
-                # Validate new password
-                password_validation = self.password_utils.validate_password_strength(new_password)
-                if not password_validation.is_valid:
-                    return UserServiceResult(
-                        success=False,
-                        message="New password does not meet requirements",
-                        error_code="WEAK_PASSWORD",
-                        metadata={'requirements': password_validation.requirements}
-                    )
-                
-                # Update password hash
-                user.password_hash = self.password_utils.hash_password(new_password)
-                user.updated_at = self.datetime_utils.utc_now()
-                
-                # Invalidate all existing sessions except current
-                self._invalidate_other_user_sessions(user_id)
-                
-                transaction.commit()
-                
-                self.security_monitor.log_password_change_success(user.id)
-                
-                return UserServiceResult(
-                    success=True,
-                    message="Password changed successfully"
-                )
-                
-        except Exception as e:
-            self.logger.error("Error changing user password", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Password change failed: {str(e)}")
-
-    # =============================================================================
-    # User Entity Relationship Management
-    # =============================================================================
-    
-    def get_user_business_entities(self, user_id: int, include_relationships: bool = True) -> UserServiceResult:
-        """
-        Retrieve all business entities owned by user with optional relationships.
-        
-        Args:
-            user_id: Target user identifier
-            include_relationships: Whether to include entity relationships
-            
-        Returns:
-            UserServiceResult: Business entities data with relationships
-        """
-        try:
-            user = self._get_user_by_id(user_id)
-            if not user:
-                return UserServiceResult(
-                    success=False,
-                    message="User not found",
-                    error_code="USER_NOT_FOUND"
-                )
-            
-            # Build query with optional relationship loading
-            query = self.db.session.query(BusinessEntity).filter_by(owner_id=user_id)
-            
-            if include_relationships:
-                query = query.options(
-                    joinedload(BusinessEntity.source_relationships),
-                    joinedload(BusinessEntity.target_relationships)
-                )
-            
-            entities = query.all()
-            
-            # Serialize entities with relationships
-            entities_data = [
-                self._serialize_business_entity(entity, include_relationships)
-                for entity in entities
-            ]
-            
-            return UserServiceResult(
-                success=True,
-                data=entities_data,
-                message="Business entities retrieved successfully",
-                metadata={'entity_count': len(entities)}
-            )
-            
-        except Exception as e:
-            self.logger.error("Error retrieving user business entities", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Business entities retrieval failed: {str(e)}")
-    
-    def create_business_entity(self, user_id: int, entity_data: Dict[str, Any]) -> UserServiceResult:
-        """
-        Create new business entity for user with validation.
-        
-        Args:
-            user_id: Owner user identifier
-            entity_data: Business entity information
-            
-        Returns:
-            UserServiceResult: Created entity data
-        """
-        try:
-            with self.get_transaction() as transaction:
-                user = self._get_user_by_id(user_id)
-                if not user:
-                    return UserServiceResult(
-                        success=False,
-                        message="User not found",
-                        error_code="USER_NOT_FOUND"
-                    )
-                
-                # Validate entity data
-                validation_result = self._validate_business_entity_data(entity_data)
-                if not validation_result.success:
-                    return validation_result
-                
-                # Create business entity
-                new_entity = BusinessEntity(
-                    name=entity_data['name'].strip(),
-                    description=entity_data.get('description', '').strip(),
-                    owner_id=user_id,
-                    status=entity_data.get('status', 'active'),
-                    created_at=self.datetime_utils.utc_now(),
-                    updated_at=self.datetime_utils.utc_now()
-                )
-                
-                self.db.session.add(new_entity)
-                self.db.session.flush()
-                
-                transaction.commit()
-                
-                self.logger.info("Business entity created successfully", extra={
-                    'entity_id': new_entity.id,
+            self.log_service_operation(
+                "User logout completed", 
+                {
                     'user_id': user_id,
-                    'operation': 'create_business_entity'
-                })
-                
-                return UserServiceResult(
-                    success=True,
-                    data=self._serialize_business_entity(new_entity),
-                    message="Business entity created successfully"
-                )
-                
-        except Exception as e:
-            self.logger.error("Error creating business entity", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Business entity creation failed: {str(e)}")
-
-    # =============================================================================
-    # Session Management Utilities
-    # =============================================================================
-    
-    def get_user_sessions(self, user_id: int, active_only: bool = True) -> UserServiceResult:
-        """
-        Retrieve user sessions with filtering options.
-        
-        Args:
-            user_id: Target user identifier
-            active_only: Whether to return only active sessions
-            
-        Returns:
-            UserServiceResult: User sessions data
-        """
-        try:
-            query = self.db.session.query(UserSession).filter_by(user_id=user_id)
-            
-            if active_only:
-                query = query.filter_by(is_valid=True).filter(
-                    UserSession.expires_at > self.datetime_utils.utc_now()
-                )
-            
-            sessions = query.order_by(UserSession.created_at.desc()).all()
-            
-            sessions_data = [self._serialize_user_session(session) for session in sessions]
-            
-            return UserServiceResult(
-                success=True,
-                data=sessions_data,
-                message="User sessions retrieved successfully",
-                metadata={'session_count': len(sessions)}
+                    'invalidate_all': invalidate_all_sessions
+                }
             )
             
+            return True
+            
         except Exception as e:
-            self.logger.error("Error retrieving user sessions", 
-                            extra={'error': str(e), 'user_id': user_id})
-            raise UserServiceError(f"Sessions retrieval failed: {str(e)}")
+            self.logger.error(f"User logout error: {e}")
+            raise UserSessionError(
+                "Logout failed due to system error",
+                original_error=e
+            )
     
-    def invalidate_user_session(self, user_id: int, session_id: int) -> UserServiceResult:
+    @retry_on_failure(max_retries=3)
+    def update_user_profile(self, user_id: int, 
+                           profile_data: Dict[str, Any],
+                           current_password: Optional[str] = None) -> User:
         """
-        Invalidate specific user session.
+        Update user profile with business rule validation.
+        
+        Implements user profile update workflow with validation, constraint
+        checking, and security controls. Supports email updates, password
+        changes, and profile metadata modifications.
         
         Args:
-            user_id: User identifier for security validation
-            session_id: Target session identifier
-            
+            user_id: User ID to update
+            profile_data: Profile data to update
+            current_password: Current password for sensitive updates
+        
         Returns:
-            UserServiceResult: Session invalidation outcome
+            User: Updated user instance
+        
+        Raises:
+            UserProfileError: When profile update fails
+            ValidationError: When validation fails
+            TransactionError: When database operations fail
+        
+        Example:
+            >>> profile_updates = {
+            ...     'email': 'john.doe@example.com',
+            ...     'password': 'NewSecurePassword123!'
+            ... }
+            >>> updated_user = user_service.update_user_profile(
+            ...     user_id=1,
+            ...     profile_data=profile_updates,
+            ...     current_password='OldPassword123!'
+            ... )
         """
         try:
-            with self.get_transaction() as transaction:
-                session = self.db.session.query(UserSession).filter_by(
-                    id=session_id,
-                    user_id=user_id
-                ).first()
+            self.log_service_operation("User profile update initiated", {'user_id': user_id})
+            
+            # Get user instance
+            user = self.get_user_by_id(user_id)
+            if not user:
+                raise UserProfileError(f"User not found: {user_id}")
+            
+            # Validate input data
+            validated_data = self.validate_input(profile_data)
+            
+            # Check if sensitive updates require current password
+            sensitive_fields = {'email', 'password'}
+            if any(field in validated_data for field in sensitive_fields):
+                if not current_password or not user.check_password(current_password):
+                    raise UserProfileError("Current password required for sensitive updates")
+            
+            # Business rule validation for updates
+            self.validate_business_rules(validated_data)
+            
+            # Update user within transaction boundary
+            with self.transaction_boundary():
+                updates_made = []
                 
-                if not session:
-                    return UserServiceResult(
-                        success=False,
-                        message="Session not found",
-                        error_code="SESSION_NOT_FOUND"
+                # Update email if provided
+                if 'email' in validated_data:
+                    new_email = validated_data['email'].strip().lower()
+                    if new_email != user.email:
+                        # Check email uniqueness
+                        existing_user = User.find_by_email(new_email)
+                        if existing_user and existing_user.id != user.id:
+                            raise UserProfileError("Email address is already in use")
+                        
+                        user.email = new_email
+                        updates_made.append('email')
+                
+                # Update password if provided
+                if 'password' in validated_data:
+                    user.set_password(validated_data['password'])
+                    updates_made.append('password')
+                    
+                    # Invalidate all other sessions for security
+                    UserSession.invalidate_user_sessions(
+                        user_id, 
+                        exclude_session_id=getattr(g, 'current_session_id', None)
                     )
                 
-                session.is_valid = False
-                session.updated_at = self.datetime_utils.utc_now()
+                # Update other allowed fields
+                allowed_fields = {'is_active'}
+                for field in allowed_fields:
+                    if field in validated_data:
+                        setattr(user, field, validated_data[field])
+                        updates_made.append(field)
                 
-                transaction.commit()
+                # Update timestamp
+                user.updated_at = datetime.now(timezone.utc)
                 
-                self.security_monitor.log_session_invalidation(user_id, session_id)
+                # Commit changes
+                self.session.commit()
                 
-                return UserServiceResult(
-                    success=True,
-                    message="Session invalidated successfully"
+                self.log_service_operation(
+                    "User profile update completed", 
+                    {
+                        'user_id': user_id,
+                        'updates_made': updates_made
+                    }
                 )
                 
-        except Exception as e:
-            self.logger.error("Error invalidating user session", 
-                            extra={'error': str(e), 'user_id': user_id, 'session_id': session_id})
-            raise UserServiceError(f"Session invalidation failed: {str(e)}")
-
-    # =============================================================================
-    # Private Helper Methods - Validation and Business Logic
-    # =============================================================================
-    
-    def _validate_registration_data(self, data: UserRegistrationData) -> UserServiceResult:
-        """Validate user registration data with comprehensive checks."""
-        errors = []
-        
-        # Username validation
-        if not data.username or len(data.username.strip()) < 3:
-            errors.append("Username must be at least 3 characters long")
-        elif not self.validation_utils.is_valid_username(data.username):
-            errors.append("Username contains invalid characters")
-        
-        # Email validation
-        if not data.email or not self.validation_utils.is_valid_email(data.email):
-            errors.append("Valid email address is required")
-        
-        # Password validation
-        password_validation = self.password_utils.validate_password_strength(data.password)
-        if not password_validation.is_valid:
-            errors.extend(password_validation.errors)
-        
-        if errors:
-            return UserServiceResult(
-                success=False,
-                message="Validation failed",
-                error_code="VALIDATION_FAILED",
-                metadata={'validation_errors': errors}
-            )
-        
-        return UserServiceResult(success=True)
-    
-    def _check_user_duplicates(self, email: str, username: str) -> UserServiceResult:
-        """Check for existing users with same email or username."""
-        # Check email duplicates
-        if self._email_exists(email):
-            return UserServiceResult(
-                success=False,
-                message="Email already exists",
-                error_code="EMAIL_EXISTS"
-            )
-        
-        # Check username duplicates
-        if self._username_exists(username):
-            return UserServiceResult(
-                success=False,
-                message="Username already exists",
-                error_code="USERNAME_EXISTS"
-            )
-        
-        return UserServiceResult(success=True)
-    
-    def _validate_account_status(self, user: User) -> UserServiceResult:
-        """Validate user account status for authentication."""
-        if not user.is_active:
-            return UserServiceResult(
-                success=False,
-                message="Account is inactive",
-                error_code="ACCOUNT_INACTIVE"
-            )
-        
-        if user.status == UserStatus.SUSPENDED.value:
-            return UserServiceResult(
-                success=False,
-                message="Account is suspended",
-                error_code="ACCOUNT_SUSPENDED"
-            )
-        
-        if user.status == UserStatus.LOCKED.value:
-            return UserServiceResult(
-                success=False,
-                message="Account is locked",
-                error_code="ACCOUNT_LOCKED"
-            )
-        
-        return UserServiceResult(success=True)
-    
-    def _handle_failed_authentication(self, user: User, identifier: str) -> None:
-        """Handle failed authentication attempt with security measures."""
-        try:
-            user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-            user.updated_at = self.datetime_utils.utc_now()
-            
-            # Check for account lockout threshold
-            if user.failed_login_attempts >= self.config['max_login_attempts']:
-                user.status = UserStatus.LOCKED.value
-                lockout_duration = timedelta(minutes=self.config['account_lockout_duration'])
-                user.locked_until = self.datetime_utils.utc_now() + lockout_duration
+                # Clear user cache
+                self._invalidate_user_cache(user_id)
                 
-                self.security_monitor.log_account_lockout(user.id, {
-                    'failed_attempts': user.failed_login_attempts,
-                    'lockout_duration': self.config['account_lockout_duration']
-                })
-            
-            self.db.session.commit()
-            
-            # Log security event
-            self.security_monitor.log_authentication_failure(identifier, "invalid_password", {
-                'user_id': user.id,
-                'failed_attempts': user.failed_login_attempts,
-                'account_locked': user.status == UserStatus.LOCKED.value
-            })
-            
+                return user
+                
+        except ValidationError:
+            raise
+        except IntegrityError as e:
+            self.handle_integrity_error(e, "user profile update")
         except Exception as e:
-            self.logger.error("Error handling failed authentication", 
-                            extra={'error': str(e), 'user_id': user.id})
-
-    # =============================================================================
-    # Private Helper Methods - Database Operations
-    # =============================================================================
+            self.logger.error(f"User profile update failed: {e}")
+            raise UserProfileError(
+                "Profile update failed due to system error",
+                original_error=e
+            )
     
-    def _get_user_by_id(self, user_id: int) -> Optional[User]:
-        """Retrieve user by ID with basic loading."""
-        return self.db.session.query(User).filter_by(id=user_id).first()
-    
-    def _get_user_by_id_with_relationships(self, user_id: int) -> Optional[User]:
-        """Retrieve user by ID with relationship loading."""
-        return self.db.session.query(User).options(
-            joinedload(User.sessions),
-            joinedload(User.business_entities)
-        ).filter_by(id=user_id).first()
-    
-    def _get_user_by_identifier(self, identifier: str) -> Optional[User]:
-        """Retrieve user by username or email."""
-        return self.db.session.query(User).filter(
-            (User.username == identifier.lower()) | 
-            (User.email == identifier.lower())
-        ).first()
-    
-    def _email_exists(self, email: str, exclude_user_id: Optional[int] = None) -> bool:
-        """Check if email already exists in database."""
-        query = self.db.session.query(User).filter_by(email=email.lower())
-        if exclude_user_id:
-            query = query.filter(User.id != exclude_user_id)
-        return query.first() is not None
-    
-    def _username_exists(self, username: str, exclude_user_id: Optional[int] = None) -> bool:
-        """Check if username already exists in database."""
-        query = self.db.session.query(User).filter_by(username=username.lower())
-        if exclude_user_id:
-            query = query.filter(User.id != exclude_user_id)
-        return query.first() is not None
-    
-    def _create_user_session(self, user: User, device_info: Optional[Dict[str, Any]] = None) -> Optional[UserSession]:
-        """Create new user session with proper expiration."""
+    def get_user_by_id(self, user_id: int, 
+                      include_sessions: bool = False,
+                      include_entities: bool = False) -> Optional[User]:
+        """
+        Get user by ID with optional relationship loading.
+        
+        Args:
+            user_id: User ID to retrieve
+            include_sessions: Whether to eagerly load user sessions
+            include_entities: Whether to eagerly load user business entities
+        
+        Returns:
+            Optional[User]: User instance if found, None otherwise
+        
+        Example:
+            >>> user = user_service.get_user_by_id(1, include_sessions=True)
+            >>> if user:
+            ...     print(f"User {user.username} has {len(user.sessions)} sessions")
+        """
         try:
-            session_token = self.session_manager.generate_session_token()
-            expires_at = self.datetime_utils.utc_now() + timedelta(
-                hours=self.config['session_timeout_hours']
-            )
+            # Check cache first
+            cache_key = f"{self._user_cache_prefix}:user:{user_id}"
+            cached_user = self.get_cached_result(cache_key)
+            if cached_user and not (include_sessions or include_entities):
+                return cached_user
             
-            user_session = UserSession(
-                user_id=user.id,
-                session_token=session_token,
-                expires_at=expires_at,
-                is_valid=True,
-                device_info=device_info or {},
-                created_at=self.datetime_utils.utc_now()
-            )
+            # Build query with optional eager loading
+            query = User.query.filter_by(id=user_id)
             
-            self.db.session.add(user_session)
-            self.db.session.flush()
+            if include_sessions:
+                query = query.options(selectinload(User.sessions))
             
-            return user_session
+            if include_entities:
+                query = query.options(selectinload(User.business_entities))
+            
+            user = query.first()
+            
+            # Cache result if no relationships loaded
+            if user and not (include_sessions or include_entities):
+                self.cache_result(cache_key, user, ttl=300)
+            
+            return user
             
         except Exception as e:
-            self.logger.error("Error creating user session", 
-                            extra={'error': str(e), 'user_id': user.id})
+            self.logger.error(f"Failed to get user {user_id}: {e}")
             return None
     
-    def _invalidate_all_user_sessions(self, user_id: int) -> None:
-        """Invalidate all sessions for a user."""
-        self.db.session.query(UserSession).filter_by(
-            user_id=user_id,
-            is_valid=True
-        ).update({
-            'is_valid': False,
-            'updated_at': self.datetime_utils.utc_now()
-        })
-    
-    def _invalidate_other_user_sessions(self, user_id: int) -> None:
-        """Invalidate all other sessions except current."""
-        current_session_token = getattr(request, 'session_token', None)
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """
+        Get user by username with caching.
         
-        query = self.db.session.query(UserSession).filter_by(
-            user_id=user_id,
-            is_valid=True
-        )
+        Args:
+            username: Username to search for
         
-        if current_session_token:
-            query = query.filter(UserSession.session_token != current_session_token)
-        
-        query.update({
-            'is_valid': False,
-            'updated_at': self.datetime_utils.utc_now()
-        })
-    
-    def _invalidate_current_session(self) -> None:
-        """Invalidate current user session."""
-        if hasattr(current_user, 'id') and current_user.is_authenticated:
-            current_session_token = getattr(request, 'session_token', None)
-            if current_session_token:
-                self.db.session.query(UserSession).filter_by(
-                    user_id=current_user.id,
-                    session_token=current_session_token
-                ).update({
-                    'is_valid': False,
-                    'updated_at': self.datetime_utils.utc_now()
-                })
-
-    # =============================================================================
-    # Private Helper Methods - Data Serialization
-    # =============================================================================
-    
-    def _serialize_user_data(self, user: User) -> Dict[str, Any]:
-        """Serialize user data for API responses."""
-        return {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'status': user.status,
-            'is_active': user.is_active,
-            'created_at': user.created_at.isoformat() if user.created_at else None,
-            'updated_at': user.updated_at.isoformat() if user.updated_at else None,
-            'last_login_at': user.last_login_at.isoformat() if user.last_login_at else None,
-            'profile_data': user.profile_data or {}
-        }
-    
-    def _serialize_user_profile(self, user: User) -> Dict[str, Any]:
-        """Serialize comprehensive user profile with relationships."""
-        profile_data = self._serialize_user_data(user)
-        
-        # Add relationship counts
-        profile_data['business_entities_count'] = len(user.business_entities) if user.business_entities else 0
-        profile_data['active_sessions_count'] = len([
-            s for s in (user.sessions or []) 
-            if s.is_valid and s.expires_at > self.datetime_utils.utc_now()
-        ])
-        
-        return profile_data
-    
-    def _serialize_user_session(self, session: UserSession) -> Dict[str, Any]:
-        """Serialize user session data."""
-        return {
-            'id': session.id,
-            'user_id': session.user_id,
-            'created_at': session.created_at.isoformat() if session.created_at else None,
-            'expires_at': session.expires_at.isoformat() if session.expires_at else None,
-            'is_valid': session.is_valid,
-            'device_info': session.device_info or {}
-        }
-    
-    def _serialize_business_entity(self, entity: BusinessEntity, include_relationships: bool = False) -> Dict[str, Any]:
-        """Serialize business entity data with optional relationships."""
-        entity_data = {
-            'id': entity.id,
-            'name': entity.name,
-            'description': entity.description,
-            'owner_id': entity.owner_id,
-            'status': entity.status,
-            'created_at': entity.created_at.isoformat() if entity.created_at else None,
-            'updated_at': entity.updated_at.isoformat() if entity.updated_at else None
-        }
-        
-        if include_relationships:
-            entity_data['relationships'] = {
-                'source_relationships': [
-                    {
-                        'id': rel.id,
-                        'target_entity_id': rel.target_entity_id,
-                        'relationship_type': rel.relationship_type,
-                        'is_active': rel.is_active
-                    }
-                    for rel in (entity.source_relationships or [])
-                ],
-                'target_relationships': [
-                    {
-                        'id': rel.id,
-                        'source_entity_id': rel.source_entity_id,
-                        'relationship_type': rel.relationship_type,
-                        'is_active': rel.is_active
-                    }
-                    for rel in (entity.target_relationships or [])
-                ]
-            }
-        
-        return entity_data
-
-    # =============================================================================
-    # Private Helper Methods - Additional Validation
-    # =============================================================================
-    
-    def _validate_profile_update(self, profile_data: UserProfileData, user: User) -> UserServiceResult:
-        """Validate profile update data."""
-        errors = []
-        
-        # Email validation if provided
-        if profile_data.email is not None:
-            if not self.validation_utils.is_valid_email(profile_data.email):
-                errors.append("Valid email address is required")
-        
-        # Name validation if provided
-        if profile_data.first_name is not None and len(profile_data.first_name.strip()) == 0:
-            errors.append("First name cannot be empty")
+        Returns:
+            Optional[User]: User instance if found, None otherwise
+        """
+        try:
+            # Check cache first
+            cache_key = f"{self._user_cache_prefix}:username:{username.lower()}"
+            cached_user = self.get_cached_result(cache_key)
+            if cached_user:
+                return cached_user
             
-        if profile_data.last_name is not None and len(profile_data.last_name.strip()) == 0:
-            errors.append("Last name cannot be empty")
+            user = User.find_by_username(username)
+            
+            # Cache result
+            if user:
+                self.cache_result(cache_key, user, ttl=300)
+            
+            return user
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get user by username {username}: {e}")
+            return None
+    
+    def get_user_by_email(self, email: str) -> Optional[User]:
+        """
+        Get user by email with caching.
         
-        if errors:
-            return UserServiceResult(
-                success=False,
-                message="Validation failed",
-                error_code="VALIDATION_FAILED",
-                metadata={'validation_errors': errors}
+        Args:
+            email: Email address to search for
+        
+        Returns:
+            Optional[User]: User instance if found, None otherwise
+        """
+        try:
+            # Check cache first
+            cache_key = f"{self._user_cache_prefix}:email:{email.lower()}"
+            cached_user = self.get_cached_result(cache_key)
+            if cached_user:
+                return cached_user
+            
+            user = User.find_by_email(email)
+            
+            # Cache result
+            if user:
+                self.cache_result(cache_key, user, ttl=300)
+            
+            return user
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get user by email {email}: {e}")
+            return None
+    
+    def get_user_sessions(self, user_id: int, active_only: bool = True) -> List[UserSession]:
+        """
+        Get user sessions with filtering options.
+        
+        Args:
+            user_id: User ID to get sessions for
+            active_only: Whether to return only active sessions
+        
+        Returns:
+            List[UserSession]: List of user sessions
+        
+        Example:
+            >>> sessions = user_service.get_user_sessions(user_id=1)
+            >>> print(f"User has {len(sessions)} active sessions")
+        """
+        try:
+            return UserSession.get_user_sessions(user_id, active_only)
+        except Exception as e:
+            self.logger.error(f"Failed to get sessions for user {user_id}: {e}")
+            return []
+    
+    def get_user_business_entities(self, user_id: int, 
+                                  status_filter: Optional[str] = 'active') -> List[BusinessEntity]:
+        """
+        Get business entities owned by user.
+        
+        Args:
+            user_id: User ID to get entities for
+            status_filter: Status filter for entities (None for all)
+        
+        Returns:
+            List[BusinessEntity]: List of owned business entities
+        
+        Example:
+            >>> entities = user_service.get_user_business_entities(user_id=1)
+            >>> print(f"User owns {len(entities)} active entities")
+        """
+        try:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return []
+            
+            query = user.business_entities
+            
+            if status_filter:
+                query = query.filter_by(status=status_filter)
+            
+            return query.all()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get entities for user {user_id}: {e}")
+            return []
+    
+    def create_user_session(self, user_id: int,
+                           request_context: Optional[Dict[str, Any]] = None,
+                           expires_in_hours: int = None) -> Optional[str]:
+        """
+        Create user session with context information.
+        
+        Args:
+            user_id: User ID to create session for
+            request_context: Request context with user_agent, ip_address
+            expires_in_hours: Session expiration in hours
+        
+        Returns:
+            Optional[str]: Session token if successful, None otherwise
+        
+        Example:
+            >>> context = {
+            ...     'user_agent': 'Mozilla/5.0...',
+            ...     'ip_address': '192.168.1.1'
+            ... }
+            >>> token = user_service.create_user_session(user_id=1, request_context=context)
+        """
+        try:
+            return self._create_user_session_internal(
+                user_id, 
+                request_context, 
+                expires_in_hours
             )
-        
-        return UserServiceResult(success=True)
+        except Exception as e:
+            self.logger.error(f"Failed to create session for user {user_id}: {e}")
+            return None
     
-    def _validate_business_entity_data(self, entity_data: Dict[str, Any]) -> UserServiceResult:
-        """Validate business entity creation data."""
-        errors = []
+    def validate_user_session(self, session_token: str) -> Optional[User]:
+        """
+        Validate user session and return associated user.
         
-        # Name validation
-        if not entity_data.get('name') or len(entity_data['name'].strip()) < 2:
-            errors.append("Entity name must be at least 2 characters long")
+        Args:
+            session_token: Session token to validate
         
-        # Status validation
-        if 'status' in entity_data and entity_data['status'] not in ['active', 'inactive', 'pending']:
-            errors.append("Invalid entity status")
+        Returns:
+            Optional[User]: User instance if session is valid, None otherwise
         
-        if errors:
-            return UserServiceResult(
-                success=False,
-                message="Validation failed",
-                error_code="VALIDATION_FAILED",
-                metadata={'validation_errors': errors}
+        Example:
+            >>> user = user_service.validate_user_session(session_token)
+            >>> if user:
+            ...     print(f"Valid session for user: {user.username}")
+        """
+        try:
+            session = UserSession.validate_session(session_token)
+            if session and session.is_active():
+                return self.get_user_by_id(session.user_id)
+            return None
+        except Exception as e:
+            self.logger.error(f"Session validation failed: {e}")
+            return None
+    
+    def invalidate_user_sessions(self, user_id: int,
+                               exclude_session_id: Optional[int] = None) -> int:
+        """
+        Invalidate user sessions for security purposes.
+        
+        Args:
+            user_id: User ID to invalidate sessions for
+            exclude_session_id: Session ID to exclude from invalidation
+        
+        Returns:
+            int: Number of sessions invalidated
+        
+        Example:
+            >>> count = user_service.invalidate_user_sessions(user_id=1)
+            >>> print(f"Invalidated {count} sessions")
+        """
+        try:
+            count = UserSession.invalidate_user_sessions(user_id, exclude_session_id)
+            self._invalidate_user_cache(user_id)
+            return count
+        except Exception as e:
+            self.logger.error(f"Failed to invalidate sessions for user {user_id}: {e}")
+            return 0
+    
+    def change_user_password(self, user_id: int, 
+                           current_password: str,
+                           new_password: str,
+                           invalidate_sessions: bool = True) -> bool:
+        """
+        Change user password with security controls.
+        
+        Args:
+            user_id: User ID for password change
+            current_password: Current password for verification
+            new_password: New password to set
+            invalidate_sessions: Whether to invalidate other sessions
+        
+        Returns:
+            bool: True if password change successful
+        
+        Raises:
+            UserProfileError: When password change fails
+            ValidationError: When validation fails
+        
+        Example:
+            >>> success = user_service.change_user_password(
+            ...     user_id=1,
+            ...     current_password='OldPassword123!',
+            ...     new_password='NewSecurePassword123!'
+            ... )
+        """
+        try:
+            return self.update_user_profile(
+                user_id,
+                {'password': new_password},
+                current_password=current_password
+            ) is not None
+        except Exception as e:
+            self.logger.error(f"Password change failed for user {user_id}: {e}")
+            raise UserProfileError(
+                "Password change failed",
+                original_error=e
             )
+    
+    def deactivate_user(self, user_id: int, 
+                       reason: Optional[str] = None) -> bool:
+        """
+        Deactivate user account and invalidate sessions.
         
-        return UserServiceResult(success=True)
-    
-    def _validate_activation_token(self, user: User, token: str) -> bool:
-        """Validate user activation token."""
-        # Implementation would depend on token generation strategy
-        # This is a placeholder for token validation logic
-        return self.session_manager.validate_activation_token(user.id, token)
-
-
-# =============================================================================
-# Service Factory Function for Dependency Injection
-# =============================================================================
-
-def create_user_service(
-    session_manager: Optional[SessionManager] = None,
-    password_utils: Optional[PasswordUtils] = None,
-    security_monitor: Optional[SecurityMonitor] = None
-) -> UserService:
-    """
-    Factory function for creating UserService instances with dependency injection.
-    
-    This factory function supports the Flask application factory pattern and
-    enables clean dependency injection for testing and modular development.
-    
-    Args:
-        session_manager: Optional session management utility
-        password_utils: Optional password security utility  
-        security_monitor: Optional security monitoring utility
+        Args:
+            user_id: User ID to deactivate
+            reason: Reason for deactivation
         
-    Returns:
-        UserService: Configured user service instance
-    """
-    return UserService(
-        session_manager=session_manager,
-        password_utils=password_utils,
-        security_monitor=security_monitor
-    )
+        Returns:
+            bool: True if deactivation successful
+        
+        Example:
+            >>> success = user_service.deactivate_user(user_id=1, reason="Account suspended")
+        """
+        try:
+            # Update user status
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return False
+            
+            with self.transaction_boundary():
+                user.is_active = False
+                user.updated_at = datetime.now(timezone.utc)
+                
+                # Invalidate all sessions
+                UserSession.invalidate_user_sessions(user_id)
+                
+                self.log_service_operation(
+                    "User deactivated", 
+                    {
+                        'user_id': user_id,
+                        'reason': reason
+                    }
+                )
+                
+                # Clear cache
+                self._invalidate_user_cache(user_id)
+                
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"User deactivation failed for user {user_id}: {e}")
+            return False
+    
+    def reactivate_user(self, user_id: int) -> bool:
+        """
+        Reactivate user account.
+        
+        Args:
+            user_id: User ID to reactivate
+        
+        Returns:
+            bool: True if reactivation successful
+        
+        Example:
+            >>> success = user_service.reactivate_user(user_id=1)
+        """
+        try:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return False
+            
+            with self.transaction_boundary():
+                user.is_active = True
+                user.updated_at = datetime.now(timezone.utc)
+                
+                self.log_service_operation("User reactivated", {'user_id': user_id})
+                
+                # Clear cache
+                self._invalidate_user_cache(user_id)
+                
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"User reactivation failed for user {user_id}: {e}")
+            return False
+    
+    def get_user_statistics(self) -> Dict[str, Any]:
+        """
+        Get user statistics for monitoring and analytics.
+        
+        Returns:
+            Dict[str, Any]: User statistics
+        
+        Example:
+            >>> stats = user_service.get_user_statistics()
+            >>> print(f"Total users: {stats['total_users']}")
+        """
+        try:
+            current_time = datetime.now(timezone.utc)
+            
+            # Count total users
+            total_users = User.query.count()
+            
+            # Count active users
+            active_users = User.query.filter_by(is_active=True).count()
+            
+            # Count users created today
+            today_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            users_created_today = User.query.filter(
+                User.created_at >= today_start
+            ).count()
+            
+            # Count users created this week
+            week_start = current_time - timedelta(days=7)
+            users_created_week = User.query.filter(
+                User.created_at >= week_start
+            ).count()
+            
+            # Get session statistics
+            session_stats = UserSession.get_session_statistics()
+            
+            statistics = {
+                'total_users': total_users,
+                'active_users': active_users,
+                'inactive_users': total_users - active_users,
+                'users_created_today': users_created_today,
+                'users_created_week': users_created_week,
+                'session_statistics': session_stats,
+                'generated_at': current_time.isoformat()
+            }
+            
+            return statistics
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate user statistics: {e}")
+            return {
+                'error': str(e),
+                'generated_at': datetime.now(timezone.utc).isoformat()
+            }
+    
+    def cleanup_expired_sessions(self, batch_size: int = 1000) -> int:
+        """
+        Clean up expired user sessions.
+        
+        Args:
+            batch_size: Number of sessions to clean up per batch
+        
+        Returns:
+            int: Number of sessions cleaned up
+        
+        Example:
+            >>> count = user_service.cleanup_expired_sessions()
+            >>> print(f"Cleaned up {count} expired sessions")
+        """
+        try:
+            return UserSession.cleanup_expired_sessions(batch_size)
+        except Exception as e:
+            self.logger.error(f"Session cleanup failed: {e}")
+            return 0
+    
+    def _invalidate_user_cache(self, user_id: int) -> None:
+        """
+        Invalidate all cached data for a user.
+        
+        Args:
+            user_id: User ID to invalidate cache for
+        """
+        try:
+            # Clear specific user cache keys
+            cache_keys = [
+                f"{self._user_cache_prefix}:user:{user_id}",
+            ]
+            
+            for key in cache_keys:
+                if key in self._session_cache:
+                    del self._session_cache[key]
+            
+            self.logger.debug(f"Invalidated cache for user {user_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Cache invalidation failed for user {user_id}: {e}")
+    
+    def user_loader_callback(self, user_id: str) -> Optional[UserMixin]:
+        """
+        Flask-Login user loader callback function.
+        
+        This method is used by Flask-Login to load user instances from
+        user IDs stored in sessions. Integrates with the service layer
+        for consistent user management.
+        
+        Args:
+            user_id: String representation of user ID
+        
+        Returns:
+            Optional[UserMixin]: User instance if found, None otherwise
+        
+        Example:
+            >>> # Register with Flask-Login
+            >>> @login_manager.user_loader
+            >>> def load_user(user_id):
+            ...     return user_service.user_loader_callback(user_id)
+        """
+        try:
+            if not user_id or not user_id.isdigit():
+                return None
+            
+            user = self.get_user_by_id(int(user_id))
+            return user if user and user.is_active else None
+            
+        except Exception as e:
+            self.logger.error(f"User loader callback failed for user_id {user_id}: {e}")
+            return None
+
+
+# Module exports for organized import management
+__all__ = [
+    'UserService',
+    'UserRegistrationError',
+    'UserAuthenticationError', 
+    'UserProfileError',
+    'UserSessionError'
+]
