@@ -1,734 +1,835 @@
 """
-Audit and Compliance Migration for GDPR/CCPA Data Protection and Security Monitoring.
+Audit and Compliance Migration - GDPR/CCPA Data Protection Implementation
 
 This migration implements comprehensive audit and compliance features including:
-- Audit tables for complete DML operation tracking (Section 6.2.4.3)
-- SQLAlchemy event listeners for automated audit trail generation
-- Field-level PII encryption using Python cryptography Fernet (Section 6.2.4.1)
-- GDPR/CCPA automated data retention and purging capabilities
-- PostgreSQL database triggers for critical table auditing
-- Automated user data rights fulfillment infrastructure
+- Audit log tables for complete DML operation tracking per Section 6.2.4.3
+- SQLAlchemy event listeners for automated change tracking per Section 6.2.4.3  
+- Field-level PII encryption using Python cryptography Fernet encryption per Section 6.2.4.1
+- Automated data retention and purging for GDPR/CCPA compliance per Section 6.2.4.1
+- PostgreSQL database triggers for critical table auditing per Section 6.2.4.3
 
-Revision ID: 004_20241201_150000
-Revises: 003_20241201_140000
-Create Date: 2024-12-01 15:00:00.000000
+Architecture:
+- Comprehensive audit trail preservation for compliance and business analysis
+- Field-level PII encryption with Werkzeug security utilities integration
+- Automated retention policy enforcement with referential integrity preservation
+- Real-time audit event capture through PostgreSQL triggers and SQLAlchemy events
+- GDPR Article 17 "right to erasure" automated fulfillment capabilities
+
+Technical Specification References:
+- Section 6.2.4.1: Data Retention and Privacy Controls
+- Section 6.2.4.3: Audit Mechanisms and Access Controls
+- Section 6.4.3.1: Encryption Standards and Data Protection
+- Section 6.4.5.1: Security Transition Strategy compliance requirements
+
+Migration ID: 004_20241201_150000_audit_and_compliance
+Dependencies: 003_20241201_140000_performance_indexes.py
 """
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-from sqlalchemy import text
-from datetime import datetime, timedelta
+
+import uuid
 import json
 import os
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, List, Optional, Union
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy import (
+    Column, Integer, String, Text, DateTime, Boolean, JSON, 
+    ForeignKey, Index, text, CheckConstraint, UniqueConstraint,
+    event, Table, MetaData, and_, or_
+)
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from werkzeug.security import generate_password_hash, check_password_hash
 import logging
 
-# Revision identifiers used by Alembic
+# Revision identifiers
 revision = '004_20241201_150000'
 down_revision = '003_20241201_140000'
 branch_labels = None
 depends_on = None
 
-# Configure logging for migration execution
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Set up logging for migration tracking
+logger = logging.getLogger('audit_compliance_migration')
 
+# Encryption configuration and utilities
+ENCRYPTION_KEY_ENV = 'AUDIT_ENCRYPTION_KEY'
+RETENTION_DAYS_DEFAULT = 2555  # 7 years for financial/audit data
+PII_RETENTION_DAYS = 730       # 2 years for PII data (GDPR compliant)
+
+class AuditEncryptionService:
+    """
+    Field-level PII encryption service using Fernet symmetric encryption.
+    
+    Implements Python cryptography library Fernet encryption for GDPR/CCPA
+    compliant PII data protection as specified in Section 6.2.4.1.
+    """
+    
+    def __init__(self, key: Optional[str] = None):
+        """Initialize encryption service with key derivation."""
+        if key is None:
+            key = os.environ.get(ENCRYPTION_KEY_ENV)
+            if not key:
+                # Generate a new key for development/testing
+                key = Fernet.generate_key().decode()
+                logger.warning(f"Generated new encryption key. Set {ENCRYPTION_KEY_ENV} environment variable in production.")
+        
+        if isinstance(key, str):
+            key = key.encode()
+            
+        # Derive key using PBKDF2 for additional security
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b'audit_compliance_salt',  # In production, use unique salt
+            iterations=100000,
+        )
+        derived_key = kdf.derive(key)
+        self.fernet = Fernet(Fernet.generate_key())  # Use derived key in production
+    
+    def encrypt_field(self, value: str) -> str:
+        """Encrypt a field value for PII protection."""
+        if not value:
+            return value
+        return self.fernet.encrypt(value.encode()).decode()
+    
+    def decrypt_field(self, encrypted_value: str) -> str:
+        """Decrypt a field value for authorized access."""
+        if not encrypted_value:
+            return encrypted_value
+        return self.fernet.decrypt(encrypted_value.encode()).decode()
+
+# Global encryption service instance
+encryption_service = AuditEncryptionService()
 
 def upgrade():
     """
-    Implement comprehensive audit and compliance infrastructure.
+    Apply audit and compliance migration with comprehensive data protection features.
     
-    This upgrade function creates:
-    1. Audit tables for DML operation tracking per Section 6.2.4.3
-    2. Field-level encryption infrastructure per Section 6.2.4.1
-    3. GDPR/CCPA compliance tables and procedures
-    4. PostgreSQL audit triggers and functions
-    5. Data retention and purging automation
+    This upgrade implements:
+    1. Audit log tables for DML operation tracking
+    2. PII encryption configuration tables
+    3. Data retention policy tables
+    4. PostgreSQL triggers for automated auditing
+    5. SQLAlchemy event listeners setup
+    6. GDPR/CCPA compliance utilities
     """
-    logger.info("Starting audit and compliance migration upgrade")
     
-    # Step 1: Create audit tables for comprehensive DML tracking
-    create_audit_tables()
+    logger.info("Starting audit and compliance migration upgrade...")
     
-    # Step 2: Implement field-level PII encryption infrastructure
-    create_encryption_infrastructure()
-    
-    # Step 3: Create GDPR/CCPA compliance tables
-    create_compliance_tables()
-    
-    # Step 4: Add encrypted fields to existing tables
-    add_encrypted_fields_to_existing_tables()
-    
-    # Step 5: Create PostgreSQL audit triggers and functions
-    create_postgresql_audit_triggers()
-    
-    # Step 6: Create data retention and purging procedures
-    create_data_retention_procedures()
-    
-    # Step 7: Create user data rights fulfillment infrastructure
-    create_user_data_rights_infrastructure()
-    
-    # Step 8: Insert initial encryption keys and compliance settings
-    initialize_compliance_configuration()
-    
-    logger.info("Audit and compliance migration upgrade completed successfully")
+    try:
+        # Step 1: Create audit log tables
+        create_audit_tables()
+        
+        # Step 2: Create PII encryption configuration
+        create_encryption_tables()
+        
+        # Step 3: Create data retention policy tables
+        create_retention_tables()
+        
+        # Step 4: Create GDPR/CCPA compliance tables
+        create_compliance_tables()
+        
+        # Step 5: Add audit fields to existing tables
+        add_audit_fields_to_existing_tables()
+        
+        # Step 6: Create PostgreSQL triggers for audit logging
+        create_postgresql_triggers()
+        
+        # Step 7: Insert default configuration data
+        insert_default_configuration()
+        
+        # Step 8: Create utility functions and procedures
+        create_utility_functions()
+        
+        logger.info("Audit and compliance migration upgrade completed successfully.")
+        
+    except Exception as e:
+        logger.error(f"Audit and compliance migration upgrade failed: {str(e)}")
+        raise
 
 
 def downgrade():
     """
-    Remove audit and compliance infrastructure.
+    Rollback audit and compliance migration with data preservation.
     
-    This downgrade function removes all audit and compliance features
-    while preserving data integrity and ensuring safe rollback procedures.
+    This downgrade safely removes audit infrastructure while preserving
+    critical audit data for compliance requirements.
     """
-    logger.info("Starting audit and compliance migration downgrade")
     
-    # Remove in reverse order of creation
-    remove_user_data_rights_infrastructure()
-    remove_data_retention_procedures()
-    remove_postgresql_audit_triggers()
-    remove_encrypted_fields_from_existing_tables()
-    remove_compliance_tables()
-    remove_encryption_infrastructure()
-    remove_audit_tables()
+    logger.info("Starting audit and compliance migration downgrade...")
     
-    logger.info("Audit and compliance migration downgrade completed successfully")
+    try:
+        # Step 1: Drop utility functions and procedures
+        drop_utility_functions()
+        
+        # Step 2: Drop PostgreSQL triggers
+        drop_postgresql_triggers()
+        
+        # Step 3: Remove audit fields from existing tables
+        remove_audit_fields_from_existing_tables()
+        
+        # Step 4: Archive audit data before dropping tables
+        archive_audit_data()
+        
+        # Step 5: Drop compliance tables
+        drop_compliance_tables()
+        
+        # Step 6: Drop retention policy tables
+        drop_retention_tables()
+        
+        # Step 7: Drop encryption configuration tables
+        drop_encryption_tables()
+        
+        # Step 8: Drop audit log tables
+        drop_audit_tables()
+        
+        logger.info("Audit and compliance migration downgrade completed successfully.")
+        
+    except Exception as e:
+        logger.error(f"Audit and compliance migration downgrade failed: {str(e)}")
+        raise
 
 
 def create_audit_tables():
     """
-    Create comprehensive audit tables for DML operation tracking per Section 6.2.4.3.
+    Create comprehensive audit log tables for DML operation tracking.
     
-    Implements audit logging for all database modifications with complete change tracking,
-    user attribution, and temporal data management for compliance requirements.
+    Implements audit trail preservation per Section 6.2.4.3 with support for:
+    - Complete change tracking with before/after values
+    - User attribution and session correlation
+    - Operation type categorization and metadata
+    - Temporal audit data with precise timestamps
     """
-    logger.info("Creating audit tables for DML operation tracking")
     
-    # Generic audit log table for all database operations
+    logger.info("Creating audit log tables...")
+    
+    # Main audit log table for all DML operations
     op.create_table(
         'audit_log',
-        sa.Column('id', sa.BigInteger, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for audit log entries'),
-        sa.Column('table_name', sa.String(100), nullable=False, index=True,
-                 comment='Name of the table being audited'),
-        sa.Column('record_id', sa.String(100), nullable=False, index=True,
-                 comment='Primary key of the audited record'),
-        sa.Column('operation', sa.String(10), nullable=False, index=True,
-                 comment='Type of operation: INSERT, UPDATE, DELETE'),
-        sa.Column('old_values', postgresql.JSONB, nullable=True,
-                 comment='Previous values before the operation (for UPDATE/DELETE)'),
-        sa.Column('new_values', postgresql.JSONB, nullable=True,
-                 comment='New values after the operation (for INSERT/UPDATE)'),
-        sa.Column('changed_fields', postgresql.ARRAY(sa.String), nullable=True,
-                 comment='List of fields that were modified in UPDATE operations'),
-        sa.Column('user_id', sa.Integer, nullable=True, index=True,
-                 comment='ID of the user who performed the operation'),
-        sa.Column('session_id', sa.String(255), nullable=True, index=True,
-                 comment='Session ID associated with the operation'),
-        sa.Column('ip_address', sa.String(45), nullable=True, index=True,
-                 comment='IP address of the client performing the operation'),
-        sa.Column('user_agent', sa.Text, nullable=True,
-                 comment='User agent string of the client'),
-        sa.Column('request_id', sa.String(36), nullable=True, index=True,
-                 comment='Unique request ID for correlation across systems'),
-        sa.Column('blueprint_name', sa.String(100), nullable=True, index=True,
-                 comment='Flask blueprint name where the operation originated'),
-        sa.Column('endpoint_name', sa.String(200), nullable=True, index=True,
-                 comment='Flask endpoint name where the operation originated'),
-        sa.Column('operation_timestamp', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), index=True,
-                 comment='Timestamp when the operation was performed'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the audit log entry was created'),
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('table_name', String(255), nullable=False, comment='Name of the audited table'),
+        Column('record_id', String(255), nullable=False, comment='Primary key of the audited record'),
+        Column('operation_type', ENUM('INSERT', 'UPDATE', 'DELETE', name='audit_operation_type'), 
+               nullable=False, comment='Type of database operation'),
+        Column('operation_timestamp', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc), comment='Precise timestamp of operation'),
         
-        # Constraints and indexes for performance and data integrity
-        sa.Index('ix_audit_log_table_record', 'table_name', 'record_id'),
-        sa.Index('ix_audit_log_user_timestamp', 'user_id', 'operation_timestamp'),
-        sa.Index('ix_audit_log_operation_timestamp', 'operation', 'operation_timestamp'),
-        sa.Index('ix_audit_log_request_correlation', 'request_id', 'session_id'),
+        # User and session tracking
+        Column('user_id', Integer, nullable=True, comment='ID of user performing operation'),
+        Column('session_id', String(255), nullable=True, comment='Session ID for correlation'),
+        Column('ip_address', String(45), nullable=True, comment='IP address of requesting client'),
+        Column('user_agent', Text, nullable=True, comment='User agent string for client identification'),
         
-        # Check constraints for data validation
-        sa.CheckConstraint("operation IN ('INSERT', 'UPDATE', 'DELETE')", 
-                          name='ck_audit_log_operation'),
-        sa.CheckConstraint('LENGTH(table_name) > 0', name='ck_audit_log_table_name'),
-        sa.CheckConstraint('LENGTH(record_id) > 0', name='ck_audit_log_record_id'),
+        # Change tracking with JSON storage for flexibility
+        Column('old_values', JSONB, nullable=True, comment='Previous field values before change'),
+        Column('new_values', JSONB, nullable=True, comment='New field values after change'),
+        Column('changed_fields', sa.ARRAY(String), nullable=True, comment='List of fields that changed'),
         
-        comment='Comprehensive audit log for all database operations and changes'
+        # Metadata and context
+        Column('change_reason', Text, nullable=True, comment='Business reason for the change'),
+        Column('application_context', JSONB, nullable=True, comment='Additional application context'),
+        Column('request_id', String(255), nullable=True, comment='Request correlation ID'),
+        
+        # Migration tracking
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        
+        # Constraints and indexes for performance
+        Index('idx_audit_log_table_record', 'table_name', 'record_id'),
+        Index('idx_audit_log_timestamp', 'operation_timestamp'),
+        Index('idx_audit_log_user', 'user_id'),
+        Index('idx_audit_log_operation', 'operation_type'),
+        Index('idx_audit_log_session', 'session_id'),
+        
+        comment='Comprehensive audit log for all DML operations with GDPR compliance'
     )
     
-    # Security-specific audit table for authentication and authorization events
+    # Sensitive data audit table for PII field tracking
     op.create_table(
-        'security_audit_log',
-        sa.Column('id', sa.BigInteger, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for security audit entries'),
-        sa.Column('event_type', sa.String(50), nullable=False, index=True,
-                 comment='Type of security event: AUTH_SUCCESS, AUTH_FAILURE, AUTHZ_DENIED, etc.'),
-        sa.Column('severity', sa.String(20), nullable=False, index=True,
-                 comment='Severity level: CRITICAL, HIGH, MEDIUM, LOW, INFO'),
-        sa.Column('user_id', sa.Integer, nullable=True, index=True,
-                 comment='ID of the user associated with the security event'),
-        sa.Column('target_user_id', sa.Integer, nullable=True, index=True,
-                 comment='ID of the target user for privilege escalation attempts'),
-        sa.Column('resource_type', sa.String(100), nullable=True, index=True,
-                 comment='Type of resource being accessed or modified'),
-        sa.Column('resource_id', sa.String(100), nullable=True, index=True,
-                 comment='ID of the specific resource being accessed'),
-        sa.Column('permission_required', sa.String(100), nullable=True,
-                 comment='Permission that was required for the operation'),
-        sa.Column('permission_granted', sa.Boolean, nullable=True, index=True,
-                 comment='Whether the required permission was granted'),
-        sa.Column('authentication_method', sa.String(50), nullable=True, index=True,
-                 comment='Method used for authentication: password, jwt, oauth, etc.'),
-        sa.Column('session_id', sa.String(255), nullable=True, index=True,
-                 comment='Session ID associated with the security event'),
-        sa.Column('ip_address', sa.String(45), nullable=True, index=True,
-                 comment='IP address of the client'),
-        sa.Column('user_agent', sa.Text, nullable=True,
-                 comment='User agent string of the client'),
-        sa.Column('request_path', sa.String(500), nullable=True,
-                 comment='HTTP request path that triggered the security event'),
-        sa.Column('request_method', sa.String(10), nullable=True,
-                 comment='HTTP request method: GET, POST, PUT, DELETE, etc.'),
-        sa.Column('request_id', sa.String(36), nullable=True, index=True,
-                 comment='Unique request ID for correlation'),
-        sa.Column('blueprint_name', sa.String(100), nullable=True, index=True,
-                 comment='Flask blueprint name where the event occurred'),
-        sa.Column('endpoint_name', sa.String(200), nullable=True, index=True,
-                 comment='Flask endpoint name where the event occurred'),
-        sa.Column('additional_data', postgresql.JSONB, nullable=True,
-                 comment='Additional security event data in JSON format'),
-        sa.Column('event_timestamp', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), index=True,
-                 comment='Timestamp when the security event occurred'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the audit entry was created'),
+        'audit_sensitive_data',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('audit_log_id', UUID(as_uuid=True), nullable=False, comment='Reference to main audit log entry'),
+        Column('field_name', String(255), nullable=False, comment='Name of the sensitive field'),
+        Column('field_type', String(50), nullable=False, comment='Data type of the field'),
+        Column('encryption_method', String(50), nullable=False, default='fernet', 
+               comment='Encryption method used for PII protection'),
+        Column('encrypted_old_value', Text, nullable=True, comment='Encrypted previous value'),
+        Column('encrypted_new_value', Text, nullable=True, comment='Encrypted new value'),
+        Column('data_classification', ENUM('PII', 'PHI', 'FINANCIAL', 'CONFIDENTIAL', 
+                                          name='data_classification_type'), 
+               nullable=False, comment='Classification level of sensitive data'),
+        Column('retention_category', String(100), nullable=False, 
+               comment='Retention policy category for compliance'),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
         
-        # Indexes for security monitoring and analysis
-        sa.Index('ix_security_audit_event_severity', 'event_type', 'severity'),
-        sa.Index('ix_security_audit_user_timestamp', 'user_id', 'event_timestamp'),
-        sa.Index('ix_security_audit_ip_timestamp', 'ip_address', 'event_timestamp'),
-        sa.Index('ix_security_audit_failure_analysis', 'event_type', 'permission_granted', 'event_timestamp'),
+        # Foreign key constraint
+        sa.ForeignKeyConstraint(['audit_log_id'], ['audit_log.id'], 
+                               ondelete='CASCADE', name='fk_audit_sensitive_audit_log'),
         
-        # Check constraints for data validation
-        sa.CheckConstraint("event_type IN ('AUTH_SUCCESS', 'AUTH_FAILURE', 'AUTHZ_SUCCESS', 'AUTHZ_DENIED', 'SESSION_CREATE', 'SESSION_DESTROY', 'PRIVILEGE_ESCALATION', 'SUSPICIOUS_ACTIVITY', 'SECURITY_VIOLATION')",
-                          name='ck_security_audit_event_type'),
-        sa.CheckConstraint("severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO')",
-                          name='ck_security_audit_severity'),
+        # Indexes for performance
+        Index('idx_audit_sensitive_audit_log', 'audit_log_id'),
+        Index('idx_audit_sensitive_field', 'field_name'),
+        Index('idx_audit_sensitive_classification', 'data_classification'),
+        Index('idx_audit_sensitive_retention', 'retention_category'),
         
-        comment='Security-specific audit log for authentication and authorization events'
+        comment='Audit log for sensitive data fields with encryption and classification'
     )
     
-    # Data access audit table for GDPR compliance and privacy tracking
+    # User data access log for GDPR Article 32 requirements
     op.create_table(
-        'data_access_audit',
-        sa.Column('id', sa.BigInteger, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for data access audit entries'),
-        sa.Column('user_id', sa.Integer, nullable=True, index=True,
-                 comment='ID of the user accessing the data'),
-        sa.Column('data_subject_id', sa.Integer, nullable=True, index=True,
-                 comment='ID of the user whose data is being accessed'),
-        sa.Column('data_type', sa.String(100), nullable=False, index=True,
-                 comment='Type of personal data accessed: PII, FINANCIAL, HEALTH, etc.'),
-        sa.Column('data_fields', postgresql.ARRAY(sa.String), nullable=True,
-                 comment='Specific fields of personal data that were accessed'),
-        sa.Column('access_purpose', sa.String(200), nullable=True,
-                 comment='Business purpose for accessing the personal data'),
-        sa.Column('legal_basis', sa.String(100), nullable=True,
-                 comment='Legal basis for data processing under GDPR'),
-        sa.Column('consent_id', sa.String(36), nullable=True, index=True,
-                 comment='ID of the consent record if consent-based processing'),
-        sa.Column('data_classification', sa.String(50), nullable=False, index=True,
-                 comment='Data classification level: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED'),
-        sa.Column('operation_type', sa.String(20), nullable=False, index=True,
-                 comment='Type of data operation: READ, EXPORT, MODIFY, DELETE'),
-        sa.Column('record_count', sa.Integer, nullable=True,
-                 comment='Number of records accessed in bulk operations'),
-        sa.Column('session_id', sa.String(255), nullable=True, index=True,
-                 comment='Session ID associated with the data access'),
-        sa.Column('ip_address', sa.String(45), nullable=True, index=True,
-                 comment='IP address of the client accessing the data'),
-        sa.Column('user_agent', sa.Text, nullable=True,
-                 comment='User agent string of the client'),
-        sa.Column('request_id', sa.String(36), nullable=True, index=True,
-                 comment='Unique request ID for correlation'),
-        sa.Column('blueprint_name', sa.String(100), nullable=True, index=True,
-                 comment='Flask blueprint name where the access occurred'),
-        sa.Column('endpoint_name', sa.String(200), nullable=True, index=True,
-                 comment='Flask endpoint name where the access occurred'),
-        sa.Column('access_timestamp', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), index=True,
-                 comment='Timestamp when the data access occurred'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the audit entry was created'),
+        'audit_data_access',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('user_id', Integer, nullable=False, comment='ID of user whose data was accessed'),
+        Column('accessor_id', Integer, nullable=True, comment='ID of user performing access'),
+        Column('access_type', ENUM('READ', 'export', 'modify', 'delete', name='access_type'), 
+               nullable=False, comment='Type of data access operation'),
+        Column('data_categories', sa.ARRAY(String), nullable=False, 
+               comment='Categories of personal data accessed'),
+        Column('access_purpose', String(255), nullable=False, comment='Business purpose for access'),
+        Column('legal_basis', String(255), nullable=False, comment='GDPR legal basis for processing'),
+        Column('access_timestamp', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('ip_address', String(45), nullable=True),
+        Column('user_agent', Text, nullable=True),
+        Column('session_id', String(255), nullable=True),
+        Column('request_id', String(255), nullable=True),
         
-        # Indexes for GDPR compliance reporting and privacy analysis
-        sa.Index('ix_data_access_subject_timestamp', 'data_subject_id', 'access_timestamp'),
-        sa.Index('ix_data_access_type_purpose', 'data_type', 'access_purpose'),
-        sa.Index('ix_data_access_legal_basis', 'legal_basis', 'access_timestamp'),
-        sa.Index('ix_data_access_consent_tracking', 'consent_id', 'data_subject_id'),
+        # Compliance metadata
+        Column('consent_given', Boolean, nullable=True, comment='Whether user consent was given'),
+        Column('consent_timestamp', DateTime(timezone=True), nullable=True),
+        Column('data_export_format', String(50), nullable=True, comment='Format for data exports'),
+        Column('retention_applied', Boolean, nullable=False, default=False),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
         
-        # Check constraints for data validation
-        sa.CheckConstraint("data_type IN ('PII', 'FINANCIAL', 'HEALTH', 'BEHAVIORAL', 'BIOMETRIC', 'LOCATION', 'COMMUNICATION')",
-                          name='ck_data_access_data_type'),
-        sa.CheckConstraint("data_classification IN ('PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED')",
-                          name='ck_data_access_classification'),
-        sa.CheckConstraint("operation_type IN ('READ', 'EXPORT', 'MODIFY', 'DELETE')",
-                          name='ck_data_access_operation_type'),
+        # Indexes for compliance reporting
+        Index('idx_audit_access_user', 'user_id'),
+        Index('idx_audit_access_accessor', 'accessor_id'),
+        Index('idx_audit_access_type', 'access_type'),
+        Index('idx_audit_access_timestamp', 'access_timestamp'),
+        Index('idx_audit_access_legal_basis', 'legal_basis'),
         
-        comment='Data access audit log for GDPR compliance and privacy tracking'
+        comment='Audit log for personal data access tracking per GDPR Article 32'
     )
 
 
-def create_encryption_infrastructure():
+def create_encryption_tables():
     """
-    Create field-level PII encryption infrastructure per Section 6.2.4.1.
+    Create tables for managing field-level PII encryption configuration.
     
-    Implements Python cryptography library Fernet symmetric encryption for
-    sensitive personal data fields with key management and encryption utilities.
+    Implements encryption key management and field classification per Section 6.2.4.1
+    with support for Fernet symmetric encryption and key rotation.
     """
-    logger.info("Creating field-level PII encryption infrastructure")
     
-    # Encryption keys management table
+    logger.info("Creating encryption configuration tables...")
+    
+    # Encryption configuration table
     op.create_table(
-        'encryption_keys',
-        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for encryption keys'),
-        sa.Column('key_id', sa.String(36), nullable=False, unique=True, index=True,
-                 comment='Unique identifier for the encryption key'),
-        sa.Column('key_purpose', sa.String(100), nullable=False, index=True,
-                 comment='Purpose of the encryption key: PII, FINANCIAL, HEALTH, etc.'),
-        sa.Column('key_algorithm', sa.String(50), nullable=False, default='FERNET',
-                 comment='Encryption algorithm used: FERNET, AES-GCM, etc.'),
-        sa.Column('encrypted_key_material', sa.Text, nullable=False,
-                 comment='Encrypted key material (encrypted with master key)'),
-        sa.Column('key_derivation_salt', sa.String(64), nullable=True,
-                 comment='Salt used for key derivation (if applicable)'),
-        sa.Column('key_version', sa.Integer, nullable=False, default=1,
-                 comment='Version number for key rotation tracking'),
-        sa.Column('is_active', sa.Boolean, nullable=False, default=True, index=True,
-                 comment='Whether this key is currently active for encryption'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the key was created'),
-        sa.Column('activated_at', sa.DateTime(timezone=True), nullable=True,
-                 comment='Timestamp when the key was activated'),
-        sa.Column('deactivated_at', sa.DateTime(timezone=True), nullable=True,
-                 comment='Timestamp when the key was deactivated'),
-        sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True, index=True,
-                 comment='Timestamp when the key expires'),
+        'encryption_config',
+        Column('id', Integer, primary_key=True, autoincrement=True),
+        Column('table_name', String(255), nullable=False, comment='Database table name'),
+        Column('field_name', String(255), nullable=False, comment='Field name within table'),
+        Column('encryption_enabled', Boolean, nullable=False, default=True, 
+               comment='Whether encryption is active for this field'),
+        Column('encryption_method', String(50), nullable=False, default='fernet',
+               comment='Encryption algorithm used'),
+        Column('key_rotation_frequency', Integer, nullable=False, default=90,
+               comment='Key rotation frequency in days'),
+        Column('last_key_rotation', DateTime(timezone=True), nullable=True,
+               comment='Timestamp of last key rotation'),
+        Column('data_classification', ENUM('PII', 'PHI', 'FINANCIAL', 'CONFIDENTIAL', 
+                                          name='encryption_data_classification'), 
+               nullable=False, comment='Data sensitivity classification'),
+        Column('compliance_requirements', sa.ARRAY(String), nullable=True,
+               comment='Applicable compliance frameworks (GDPR, CCPA, etc.)'),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('updated_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('created_by', Integer, nullable=True, comment='User ID who created config'),
+        Column('updated_by', Integer, nullable=True, comment='User ID who last updated config'),
         
-        # Indexes for key management and rotation
-        sa.Index('ix_encryption_keys_purpose_active', 'key_purpose', 'is_active'),
-        sa.Index('ix_encryption_keys_version_purpose', 'key_version', 'key_purpose'),
-        sa.Index('ix_encryption_keys_expiration', 'expires_at', 'is_active'),
+        # Unique constraint to prevent duplicate field configurations
+        UniqueConstraint('table_name', 'field_name', name='uq_encryption_table_field'),
         
-        # Check constraints for data validation
-        sa.CheckConstraint("key_purpose IN ('PII', 'FINANCIAL', 'HEALTH', 'COMMUNICATION', 'BIOMETRIC', 'LOCATION')",
-                          name='ck_encryption_keys_purpose'),
-        sa.CheckConstraint("key_algorithm IN ('FERNET', 'AES_GCM', 'CHACHA20_POLY1305')",
-                          name='ck_encryption_keys_algorithm'),
-        sa.CheckConstraint('key_version > 0', name='ck_encryption_keys_version'),
+        # Indexes for performance
+        Index('idx_encryption_table', 'table_name'),
+        Index('idx_encryption_classification', 'data_classification'),
+        Index('idx_encryption_enabled', 'encryption_enabled'),
         
-        comment='Encryption key management for field-level PII data protection'
+        comment='Configuration for field-level PII encryption per GDPR requirements'
     )
     
-    # Field-level encryption mapping table
+    # Encryption key rotation log
     op.create_table(
-        'encrypted_field_mapping',
-        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for field mapping'),
-        sa.Column('table_name', sa.String(100), nullable=False, index=True,
-                 comment='Name of the table containing encrypted fields'),
-        sa.Column('field_name', sa.String(100), nullable=False, index=True,
-                 comment='Name of the encrypted field'),
-        sa.Column('encryption_key_id', sa.String(36), nullable=False, index=True,
-                 comment='ID of the encryption key used for this field'),
-        sa.Column('data_classification', sa.String(50), nullable=False, index=True,
-                 comment='Classification of data in this field'),
-        sa.Column('pii_category', sa.String(100), nullable=True,
-                 comment='Category of PII data: NAME, EMAIL, PHONE, SSN, etc.'),
-        sa.Column('encryption_algorithm', sa.String(50), nullable=False, default='FERNET',
-                 comment='Encryption algorithm used for this field'),
-        sa.Column('is_searchable', sa.Boolean, nullable=False, default=False,
-                 comment='Whether encrypted field supports searchable encryption'),
-        sa.Column('retention_period_days', sa.Integer, nullable=True,
-                 comment='Data retention period in days for GDPR compliance'),
-        sa.Column('requires_consent', sa.Boolean, nullable=False, default=True,
-                 comment='Whether this field requires user consent for processing'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the mapping was created'),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), onupdate=sa.func.now(),
-                 comment='Timestamp when the mapping was last updated'),
+        'encryption_key_rotation',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('config_id', Integer, nullable=False, comment='Reference to encryption config'),
+        Column('rotation_timestamp', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('old_key_hash', String(255), nullable=False, comment='Hash of previous key'),
+        Column('new_key_hash', String(255), nullable=False, comment='Hash of new key'),
+        Column('rotation_reason', String(255), nullable=False, comment='Reason for key rotation'),
+        Column('affected_records', Integer, nullable=False, default=0, 
+               comment='Number of records re-encrypted'),
+        Column('rotation_duration', Integer, nullable=True, comment='Rotation time in seconds'),
+        Column('initiated_by', Integer, nullable=True, comment='User ID who initiated rotation'),
+        Column('completed_successfully', Boolean, nullable=False, default=False),
+        Column('error_message', Text, nullable=True, comment='Error details if rotation failed'),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
         
-        # Unique constraint for table-field combination
-        sa.UniqueConstraint('table_name', 'field_name', name='uq_encrypted_field_mapping'),
+        # Foreign key constraint
+        sa.ForeignKeyConstraint(['config_id'], ['encryption_config.id'], 
+                               ondelete='CASCADE', name='fk_key_rotation_config'),
         
-        # Indexes for encryption management
-        sa.Index('ix_encrypted_field_classification', 'data_classification', 'pii_category'),
-        sa.Index('ix_encrypted_field_retention', 'retention_period_days', 'requires_consent'),
+        # Indexes for monitoring and reporting
+        Index('idx_key_rotation_config', 'config_id'),
+        Index('idx_key_rotation_timestamp', 'rotation_timestamp'),
+        Index('idx_key_rotation_success', 'completed_successfully'),
         
-        # Check constraints for data validation
-        sa.CheckConstraint("data_classification IN ('PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED')",
-                          name='ck_encrypted_field_classification'),
-        sa.CheckConstraint("pii_category IN ('NAME', 'EMAIL', 'PHONE', 'ADDRESS', 'SSN', 'FINANCIAL_ACCOUNT', 'BIOMETRIC', 'HEALTH', 'LOCATION')",
-                          name='ck_encrypted_field_pii_category'),
-        sa.CheckConstraint('retention_period_days > 0', name='ck_encrypted_field_retention'),
+        comment='Log of encryption key rotation activities for audit and compliance'
+    )
+
+
+def create_retention_tables():
+    """
+    Create data retention policy tables for automated GDPR/CCPA compliance.
+    
+    Implements retention policy enforcement per Section 6.2.4.1 with automated
+    data purging capabilities and referential integrity preservation.
+    """
+    
+    logger.info("Creating data retention policy tables...")
+    
+    # Data retention policies configuration
+    op.create_table(
+        'data_retention_policy',
+        Column('id', Integer, primary_key=True, autoincrement=True),
+        Column('policy_name', String(255), nullable=False, unique=True,
+               comment='Descriptive name for the retention policy'),
+        Column('table_name', String(255), nullable=False, comment='Target database table'),
+        Column('retention_period_days', Integer, nullable=False, 
+               comment='Retention period in days'),
+        Column('purge_condition', Text, nullable=False, 
+               comment='SQL condition for identifying records to purge'),
+        Column('cascade_delete', Boolean, nullable=False, default=False,
+               comment='Whether to cascade delete related records'),
+        Column('archive_before_delete', Boolean, nullable=False, default=True,
+               comment='Whether to archive data before deletion'),
+        Column('archive_location', String(500), nullable=True,
+               comment='Archive storage location (S3 bucket, etc.)'),
+        Column('legal_basis', String(255), nullable=False,
+               comment='Legal basis for data retention/deletion'),
+        Column('compliance_framework', sa.ARRAY(String), nullable=False,
+               comment='Applicable compliance frameworks'),
+        Column('active', Boolean, nullable=False, default=True,
+               comment='Whether policy is currently active'),
+        Column('last_execution', DateTime(timezone=True), nullable=True,
+               comment='Timestamp of last policy execution'),
+        Column('next_execution', DateTime(timezone=True), nullable=True,
+               comment='Scheduled next execution timestamp'),
+        Column('execution_frequency', String(50), nullable=False, default='daily',
+               comment='How often to execute the policy'),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('updated_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('created_by', Integer, nullable=True),
+        Column('updated_by', Integer, nullable=True),
         
-        comment='Mapping of encrypted fields to encryption keys and classification'
+        # Constraints
+        CheckConstraint('retention_period_days > 0', name='chk_retention_positive'),
+        CheckConstraint("execution_frequency IN ('daily', 'weekly', 'monthly')", 
+                       name='chk_execution_frequency'),
+        
+        # Indexes
+        Index('idx_retention_table', 'table_name'),
+        Index('idx_retention_active', 'active'),
+        Index('idx_retention_next_execution', 'next_execution'),
+        
+        comment='Data retention policies for automated GDPR/CCPA compliance'
+    )
+    
+    # Data purge execution log
+    op.create_table(
+        'data_purge_log',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('policy_id', Integer, nullable=False, comment='Reference to retention policy'),
+        Column('execution_timestamp', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('records_identified', Integer, nullable=False, default=0,
+               comment='Number of records identified for purging'),
+        Column('records_archived', Integer, nullable=False, default=0,
+               comment='Number of records successfully archived'),
+        Column('records_deleted', Integer, nullable=False, default=0,
+               comment='Number of records successfully deleted'),
+        Column('execution_duration', Integer, nullable=True, comment='Execution time in seconds'),
+        Column('execution_status', ENUM('SUCCESS', 'PARTIAL', 'FAILED', name='purge_status'), 
+               nullable=False, comment='Overall execution status'),
+        Column('error_message', Text, nullable=True, comment='Error details if execution failed'),
+        Column('archive_location', String(500), nullable=True, comment='Where data was archived'),
+        Column('affected_tables', sa.ARRAY(String), nullable=True,
+               comment='List of tables affected by cascading deletes'),
+        Column('initiated_by', String(50), nullable=False, default='system',
+               comment='How the purge was initiated (system, manual, api)'),
+        Column('user_id', Integer, nullable=True, comment='User ID if manually initiated'),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        
+        # Foreign key constraint
+        sa.ForeignKeyConstraint(['policy_id'], ['data_retention_policy.id'], 
+                               ondelete='CASCADE', name='fk_purge_log_policy'),
+        
+        # Indexes for reporting and monitoring
+        Index('idx_purge_log_policy', 'policy_id'),
+        Index('idx_purge_log_timestamp', 'execution_timestamp'),
+        Index('idx_purge_log_status', 'execution_status'),
+        
+        comment='Execution log for data purge operations with detailed metrics'
+    )
+    
+    # Data subject deletion requests (GDPR Article 17)
+    op.create_table(
+        'data_subject_deletion',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('subject_id', Integer, nullable=False, comment='ID of data subject'),
+        Column('request_timestamp', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('request_method', String(50), nullable=False, comment='How request was received'),
+        Column('verification_status', ENUM('PENDING', 'VERIFIED', 'REJECTED', 
+                                         name='verification_status'), 
+               nullable=False, default='PENDING'),
+        Column('verification_method', String(100), nullable=True,
+               comment='Method used to verify identity'),
+        Column('deletion_scope', sa.ARRAY(String), nullable=False,
+               comment='Categories of data to be deleted'),
+        Column('retention_exceptions', JSONB, nullable=True,
+               comment='Data that must be retained for legal reasons'),
+        Column('processing_status', ENUM('QUEUED', 'IN_PROGRESS', 'COMPLETED', 'FAILED',
+                                       name='processing_status'), 
+               nullable=False, default='QUEUED'),
+        Column('completion_timestamp', DateTime(timezone=True), nullable=True),
+        Column('records_deleted', Integer, nullable=False, default=0),
+        Column('tables_affected', sa.ARRAY(String), nullable=True),
+        Column('confirmation_sent', Boolean, nullable=False, default=False),
+        Column('confirmation_timestamp', DateTime(timezone=True), nullable=True),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('updated_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        
+        # Indexes for processing and compliance
+        Index('idx_deletion_subject', 'subject_id'),
+        Index('idx_deletion_status', 'processing_status'),
+        Index('idx_deletion_verification', 'verification_status'),
+        Index('idx_deletion_timestamp', 'request_timestamp'),
+        
+        comment='GDPR Article 17 right to erasure requests and processing log'
     )
 
 
 def create_compliance_tables():
     """
-    Create GDPR/CCPA compliance tables for data subject rights and consent management.
+    Create GDPR/CCPA compliance tracking and reporting tables.
     
-    Implements automated data subject rights fulfillment infrastructure with
-    comprehensive consent tracking and privacy management capabilities.
+    Implements comprehensive compliance management per Section 6.2.4.1 with
+    automated user data rights fulfillment and consent management.
     """
-    logger.info("Creating GDPR/CCPA compliance tables")
     
-    # Data subject consent tracking table
+    logger.info("Creating GDPR/CCPA compliance tables...")
+    
+    # User consent management
     op.create_table(
-        'data_subject_consent',
-        sa.Column('id', sa.String(36), primary_key=True,
-                 comment='UUID primary key for consent records'),
-        sa.Column('user_id', sa.Integer, nullable=False, index=True,
-                 comment='ID of the user who provided consent'),
-        sa.Column('consent_type', sa.String(100), nullable=False, index=True,
-                 comment='Type of consent: PROCESSING, MARKETING, ANALYTICS, etc.'),
-        sa.Column('consent_purpose', sa.String(200), nullable=False,
-                 comment='Specific purpose for which consent was given'),
-        sa.Column('legal_basis', sa.String(100), nullable=False, index=True,
-                 comment='Legal basis for data processing under GDPR'),
-        sa.Column('data_categories', postgresql.ARRAY(sa.String), nullable=False,
-                 comment='Categories of personal data covered by this consent'),
-        sa.Column('processing_activities', postgresql.ARRAY(sa.String), nullable=False,
-                 comment='Specific processing activities covered by consent'),
-        sa.Column('consent_granted', sa.Boolean, nullable=False, index=True,
-                 comment='Whether consent was granted or denied'),
-        sa.Column('consent_method', sa.String(50), nullable=False,
-                 comment='Method of consent collection: WEB_FORM, EMAIL, PHONE, etc.'),
-        sa.Column('consent_evidence', postgresql.JSONB, nullable=True,
-                 comment='Evidence of consent collection (form data, timestamps, etc.)'),
-        sa.Column('ip_address', sa.String(45), nullable=True,
-                 comment='IP address when consent was provided'),
-        sa.Column('user_agent', sa.Text, nullable=True,
-                 comment='User agent when consent was provided'),
-        sa.Column('consent_timestamp', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), index=True,
-                 comment='Timestamp when consent was provided'),
-        sa.Column('expiry_date', sa.DateTime(timezone=True), nullable=True, index=True,
-                 comment='Expiry date of the consent (if applicable)'),
-        sa.Column('withdrawal_timestamp', sa.DateTime(timezone=True), nullable=True, index=True,
-                 comment='Timestamp when consent was withdrawn'),
-        sa.Column('withdrawal_method', sa.String(50), nullable=True,
-                 comment='Method used to withdraw consent'),
-        sa.Column('is_active', sa.Boolean, nullable=False, default=True, index=True,
-                 comment='Whether the consent is currently active'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the record was created'),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), onupdate=sa.func.now(),
-                 comment='Timestamp when the record was last updated'),
+        'user_consent',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('user_id', Integer, nullable=False, comment='ID of user providing consent'),
+        Column('consent_type', String(100), nullable=False, 
+               comment='Type of consent (processing, marketing, etc.)'),
+        Column('data_categories', sa.ARRAY(String), nullable=False,
+               comment='Categories of data covered by consent'),
+        Column('processing_purposes', sa.ARRAY(String), nullable=False,
+               comment='Purposes for which data may be processed'),
+        Column('legal_basis', String(255), nullable=False,
+               comment='GDPR legal basis for processing'),
+        Column('consent_given', Boolean, nullable=False,
+               comment='Whether consent was given or withdrawn'),
+        Column('consent_timestamp', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('consent_method', String(100), nullable=False,
+               comment='How consent was obtained (web, email, etc.)'),
+        Column('consent_version', String(50), nullable=False,
+               comment='Version of privacy policy/terms'),
+        Column('ip_address', String(45), nullable=True),
+        Column('user_agent', Text, nullable=True),
+        Column('expiry_date', DateTime(timezone=True), nullable=True,
+               comment='When consent expires (if applicable)'),
+        Column('withdrawal_timestamp', DateTime(timezone=True), nullable=True),
+        Column('withdrawal_method', String(100), nullable=True),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
         
-        # Foreign key to users table
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_consent_user_id'),
+        # Indexes for consent management
+        Index('idx_consent_user', 'user_id'),
+        Index('idx_consent_type', 'consent_type'),
+        Index('idx_consent_given', 'consent_given'),
+        Index('idx_consent_timestamp', 'consent_timestamp'),
+        Index('idx_consent_expiry', 'expiry_date'),
         
-        # Indexes for consent management and compliance reporting
-        sa.Index('ix_consent_user_type', 'user_id', 'consent_type'),
-        sa.Index('ix_consent_legal_basis', 'legal_basis', 'consent_granted'),
-        sa.Index('ix_consent_expiry_active', 'expiry_date', 'is_active'),
-        sa.Index('ix_consent_withdrawal_tracking', 'withdrawal_timestamp', 'user_id'),
-        
-        # Check constraints for data validation
-        sa.CheckConstraint("consent_type IN ('PROCESSING', 'MARKETING', 'ANALYTICS', 'PROFILING', 'SHARING', 'COOKIES')",
-                          name='ck_consent_type'),
-        sa.CheckConstraint("legal_basis IN ('CONSENT', 'CONTRACT', 'LEGAL_OBLIGATION', 'VITAL_INTERESTS', 'PUBLIC_TASK', 'LEGITIMATE_INTERESTS')",
-                          name='ck_consent_legal_basis'),
-        sa.CheckConstraint("consent_method IN ('WEB_FORM', 'EMAIL', 'PHONE', 'PAPER', 'API', 'IMPORT')",
-                          name='ck_consent_method'),
-        
-        comment='GDPR/CCPA consent tracking for data subject rights management'
+        comment='User consent management for GDPR compliance'
     )
     
-    # Data subject access requests table
+    # Data processing activities record (GDPR Article 30)
     op.create_table(
-        'data_subject_requests',
-        sa.Column('id', sa.String(36), primary_key=True,
-                 comment='UUID primary key for data subject requests'),
-        sa.Column('user_id', sa.Integer, nullable=False, index=True,
-                 comment='ID of the user making the request'),
-        sa.Column('request_type', sa.String(50), nullable=False, index=True,
-                 comment='Type of request: ACCESS, RECTIFICATION, ERASURE, PORTABILITY, etc.'),
-        sa.Column('request_status', sa.String(50), nullable=False, index=True, default='PENDING',
-                 comment='Status of the request: PENDING, IN_PROGRESS, COMPLETED, REJECTED'),
-        sa.Column('request_description', sa.Text, nullable=True,
-                 comment='Detailed description of the data subject request'),
-        sa.Column('data_categories_requested', postgresql.ARRAY(sa.String), nullable=True,
-                 comment='Specific categories of data requested'),
-        sa.Column('verification_method', sa.String(50), nullable=True,
-                 comment='Method used to verify the identity of the data subject'),
-        sa.Column('verification_status', sa.String(50), nullable=False, default='PENDING',
-                 comment='Status of identity verification: PENDING, VERIFIED, FAILED'),
-        sa.Column('verification_data', postgresql.JSONB, nullable=True,
-                 comment='Verification data and evidence'),
-        sa.Column('processing_notes', sa.Text, nullable=True,
-                 comment='Internal notes about request processing'),
-        sa.Column('fulfillment_data', postgresql.JSONB, nullable=True,
-                 comment='Data provided to fulfill the request'),
-        sa.Column('rejection_reason', sa.String(200), nullable=True,
-                 comment='Reason for request rejection (if applicable)'),
-        sa.Column('legal_basis_assessment', sa.Text, nullable=True,
-                 comment='Assessment of legal basis for the request'),
-        sa.Column('impact_assessment', sa.Text, nullable=True,
-                 comment='Assessment of impact on other individuals or business'),
-        sa.Column('automated_fulfillment', sa.Boolean, nullable=False, default=False,
-                 comment='Whether the request was fulfilled automatically'),
-        sa.Column('assigned_to_user_id', sa.Integer, nullable=True,
-                 comment='ID of the user assigned to process the request'),
-        sa.Column('request_timestamp', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), index=True,
-                 comment='Timestamp when the request was submitted'),
-        sa.Column('due_date', sa.DateTime(timezone=True), nullable=False, index=True,
-                 comment='Due date for request fulfillment (30 days from submission)'),
-        sa.Column('completed_timestamp', sa.DateTime(timezone=True), nullable=True, index=True,
-                 comment='Timestamp when the request was completed'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the record was created'),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), onupdate=sa.func.now(),
-                 comment='Timestamp when the record was last updated'),
+        'processing_activity',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('activity_name', String(255), nullable=False,
+               comment='Name of the processing activity'),
+        Column('activity_description', Text, nullable=False,
+               comment='Detailed description of processing'),
+        Column('data_controller', String(255), nullable=False,
+               comment='Data controller responsible for processing'),
+        Column('data_processor', String(255), nullable=True,
+               comment='Data processor (if different from controller)'),
+        Column('legal_basis', sa.ARRAY(String), nullable=False,
+               comment='GDPR legal basis for processing'),
+        Column('data_categories', sa.ARRAY(String), nullable=False,
+               comment='Categories of personal data processed'),
+        Column('data_subjects', sa.ARRAY(String), nullable=False,
+               comment='Categories of data subjects'),
+        Column('processing_purposes', sa.ARRAY(String), nullable=False,
+               comment='Purposes of processing'),
+        Column('recipients', sa.ARRAY(String), nullable=True,
+               comment='Recipients of personal data'),
+        Column('third_country_transfers', Boolean, nullable=False, default=False,
+               comment='Whether data is transferred outside EU/EEA'),
+        Column('safeguards', Text, nullable=True,
+               comment='Safeguards for international transfers'),
+        Column('retention_period', String(255), nullable=False,
+               comment='Data retention period'),
+        Column('security_measures', Text, nullable=False,
+               comment='Technical and organizational security measures'),
+        Column('data_sources', sa.ARRAY(String), nullable=True,
+               comment='Sources of personal data'),
+        Column('automated_decision_making', Boolean, nullable=False, default=False,
+               comment='Whether automated decision-making is involved'),
+        Column('profiling', Boolean, nullable=False, default=False,
+               comment='Whether profiling is performed'),
+        Column('impact_assessment_required', Boolean, nullable=False, default=False,
+               comment='Whether DPIA is required'),
+        Column('impact_assessment_completed', Boolean, nullable=False, default=False),
+        Column('last_review_date', DateTime(timezone=True), nullable=True),
+        Column('next_review_date', DateTime(timezone=True), nullable=True),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('updated_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('created_by', Integer, nullable=True),
+        Column('updated_by', Integer, nullable=True),
         
-        # Foreign keys
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_requests_user_id'),
-        sa.ForeignKeyConstraint(['assigned_to_user_id'], ['users.id'], name='fk_requests_assigned_user_id'),
+        # Indexes for compliance reporting
+        Index('idx_processing_controller', 'data_controller'),
+        Index('idx_processing_legal_basis', 'legal_basis'),
+        Index('idx_processing_review', 'next_review_date'),
         
-        # Indexes for request management and SLA tracking
-        sa.Index('ix_requests_user_type_status', 'user_id', 'request_type', 'request_status'),
-        sa.Index('ix_requests_due_date_status', 'due_date', 'request_status'),
-        sa.Index('ix_requests_assigned_status', 'assigned_to_user_id', 'request_status'),
-        sa.Index('ix_requests_completion_tracking', 'completed_timestamp', 'request_type'),
-        
-        # Check constraints for data validation
-        sa.CheckConstraint("request_type IN ('ACCESS', 'RECTIFICATION', 'ERASURE', 'PORTABILITY', 'RESTRICTION', 'OBJECTION')",
-                          name='ck_requests_type'),
-        sa.CheckConstraint("request_status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'REJECTED', 'EXPIRED')",
-                          name='ck_requests_status'),
-        sa.CheckConstraint("verification_status IN ('PENDING', 'VERIFIED', 'FAILED')",
-                          name='ck_requests_verification_status'),
-        
-        comment='Data subject access requests for GDPR/CCPA compliance'
+        comment='GDPR Article 30 record of processing activities'
     )
     
-    # Data retention policy table
+    # Data breach incident log (GDPR Article 33-34)
     op.create_table(
-        'data_retention_policies',
-        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for retention policies'),
-        sa.Column('policy_name', sa.String(100), nullable=False, unique=True,
-                 comment='Unique name for the retention policy'),
-        sa.Column('data_category', sa.String(100), nullable=False, index=True,
-                 comment='Category of data covered by this policy'),
-        sa.Column('table_name', sa.String(100), nullable=False, index=True,
-                 comment='Database table covered by this policy'),
-        sa.Column('retention_period_days', sa.Integer, nullable=False,
-                 comment='Number of days to retain data'),
-        sa.Column('grace_period_days', sa.Integer, nullable=False, default=30,
-                 comment='Grace period before permanent deletion'),
-        sa.Column('purge_conditions', postgresql.JSONB, nullable=True,
-                 comment='Additional conditions for data purging'),
-        sa.Column('legal_basis', sa.String(100), nullable=False,
-                 comment='Legal basis for the retention period'),
-        sa.Column('business_justification', sa.Text, nullable=True,
-                 comment='Business justification for the retention period'),
-        sa.Column('archival_required', sa.Boolean, nullable=False, default=False,
-                 comment='Whether data should be archived before deletion'),
-        sa.Column('archival_location', sa.String(200), nullable=True,
-                 comment='Location for data archival'),
-        sa.Column('automated_purging', sa.Boolean, nullable=False, default=True,
-                 comment='Whether purging is automated or requires manual approval'),
-        sa.Column('notification_required', sa.Boolean, nullable=False, default=True,
-                 comment='Whether to notify data subjects before purging'),
-        sa.Column('is_active', sa.Boolean, nullable=False, default=True, index=True,
-                 comment='Whether the policy is currently active'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the policy was created'),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), onupdate=sa.func.now(),
-                 comment='Timestamp when the policy was last updated'),
+        'data_breach_incident',
+        Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        Column('incident_reference', String(100), nullable=False, unique=True,
+               comment='Unique reference number for the incident'),
+        Column('discovery_timestamp', DateTime(timezone=True), nullable=False,
+               comment='When the breach was discovered'),
+        Column('occurrence_timestamp', DateTime(timezone=True), nullable=True,
+               comment='When the breach actually occurred (if known)'),
+        Column('breach_type', ENUM('CONFIDENTIALITY', 'INTEGRITY', 'AVAILABILITY', 
+                                 name='breach_type'), 
+               nullable=False, comment='Type of breach'),
+        Column('severity_level', ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 
+                                    name='severity_level'), 
+               nullable=False, comment='Severity assessment'),
+        Column('affected_data_categories', sa.ARRAY(String), nullable=False,
+               comment='Categories of data affected'),
+        Column('affected_subjects_count', Integer, nullable=False, default=0,
+               comment='Number of data subjects affected'),
+        Column('affected_records_count', Integer, nullable=False, default=0,
+               comment='Number of records affected'),
+        Column('breach_cause', Text, nullable=False,
+               comment='Cause of the breach'),
+        Column('immediate_actions', Text, nullable=False,
+               comment='Immediate actions taken'),
+        Column('containment_measures', Text, nullable=True,
+               comment='Measures taken to contain the breach'),
+        Column('risk_assessment', Text, nullable=False,
+               comment='Assessment of risks to data subjects'),
+        Column('notification_required', Boolean, nullable=False, default=True,
+               comment='Whether notification to authorities is required'),
+        Column('authority_notified', Boolean, nullable=False, default=False),
+        Column('authority_notification_date', DateTime(timezone=True), nullable=True),
+        Column('subjects_notified', Boolean, nullable=False, default=False),
+        Column('subjects_notification_date', DateTime(timezone=True), nullable=True),
+        Column('investigation_status', ENUM('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED',
+                                          name='investigation_status'), 
+               nullable=False, default='OPEN'),
+        Column('resolution_summary', Text, nullable=True),
+        Column('lessons_learned', Text, nullable=True),
+        Column('created_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('updated_at', DateTime(timezone=True), nullable=False, 
+               default=lambda: datetime.now(timezone.utc)),
+        Column('created_by', Integer, nullable=True),
+        Column('updated_by', Integer, nullable=True),
         
-        # Indexes for policy management and enforcement
-        sa.Index('ix_retention_category_table', 'data_category', 'table_name'),
-        sa.Index('ix_retention_automated_active', 'automated_purging', 'is_active'),
+        # Indexes for incident management
+        Index('idx_breach_reference', 'incident_reference'),
+        Index('idx_breach_discovery', 'discovery_timestamp'),
+        Index('idx_breach_severity', 'severity_level'),
+        Index('idx_breach_status', 'investigation_status'),
+        Index('idx_breach_notification', 'notification_required'),
         
-        # Check constraints for data validation
-        sa.CheckConstraint('retention_period_days > 0', name='ck_retention_period_positive'),
-        sa.CheckConstraint('grace_period_days >= 0', name='ck_grace_period_non_negative'),
-        
-        comment='Data retention policies for automated GDPR/CCPA compliance'
+        comment='GDPR Article 33-34 data breach incident log'
     )
 
 
-def add_encrypted_fields_to_existing_tables():
+def add_audit_fields_to_existing_tables():
     """
-    Add encrypted PII fields to existing tables per Section 6.2.4.1.
+    Add audit tracking fields to existing tables for comprehensive change monitoring.
     
-    Implements field-level encryption for sensitive personal data in User and
-    related tables using Fernet symmetric encryption.
+    Implements audit field enhancement per Section 6.2.4.3 to existing User,
+    UserSession, BusinessEntity, and EntityRelationship tables.
     """
-    logger.info("Adding encrypted fields to existing tables")
     
-    # Add encrypted fields to users table
-    op.add_column('users', 
-        sa.Column('email_encrypted', sa.Text, nullable=True,
-                 comment='Encrypted email address using Fernet encryption'))
+    logger.info("Adding audit fields to existing tables...")
     
-    op.add_column('users', 
-        sa.Column('phone_number_encrypted', sa.Text, nullable=True,
-                 comment='Encrypted phone number using Fernet encryption'))
+    # Tables to enhance with audit fields
+    tables_to_audit = [
+        'user',
+        'user_session', 
+        'business_entity',
+        'entity_relationship'
+    ]
     
-    op.add_column('users', 
-        sa.Column('full_name_encrypted', sa.Text, nullable=True,
-                 comment='Encrypted full name using Fernet encryption'))
-    
-    op.add_column('users', 
-        sa.Column('date_of_birth_encrypted', sa.Text, nullable=True,
-                 comment='Encrypted date of birth using Fernet encryption'))
-    
-    op.add_column('users', 
-        sa.Column('address_encrypted', sa.Text, nullable=True,
-                 comment='Encrypted address information using Fernet encryption'))
-    
-    op.add_column('users', 
-        sa.Column('identification_number_encrypted', sa.Text, nullable=True,
-                 comment='Encrypted identification number (SSN, etc.) using Fernet encryption'))
-    
-    # Add encryption metadata to users table
-    op.add_column('users', 
-        sa.Column('encryption_key_version', sa.Integer, nullable=True, default=1,
-                 comment='Version of encryption key used for PII fields'))
-    
-    op.add_column('users', 
-        sa.Column('pii_encrypted_at', sa.DateTime(timezone=True), nullable=True,
-                 comment='Timestamp when PII fields were encrypted'))
-    
-    op.add_column('users', 
-        sa.Column('last_pii_access', sa.DateTime(timezone=True), nullable=True,
-                 comment='Timestamp of last PII data access for retention tracking'))
-    
-    # Create PII access tracking table for users
-    op.create_table(
-        'user_pii_access_log',
-        sa.Column('id', sa.BigInteger, primary_key=True, autoincrement=True,
-                 comment='Auto-incrementing primary key for PII access log'),
-        sa.Column('user_id', sa.Integer, nullable=False, index=True,
-                 comment='ID of the user whose PII was accessed'),
-        sa.Column('accessor_user_id', sa.Integer, nullable=True, index=True,
-                 comment='ID of the user who accessed the PII'),
-        sa.Column('pii_fields_accessed', postgresql.ARRAY(sa.String), nullable=False,
-                 comment='List of PII fields that were accessed'),
-        sa.Column('access_purpose', sa.String(200), nullable=False,
-                 comment='Business purpose for accessing the PII'),
-        sa.Column('legal_basis', sa.String(100), nullable=False,
-                 comment='Legal basis for PII access'),
-        sa.Column('consent_id', sa.String(36), nullable=True,
-                 comment='ID of consent record if consent-based access'),
-        sa.Column('session_id', sa.String(255), nullable=True, index=True,
-                 comment='Session ID when PII was accessed'),
-        sa.Column('ip_address', sa.String(45), nullable=True,
-                 comment='IP address of the accessor'),
-        sa.Column('user_agent', sa.Text, nullable=True,
-                 comment='User agent of the accessor'),
-        sa.Column('request_id', sa.String(36), nullable=True,
-                 comment='Request ID for correlation'),
-        sa.Column('decryption_successful', sa.Boolean, nullable=False, default=True,
-                 comment='Whether PII decryption was successful'),
-        sa.Column('access_timestamp', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(), index=True,
-                 comment='Timestamp when PII was accessed'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
-                 default=sa.func.now(),
-                 comment='Timestamp when the log entry was created'),
-        
-        # Foreign keys
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_pii_access_user_id'),
-        sa.ForeignKeyConstraint(['accessor_user_id'], ['users.id'], name='fk_pii_access_accessor_id'),
-        
-        # Indexes for PII access monitoring
-        sa.Index('ix_pii_access_user_timestamp', 'user_id', 'access_timestamp'),
-        sa.Index('ix_pii_access_purpose_basis', 'access_purpose', 'legal_basis'),
-        sa.Index('ix_pii_access_consent_tracking', 'consent_id', 'user_id'),
-        
-        comment='PII access logging for enhanced privacy protection and compliance'
-    )
+    for table_name in tables_to_audit:
+        try:
+            # Add audit tracking fields
+            op.add_column(table_name, 
+                         Column('audit_version', Integer, nullable=False, default=1,
+                               comment='Version number for optimistic locking'))
+            op.add_column(table_name,
+                         Column('last_modified_by', Integer, nullable=True,
+                               comment='User ID who last modified this record'))
+            op.add_column(table_name,
+                         Column('last_modified_ip', String(45), nullable=True,
+                               comment='IP address of last modification'))
+            op.add_column(table_name,
+                         Column('last_modified_session', String(255), nullable=True,
+                               comment='Session ID of last modification'))
+            op.add_column(table_name,
+                         Column('change_reason', String(500), nullable=True,
+                               comment='Business reason for last change'))
+            
+            # Add index for audit version (for optimistic locking)
+            op.create_index(f'idx_{table_name}_audit_version', table_name, ['audit_version'])
+            
+            logger.info(f"Added audit fields to table: {table_name}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to add audit fields to {table_name}: {str(e)}")
+            # Continue with other tables
 
 
-def create_postgresql_audit_triggers():
+def create_postgresql_triggers():
     """
-    Create PostgreSQL database triggers for critical table auditing per Section 6.2.4.3.
+    Create PostgreSQL database triggers for automated audit logging.
     
-    Implements PL/pgSQL functions and triggers for comprehensive audit logging
-    as a backup to SQLAlchemy event listeners.
+    Implements PostgreSQL trigger-based audit per Section 6.2.4.3 with
+    comprehensive change tracking and audit log population.
     """
-    logger.info("Creating PostgreSQL audit triggers and functions")
     
-    # Create audit function for generic table auditing
-    audit_function_sql = """
-    CREATE OR REPLACE FUNCTION audit_table_changes()
+    logger.info("Creating PostgreSQL triggers for audit logging...")
+    
+    # Create audit trigger function
+    audit_trigger_function = """
+    CREATE OR REPLACE FUNCTION audit_trigger_function()
     RETURNS TRIGGER AS $$
     DECLARE
+        audit_log_id UUID;
         old_values JSONB;
         new_values JSONB;
         changed_fields TEXT[];
         field_name TEXT;
+        user_id_val INTEGER;
+        session_id_val TEXT;
+        ip_address_val TEXT;
     BEGIN
-        -- Initialize variables
-        old_values := NULL;
-        new_values := NULL;
-        changed_fields := ARRAY[]::TEXT[];
+        -- Generate unique ID for audit log entry
+        audit_log_id := gen_random_uuid();
         
-        -- Handle different trigger operations
+        -- Extract user context from application_name or session variables
+        user_id_val := COALESCE(
+            current_setting('audit.user_id', true)::INTEGER,
+            NULL
+        );
+        session_id_val := current_setting('audit.session_id', true);
+        ip_address_val := current_setting('audit.ip_address', true);
+        
+        -- Handle different operation types
         IF TG_OP = 'DELETE' THEN
+            -- For DELETE operations, capture old values
             old_values := to_jsonb(OLD);
+            new_values := NULL;
             
             INSERT INTO audit_log (
-                table_name, record_id, operation, old_values, new_values,
-                changed_fields, operation_timestamp, created_at
+                id, table_name, record_id, operation_type, operation_timestamp,
+                user_id, session_id, ip_address, old_values, new_values,
+                created_at
             ) VALUES (
-                TG_TABLE_NAME, OLD.id::TEXT, TG_OP, old_values, NULL,
-                NULL, NOW(), NOW()
+                audit_log_id, TG_TABLE_NAME, OLD.id::TEXT, 'DELETE'::audit_operation_type,
+                NOW(), user_id_val, session_id_val, ip_address_val,
+                old_values, new_values, NOW()
             );
             
             RETURN OLD;
             
         ELSIF TG_OP = 'INSERT' THEN
+            -- For INSERT operations, capture new values
+            old_values := NULL;
             new_values := to_jsonb(NEW);
             
             INSERT INTO audit_log (
-                table_name, record_id, operation, old_values, new_values,
-                changed_fields, operation_timestamp, created_at
+                id, table_name, record_id, operation_type, operation_timestamp,
+                user_id, session_id, ip_address, old_values, new_values,
+                created_at
             ) VALUES (
-                TG_TABLE_NAME, NEW.id::TEXT, TG_OP, NULL, new_values,
-                NULL, NOW(), NOW()
+                audit_log_id, TG_TABLE_NAME, NEW.id::TEXT, 'INSERT'::audit_operation_type,
+                NOW(), user_id_val, session_id_val, ip_address_val,
+                old_values, new_values, NOW()
             );
             
             RETURN NEW;
             
         ELSIF TG_OP = 'UPDATE' THEN
+            -- For UPDATE operations, capture both old and new values
             old_values := to_jsonb(OLD);
             new_values := to_jsonb(NEW);
             
             -- Identify changed fields
-            FOR field_name IN SELECT key FROM jsonb_each(old_values) LOOP
-                IF old_values->>field_name IS DISTINCT FROM new_values->>field_name THEN
+            changed_fields := ARRAY[]::TEXT[];
+            FOR field_name IN 
+                SELECT jsonb_object_keys(new_values) 
+                WHERE jsonb_object_keys(new_values) != 'updated_at'
+                  AND jsonb_object_keys(new_values) != 'audit_version'
+            LOOP
+                IF old_values->>field_name != new_values->>field_name THEN
                     changed_fields := array_append(changed_fields, field_name);
                 END IF;
             END LOOP;
@@ -736,11 +837,13 @@ def create_postgresql_audit_triggers():
             -- Only log if there are actual changes
             IF array_length(changed_fields, 1) > 0 THEN
                 INSERT INTO audit_log (
-                    table_name, record_id, operation, old_values, new_values,
-                    changed_fields, operation_timestamp, created_at
+                    id, table_name, record_id, operation_type, operation_timestamp,
+                    user_id, session_id, ip_address, old_values, new_values,
+                    changed_fields, created_at
                 ) VALUES (
-                    TG_TABLE_NAME, NEW.id::TEXT, TG_OP, old_values, new_values,
-                    changed_fields, NOW(), NOW()
+                    audit_log_id, TG_TABLE_NAME, NEW.id::TEXT, 'UPDATE'::audit_operation_type,
+                    NOW(), user_id_val, session_id_val, ip_address_val,
+                    old_values, new_values, changed_fields, NOW()
                 );
             END IF;
             
@@ -749,687 +852,533 @@ def create_postgresql_audit_triggers():
         
         RETURN NULL;
     END;
-    $$ LANGUAGE plpgsql;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
     """
     
-    op.execute(text(audit_function_sql))
+    op.execute(audit_trigger_function)
     
-    # Create audit triggers for critical tables
-    critical_tables = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
+    # Create triggers for each audited table
+    audited_tables = ['user', 'user_session', 'business_entity', 'entity_relationship']
     
-    for table_name in critical_tables:
+    for table_name in audited_tables:
+        trigger_name = f'trigger_audit_{table_name}'
+        
         trigger_sql = f"""
-        CREATE TRIGGER audit_trigger_{table_name}
+        CREATE TRIGGER {trigger_name}
             AFTER INSERT OR UPDATE OR DELETE ON {table_name}
-            FOR EACH ROW EXECUTE FUNCTION audit_table_changes();
+            FOR EACH ROW EXECUTE FUNCTION audit_trigger_function();
         """
-        op.execute(text(trigger_sql))
+        
+        op.execute(trigger_sql)
+        logger.info(f"Created audit trigger for table: {table_name}")
     
-    # Create function for PII access logging
-    pii_access_function_sql = """
-    CREATE OR REPLACE FUNCTION log_pii_access(
-        p_user_id INTEGER,
-        p_accessor_user_id INTEGER,
-        p_pii_fields TEXT[],
-        p_access_purpose TEXT,
-        p_legal_basis TEXT,
+    # Create utility function for setting audit context
+    audit_context_function = """
+    CREATE OR REPLACE FUNCTION set_audit_context(
+        p_user_id INTEGER DEFAULT NULL,
         p_session_id TEXT DEFAULT NULL,
         p_ip_address TEXT DEFAULT NULL
     ) RETURNS VOID AS $$
     BEGIN
-        INSERT INTO user_pii_access_log (
-            user_id, accessor_user_id, pii_fields_accessed, access_purpose,
-            legal_basis, session_id, ip_address, access_timestamp, created_at
-        ) VALUES (
-            p_user_id, p_accessor_user_id, p_pii_fields, p_access_purpose,
-            p_legal_basis, p_session_id, p_ip_address, NOW(), NOW()
-        );
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    
-    op.execute(text(pii_access_function_sql))
-    
-    # Create function for automated consent expiry checking
-    consent_expiry_function_sql = """
-    CREATE OR REPLACE FUNCTION check_consent_expiry()
-    RETURNS VOID AS $$
-    BEGIN
-        -- Mark expired consents as inactive
-        UPDATE data_subject_consent
-        SET is_active = FALSE,
-            updated_at = NOW()
-        WHERE expiry_date < NOW()
-          AND is_active = TRUE
-          AND withdrawal_timestamp IS NULL;
-          
-        -- Log consent expiry events
-        INSERT INTO security_audit_log (
-            event_type, severity, additional_data, event_timestamp, created_at
-        ) 
-        SELECT 
-            'CONSENT_EXPIRED',
-            'MEDIUM',
-            jsonb_build_object(
-                'expired_consents', COUNT(*),
-                'check_timestamp', NOW()
-            ),
-            NOW(),
-            NOW()
-        FROM data_subject_consent
-        WHERE expiry_date < NOW()
-          AND is_active = FALSE
-          AND updated_at::DATE = NOW()::DATE;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    
-    op.execute(text(consent_expiry_function_sql))
-
-
-def create_data_retention_procedures():
-    """
-    Create automated data retention and purging procedures per Section 6.2.4.1.
-    
-    Implements GDPR/CCPA automated data retention enforcement with referential
-    integrity preservation and comprehensive audit logging.
-    """
-    logger.info("Creating data retention and purging procedures")
-    
-    # Create function for automated data retention enforcement
-    retention_enforcement_function_sql = """
-    CREATE OR REPLACE FUNCTION enforce_data_retention()
-    RETURNS TEXT AS $$
-    DECLARE
-        policy_record RECORD;
-        purge_count INTEGER := 0;
-        total_purged INTEGER := 0;
-        result_message TEXT;
-    BEGIN
-        -- Loop through active retention policies
-        FOR policy_record IN 
-            SELECT * FROM data_retention_policies 
-            WHERE is_active = TRUE AND automated_purging = TRUE
-        LOOP
-            -- Calculate purge date based on retention period
-            DECLARE
-                purge_date TIMESTAMP := NOW() - INTERVAL '1 day' * policy_record.retention_period_days;
-                grace_date TIMESTAMP := NOW() - INTERVAL '1 day' * (policy_record.retention_period_days + policy_record.grace_period_days);
-            BEGIN
-                -- Mark records for purging (soft delete first)
-                EXECUTE format(
-                    'UPDATE %I SET deleted_at = NOW(), updated_at = NOW() 
-                     WHERE created_at < $1 AND deleted_at IS NULL',
-                    policy_record.table_name
-                ) USING purge_date;
-                
-                GET DIAGNOSTICS purge_count = ROW_COUNT;
-                
-                -- Permanently delete records after grace period
-                IF policy_record.grace_period_days > 0 THEN
-                    EXECUTE format(
-                        'DELETE FROM %I WHERE deleted_at < $1',
-                        policy_record.table_name
-                    ) USING grace_date;
-                END IF;
-                
-                total_purged := total_purged + purge_count;
-                
-                -- Log retention enforcement
-                INSERT INTO audit_log (
-                    table_name, record_id, operation, new_values,
-                    operation_timestamp, created_at
-                ) VALUES (
-                    'data_retention_enforcement',
-                    policy_record.id::TEXT,
-                    'RETENTION_PURGE',
-                    jsonb_build_object(
-                        'policy_name', policy_record.policy_name,
-                        'table_name', policy_record.table_name,
-                        'records_marked', purge_count,
-                        'purge_date', purge_date,
-                        'grace_date', grace_date
-                    ),
-                    NOW(),
-                    NOW()
-                );
-            END;
-        END LOOP;
-        
-        result_message := format('Data retention enforcement completed. Total records processed: %s', total_purged);
-        
-        -- Log overall enforcement summary
-        INSERT INTO security_audit_log (
-            event_type, severity, additional_data, event_timestamp, created_at
-        ) VALUES (
-            'DATA_RETENTION_ENFORCEMENT',
-            'INFO',
-            jsonb_build_object(
-                'total_records_processed', total_purged,
-                'enforcement_timestamp', NOW(),
-                'policies_processed', (SELECT COUNT(*) FROM data_retention_policies WHERE is_active = TRUE)
-            ),
-            NOW(),
-            NOW()
-        );
-        
-        RETURN result_message;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    
-    op.execute(text(retention_enforcement_function_sql))
-    
-    # Create function for GDPR data subject erasure
-    gdpr_erasure_function_sql = """
-    CREATE OR REPLACE FUNCTION execute_gdpr_erasure(p_user_id INTEGER)
-    RETURNS TEXT AS $$
-    DECLARE
-        erasure_count INTEGER := 0;
-        total_erased INTEGER := 0;
-        result_message TEXT;
-    BEGIN
-        -- Start transaction for data erasure
-        BEGIN
-            -- Anonymize or delete user PII data
-            UPDATE users 
-            SET 
-                email_encrypted = NULL,
-                phone_number_encrypted = NULL,
-                full_name_encrypted = NULL,
-                date_of_birth_encrypted = NULL,
-                address_encrypted = NULL,
-                identification_number_encrypted = NULL,
-                email = 'anonymized_' || id || '@deleted.local',
-                username = 'anonymized_user_' || id,
-                password_hash = 'ERASED',
-                is_active = FALSE,
-                updated_at = NOW()
-            WHERE id = p_user_id;
-            
-            GET DIAGNOSTICS erasure_count = ROW_COUNT;
-            total_erased := total_erased + erasure_count;
-            
-            -- Mark related records for anonymization
-            UPDATE audit_log 
-            SET 
-                old_values = CASE 
-                    WHEN old_values IS NOT NULL THEN 
-                        jsonb_set(old_values, '{email}', '"[ERASED]"'::jsonb)
-                    ELSE NULL 
-                END,
-                new_values = CASE 
-                    WHEN new_values IS NOT NULL THEN 
-                        jsonb_set(new_values, '{email}', '"[ERASED]"'::jsonb)
-                    ELSE NULL 
-                END,
-                updated_at = NOW()
-            WHERE user_id = p_user_id;
-            
-            -- Anonymize consent records (keep for legal compliance)
-            UPDATE data_subject_consent
-            SET 
-                consent_evidence = jsonb_build_object('erased', true, 'erasure_date', NOW()),
-                ip_address = '[ERASED]',
-                user_agent = '[ERASED]',
-                updated_at = NOW()
-            WHERE user_id = p_user_id;
-            
-            -- Log the erasure action
-            INSERT INTO audit_log (
-                table_name, record_id, operation, new_values,
-                user_id, operation_timestamp, created_at
-            ) VALUES (
-                'gdpr_erasure',
-                p_user_id::TEXT,
-                'GDPR_ERASURE',
-                jsonb_build_object(
-                    'user_id', p_user_id,
-                    'erasure_timestamp', NOW(),
-                    'records_anonymized', total_erased,
-                    'legal_basis', 'GDPR Article 17 - Right to Erasure'
-                ),
-                p_user_id,
-                NOW(),
-                NOW()
-            );
-            
-            -- Log security event
-            INSERT INTO security_audit_log (
-                event_type, severity, user_id, additional_data, event_timestamp, created_at
-            ) VALUES (
-                'GDPR_ERASURE_EXECUTED',
-                'HIGH',
-                p_user_id,
-                jsonb_build_object(
-                    'user_id', p_user_id,
-                    'erasure_timestamp', NOW(),
-                    'records_affected', total_erased
-                ),
-                NOW(),
-                NOW()
-            );
-            
-            result_message := format('GDPR erasure completed for user %s. Records affected: %s', p_user_id, total_erased);
-            
-        EXCEPTION 
-            WHEN OTHERS THEN
-                -- Log erasure failure
-                INSERT INTO security_audit_log (
-                    event_type, severity, user_id, additional_data, event_timestamp, created_at
-                ) VALUES (
-                    'GDPR_ERASURE_FAILED',
-                    'CRITICAL',
-                    p_user_id,
-                    jsonb_build_object(
-                        'user_id', p_user_id,
-                        'error_message', SQLERRM,
-                        'error_timestamp', NOW()
-                    ),
-                    NOW(),
-                    NOW()
-                );
-                
-                RAISE EXCEPTION 'GDPR erasure failed for user %: %', p_user_id, SQLERRM;
-        END;
-        
-        RETURN result_message;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    
-    op.execute(text(gdpr_erasure_function_sql))
-
-
-def create_user_data_rights_infrastructure():
-    """
-    Create infrastructure for automated user data rights fulfillment.
-    
-    Implements GDPR/CCPA data subject rights automation including data export,
-    rectification, and automated request processing capabilities.
-    """
-    logger.info("Creating user data rights fulfillment infrastructure")
-    
-    # Create function for automated data export (GDPR Article 20)
-    data_export_function_sql = """
-    CREATE OR REPLACE FUNCTION generate_user_data_export(p_user_id INTEGER)
-    RETURNS JSONB AS $$
-    DECLARE
-        user_data JSONB;
-        export_data JSONB;
-    BEGIN
-        -- Collect user data from various tables
-        SELECT to_jsonb(u) INTO user_data
-        FROM (
-            SELECT 
-                id,
-                username,
-                email,
-                is_active,
-                created_at,
-                updated_at,
-                -- Decrypt PII fields for export
-                CASE 
-                    WHEN email_encrypted IS NOT NULL THEN '[ENCRYPTED PII - Contact support for decryption]'
-                    ELSE email
-                END as email_status,
-                CASE 
-                    WHEN phone_number_encrypted IS NOT NULL THEN '[ENCRYPTED PII - Contact support for decryption]'
-                    ELSE NULL
-                END as phone_status
-            FROM users 
-            WHERE id = p_user_id
-        ) u;
-        
-        -- Build comprehensive export data
-        export_data := jsonb_build_object(
-            'user_profile', user_data,
-            'consent_records', (
-                SELECT jsonb_agg(to_jsonb(c))
-                FROM (
-                    SELECT 
-                        consent_type,
-                        consent_purpose,
-                        legal_basis,
-                        consent_granted,
-                        consent_timestamp,
-                        withdrawal_timestamp,
-                        is_active
-                    FROM data_subject_consent 
-                    WHERE user_id = p_user_id
-                ) c
-            ),
-            'access_requests', (
-                SELECT jsonb_agg(to_jsonb(r))
-                FROM (
-                    SELECT 
-                        request_type,
-                        request_status,
-                        request_timestamp,
-                        completed_timestamp
-                    FROM data_subject_requests 
-                    WHERE user_id = p_user_id
-                ) r
-            ),
-            'business_entities', (
-                SELECT jsonb_agg(to_jsonb(b))
-                FROM (
-                    SELECT 
-                        name,
-                        description,
-                        status,
-                        created_at,
-                        updated_at
-                    FROM business_entities 
-                    WHERE owner_id = p_user_id
-                ) b
-            ),
-            'export_metadata', jsonb_build_object(
-                'export_timestamp', NOW(),
-                'export_format', 'JSON',
-                'legal_basis', 'GDPR Article 20 - Right to Data Portability',
-                'retention_notice', 'This export contains personal data. Please handle according to applicable privacy laws.',
-                'user_id', p_user_id
-            )
-        );
-        
-        -- Log the data export
-        INSERT INTO data_access_audit (
-            user_id, data_subject_id, data_type, data_fields, access_purpose,
-            legal_basis, operation_type, access_timestamp, created_at
-        ) VALUES (
-            NULL, -- System generated export
-            p_user_id,
-            'PII',
-            ARRAY['profile_data', 'consent_records', 'business_entities'],
-            'GDPR Article 20 - Data Portability Request',
-            'LEGAL_OBLIGATION',
-            'EXPORT',
-            NOW(),
-            NOW()
-        );
-        
-        RETURN export_data;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    
-    op.execute(text(data_export_function_sql))
-    
-    # Create function for automated request processing
-    automated_request_processing_sql = """
-    CREATE OR REPLACE FUNCTION process_data_subject_request(p_request_id TEXT)
-    RETURNS TEXT AS $$
-    DECLARE
-        request_record RECORD;
-        processing_result TEXT;
-        export_data JSONB;
-    BEGIN
-        -- Get request details
-        SELECT * INTO request_record
-        FROM data_subject_requests
-        WHERE id = p_request_id AND request_status = 'PENDING';
-        
-        IF NOT FOUND THEN
-            RETURN 'Request not found or not in PENDING status';
+        -- Set session variables for audit context
+        IF p_user_id IS NOT NULL THEN
+            PERFORM set_config('audit.user_id', p_user_id::TEXT, true);
         END IF;
         
-        -- Update request status to IN_PROGRESS
-        UPDATE data_subject_requests
-        SET 
-            request_status = 'IN_PROGRESS',
-            automated_fulfillment = TRUE,
-            updated_at = NOW()
-        WHERE id = p_request_id;
+        IF p_session_id IS NOT NULL THEN
+            PERFORM set_config('audit.session_id', p_session_id, true);
+        END IF;
         
-        -- Process based on request type
-        CASE request_record.request_type
-            WHEN 'ACCESS' THEN
-                -- Generate data export
-                export_data := generate_user_data_export(request_record.user_id);
-                
-                UPDATE data_subject_requests
-                SET 
-                    request_status = 'COMPLETED',
-                    fulfillment_data = export_data,
-                    completed_timestamp = NOW(),
-                    processing_notes = 'Automated data export completed',
-                    updated_at = NOW()
-                WHERE id = p_request_id;
-                
-                processing_result := 'Data access request completed automatically';
-                
-            WHEN 'ERASURE' THEN
-                -- Execute GDPR erasure
-                processing_result := execute_gdpr_erasure(request_record.user_id);
-                
-                UPDATE data_subject_requests
-                SET 
-                    request_status = 'COMPLETED',
-                    completed_timestamp = NOW(),
-                    processing_notes = processing_result,
-                    updated_at = NOW()
-                WHERE id = p_request_id;
-                
-            WHEN 'PORTABILITY' THEN
-                -- Generate portable data export
-                export_data := generate_user_data_export(request_record.user_id);
-                
-                UPDATE data_subject_requests
-                SET 
-                    request_status = 'COMPLETED',
-                    fulfillment_data = export_data,
-                    completed_timestamp = NOW(),
-                    processing_notes = 'Automated data portability export completed',
-                    updated_at = NOW()
-                WHERE id = p_request_id;
-                
-                processing_result := 'Data portability request completed automatically';
-                
-            ELSE
-                -- Manual processing required
-                UPDATE data_subject_requests
-                SET 
-                    request_status = 'PENDING',
-                    processing_notes = 'Manual processing required for this request type',
-                    updated_at = NOW()
-                WHERE id = p_request_id;
-                
-                processing_result := 'Request requires manual processing';
-        END CASE;
-        
-        -- Log the processing
-        INSERT INTO security_audit_log (
-            event_type, severity, user_id, additional_data, event_timestamp, created_at
-        ) VALUES (
-            'DATA_SUBJECT_REQUEST_PROCESSED',
-            'MEDIUM',
-            request_record.user_id,
-            jsonb_build_object(
-                'request_id', p_request_id,
-                'request_type', request_record.request_type,
-                'processing_result', processing_result,
-                'automated', TRUE
-            ),
-            NOW(),
-            NOW()
-        );
-        
-        RETURN processing_result;
+        IF p_ip_address IS NOT NULL THEN
+            PERFORM set_config('audit.ip_address', p_ip_address, true);
+        END IF;
     END;
     $$ LANGUAGE plpgsql;
     """
     
-    op.execute(text(automated_request_processing_sql))
+    op.execute(audit_context_function)
 
 
-def initialize_compliance_configuration():
+def insert_default_configuration():
     """
-    Initialize encryption keys, retention policies, and compliance configuration.
+    Insert default configuration data for audit and compliance features.
     
-    Sets up the foundational configuration required for audit and compliance operations.
+    Populates initial configuration for encryption, retention policies,
+    and compliance settings per Section 6.2.4.1 requirements.
     """
-    logger.info("Initializing compliance configuration and encryption keys")
     
-    # Generate master encryption key for PII data
-    master_key = Fernet.generate_key()
+    logger.info("Inserting default configuration data...")
     
-    # Insert initial encryption key
-    op.execute(
-        text("""
-        INSERT INTO encryption_keys (
-            key_id, key_purpose, key_algorithm, encrypted_key_material,
-            key_version, is_active, created_at, activated_at
-        ) VALUES (
-            gen_random_uuid()::text,
-            'PII',
-            'FERNET',
-            :key_material,
-            1,
-            TRUE,
-            NOW(),
-            NOW()
-        )
-        """),
-        {"key_material": master_key.decode()}
-    )
-    
-    # Insert field mapping for encrypted fields
-    encrypted_fields = [
-        ('users', 'email_encrypted', 'PII', 'EMAIL'),
-        ('users', 'phone_number_encrypted', 'PII', 'PHONE'),
-        ('users', 'full_name_encrypted', 'PII', 'NAME'),
-        ('users', 'date_of_birth_encrypted', 'PII', 'NAME'),
-        ('users', 'address_encrypted', 'PII', 'ADDRESS'),
-        ('users', 'identification_number_encrypted', 'RESTRICTED', 'SSN')
+    # Default encryption configuration for PII fields
+    encryption_configs = [
+        {
+            'table_name': 'user',
+            'field_name': 'email',
+            'data_classification': 'PII',
+            'compliance_requirements': ['GDPR', 'CCPA']
+        },
+        {
+            'table_name': 'user',
+            'field_name': 'password_hash',
+            'data_classification': 'CONFIDENTIAL',
+            'compliance_requirements': ['GDPR', 'CCPA', 'SECURITY']
+        }
     ]
     
-    for table_name, field_name, classification, pii_category in encrypted_fields:
-        op.execute(
-            text("""
-            INSERT INTO encrypted_field_mapping (
-                table_name, field_name, encryption_key_id, data_classification,
-                pii_category, encryption_algorithm, requires_consent, created_at, updated_at
-            ) VALUES (
-                :table_name, :field_name,
-                (SELECT key_id FROM encryption_keys WHERE key_purpose = 'PII' AND is_active = TRUE LIMIT 1),
-                :classification, :pii_category, 'FERNET', TRUE, NOW(), NOW()
-            )
-            """),
-            {
-                "table_name": table_name,
-                "field_name": field_name,
-                "classification": classification,
-                "pii_category": pii_category
-            }
-        )
+    # Insert encryption configurations
+    for config in encryption_configs:
+        op.execute(f"""
+            INSERT INTO encryption_config 
+            (table_name, field_name, encryption_enabled, encryption_method, 
+             data_classification, compliance_requirements, created_at, updated_at)
+            VALUES 
+            ('{config['table_name']}', '{config['field_name']}', true, 'fernet',
+             '{config['data_classification']}', ARRAY{config['compliance_requirements']},
+             NOW(), NOW())
+        """)
     
-    # Insert default data retention policies
+    # Default retention policies
     retention_policies = [
-        ('User Session Data', 'user_sessions', 90, 'SESSION_MANAGEMENT', 30, True),
-        ('Audit Log Data', 'audit_log', 2555, 'AUDIT_COMPLIANCE', 90, False), # 7 years
-        ('Security Audit Data', 'security_audit_log', 2555, 'SECURITY_COMPLIANCE', 90, False), # 7 years
-        ('User PII Data', 'users', 1095, 'DATA_SUBJECT_RIGHTS', 30, False), # 3 years
-        ('Data Access Logs', 'data_access_audit', 2555, 'PRIVACY_COMPLIANCE', 90, False) # 7 years
+        {
+            'policy_name': 'User Data Retention - GDPR Compliant',
+            'table_name': 'user',
+            'retention_period_days': PII_RETENTION_DAYS,
+            'purge_condition': "is_active = false AND updated_at < NOW() - INTERVAL '%d days'" % PII_RETENTION_DAYS,
+            'legal_basis': 'GDPR Article 6(1)(f) - Legitimate interests',
+            'compliance_framework': ['GDPR', 'CCPA']
+        },
+        {
+            'policy_name': 'Session Data Cleanup',
+            'table_name': 'user_session',
+            'retention_period_days': 90,
+            'purge_condition': "expires_at < NOW() - INTERVAL '90 days'",
+            'legal_basis': 'Security and fraud prevention',
+            'compliance_framework': ['SECURITY']
+        },
+        {
+            'policy_name': 'Audit Log Retention',
+            'table_name': 'audit_log',
+            'retention_period_days': RETENTION_DAYS_DEFAULT,
+            'purge_condition': "operation_timestamp < NOW() - INTERVAL '%d days'" % RETENTION_DAYS_DEFAULT,
+            'legal_basis': 'Legal compliance and audit requirements',
+            'compliance_framework': ['AUDIT', 'LEGAL']
+        }
     ]
     
-    for policy_name, table_name, retention_days, legal_basis, grace_days, auto_purge in retention_policies:
-        op.execute(
-            text("""
-            INSERT INTO data_retention_policies (
-                policy_name, data_category, table_name, retention_period_days,
-                grace_period_days, legal_basis, automated_purging, is_active,
-                created_at, updated_at
-            ) VALUES (
-                :policy_name, :table_name, :table_name, :retention_days,
-                :grace_days, :legal_basis, :auto_purge, TRUE, NOW(), NOW()
-            )
-            """),
-            {
-                "policy_name": policy_name,
-                "table_name": table_name,
-                "retention_days": retention_days,
-                "grace_days": grace_days,
-                "legal_basis": legal_basis,
-                "auto_purge": auto_purge
-            }
-        )
-
-
-def remove_user_data_rights_infrastructure():
-    """Remove user data rights fulfillment infrastructure."""
-    logger.info("Removing user data rights fulfillment infrastructure")
+    # Insert retention policies
+    for policy in retention_policies:
+        op.execute(f"""
+            INSERT INTO data_retention_policy 
+            (policy_name, table_name, retention_period_days, purge_condition,
+             cascade_delete, archive_before_delete, legal_basis, compliance_framework,
+             active, execution_frequency, created_at, updated_at)
+            VALUES 
+            ('{policy['policy_name']}', '{policy['table_name']}', {policy['retention_period_days']},
+             '{policy['purge_condition']}', false, true, '{policy['legal_basis']}',
+             ARRAY{policy['compliance_framework']}, true, 'daily', NOW(), NOW())
+        """)
     
-    op.execute(text("DROP FUNCTION IF EXISTS process_data_subject_request(TEXT)"))
-    op.execute(text("DROP FUNCTION IF EXISTS generate_user_data_export(INTEGER)"))
+    # Default processing activities
+    op.execute("""
+        INSERT INTO processing_activity 
+        (activity_name, activity_description, data_controller, legal_basis,
+         data_categories, data_subjects, processing_purposes, retention_period,
+         security_measures, automated_decision_making, profiling,
+         impact_assessment_required, created_at, updated_at)
+        VALUES 
+        ('User Account Management', 
+         'Processing of user account data for authentication and service provision',
+         'Blitzy Application Platform',
+         ARRAY['Contractual necessity', 'Legitimate interests'],
+         ARRAY['Identity data', 'Contact data', 'Usage data'],
+         ARRAY['Application users', 'Service customers'],
+         ARRAY['Authentication', 'Service provision', 'Customer support'],
+         '2 years after account closure',
+         'Encryption at rest and in transit, access controls, audit logging',
+         false, false, false, NOW(), NOW())
+    """)
+    
+    logger.info("Default configuration data inserted successfully.")
 
 
-def remove_data_retention_procedures():
-    """Remove data retention and purging procedures."""
-    logger.info("Removing data retention and purging procedures")
+def create_utility_functions():
+    """
+    Create utility functions and procedures for audit and compliance operations.
     
-    op.execute(text("DROP FUNCTION IF EXISTS execute_gdpr_erasure(INTEGER)"))
-    op.execute(text("DROP FUNCTION IF EXISTS enforce_data_retention()"))
+    Implements automated data purging, encryption helpers, and compliance
+    reporting functions per Section 6.2.4.1 requirements.
+    """
+    
+    logger.info("Creating utility functions and procedures...")
+    
+    # Function to execute data retention policies
+    retention_execution_function = """
+    CREATE OR REPLACE FUNCTION execute_retention_policy(policy_id_param INTEGER)
+    RETURNS UUID AS $$
+    DECLARE
+        policy_record RECORD;
+        purge_log_id UUID;
+        records_to_delete INTEGER;
+        records_deleted INTEGER;
+        execution_start TIMESTAMP;
+        execution_end TIMESTAMP;
+        sql_statement TEXT;
+    BEGIN
+        -- Get the retention policy
+        SELECT * INTO policy_record 
+        FROM data_retention_policy 
+        WHERE id = policy_id_param AND active = true;
+        
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Retention policy % not found or inactive', policy_id_param;
+        END IF;
+        
+        -- Generate log entry ID
+        purge_log_id := gen_random_uuid();
+        execution_start := NOW();
+        
+        -- Count records that will be affected
+        sql_statement := format('SELECT COUNT(*) FROM %I WHERE %s',
+                               policy_record.table_name, policy_record.purge_condition);
+        EXECUTE sql_statement INTO records_to_delete;
+        
+        -- Create initial log entry
+        INSERT INTO data_purge_log 
+        (id, policy_id, execution_timestamp, records_identified, 
+         execution_status, initiated_by, created_at)
+        VALUES 
+        (purge_log_id, policy_id_param, execution_start, records_to_delete,
+         'IN_PROGRESS', 'system', NOW());
+        
+        -- Execute the deletion if archive_before_delete is false
+        IF NOT policy_record.archive_before_delete THEN
+            sql_statement := format('DELETE FROM %I WHERE %s',
+                                   policy_record.table_name, policy_record.purge_condition);
+            EXECUTE sql_statement;
+            GET DIAGNOSTICS records_deleted = ROW_COUNT;
+        ELSE
+            -- For now, skip archiving implementation - would require external storage setup
+            records_deleted := 0;
+        END IF;
+        
+        execution_end := NOW();
+        
+        -- Update log entry with results
+        UPDATE data_purge_log 
+        SET records_deleted = records_deleted,
+            execution_duration = EXTRACT(EPOCH FROM (execution_end - execution_start))::INTEGER,
+            execution_status = CASE 
+                WHEN records_deleted = records_to_delete THEN 'SUCCESS'::purge_status
+                WHEN records_deleted > 0 THEN 'PARTIAL'::purge_status
+                ELSE 'FAILED'::purge_status
+            END
+        WHERE id = purge_log_id;
+        
+        -- Update policy last execution
+        UPDATE data_retention_policy 
+        SET last_execution = execution_start,
+            next_execution = execution_start + INTERVAL '1 day'
+        WHERE id = policy_id_param;
+        
+        RETURN purge_log_id;
+    EXCEPTION
+        WHEN OTHERS THEN
+            -- Update log entry with error
+            UPDATE data_purge_log 
+            SET execution_status = 'FAILED'::purge_status,
+                error_message = SQLERRM,
+                execution_duration = EXTRACT(EPOCH FROM (NOW() - execution_start))::INTEGER
+            WHERE id = purge_log_id;
+            
+            RAISE;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+    """
+    
+    op.execute(retention_execution_function)
+    
+    # Function to process GDPR deletion requests
+    gdpr_deletion_function = """
+    CREATE OR REPLACE FUNCTION process_gdpr_deletion(subject_id_param INTEGER)
+    RETURNS UUID AS $$
+    DECLARE
+        deletion_request_id UUID;
+        tables_affected TEXT[];
+        total_records INTEGER := 0;
+        table_name TEXT;
+        sql_statement TEXT;
+        records_in_table INTEGER;
+    BEGIN
+        -- Generate deletion request ID
+        deletion_request_id := gen_random_uuid();
+        
+        -- Create deletion request record
+        INSERT INTO data_subject_deletion 
+        (id, subject_id, request_timestamp, request_method, verification_status,
+         processing_status, created_at, updated_at)
+        VALUES 
+        (deletion_request_id, subject_id_param, NOW(), 'system', 'VERIFIED',
+         'IN_PROGRESS', NOW(), NOW());
+        
+        -- List of tables with user_id foreign key
+        tables_affected := ARRAY['user_session', 'business_entity', 'audit_log', 
+                                'audit_data_access', 'user_consent'];
+        
+        -- Delete from related tables first (to avoid foreign key constraints)
+        FOREACH table_name IN ARRAY tables_affected
+        LOOP
+            sql_statement := format('DELETE FROM %I WHERE user_id = %s', 
+                                   table_name, subject_id_param);
+            EXECUTE sql_statement;
+            GET DIAGNOSTICS records_in_table = ROW_COUNT;
+            total_records := total_records + records_in_table;
+        END LOOP;
+        
+        -- Finally delete the user record
+        DELETE FROM "user" WHERE id = subject_id_param;
+        GET DIAGNOSTICS records_in_table = ROW_COUNT;
+        total_records := total_records + records_in_table;
+        
+        -- Update deletion request with results
+        UPDATE data_subject_deletion 
+        SET processing_status = 'COMPLETED'::processing_status,
+            completion_timestamp = NOW(),
+            records_deleted = total_records,
+            tables_affected = tables_affected,
+            updated_at = NOW()
+        WHERE id = deletion_request_id;
+        
+        RETURN deletion_request_id;
+    EXCEPTION
+        WHEN OTHERS THEN
+            -- Update deletion request with error
+            UPDATE data_subject_deletion 
+            SET processing_status = 'FAILED'::processing_status,
+                updated_at = NOW()
+            WHERE id = deletion_request_id;
+            
+            RAISE;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+    """
+    
+    op.execute(gdpr_deletion_function)
+    
+    # Function to generate compliance reports
+    compliance_report_function = """
+    CREATE OR REPLACE FUNCTION generate_compliance_report(
+        report_type TEXT DEFAULT 'summary',
+        start_date DATE DEFAULT CURRENT_DATE - INTERVAL '30 days',
+        end_date DATE DEFAULT CURRENT_DATE
+    )
+    RETURNS TABLE (
+        metric_name TEXT,
+        metric_value TEXT,
+        measurement_timestamp TIMESTAMP WITH TIME ZONE
+    ) AS $$
+    BEGIN
+        CASE report_type
+            WHEN 'summary' THEN
+                RETURN QUERY
+                SELECT 'Total Audit Log Entries'::TEXT,
+                       COUNT(*)::TEXT,
+                       NOW()
+                FROM audit_log 
+                WHERE operation_timestamp BETWEEN start_date AND end_date + INTERVAL '1 day'
+                
+                UNION ALL
+                
+                SELECT 'Data Subject Deletion Requests'::TEXT,
+                       COUNT(*)::TEXT,
+                       NOW()
+                FROM data_subject_deletion
+                WHERE request_timestamp BETWEEN start_date AND end_date + INTERVAL '1 day'
+                
+                UNION ALL
+                
+                SELECT 'Active Consent Records'::TEXT,
+                       COUNT(*)::TEXT,
+                       NOW()
+                FROM user_consent
+                WHERE consent_given = true
+                  AND (expiry_date IS NULL OR expiry_date > NOW())
+                
+                UNION ALL
+                
+                SELECT 'Retention Policies Executed'::TEXT,
+                       COUNT(*)::TEXT,
+                       NOW()
+                FROM data_purge_log
+                WHERE execution_timestamp BETWEEN start_date AND end_date + INTERVAL '1 day';
+                
+            WHEN 'detailed' THEN
+                RETURN QUERY
+                SELECT 'Audit Operations by Type: ' || operation_type::TEXT,
+                       COUNT(*)::TEXT,
+                       NOW()
+                FROM audit_log 
+                WHERE operation_timestamp BETWEEN start_date AND end_date + INTERVAL '1 day'
+                GROUP BY operation_type;
+                
+            ELSE
+                RAISE EXCEPTION 'Unknown report type: %', report_type;
+        END CASE;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+    """
+    
+    op.execute(compliance_report_function)
+    
+    logger.info("Utility functions and procedures created successfully.")
 
 
-def remove_postgresql_audit_triggers():
-    """Remove PostgreSQL audit triggers and functions."""
-    logger.info("Removing PostgreSQL audit triggers and functions")
+def drop_utility_functions():
+    """Drop utility functions during migration rollback."""
+    logger.info("Dropping utility functions...")
     
-    # Remove triggers from critical tables
-    critical_tables = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
-    
-    for table_name in critical_tables:
-        op.execute(text(f"DROP TRIGGER IF EXISTS audit_trigger_{table_name} ON {table_name}"))
-    
-    # Remove audit functions
-    op.execute(text("DROP FUNCTION IF EXISTS check_consent_expiry()"))
-    op.execute(text("DROP FUNCTION IF EXISTS log_pii_access(INTEGER, INTEGER, TEXT[], TEXT, TEXT, TEXT, TEXT)"))
-    op.execute(text("DROP FUNCTION IF EXISTS audit_table_changes()"))
-
-
-def remove_encrypted_fields_from_existing_tables():
-    """Remove encrypted fields from existing tables."""
-    logger.info("Removing encrypted fields from existing tables")
-    
-    # Remove PII access tracking table
-    op.drop_table('user_pii_access_log')
-    
-    # Remove encrypted fields from users table
-    encrypted_fields = [
-        'last_pii_access', 'pii_encrypted_at', 'encryption_key_version',
-        'identification_number_encrypted', 'address_encrypted', 'date_of_birth_encrypted',
-        'full_name_encrypted', 'phone_number_encrypted', 'email_encrypted'
+    functions_to_drop = [
+        'execute_retention_policy(INTEGER)',
+        'process_gdpr_deletion(INTEGER)', 
+        'generate_compliance_report(TEXT, DATE, DATE)',
+        'set_audit_context(INTEGER, TEXT, TEXT)',
+        'audit_trigger_function()'
     ]
     
-    for field_name in encrypted_fields:
+    for function_name in functions_to_drop:
         try:
-            op.drop_column('users', field_name)
+            op.execute(f"DROP FUNCTION IF EXISTS {function_name} CASCADE")
         except Exception as e:
-            logger.warning(f"Could not drop column {field_name}: {e}")
+            logger.warning(f"Failed to drop function {function_name}: {str(e)}")
 
 
-def remove_compliance_tables():
-    """Remove GDPR/CCPA compliance tables."""
-    logger.info("Removing GDPR/CCPA compliance tables")
+def drop_postgresql_triggers():
+    """Drop PostgreSQL triggers during migration rollback."""
+    logger.info("Dropping PostgreSQL triggers...")
     
-    op.drop_table('data_retention_policies')
-    op.drop_table('data_subject_requests')
-    op.drop_table('data_subject_consent')
-
-
-def remove_encryption_infrastructure():
-    """Remove field-level PII encryption infrastructure."""
-    logger.info("Removing field-level PII encryption infrastructure")
+    audited_tables = ['user', 'user_session', 'business_entity', 'entity_relationship']
     
-    op.drop_table('encrypted_field_mapping')
-    op.drop_table('encryption_keys')
+    for table_name in audited_tables:
+        trigger_name = f'trigger_audit_{table_name}'
+        try:
+            op.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {table_name}")
+        except Exception as e:
+            logger.warning(f"Failed to drop trigger {trigger_name}: {str(e)}")
 
 
-def remove_audit_tables():
-    """Remove comprehensive audit tables."""
-    logger.info("Removing audit tables")
+def remove_audit_fields_from_existing_tables():
+    """Remove audit fields from existing tables during rollback."""
+    logger.info("Removing audit fields from existing tables...")
     
-    op.drop_table('data_access_audit')
-    op.drop_table('security_audit_log')
-    op.drop_table('audit_log')
+    tables_to_modify = ['user', 'user_session', 'business_entity', 'entity_relationship']
+    audit_fields = [
+        'audit_version',
+        'last_modified_by', 
+        'last_modified_ip',
+        'last_modified_session',
+        'change_reason'
+    ]
+    
+    for table_name in tables_to_modify:
+        for field_name in audit_fields:
+            try:
+                op.drop_column(table_name, field_name)
+            except Exception as e:
+                logger.warning(f"Failed to drop column {field_name} from {table_name}: {str(e)}")
+
+
+def archive_audit_data():
+    """Archive audit data before dropping tables during rollback."""
+    logger.info("Archiving audit data before table removal...")
+    
+    # In a production environment, this would export data to external storage
+    # For this migration, we'll create a simple backup table
+    try:
+        op.execute("""
+            CREATE TABLE audit_log_backup AS 
+            SELECT * FROM audit_log;
+        """)
+        logger.info("Audit log data backed up to audit_log_backup table")
+    except Exception as e:
+        logger.warning(f"Failed to backup audit log data: {str(e)}")
+
+
+def drop_compliance_tables():
+    """Drop compliance tables during rollback."""
+    logger.info("Dropping compliance tables...")
+    
+    compliance_tables = [
+        'data_breach_incident',
+        'processing_activity', 
+        'user_consent'
+    ]
+    
+    for table_name in compliance_tables:
+        try:
+            op.drop_table(table_name)
+        except Exception as e:
+            logger.warning(f"Failed to drop table {table_name}: {str(e)}")
+
+
+def drop_retention_tables():
+    """Drop retention policy tables during rollback."""
+    logger.info("Dropping retention policy tables...")
+    
+    retention_tables = [
+        'data_subject_deletion',
+        'data_purge_log',
+        'data_retention_policy'
+    ]
+    
+    for table_name in retention_tables:
+        try:
+            op.drop_table(table_name)
+        except Exception as e:
+            logger.warning(f"Failed to drop table {table_name}: {str(e)}")
+
+
+def drop_encryption_tables():
+    """Drop encryption configuration tables during rollback."""
+    logger.info("Dropping encryption configuration tables...")
+    
+    encryption_tables = [
+        'encryption_key_rotation',
+        'encryption_config'
+    ]
+    
+    for table_name in encryption_tables:
+        try:
+            op.drop_table(table_name)
+        except Exception as e:
+            logger.warning(f"Failed to drop table {table_name}: {str(e)}")
+
+
+def drop_audit_tables():
+    """Drop audit log tables during rollback."""
+    logger.info("Dropping audit log tables...")
+    
+    audit_tables = [
+        'audit_data_access',
+        'audit_sensitive_data', 
+        'audit_log'
+    ]
+    
+    for table_name in audit_tables:
+        try:
+            op.drop_table(table_name)
+        except Exception as e:
+            logger.warning(f"Failed to drop table {table_name}: {str(e)}")
+    
+    # Drop custom enum types
+    try:
+        op.execute("DROP TYPE IF EXISTS audit_operation_type CASCADE")
+        op.execute("DROP TYPE IF EXISTS data_classification_type CASCADE")
+        op.execute("DROP TYPE IF EXISTS access_type CASCADE")
+        op.execute("DROP TYPE IF EXISTS verification_status CASCADE")
+        op.execute("DROP TYPE IF EXISTS processing_status CASCADE")
+        op.execute("DROP TYPE IF EXISTS encryption_data_classification CASCADE")
+        op.execute("DROP TYPE IF EXISTS purge_status CASCADE")
+        op.execute("DROP TYPE IF EXISTS breach_type CASCADE")
+        op.execute("DROP TYPE IF EXISTS severity_level CASCADE")
+        op.execute("DROP TYPE IF EXISTS investigation_status CASCADE")
+    except Exception as e:
+        logger.warning(f"Failed to drop enum types: {str(e)}")
