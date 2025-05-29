@@ -1,251 +1,266 @@
-# GitHub Dependabot Configuration for Flask Ecosystem Migration
-# Automated dependency updates and security vulnerability monitoring for Python Flask application
-# Migration from Node.js/Express.js to Python 3.13.3/Flask 3.1.1 per Technical Specification Section 0.1.1
+# Dependabot configuration for Flask ecosystem automated dependency updates and security monitoring
+# Supports the migration from Node.js/Express.js to Python 3.13.3/Flask 3.1.1 per Technical Specification Section 0.1.1
+# Implements security vulnerability monitoring per Section 8.4.1 and automated updates per Section 8.4.4
 
 version: 2
 updates:
-  # Python package ecosystem monitoring with pip package manager
-  # Monitors Flask ecosystem components per Section 3.2 and Section 8.4.4
+  # Python pip package manager configuration for Flask ecosystem dependencies
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      # Weekly monitoring schedule for security-focused priority per Section 8.4.4
-      # Balances security maintenance with production stability requirements
+      # Weekly monitoring schedule for comprehensive dependency updates per Section 8.4.4
       interval: "weekly"
+      # Monday at 9:00 AM UTC for optimal CI/CD pipeline integration
       day: "monday"
       time: "09:00"
       timezone: "UTC"
     
-    # Security vulnerability detection and automated pull request generation per Section 8.4.1
-    # Enhanced monitoring for Flask ecosystem critical components
+    # Security-focused dependency update configuration
     open-pull-requests-limit: 10
     
-    # Pull request configuration for CI/CD pipeline integration per Section 8.4.4
+    # Enhanced pull request configuration for Flask migration context
     pull-request-branch-name:
-      separator: "-"
+      separator: "/"
     
-    # Automated commit messages for clear dependency tracking
+    # Commit message configuration for clear tracking
     commit-message:
       prefix: "deps"
       prefix-development: "deps-dev"
       include: "scope"
     
-    # Labels for automated CI/CD workflow integration and security priority classification
-    labels:
-      - "dependencies"
-      - "security"
-      - "flask-ecosystem"
-      - "python-3.13.3"
-      - "automated-pr"
+    # Target branch for dependency updates aligned with CI/CD workflow
+    target-branch: "main"
     
-    # Reviewers and assignees for security-critical updates
+    # Reviewer assignment for security-critical updates
     reviewers:
       - "devops-team"
       - "security-team"
     
-    # Target specific Flask ecosystem components for enhanced monitoring per Section 3.2
-    # Prioritizes security updates for core Flask dependencies
-    allow:
-      # Core Flask framework and dependencies (Section 3.2.1)
-      - dependency-name: "flask"
-        dependency-type: "direct"
-      - dependency-name: "werkzeug"
-        dependency-type: "direct"
-      - dependency-name: "itsdangerous"
-        dependency-type: "direct"
-      - dependency-name: "jinja2"
-        dependency-type: "direct"
-      - dependency-name: "click"
-        dependency-type: "direct"
-      - dependency-name: "blinker"
-        dependency-type: "direct"
+    # Flask ecosystem dependency groups for organized updates
+    groups:
+      # Core Flask framework dependencies per Section 3.2.1
+      flask-core:
+        patterns:
+          - "flask*"
+          - "werkzeug*"
+          - "jinja2*"
+          - "itsdangerous*"
+          - "click*"
+          - "blinker*"
+        update-types:
+          - "minor"
+          - "patch"
       
-      # Database integration components (Section 3.2.2)
-      - dependency-name: "flask-sqlalchemy"
-        dependency-type: "direct"
-      - dependency-name: "flask-migrate"
-        dependency-type: "direct"
-      - dependency-name: "sqlalchemy"
-        dependency-type: "direct"
-      - dependency-name: "alembic"
-        dependency-type: "direct"
+      # Database and ORM dependencies per Section 3.2.2  
+      database-orm:
+        patterns:
+          - "flask-sqlalchemy*"
+          - "flask-migrate*" 
+          - "sqlalchemy*"
+          - "alembic*"
+          - "psycopg2*"
+          - "sqlalchemy-utils*"
+        update-types:
+          - "minor"
+          - "patch"
       
-      # Authentication and security libraries per Section 6.4
-      - dependency-name: "flask-login"
-        dependency-type: "direct"
-      - dependency-name: "flask-jwt-extended"
-        dependency-type: "direct"
-      - dependency-name: "flask-principal"
-        dependency-type: "direct"
-      - dependency-name: "flask-security"
-        dependency-type: "direct"
-      - dependency-name: "flask-wtf"
-        dependency-type: "direct"
-      - dependency-name: "wtforms"
-        dependency-type: "direct"
-      
-      # Production deployment dependencies per Section 8.1.1
-      - dependency-name: "gunicorn"
-        dependency-type: "direct"
-      - dependency-name: "psycopg2-binary"
-        dependency-type: "direct"
-      - dependency-name: "psycopg2"
-        dependency-type: "direct"
-      
-      # AWS SDK and cloud infrastructure dependencies per Section 8.2
-      - dependency-name: "boto3"
-        dependency-type: "direct"
-      - dependency-name: "botocore"
-        dependency-type: "direct"
-      
-      # External service integration per Section 6.4.1
-      - dependency-name: "auth0-python"
-        dependency-type: "direct"
-      - dependency-name: "requests"
-        dependency-type: "direct"
-      - dependency-name: "urllib3"
-        dependency-type: "direct"
+      # Authentication and security dependencies per Section 6.4.1
+      auth-security:
+        patterns:
+          - "auth0-python*"
+          - "flask-login*"
+          - "flask-jwt-extended*"
+          - "flask-principal*"
+          - "flask-security*"
+          - "flask-wtf*"
+          - "wtforms*"
+          - "cryptography*"
+          - "pyjwt*"
+        update-types:
+          - "minor"
+          - "patch"
       
       # Monitoring and observability dependencies per Section 6.4.6.1
-      - dependency-name: "prometheus-client"
-        dependency-type: "direct"
-      - dependency-name: "structlog"
-        dependency-type: "direct"
-      - dependency-name: "python-json-logger"
-        dependency-type: "direct"
+      monitoring-observability:
+        patterns:
+          - "prometheus-client*"
+          - "structlog*"
+          - "flask-cors*"
+          - "python-json-logger*"
+        update-types:
+          - "minor"
+          - "patch"
       
-      # Security scanning and validation tools per Section 8.4.1
-      - dependency-name: "safety"
-        dependency-type: "direct"
-      - dependency-name: "bandit"
-        dependency-type: "direct"
-      - dependency-name: "cryptography"
-        dependency-type: "direct"
-      - dependency-name: "certifi"
-        dependency-type: "direct"
+      # AWS and cloud service dependencies per Section 8.1
+      aws-cloud:
+        patterns:
+          - "boto3*"
+          - "botocore*"
+          - "awscli*"
+          - "flask-session*"
+        update-types:
+          - "minor"
+          - "patch"
       
-      # Testing framework dependencies for security validation per Section 6.4.5.2
-      - dependency-name: "pytest"
-        dependency-type: "direct"
-      - dependency-name: "pytest-flask"
-        dependency-type: "direct"
-      - dependency-name: "pytest-cov"
-        dependency-type: "direct"
-      
-      # Data processing and ML dependencies for anomaly detection per Section 6.4.6.1
-      - dependency-name: "numpy"
-        dependency-type: "direct"
-      - dependency-name: "scikit-learn"
-        dependency-type: "direct"
-      - dependency-name: "pandas"
-        dependency-type: "direct"
-      
-      # All other security updates for transitive dependencies
-      - dependency-type: "direct"
-        update-type: "security"
-      - dependency-type: "indirect"
-        update-type: "security"
+      # Development and testing dependencies per Section 3.6.3
+      dev-testing:
+        patterns:
+          - "pytest*"
+          - "pytest-flask*"
+          - "pytest-cov*"
+          - "bandit*"
+          - "safety*"
+          - "pip-audit*"
+          - "black*"
+          - "flake8*"
+          - "mypy*"
+        update-types:
+          - "minor"
+          - "patch"
     
-    # Ignore specific updates that may cause breaking changes during migration
-    # Focused on maintaining Python 3.13.3 compatibility per Section 3.1
+    # Allow automatic updates for security patches
+    allow:
+      # Security updates get highest priority per Section 8.4.1
+      - dependency-type: "all"
+        update-type: "security"
+      # Production dependencies for Flask ecosystem
+      - dependency-type: "production"
+        update-type: "version-update:semver-patch"
+      - dependency-type: "production"  
+        update-type: "version-update:semver-minor"
+      # Development dependencies for testing and CI/CD
+      - dependency-type: "development"
+        update-type: "version-update:semver-patch"
+      - dependency-type: "development"
+        update-type: "version-update:semver-minor"
+    
+    # Ignore specific major version updates that require manual migration planning
     ignore:
-      # Pin major Flask version during migration for stability
+      # Major Flask framework updates require careful migration planning
       - dependency-name: "flask"
-        update-type: "version-update:semver-major"
-      
-      # Pin SQLAlchemy major versions to prevent migration conflicts
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "flask-sqlalchemy"
+        update-types: ["version-update:semver-major"]  
       - dependency-name: "sqlalchemy"
-        update-type: "version-update:semver-major"
-      
-      # Ignore Python version updates outside of 3.13.x range
+        update-types: ["version-update:semver-major"]
+      # Python runtime version managed separately per Section 3.1.1
       - dependency-name: "python"
-        versions: ["< 3.13.0", ">= 3.14.0"]
+        update-types: ["version-update:semver-major"]
     
-    # Milestone assignment for tracking dependency updates in sprint planning
-    milestone: "dependency-maintenance"
-    
-    # Target branch for pull requests (typically main or develop)
-    target-branch: "main"
-
-  # Docker ecosystem monitoring for base image security updates per Section 8.3
-  # Monitors python:3.13.3-slim base image and container dependencies
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      # Weekly monitoring for container security updates per Section 8.3.1
-      interval: "weekly"
-      day: "tuesday"
-      time: "10:00"
-      timezone: "UTC"
-    
-    # Container security focus for base image updates
-    open-pull-requests-limit: 5
-    
-    # Labels for container security tracking
+    # Custom labels for Flask migration context and security tracking
     labels:
       - "dependencies"
-      - "docker"
-      - "security"
-      - "python-3.13.3-slim"
-      - "container-security"
+      - "flask-migration"
+      - "security-update"
+      - "automated-pr"
     
-    # Reviewers for container security updates
-    reviewers:
-      - "devops-team"
-      - "security-team"
+    # Enable security advisories integration for proactive vulnerability detection
+    enable-beta-ecosystems: false
     
-    # Commit message configuration for container updates
-    commit-message:
-      prefix: "docker"
-      include: "scope"
+    # Milestone assignment for tracking dependency updates in Flask migration project  
+    milestone: "Flask Migration Dependency Updates"
     
-    # Allow only security updates for Docker base images
-    allow:
-      - dependency-type: "direct"
-        update-type: "security"
+    # Additional configuration for enhanced security monitoring
+    insecure-external-code-execution: "deny"
     
-    # Target branch alignment with application updates
-    target-branch: "main"
-
-  # GitHub Actions ecosystem monitoring for CI/CD security per Section 8.4.4
-  # Monitors GitHub Actions workflows and security scanning tools
+  # GitHub Actions workflow dependencies for CI/CD pipeline per Section 8.4
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      # Monthly monitoring for GitHub Actions security updates
-      interval: "monthly"
-      day: "first"
-      time: "11:00"
+      interval: "weekly"
+      day: "monday" 
+      time: "10:00"
       timezone: "UTC"
     
-    # Limit GitHub Actions PRs to maintain workflow stability
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
     
-    # Labels for CI/CD security tracking
-    labels:
-      - "dependencies"
-      - "github-actions"
-      - "ci-cd"
-      - "security"
-      - "automation"
-    
-    # Reviewers for CI/CD security updates
-    reviewers:
-      - "devops-team"
+    # Target branch alignment with main CI/CD workflow
+    target-branch: "main"
     
     # Commit message configuration for GitHub Actions updates
     commit-message:
       prefix: "ci"
       include: "scope"
     
-    # Allow only security updates and minor version updates for actions
-    allow:
-      - dependency-type: "direct"
-        update-type: "security"
-      - dependency-type: "direct"
-        update-type: "version-update:semver-minor"
-      - dependency-type: "direct"
-        update-type: "version-update:semver-patch"
+    # Group GitHub Actions updates for organized review
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     
-    # Target branch alignment with application updates
+    # Labels for GitHub Actions dependency tracking
+    labels:
+      - "ci-cd"
+      - "github-actions" 
+      - "dependencies"
+      - "flask-pipeline"
+    
+    # Allow security and patch updates for GitHub Actions
+    allow:
+      - dependency-type: "all"
+        update-type: "security"
+      - dependency-type: "all"
+        update-type: "version-update:semver-patch"
+      - dependency-type: "all"
+        update-type: "version-update:semver-minor"
+    
+    # Reviewer assignment for CI/CD changes
+    reviewers:
+      - "devops-team"
+
+  # Docker base image monitoring for python:3.13.3-slim per Section 8.3.1
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00" 
+      timezone: "UTC"
+    
+    open-pull-requests-limit: 3
+    
+    # Target branch for Docker image updates
     target-branch: "main"
+    
+    # Commit message configuration for Docker updates
+    commit-message:
+      prefix: "docker"
+      include: "scope"
+    
+    # Group Docker updates for security and base image tracking
+    groups:
+      python-base-images:
+        patterns:
+          - "python*"
+        update-types:
+          - "minor"
+          - "patch"
+    
+    # Labels for Docker dependency tracking aligned with container security
+    labels:
+      - "docker"
+      - "container-security"
+      - "python-runtime"
+      - "dependencies"
+    
+    # Allow security updates and patch versions for base images
+    allow:
+      - dependency-type: "all"
+        update-type: "security"
+      - dependency-type: "all"
+        update-type: "version-update:semver-patch"
+      - dependency-type: "all"
+        update-type: "version-update:semver-minor"
+    
+    # Ignore major Python version updates (managed separately per migration plan)
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major"]
+    
+    # Reviewer assignment for container security updates
+    reviewers:
+      - "devops-team"
+      - "security-team"
