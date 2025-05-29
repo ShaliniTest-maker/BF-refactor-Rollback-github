@@ -1,0 +1,669 @@
+# Service Layer Unit Test Coverage Reporting Workflow
+# Implements pytest-cov analysis with automated coverage threshold enforcement per Section 8.4.1
+# Generates comprehensive coverage reports specifically for Service Layer business logic 
+# with historical trend analysis and coverage regression detection for Flask migration validation
+
+name: Service Layer Coverage Reporting
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/services/**'
+      - 'src/auth/services/**'
+      - 'tests/unit/test_services.py'
+      - 'tests/unit/test_auth.py'
+      - 'pytest.ini'
+      - 'requirements.txt'
+      - '.github/workflows/coverage-reporting.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/services/**'
+      - 'src/auth/services/**'
+      - 'tests/unit/test_services.py'
+      - 'tests/unit/test_auth.py'
+      - 'pytest.ini'
+      - 'requirements.txt'
+  schedule:
+    # Daily coverage analysis at 02:00 UTC for trend monitoring
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      coverage_threshold:
+        description: 'Override minimum line coverage threshold (default: 90)'
+        required: false
+        default: '90'
+        type: string
+      branch_threshold:
+        description: 'Override minimum branch coverage threshold (default: 85)'
+        required: false
+        default: '85'
+        type: string
+
+env:
+  PYTHON_VERSION: '3.13.3'
+  FLASK_ENV: 'testing'
+  FLASK_DEBUG: 'false'
+  # Coverage thresholds per Section 8.4.1 requirements
+  MIN_LINE_COVERAGE: ${{ github.event.inputs.coverage_threshold || '90' }}
+  MIN_BRANCH_COVERAGE: ${{ github.event.inputs.branch_threshold || '85' }}
+  # Service Layer specific configuration
+  SERVICE_LAYER_PATH: 'src/services/'
+  AUTH_SERVICES_PATH: 'src/auth/services/'
+  COVERAGE_REPORT_DIR: 'coverage-reports'
+
+jobs:
+  service-layer-coverage:
+    name: Service Layer Coverage Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    strategy:
+      matrix:
+        python-version: ['3.13.3']
+        test-suite: ['services', 'auth-services', 'combined']
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for trend analysis
+          
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libpq-dev
+          
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Install testing and coverage dependencies
+          pip install pytest==8.3.2 pytest-cov==5.0.0 pytest-flask==1.3.0
+          pip install pytest-mock==3.12.0 pytest-benchmark==5.1.0
+          pip install coverage[toml]==7.6.1 coverage-badge==1.1.1
+          
+      - name: Create coverage configuration
+        run: |
+          cat > .coveragerc << EOF
+          [run]
+          source = src/services, src/auth/services
+          omit = 
+              */tests/*
+              */venv/*
+              */env/*
+              */__pycache__/*
+              */migrations/*
+              setup.py
+              conftest.py
+          branch = true
+          
+          [report]
+          # Minimum coverage thresholds per Section 8.4.1
+          fail_under = ${{ env.MIN_LINE_COVERAGE }}
+          show_missing = true
+          skip_covered = false
+          precision = 2
+          exclude_lines =
+              pragma: no cover
+              def __repr__
+              if self.debug:
+              if settings.DEBUG
+              raise AssertionError
+              raise NotImplementedError
+              if 0:
+              if __name__ == .__main__.:
+              class .*\bProtocol\):
+              @(abc\.)?abstractmethod
+          
+          [html]
+          directory = ${{ env.COVERAGE_REPORT_DIR }}/html
+          title = Service Layer Coverage Report
+          
+          [xml]
+          output = ${{ env.COVERAGE_REPORT_DIR }}/coverage.xml
+          
+          [json]
+          output = ${{ env.COVERAGE_REPORT_DIR }}/coverage.json
+          EOF
+          
+      - name: Set up test database
+        run: |
+          # Create test database for Service Layer testing
+          python -c "
+          import os
+          os.environ['FLASK_ENV'] = 'testing'
+          from src import create_app
+          from src.models import db
+          app = create_app()
+          with app.app_context():
+              db.create_all()
+          print('Test database created successfully')
+          "
+          
+      - name: Run Service Layer Coverage Analysis - ${{ matrix.test-suite }}
+        run: |
+          mkdir -p ${{ env.COVERAGE_REPORT_DIR }}
+          
+          case "${{ matrix.test-suite }}" in
+            "services")
+              # Core Service Layer coverage
+              python -m pytest tests/unit/test_services.py \
+                --cov=${{ env.SERVICE_LAYER_PATH }} \
+                --cov-report=html:${{ env.COVERAGE_REPORT_DIR }}/html/services \
+                --cov-report=xml:${{ env.COVERAGE_REPORT_DIR }}/services-coverage.xml \
+                --cov-report=json:${{ env.COVERAGE_REPORT_DIR }}/services-coverage.json \
+                --cov-report=term-missing \
+                --cov-branch \
+                --cov-fail-under=${{ env.MIN_LINE_COVERAGE }} \
+                --junit-xml=${{ env.COVERAGE_REPORT_DIR }}/services-junit.xml \
+                -v --tb=short
+              ;;
+            "auth-services")
+              # Authentication Services coverage
+              python -m pytest tests/unit/test_auth.py \
+                --cov=${{ env.AUTH_SERVICES_PATH }} \
+                --cov-report=html:${{ env.COVERAGE_REPORT_DIR }}/html/auth-services \
+                --cov-report=xml:${{ env.COVERAGE_REPORT_DIR }}/auth-services-coverage.xml \
+                --cov-report=json:${{ env.COVERAGE_REPORT_DIR }}/auth-services-coverage.json \
+                --cov-report=term-missing \
+                --cov-branch \
+                --cov-fail-under=${{ env.MIN_LINE_COVERAGE }} \
+                --junit-xml=${{ env.COVERAGE_REPORT_DIR }}/auth-services-junit.xml \
+                -v --tb=short
+              ;;
+            "combined")
+              # Combined Service Layer coverage analysis
+              python -m pytest tests/unit/test_services.py tests/unit/test_auth.py \
+                --cov=${{ env.SERVICE_LAYER_PATH }} \
+                --cov=${{ env.AUTH_SERVICES_PATH }} \
+                --cov-report=html:${{ env.COVERAGE_REPORT_DIR }}/html/combined \
+                --cov-report=xml:${{ env.COVERAGE_REPORT_DIR }}/combined-coverage.xml \
+                --cov-report=json:${{ env.COVERAGE_REPORT_DIR }}/combined-coverage.json \
+                --cov-report=term-missing \
+                --cov-branch \
+                --cov-fail-under=${{ env.MIN_LINE_COVERAGE }} \
+                --junit-xml=${{ env.COVERAGE_REPORT_DIR }}/combined-junit.xml \
+                -v --tb=short
+              ;;
+          esac
+          
+      - name: Validate Branch Coverage Threshold
+        run: |
+          # Extract branch coverage from JSON report and validate against threshold
+          python << EOF
+          import json
+          import sys
+          import os
+          
+          def validate_branch_coverage(report_file, threshold):
+              try:
+                  with open(report_file, 'r') as f:
+                      data = json.load(f)
+                  
+                  branch_coverage = data['totals'].get('covered_branches', 0) / max(data['totals'].get('num_branches', 1), 1) * 100
+                  line_coverage = data['totals']['percent_covered']
+                  
+                  print(f"Line Coverage: {line_coverage:.2f}%")
+                  print(f"Branch Coverage: {branch_coverage:.2f}%")
+                  print(f"Required Line Coverage: {threshold}%")
+                  print(f"Required Branch Coverage: ${{ env.MIN_BRANCH_COVERAGE }}%")
+                  
+                  if branch_coverage < float("${{ env.MIN_BRANCH_COVERAGE }}"):
+                      print(f"❌ Branch coverage {branch_coverage:.2f}% is below threshold ${{ env.MIN_BRANCH_COVERAGE }}%")
+                      return False
+                      
+                  if line_coverage < float(threshold):
+                      print(f"❌ Line coverage {line_coverage:.2f}% is below threshold {threshold}%")
+                      return False
+                      
+                  print("✅ Coverage thresholds met")
+                  return True
+                  
+              except Exception as e:
+                  print(f"Error validating coverage: {e}")
+                  return False
+          
+          # Validate coverage for current test suite
+          suite_name = "${{ matrix.test-suite }}"
+          if suite_name == "combined":
+              report_file = "${{ env.COVERAGE_REPORT_DIR }}/combined-coverage.json"
+          elif suite_name == "services":
+              report_file = "${{ env.COVERAGE_REPORT_DIR }}/services-coverage.json"
+          else:
+              report_file = "${{ env.COVERAGE_REPORT_DIR }}/auth-services-coverage.json"
+              
+          if not validate_branch_coverage(report_file, ${{ env.MIN_LINE_COVERAGE }}):
+              sys.exit(1)
+          EOF
+          
+      - name: Generate Coverage Badge
+        if: matrix.test-suite == 'combined'
+        run: |
+          # Generate coverage badge for Service Layer
+          coverage-badge -o ${{ env.COVERAGE_REPORT_DIR }}/coverage-badge.svg
+          
+      - name: Archive Coverage Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ matrix.test-suite }}-${{ matrix.python-version }}
+          path: |
+            ${{ env.COVERAGE_REPORT_DIR }}/
+            *.log
+          retention-days: 30
+          
+      - name: Comment Coverage Summary on PR
+        if: github.event_name == 'pull_request' && matrix.test-suite == 'combined'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            try {
+              const coverageFile = '${{ env.COVERAGE_REPORT_DIR }}/combined-coverage.json';
+              const coverage = JSON.parse(fs.readFileSync(coverageFile, 'utf8'));
+              
+              const linePercent = coverage.totals.percent_covered;
+              const branchPercent = (coverage.totals.covered_branches / Math.max(coverage.totals.num_branches, 1)) * 100;
+              
+              const comment = `## 📊 Service Layer Coverage Report
+              
+              | Metric | Coverage | Threshold | Status |
+              |--------|----------|-----------|--------|
+              | Line Coverage | ${linePercent.toFixed(2)}% | ${{ env.MIN_LINE_COVERAGE }}% | ${linePercent >= ${{ env.MIN_LINE_COVERAGE }} ? '✅' : '❌'} |
+              | Branch Coverage | ${branchPercent.toFixed(2)}% | ${{ env.MIN_BRANCH_COVERAGE }}% | ${branchPercent >= ${{ env.MIN_BRANCH_COVERAGE }} ? '✅' : '❌'} |
+              
+              ### Service Layer Components Tested:
+              - ✅ UserService business logic orchestration  
+              - ✅ BusinessEntityService workflow management
+              - ✅ ValidationService rule enforcement
+              - ✅ WorkflowOrchestrator service composition
+              - ✅ Authentication Services integration
+              
+              **Coverage Report:** [View Detailed Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              
+              *Generated by Service Layer Coverage Reporting workflow per Section 8.4.1*`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } catch (error) {
+              console.log('Could not post coverage comment:', error);
+            }
+
+  coverage-trend-analysis:
+    name: Coverage Trend Analysis & Regression Detection
+    runs-on: ubuntu-latest
+    needs: service-layer-coverage
+    if: always() && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Download Coverage Reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-reports-combined-*
+          merge-multiple: true
+          path: current-coverage/
+          
+      - name: Install Analysis Dependencies
+        run: |
+          pip install pandas==2.2.2 matplotlib==3.9.0 jinja2==3.1.2
+          
+      - name: Coverage Trend Analysis
+        run: |
+          python << 'EOF'
+          import json
+          import os
+          import datetime
+          from pathlib import Path
+          import subprocess
+          
+          def analyze_coverage_trends():
+              # Load current coverage data
+              current_file = Path('current-coverage/combined-coverage.json')
+              if not current_file.exists():
+                  print("❌ No current coverage data found")
+                  return False
+                  
+              with open(current_file) as f:
+                  current_data = json.load(f)
+                  
+              current_line = current_data['totals']['percent_covered']
+              current_branch = (current_data['totals']['covered_branches'] / 
+                              max(current_data['totals']['num_branches'], 1)) * 100
+              
+              # Create trend record
+              trend_record = {
+                  'timestamp': datetime.datetime.utcnow().isoformat(),
+                  'commit': os.environ.get('GITHUB_SHA', 'unknown'),
+                  'line_coverage': current_line,
+                  'branch_coverage': current_branch,
+                  'total_lines': current_data['totals']['num_statements'],
+                  'total_branches': current_data['totals']['num_branches']
+              }
+              
+              print(f"📈 Coverage Trend Analysis")
+              print(f"Timestamp: {trend_record['timestamp']}")
+              print(f"Commit: {trend_record['commit'][:8]}")
+              print(f"Line Coverage: {current_line:.2f}%")
+              print(f"Branch Coverage: {current_branch:.2f}%")
+              
+              # Store trend data (in production, this would be stored in a database or artifact)
+              trends_file = Path('coverage-trends.json')
+              trends = []
+              
+              if trends_file.exists():
+                  with open(trends_file) as f:
+                      trends = json.load(f)
+                      
+              trends.append(trend_record)
+              
+              # Keep last 100 records
+              trends = trends[-100:]
+              
+              with open(trends_file, 'w') as f:
+                  json.dump(trends, f, indent=2)
+                  
+              # Regression detection
+              if len(trends) >= 2:
+                  previous = trends[-2]
+                  line_delta = current_line - previous['line_coverage']
+                  branch_delta = current_branch - previous['branch_coverage']
+                  
+                  print(f"\n🔍 Regression Analysis:")
+                  print(f"Line Coverage Change: {line_delta:+.2f}%")
+                  print(f"Branch Coverage Change: {branch_delta:+.2f}%")
+                  
+                  # Alert thresholds
+                  if line_delta < -2.0 or branch_delta < -2.0:
+                      print("⚠️  Coverage regression detected!")
+                      return False
+                  elif line_delta > 1.0 or branch_delta > 1.0:
+                      print("🎉 Coverage improvement detected!")
+                      
+              return True
+              
+          if not analyze_coverage_trends():
+              exit(1)
+          EOF
+          
+      - name: Generate Coverage Trend Report
+        run: |
+          python << 'EOF'
+          import json
+          import matplotlib
+          matplotlib.use('Agg')  # Non-interactive backend
+          import matplotlib.pyplot as plt
+          import matplotlib.dates as mdates
+          from datetime import datetime
+          from pathlib import Path
+          
+          def generate_trend_chart():
+              trends_file = Path('coverage-trends.json')
+              if not trends_file.exists():
+                  print("No trends data available")
+                  return
+                  
+              with open(trends_file) as f:
+                  trends = json.load(f)
+                  
+              if len(trends) < 2:
+                  print("Insufficient data for trend analysis")
+                  return
+                  
+              # Extract data for plotting
+              timestamps = [datetime.fromisoformat(t['timestamp']) for t in trends]
+              line_coverage = [t['line_coverage'] for t in trends]
+              branch_coverage = [t['branch_coverage'] for t in trends]
+              
+              # Create trend chart
+              plt.figure(figsize=(12, 8))
+              
+              plt.subplot(2, 1, 1)
+              plt.plot(timestamps, line_coverage, 'b-o', label='Line Coverage', linewidth=2, markersize=4)
+              plt.axhline(y=90, color='r', linestyle='--', alpha=0.7, label='Minimum Threshold (90%)')
+              plt.ylabel('Line Coverage (%)')
+              plt.title('Service Layer Coverage Trends')
+              plt.legend()
+              plt.grid(True, alpha=0.3)
+              
+              plt.subplot(2, 1, 2)
+              plt.plot(timestamps, branch_coverage, 'g-o', label='Branch Coverage', linewidth=2, markersize=4)
+              plt.axhline(y=85, color='r', linestyle='--', alpha=0.7, label='Minimum Threshold (85%)')
+              plt.ylabel('Branch Coverage (%)')
+              plt.xlabel('Date')
+              plt.legend()
+              plt.grid(True, alpha=0.3)
+              
+              # Format x-axis
+              plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+              plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+              plt.xticks(rotation=45)
+              
+              plt.tight_layout()
+              plt.savefig('coverage-trends.png', dpi=150, bbox_inches='tight')
+              print("✅ Coverage trend chart generated: coverage-trends.png")
+              
+          generate_trend_chart()
+          EOF
+          
+      - name: Upload Trend Analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-trend-analysis
+          path: |
+            coverage-trends.json
+            coverage-trends.png
+          retention-days: 90
+
+  publish-coverage-reports:
+    name: Publish Coverage Reports to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [service-layer-coverage, coverage-trend-analysis]
+    if: always() && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Download All Coverage Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: coverage-artifacts/
+          
+      - name: Prepare GitHub Pages Content
+        run: |
+          mkdir -p public
+          
+          # Copy HTML coverage reports
+          if [ -d "coverage-artifacts/coverage-reports-combined-3.13.3/html" ]; then
+            cp -r coverage-artifacts/coverage-reports-combined-3.13.3/html/* public/
+          fi
+          
+          # Copy trend analysis
+          if [ -f "coverage-artifacts/coverage-trend-analysis/coverage-trends.png" ]; then
+            cp coverage-artifacts/coverage-trend-analysis/coverage-trends.png public/
+          fi
+          
+          # Copy coverage badge
+          if [ -f "coverage-artifacts/coverage-reports-combined-3.13.3/coverage-badge.svg" ]; then
+            cp coverage-artifacts/coverage-reports-combined-3.13.3/coverage-badge.svg public/
+          fi
+          
+          # Create index page
+          cat > public/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Service Layer Coverage Reports</title>
+              <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; background: #f6f8fa; }
+                  .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                  .header { text-align: center; margin-bottom: 30px; }
+                  .badge { margin: 10px; }
+                  .section { margin: 20px 0; padding: 20px; border: 1px solid #e1e4e8; border-radius: 6px; }
+                  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+                  .card { padding: 20px; border: 1px solid #e1e4e8; border-radius: 6px; background: #f6f8fa; }
+                  a { color: #0366d6; text-decoration: none; }
+                  a:hover { text-decoration: underline; }
+                  .trend-chart { text-align: center; margin: 20px 0; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <h1>🧪 Service Layer Coverage Reports</h1>
+                      <p>Flask Migration Quality Assurance - Coverage Analysis per Section 8.4.1</p>
+                      <div class="badge">
+                          <img src="coverage-badge.svg" alt="Coverage Badge" />
+                      </div>
+                      <p><strong>Generated:</strong> $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
+                  </div>
+                  
+                  <div class="section">
+                      <h2>📊 Coverage Analysis</h2>
+                      <div class="grid">
+                          <div class="card">
+                              <h3>Service Layer Components</h3>
+                              <ul>
+                                  <li>✅ UserService - Business logic orchestration</li>
+                                  <li>✅ BusinessEntityService - Workflow management</li>
+                                  <li>✅ ValidationService - Rule enforcement</li>
+                                  <li>✅ WorkflowOrchestrator - Service composition</li>
+                                  <li>✅ Authentication Services - Security integration</li>
+                              </ul>
+                          </div>
+                          <div class="card">
+                              <h3>Coverage Thresholds</h3>
+                              <ul>
+                                  <li><strong>Line Coverage:</strong> ≥ 90%</li>
+                                  <li><strong>Branch Coverage:</strong> ≥ 85%</li>
+                                  <li><strong>Quality Gate:</strong> Automated enforcement</li>
+                                  <li><strong>Trend Analysis:</strong> Regression detection</li>
+                              </ul>
+                          </div>
+                      </div>
+                  </div>
+                  
+                  <div class="section">
+                      <h2>📈 Coverage Reports</h2>
+                      <div class="grid">
+                          <div class="card">
+                              <h3>Latest Coverage Report</h3>
+                              <p>Detailed HTML coverage analysis with line-by-line coverage information.</p>
+                              <a href="combined/index.html">View Detailed Coverage Report →</a>
+                          </div>
+                          <div class="card">
+                              <h3>Historical Trends</h3>
+                              <p>Coverage trend analysis and regression detection over time.</p>
+                              <div class="trend-chart">
+                                  <img src="coverage-trends.png" alt="Coverage Trends" style="max-width: 100%; height: auto;" />
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+                  
+                  <div class="section">
+                      <h2>🔍 Quality Gates</h2>
+                      <p>This coverage report implements automated quality gates per Section 8.4.3:</p>
+                      <ul>
+                          <li><strong>Coverage Compliance Gate:</strong> Enforces minimum coverage thresholds</li>
+                          <li><strong>Regression Detection:</strong> Identifies coverage decreases > 2%</li>
+                          <li><strong>Business Rule Validation:</strong> Ensures Service Layer workflow testing</li>
+                          <li><strong>External Dependency Mocking:</strong> Validates service isolation</li>
+                      </ul>
+                  </div>
+                  
+                  <footer style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e1e4e8; color: #586069;">
+                      <p>Service Layer Coverage Reporting - Flask Migration Quality Assurance</p>
+                      <p>Automated by GitHub Actions • Updated automatically on every push to main</p>
+                  </footer>
+              </div>
+          </body>
+          </html>
+          EOF
+          
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+        
+      - name: Upload GitHub Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public/
+          
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  coverage-quality-gate:
+    name: Coverage Quality Gate Enforcement
+    runs-on: ubuntu-latest
+    needs: service-layer-coverage
+    if: always()
+    
+    steps:
+      - name: Evaluate Coverage Quality Gate
+        run: |
+          # Collect results from all coverage jobs
+          coverage_results='${{ toJson(needs.service-layer-coverage.result) }}'
+          
+          echo "🎯 Coverage Quality Gate Evaluation"
+          echo "=================================="
+          
+          if [[ "$coverage_results" == "success" ]]; then
+            echo "✅ All Service Layer coverage thresholds met"
+            echo "✅ Line coverage ≥ ${{ env.MIN_LINE_COVERAGE }}%"
+            echo "✅ Branch coverage ≥ ${{ env.MIN_BRANCH_COVERAGE }}%"
+            echo "✅ Service Layer workflow orchestration validated"
+            echo "✅ Business rule implementation testing completed"
+            echo ""
+            echo "🚀 Quality gate PASSED - Deployment approved"
+            exit 0
+          else
+            echo "❌ Service Layer coverage quality gate FAILED"
+            echo "❌ Coverage thresholds not met or tests failed"
+            echo ""
+            echo "🚫 Quality gate FAILED - Deployment blocked"
+            echo ""
+            echo "Required actions:"
+            echo "1. Review failing tests in Service Layer components"
+            echo "2. Add additional unit tests for uncovered code paths"
+            echo "3. Ensure business logic workflow orchestration coverage"
+            echo "4. Validate external dependency mocking in tests"
+            echo "5. Check that coverage meets minimum thresholds:"
+            echo "   - Line coverage: ≥ ${{ env.MIN_LINE_COVERAGE }}%"
+            echo "   - Branch coverage: ≥ ${{ env.MIN_BRANCH_COVERAGE }}%"
+            exit 1
+          fi
