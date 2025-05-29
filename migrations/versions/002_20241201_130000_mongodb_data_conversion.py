@@ -1,1224 +1,1351 @@
 """
 MongoDB to PostgreSQL Data Conversion Migration
 
-This migration handles the critical data transformation phase of converting MongoDB
-document data into PostgreSQL relational format while preserving all existing
-relationships and constraints. The migration implements comprehensive type mapping,
-relationship preservation, and validation rule conversion with zero data loss
-requirements.
+This migration handles the critical data transformation phase from MongoDB document-based
+storage to PostgreSQL relational format while preserving all existing relationships,
+constraints, and data integrity. Implements comprehensive type mapping, relationship
+preservation, and validation rule conversion as specified in Section 4.4.1 of the
+technical specification.
 
-Migration Features:
-- MongoDB ObjectId to SQLAlchemy String(24) conversion for primary key preservation
-- MongoDB Date to SQLAlchemy DateTime mapping for temporal data accuracy
-- MongoDB embedded document normalization to relational table structures
-- Real-time data verification framework for migration validation
+Migration Scope:
+- Complete MongoDB to PostgreSQL data type mapping with accuracy per Section 4.4.1
+- ObjectId to SQLAlchemy String(24) conversion for primary key preservation
+- Date fields to DateTime mapping for temporal data accuracy
+- Embedded document normalization into relational table structures
+- Data validation rules and constraint preservation per Section 6.2.2.1
+- Real-time data verification framework per Section 4.4.2
 - Comprehensive backup and rollback procedures ensuring zero data loss
 - Performance validation against Node.js baseline metrics
+
+Key Features:
+- Zero data loss migration with comprehensive backup procedures
+- Real-time verification framework using SQLAlchemy sessions
+- Performance monitoring and validation during conversion
+- Automated rollback triggers for migration failure scenarios
+- Type-safe data conversion with validation at each step
+- Comprehensive audit logging for compliance requirements
+
+Technical Specification References:
+- Section 4.4.1: Database Model Conversion Process
+- Section 4.4.2: Migration Management and Rollback Process
+- Section 6.2.1: Database Technology Transition to PostgreSQL 15.x
+- Section 6.2.2.1: Entity Relationships and Data Models
+- Feature F-003: Database Model Conversion from MongoDB patterns
 
 Revision ID: 002_20241201_130000
 Revises: 001_20241201_120000
 Create Date: 2024-12-01 13:00:00.000000
 """
 
+import os
+import json
+import time
+import logging
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional, Tuple, Union
+from decimal import Decimal
+
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.sql import text
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, Boolean, DateTime, Text, ForeignKey
-from datetime import datetime, timezone
-import json
-import logging
-import time
-from typing import Dict, List, Any, Optional, Tuple
-import traceback
+from sqlalchemy import text, inspect
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects import postgresql
 
-# Revision identifiers, used by Alembic
+# Configure logging for migration tracking
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Revision identifiers for Alembic version control
 revision = '002_20241201_130000'
 down_revision = '001_20241201_120000'
 branch_labels = None
 depends_on = None
 
-# Configure logging for migration tracking and audit trail
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('migration_002_data_conversion.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
-# MongoDB to PostgreSQL type mapping configuration per Section 4.4.1
-MONGODB_TYPE_MAPPING = {
-    'ObjectId': {'sqlalchemy_type': String(24), 'converter': 'convert_object_id'},
-    'Date': {'sqlalchemy_type': DateTime(timezone=True), 'converter': 'convert_date'},
-    'String': {'sqlalchemy_type': Text, 'converter': 'convert_string'},
-    'Number': {'sqlalchemy_type': Integer, 'converter': 'convert_number'},
-    'Boolean': {'sqlalchemy_type': Boolean, 'converter': 'convert_boolean'},
-    'Array': {'sqlalchemy_type': Text, 'converter': 'convert_array_to_json'},
-    'Object': {'sqlalchemy_type': Text, 'converter': 'convert_object_to_json'}
-}
-
-# Collection to table mapping configuration
-COLLECTION_TABLE_MAPPING = {
-    'users': {
-        'table_name': 'users',
-        'primary_key': 'id',
-        'mongodb_pk': '_id',
-        'field_mapping': {
-            '_id': {'column': 'legacy_mongodb_id', 'type': 'ObjectId'},
-            'username': {'column': 'username', 'type': 'String'},
-            'email': {'column': 'email', 'type': 'String'},
-            'password': {'column': 'password_hash', 'type': 'String'},
-            'isActive': {'column': 'is_active', 'type': 'Boolean'},
-            'createdAt': {'column': 'created_at', 'type': 'Date'},
-            'updatedAt': {'column': 'updated_at', 'type': 'Date'}
-        }
-    },
-    'userSessions': {
-        'table_name': 'user_sessions',
-        'primary_key': 'id',
-        'mongodb_pk': '_id',
-        'field_mapping': {
-            '_id': {'column': 'legacy_mongodb_id', 'type': 'ObjectId'},
-            'userId': {'column': 'user_id', 'type': 'ObjectId', 'foreign_key': 'users.id'},
-            'sessionToken': {'column': 'session_token', 'type': 'String'},
-            'expiresAt': {'column': 'expires_at', 'type': 'Date'},
-            'isValid': {'column': 'is_valid', 'type': 'Boolean'},
-            'createdAt': {'column': 'created_at', 'type': 'Date'}
-        }
-    },
-    'businessEntities': {
-        'table_name': 'business_entities',
-        'primary_key': 'id',
-        'mongodb_pk': '_id',
-        'field_mapping': {
-            '_id': {'column': 'legacy_mongodb_id', 'type': 'ObjectId'},
-            'name': {'column': 'name', 'type': 'String'},
-            'description': {'column': 'description', 'type': 'String'},
-            'ownerId': {'column': 'owner_id', 'type': 'ObjectId', 'foreign_key': 'users.id'},
-            'status': {'column': 'status', 'type': 'String'},
-            'createdAt': {'column': 'created_at', 'type': 'Date'},
-            'updatedAt': {'column': 'updated_at', 'type': 'Date'}
-        }
-    },
-    'entityRelationships': {
-        'table_name': 'entity_relationships',
-        'primary_key': 'id',
-        'mongodb_pk': '_id',
-        'field_mapping': {
-            '_id': {'column': 'legacy_mongodb_id', 'type': 'ObjectId'},
-            'sourceEntityId': {'column': 'source_entity_id', 'type': 'ObjectId', 'foreign_key': 'business_entities.id'},
-            'targetEntityId': {'column': 'target_entity_id', 'type': 'ObjectId', 'foreign_key': 'business_entities.id'},
-            'relationshipType': {'column': 'relationship_type', 'type': 'String'},
-            'isActive': {'column': 'is_active', 'type': 'Boolean'},
-            'createdAt': {'column': 'created_at', 'type': 'Date'}
-        }
-    }
-}
-
-# Performance monitoring configuration per Section 6.2.1
-PERFORMANCE_TARGETS = {
-    'simple_queries': {'target_ms': 500, 'percentile': 95},
-    'complex_queries': {'target_ms': 2000, 'percentile': 95},
-    'insert_operations': {'target_ms': 300, 'percentile': 95},
-    'batch_operations': {'target_ms': 5000, 'percentile': 95}
-}
-
-# Data validation configuration for zero data loss verification
-VALIDATION_CONFIG = {
-    'record_count_tolerance': 0,  # Zero tolerance for data loss
-    'relationship_integrity_check': True,
-    'constraint_validation': True,
-    'performance_benchmark': True
-}
-
-
-class DataConverter:
+class MongoDBDataConverter:
     """
-    MongoDB to PostgreSQL data conversion utility class.
+    MongoDB to PostgreSQL data conversion engine with comprehensive type mapping,
+    validation, and verification capabilities.
     
-    Provides comprehensive data transformation capabilities with type mapping,
-    validation, and error handling for zero data loss migration requirements.
+    This class implements the core data conversion logic as specified in Section 4.4.1
+    of the technical specification, providing type-safe conversion of MongoDB documents
+    to PostgreSQL relational format with complete relationship preservation.
     """
     
-    def __init__(self, mongodb_connection_string: str, postgresql_connection_string: str):
+    def __init__(self, connection: sa.engine.Connection):
         """
-        Initialize data converter with database connections.
+        Initialize the data converter with database connection and configuration.
         
         Args:
-            mongodb_connection_string (str): MongoDB connection URI
-            postgresql_connection_string (str): PostgreSQL connection URI
+            connection: SQLAlchemy database connection for PostgreSQL operations
         """
-        self.mongodb_connection = mongodb_connection_string
-        self.postgresql_connection = postgresql_connection_string
-        self.validation_errors = []
-        self.conversion_stats = {}
+        self.connection = connection
+        self.session = sessionmaker(bind=connection)()
+        self.conversion_stats = {
+            'users_converted': 0,
+            'sessions_converted': 0,
+            'business_entities_converted': 0,
+            'entity_relationships_converted': 0,
+            'errors': []
+        }
+        self.mongodb_connection = None
+        self.verification_results = {}
         
-    def convert_object_id(self, value: Any) -> Optional[str]:
-        """
-        Convert MongoDB ObjectId to SQLAlchemy String(24) format.
+        # MongoDB to PostgreSQL type mapping per Section 4.4.1
+        self.type_mapping = {
+            'ObjectId': 'String(24)',
+            'String': 'String',
+            'Number': 'Integer',
+            'Float': 'Numeric',
+            'Double': 'Float',
+            'Boolean': 'Boolean',
+            'Date': 'DateTime',
+            'Array': 'JSON',
+            'Object': 'JSON',
+            'Null': 'NULL'
+        }
         
-        Args:
-            value: MongoDB ObjectId value
-            
-        Returns:
-            Optional[str]: 24-character string representation or None
-        """
-        if value is None:
-            return None
-        
-        # Handle both ObjectId objects and string representations
-        if hasattr(value, '__str__'):
-            str_value = str(value)
-            if len(str_value) == 24:
-                return str_value
-        
-        logger.warning(f"Invalid ObjectId format: {value}")
-        return None
+        logger.info("MongoDB to PostgreSQL data converter initialized")
     
-    def convert_date(self, value: Any) -> Optional[datetime]:
+    def establish_mongodb_connection(self) -> bool:
         """
-        Convert MongoDB Date to SQLAlchemy DateTime with timezone.
+        Establish connection to MongoDB source database for data extraction.
         
-        Args:
-            value: MongoDB Date value
-            
         Returns:
-            Optional[datetime]: UTC datetime object or None
+            bool: True if connection successful, False otherwise
         """
-        if value is None:
-            return None
-        
         try:
-            if isinstance(value, datetime):
-                # Ensure timezone-aware datetime
-                if value.tzinfo is None:
-                    return value.replace(tzinfo=timezone.utc)
-                return value
+            # MongoDB connection configuration from environment variables
+            mongodb_uri = os.environ.get('MONGODB_URI')
+            if not mongodb_uri:
+                logger.error("MONGODB_URI environment variable not set")
+                return False
             
-            if isinstance(value, str):
-                # Parse ISO format date strings
-                return datetime.fromisoformat(value.replace('Z', '+00:00'))
-            
-            if isinstance(value, (int, float)):
-                # Unix timestamp conversion
-                return datetime.fromtimestamp(value, tz=timezone.utc)
-            
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Date conversion error for value {value}: {e}")
-        
-        return None
-    
-    def convert_string(self, value: Any) -> Optional[str]:
-        """
-        Convert MongoDB String to SQLAlchemy Text/String format.
-        
-        Args:
-            value: MongoDB String value
-            
-        Returns:
-            Optional[str]: String value or None
-        """
-        if value is None:
-            return None
-        
-        if isinstance(value, str):
-            return value.strip() if value.strip() else None
-        
-        # Convert other types to string representation
-        return str(value) if value is not None else None
-    
-    def convert_number(self, value: Any) -> Optional[int]:
-        """
-        Convert MongoDB Number to SQLAlchemy Integer format.
-        
-        Args:
-            value: MongoDB Number value
-            
-        Returns:
-            Optional[int]: Integer value or None
-        """
-        if value is None:
-            return None
-        
-        try:
-            if isinstance(value, (int, float)):
-                return int(value)
-            
-            if isinstance(value, str) and value.strip():
-                return int(float(value.strip()))
-                
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Number conversion error for value {value}: {e}")
-        
-        return None
-    
-    def convert_boolean(self, value: Any) -> bool:
-        """
-        Convert MongoDB Boolean to SQLAlchemy Boolean format.
-        
-        Args:
-            value: MongoDB Boolean value
-            
-        Returns:
-            bool: Boolean value (defaults to False for None/invalid)
-        """
-        if value is None:
-            return False
-        
-        if isinstance(value, bool):
-            return value
-        
-        if isinstance(value, str):
-            return value.lower() in ('true', '1', 'yes', 'on', 'active')
-        
-        if isinstance(value, (int, float)):
-            return bool(value)
-        
-        return False
-    
-    def convert_array_to_json(self, value: Any) -> Optional[str]:
-        """
-        Convert MongoDB Array to JSON string for PostgreSQL storage.
-        
-        Args:
-            value: MongoDB Array value
-            
-        Returns:
-            Optional[str]: JSON string representation or None
-        """
-        if value is None:
-            return None
-        
-        try:
-            if isinstance(value, (list, tuple)):
-                return json.dumps(list(value))
-            
-            if isinstance(value, str):
-                # Validate existing JSON string
-                json.loads(value)
-                return value
-                
-        except (TypeError, json.JSONDecodeError) as e:
-            logger.warning(f"Array conversion error for value {value}: {e}")
-        
-        return None
-    
-    def convert_object_to_json(self, value: Any) -> Optional[str]:
-        """
-        Convert MongoDB Object/Document to JSON string for PostgreSQL storage.
-        
-        Args:
-            value: MongoDB Object value
-            
-        Returns:
-            Optional[str]: JSON string representation or None
-        """
-        if value is None:
-            return None
-        
-        try:
-            if isinstance(value, dict):
-                return json.dumps(value)
-            
-            if isinstance(value, str):
-                # Validate existing JSON string
-                json.loads(value)
-                return value
-                
-        except (TypeError, json.JSONDecodeError) as e:
-            logger.warning(f"Object conversion error for value {value}: {e}")
-        
-        return None
-
-
-class MigrationValidator:
-    """
-    Comprehensive migration validation framework for zero data loss verification.
-    
-    Implements real-time data verification queries, relationship integrity checks,
-    and performance validation against baseline metrics per Section 4.4.2.
-    """
-    
-    def __init__(self, session: Session):
-        """
-        Initialize migration validator with SQLAlchemy session.
-        
-        Args:
-            session (Session): SQLAlchemy database session
-        """
-        self.session = session
-        self.validation_results = {}
-        self.performance_metrics = {}
-    
-    def validate_record_counts(self) -> bool:
-        """
-        Validate record counts between MongoDB collections and PostgreSQL tables.
-        
-        Returns:
-            bool: True if all record counts match, False otherwise
-        """
-        logger.info("Starting record count validation...")
-        
-        validation_passed = True
-        
-        for collection_name, config in COLLECTION_TABLE_MAPPING.items():
-            table_name = config['table_name']
-            
+            # Import pymongo for MongoDB operations
             try:
-                # Get PostgreSQL table count
-                pg_count_query = text(f"SELECT COUNT(*) FROM {table_name}")
-                pg_count = self.session.execute(pg_count_query).scalar()
-                
-                logger.info(f"Table {table_name}: {pg_count} records")
-                
-                self.validation_results[table_name] = {
-                    'postgresql_count': pg_count,
-                    'validation_status': 'completed'
-                }
-                
-            except Exception as e:
-                logger.error(f"Record count validation failed for {table_name}: {e}")
-                validation_passed = False
-                self.validation_results[table_name] = {
-                    'postgresql_count': 0,
-                    'validation_status': 'failed',
-                    'error': str(e)
-                }
-        
-        return validation_passed
-    
-    def validate_relationship_integrity(self) -> bool:
-        """
-        Validate foreign key relationships and referential integrity.
-        
-        Returns:
-            bool: True if all relationships are valid, False otherwise
-        """
-        logger.info("Starting relationship integrity validation...")
-        
-        validation_queries = [
-            # Validate user_sessions.user_id -> users.id relationship
-            {
-                'name': 'user_sessions_user_id_integrity',
-                'query': """
-                    SELECT COUNT(*) FROM user_sessions us 
-                    LEFT JOIN users u ON us.user_id = u.id 
-                    WHERE us.user_id IS NOT NULL AND u.id IS NULL
-                """,
-                'expected': 0
-            },
+                import pymongo
+                from pymongo import MongoClient
+            except ImportError:
+                logger.error("pymongo library not installed. Install with: pip install pymongo")
+                return False
             
-            # Validate business_entities.owner_id -> users.id relationship
-            {
-                'name': 'business_entities_owner_id_integrity',
-                'query': """
-                    SELECT COUNT(*) FROM business_entities be 
-                    LEFT JOIN users u ON be.owner_id = u.id 
-                    WHERE be.owner_id IS NOT NULL AND u.id IS NULL
-                """,
-                'expected': 0
-            },
+            # Establish MongoDB connection with timeout settings
+            self.mongodb_connection = MongoClient(
+                mongodb_uri,
+                serverSelectionTimeoutMS=5000,  # 5 second timeout
+                connectTimeoutMS=10000,  # 10 second connection timeout
+                socketTimeoutMS=20000   # 20 second socket timeout
+            )
             
-            # Validate entity_relationships.source_entity_id -> business_entities.id relationship
-            {
-                'name': 'entity_relationships_source_integrity',
-                'query': """
-                    SELECT COUNT(*) FROM entity_relationships er 
-                    LEFT JOIN business_entities be ON er.source_entity_id = be.id 
-                    WHERE er.source_entity_id IS NOT NULL AND be.id IS NULL
-                """,
-                'expected': 0
-            },
+            # Test connection with ping
+            self.mongodb_connection.admin.command('ping')
             
-            # Validate entity_relationships.target_entity_id -> business_entities.id relationship
-            {
-                'name': 'entity_relationships_target_integrity',
-                'query': """
-                    SELECT COUNT(*) FROM entity_relationships er 
-                    LEFT JOIN business_entities be ON er.target_entity_id = be.id 
-                    WHERE er.target_entity_id IS NOT NULL AND be.id IS NULL
-                """,
-                'expected': 0
-            }
-        ]
-        
-        validation_passed = True
-        
-        for validation in validation_queries:
-            try:
-                result = self.session.execute(text(validation['query'])).scalar()
-                
-                if result == validation['expected']:
-                    logger.info(f"✓ {validation['name']}: PASSED")
-                    self.validation_results[validation['name']] = 'PASSED'
-                else:
-                    logger.error(f"✗ {validation['name']}: FAILED (found {result}, expected {validation['expected']})")
-                    validation_passed = False
-                    self.validation_results[validation['name']] = f'FAILED (found {result})'
-                    
-            except Exception as e:
-                logger.error(f"Relationship validation failed for {validation['name']}: {e}")
-                validation_passed = False
-                self.validation_results[validation['name']] = f'ERROR: {str(e)}'
-        
-        return validation_passed
-    
-    def validate_data_constraints(self) -> bool:
-        """
-        Validate data constraints and business rules preservation.
-        
-        Returns:
-            bool: True if all constraints are valid, False otherwise
-        """
-        logger.info("Starting data constraints validation...")
-        
-        constraint_queries = [
-            # Validate unique constraints
-            {
-                'name': 'users_username_unique',
-                'query': """
-                    SELECT COUNT(*) FROM (
-                        SELECT username, COUNT(*) as cnt 
-                        FROM users 
-                        WHERE username IS NOT NULL 
-                        GROUP BY username 
-                        HAVING COUNT(*) > 1
-                    ) duplicates
-                """,
-                'expected': 0
-            },
+            # Get database name from URI or environment
+            db_name = os.environ.get('MONGODB_DATABASE', 'blitzy')
+            self.mongodb_db = self.mongodb_connection[db_name]
             
-            {
-                'name': 'users_email_unique',
-                'query': """
-                    SELECT COUNT(*) FROM (
-                        SELECT email, COUNT(*) as cnt 
-                        FROM users 
-                        WHERE email IS NOT NULL 
-                        GROUP BY email 
-                        HAVING COUNT(*) > 1
-                    ) duplicates
-                """,
-                'expected': 0
-            },
-            
-            {
-                'name': 'user_sessions_token_unique',
-                'query': """
-                    SELECT COUNT(*) FROM (
-                        SELECT session_token, COUNT(*) as cnt 
-                        FROM user_sessions 
-                        WHERE session_token IS NOT NULL 
-                        GROUP BY session_token 
-                        HAVING COUNT(*) > 1
-                    ) duplicates
-                """,
-                'expected': 0
-            },
-            
-            # Validate NOT NULL constraints
-            {
-                'name': 'users_required_fields',
-                'query': """
-                    SELECT COUNT(*) FROM users 
-                    WHERE username IS NULL OR email IS NULL OR password_hash IS NULL
-                """,
-                'expected': 0
-            },
-            
-            {
-                'name': 'business_entities_required_fields',
-                'query': """
-                    SELECT COUNT(*) FROM business_entities 
-                    WHERE name IS NULL OR owner_id IS NULL
-                """,
-                'expected': 0
-            }
-        ]
-        
-        validation_passed = True
-        
-        for validation in constraint_queries:
-            try:
-                result = self.session.execute(text(validation['query'])).scalar()
-                
-                if result == validation['expected']:
-                    logger.info(f"✓ {validation['name']}: PASSED")
-                    self.validation_results[validation['name']] = 'PASSED'
-                else:
-                    logger.error(f"✗ {validation['name']}: FAILED (found {result}, expected {validation['expected']})")
-                    validation_passed = False
-                    self.validation_results[validation['name']] = f'FAILED (found {result})'
-                    
-            except Exception as e:
-                logger.error(f"Constraint validation failed for {validation['name']}: {e}")
-                validation_passed = False
-                self.validation_results[validation['name']] = f'ERROR: {str(e)}'
-        
-        return validation_passed
-    
-    def validate_performance_benchmarks(self) -> bool:
-        """
-        Validate query performance against baseline metrics per Section 6.2.1.
-        
-        Returns:
-            bool: True if performance meets targets, False otherwise
-        """
-        logger.info("Starting performance benchmark validation...")
-        
-        performance_queries = [
-            {
-                'name': 'simple_select_users',
-                'query': "SELECT * FROM users WHERE id = 1",
-                'target': PERFORMANCE_TARGETS['simple_queries']['target_ms'],
-                'category': 'simple_queries'
-            },
-            {
-                'name': 'complex_join_user_entities',
-                'query': """
-                    SELECT u.username, COUNT(be.id) as entity_count 
-                    FROM users u 
-                    LEFT JOIN business_entities be ON u.id = be.owner_id 
-                    GROUP BY u.id, u.username 
-                    ORDER BY entity_count DESC 
-                    LIMIT 10
-                """,
-                'target': PERFORMANCE_TARGETS['complex_queries']['target_ms'],
-                'category': 'complex_queries'
-            },
-            {
-                'name': 'relationship_query',
-                'query': """
-                    SELECT be1.name as source, be2.name as target, er.relationship_type 
-                    FROM entity_relationships er 
-                    JOIN business_entities be1 ON er.source_entity_id = be1.id 
-                    JOIN business_entities be2 ON er.target_entity_id = be2.id 
-                    WHERE er.is_active = true 
-                    LIMIT 20
-                """,
-                'target': PERFORMANCE_TARGETS['complex_queries']['target_ms'],
-                'category': 'complex_queries'
-            }
-        ]
-        
-        validation_passed = True
-        
-        for query_test in performance_queries:
-            try:
-                start_time = time.time()
-                self.session.execute(text(query_test['query']))
-                execution_time_ms = (time.time() - start_time) * 1000
-                
-                if execution_time_ms <= query_test['target']:
-                    logger.info(f"✓ {query_test['name']}: {execution_time_ms:.2f}ms (target: {query_test['target']}ms)")
-                    self.performance_metrics[query_test['name']] = {
-                        'execution_time_ms': execution_time_ms,
-                        'target_ms': query_test['target'],
-                        'status': 'PASSED'
-                    }
-                else:
-                    logger.warning(f"⚠ {query_test['name']}: {execution_time_ms:.2f}ms (target: {query_test['target']}ms) - PERFORMANCE ISSUE")
-                    validation_passed = False
-                    self.performance_metrics[query_test['name']] = {
-                        'execution_time_ms': execution_time_ms,
-                        'target_ms': query_test['target'],
-                        'status': 'FAILED'
-                    }
-                    
-            except Exception as e:
-                logger.error(f"Performance validation failed for {query_test['name']}: {e}")
-                validation_passed = False
-                self.performance_metrics[query_test['name']] = {
-                    'execution_time_ms': 0,
-                    'target_ms': query_test['target'],
-                    'status': f'ERROR: {str(e)}'
-                }
-        
-        return validation_passed
-    
-    def generate_validation_report(self) -> dict:
-        """
-        Generate comprehensive validation report for migration audit trail.
-        
-        Returns:
-            dict: Complete validation results and performance metrics
-        """
-        return {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'validation_results': self.validation_results,
-            'performance_metrics': self.performance_metrics,
-            'summary': {
-                'total_validations': len(self.validation_results),
-                'passed_validations': len([v for v in self.validation_results.values() if v == 'PASSED']),
-                'failed_validations': len([v for v in self.validation_results.values() if 'FAILED' in str(v)]),
-                'performance_tests': len(self.performance_metrics),
-                'performance_passed': len([p for p in self.performance_metrics.values() if p.get('status') == 'PASSED'])
-            }
-        }
-
-
-def create_mongodb_id_mapping_table(connection):
-    """
-    Create mapping table for MongoDB ObjectId to PostgreSQL auto-increment ID conversion.
-    
-    This table maintains the relationship between original MongoDB ObjectIds and 
-    new PostgreSQL auto-increment primary keys for data integrity and rollback capabilities.
-    """
-    logger.info("Creating MongoDB ID mapping table...")
-    
-    mapping_table_sql = """
-    CREATE TABLE IF NOT EXISTS mongodb_id_mapping (
-        id SERIAL PRIMARY KEY,
-        table_name VARCHAR(255) NOT NULL,
-        mongodb_id VARCHAR(24) NOT NULL,
-        postgresql_id INTEGER NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(table_name, mongodb_id),
-        UNIQUE(table_name, postgresql_id)
-    );
-    
-    CREATE INDEX IF NOT EXISTS idx_mongodb_mapping_table_mongodb 
-    ON mongodb_id_mapping(table_name, mongodb_id);
-    
-    CREATE INDEX IF NOT EXISTS idx_mongodb_mapping_table_postgresql 
-    ON mongodb_id_mapping(table_name, postgresql_id);
-    
-    COMMENT ON TABLE mongodb_id_mapping IS 
-    'Mapping table for MongoDB ObjectId to PostgreSQL auto-increment ID conversion';
-    """
-    
-    connection.execute(text(mapping_table_sql))
-    connection.commit()
-    logger.info("MongoDB ID mapping table created successfully")
-
-
-def add_legacy_mongodb_id_columns(connection):
-    """
-    Add legacy MongoDB ID columns to all tables for data traceability.
-    
-    These columns store the original MongoDB ObjectIds to maintain data lineage
-    and support rollback procedures if needed.
-    """
-    logger.info("Adding legacy MongoDB ID columns...")
-    
-    tables_to_modify = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
-    
-    for table_name in tables_to_modify:
-        try:
-            # Add legacy_mongodb_id column
-            alter_sql = f"""
-            ALTER TABLE {table_name} 
-            ADD COLUMN IF NOT EXISTS legacy_mongodb_id VARCHAR(24) UNIQUE;
-            
-            CREATE INDEX IF NOT EXISTS idx_{table_name}_legacy_mongodb_id 
-            ON {table_name}(legacy_mongodb_id);
-            
-            COMMENT ON COLUMN {table_name}.legacy_mongodb_id IS 
-            'Original MongoDB ObjectId for data traceability and rollback support';
-            """
-            
-            connection.execute(text(alter_sql))
-            logger.info(f"Added legacy MongoDB ID column to {table_name}")
+            logger.info(f"Successfully connected to MongoDB database: {db_name}")
+            return True
             
         except Exception as e:
-            logger.error(f"Failed to add legacy MongoDB ID column to {table_name}: {e}")
+            logger.error(f"Failed to connect to MongoDB: {str(e)}")
+            self.conversion_stats['errors'].append(f"MongoDB connection failed: {str(e)}")
+            return False
+    
+    def create_backup_snapshot(self) -> str:
+        """
+        Create comprehensive backup snapshot before data conversion begins.
+        
+        Returns:
+            str: Backup identifier for restoration purposes
+            
+        Raises:
+            Exception: If backup creation fails
+        """
+        backup_timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        backup_id = f"mongodb_migration_backup_{backup_timestamp}"
+        
+        logger.info(f"Creating backup snapshot: {backup_id}")
+        
+        try:
+            # Create PostgreSQL backup using pg_dump equivalent query
+            backup_tables = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
+            
+            for table_name in backup_tables:
+                # Check if table exists and has data
+                result = self.connection.execute(text(f"""
+                    SELECT COUNT(*) as count 
+                    FROM information_schema.tables 
+                    WHERE table_name = '{table_name}'
+                """))
+                
+                if result.fetchone()[0] > 0:
+                    # Create backup table
+                    backup_table_name = f"{table_name}_backup_{backup_timestamp}"
+                    self.connection.execute(text(f"""
+                        CREATE TABLE {backup_table_name} AS 
+                        SELECT * FROM {table_name}
+                    """))
+                    logger.info(f"Created backup table: {backup_table_name}")
+            
+            # Store backup metadata
+            backup_metadata = {
+                'backup_id': backup_id,
+                'timestamp': backup_timestamp,
+                'tables_backed_up': backup_tables,
+                'migration_version': revision
+            }
+            
+            # Create backup metadata table if not exists
+            self.connection.execute(text("""
+                CREATE TABLE IF NOT EXISTS migration_backups (
+                    id SERIAL PRIMARY KEY,
+                    backup_id VARCHAR(255) UNIQUE NOT NULL,
+                    metadata JSONB NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """))
+            
+            # Insert backup metadata
+            self.connection.execute(text("""
+                INSERT INTO migration_backups (backup_id, metadata)
+                VALUES (:backup_id, :metadata)
+            """), {
+                'backup_id': backup_id,
+                'metadata': json.dumps(backup_metadata)
+            })
+            
+            self.connection.commit()
+            logger.info(f"Backup snapshot created successfully: {backup_id}")
+            
+            return backup_id
+            
+        except Exception as e:
+            logger.error(f"Backup creation failed: {str(e)}")
+            self.connection.rollback()
+            raise Exception(f"Failed to create backup snapshot: {str(e)}")
+    
+    def convert_objectid_to_string(self, objectid_value: Any) -> str:
+        """
+        Convert MongoDB ObjectId to PostgreSQL String(24) format.
+        
+        Args:
+            objectid_value: MongoDB ObjectId instance or string representation
+            
+        Returns:
+            str: 24-character string representation of ObjectId
+        """
+        if objectid_value is None:
+            return None
+        
+        # Handle different ObjectId input types
+        if hasattr(objectid_value, '__str__'):
+            objectid_str = str(objectid_value)
+        else:
+            objectid_str = objectid_value
+        
+        # Validate ObjectId format (24 hexadecimal characters)
+        if not isinstance(objectid_str, str) or len(objectid_str) != 24:
+            raise ValueError(f"Invalid ObjectId format: {objectid_str}")
+        
+        # Validate hexadecimal characters
+        try:
+            int(objectid_str, 16)
+        except ValueError:
+            raise ValueError(f"ObjectId contains non-hexadecimal characters: {objectid_str}")
+        
+        return objectid_str
+    
+    def convert_mongodb_date(self, date_value: Any) -> Optional[datetime]:
+        """
+        Convert MongoDB Date to PostgreSQL DateTime with timezone support.
+        
+        Args:
+            date_value: MongoDB date value (datetime, string, or timestamp)
+            
+        Returns:
+            Optional[datetime]: PostgreSQL compatible datetime with timezone
+        """
+        if date_value is None:
+            return None
+        
+        # Handle datetime objects
+        if isinstance(date_value, datetime):
+            # Ensure timezone awareness
+            if date_value.tzinfo is None:
+                return date_value.replace(tzinfo=timezone.utc)
+            return date_value
+        
+        # Handle string dates
+        if isinstance(date_value, str):
+            try:
+                # Parse ISO format dates
+                parsed_date = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+                return parsed_date
+            except ValueError:
+                logger.warning(f"Failed to parse date string: {date_value}")
+                return None
+        
+        # Handle Unix timestamps
+        if isinstance(date_value, (int, float)):
+            try:
+                return datetime.fromtimestamp(date_value, tz=timezone.utc)
+            except (ValueError, OSError):
+                logger.warning(f"Failed to parse timestamp: {date_value}")
+                return None
+        
+        logger.warning(f"Unknown date format: {type(date_value)} - {date_value}")
+        return None
+    
+    def normalize_embedded_document(self, document: Dict[str, Any], parent_type: str) -> Dict[str, Any]:
+        """
+        Normalize MongoDB embedded documents into relational table format.
+        
+        Args:
+            document: MongoDB embedded document
+            parent_type: Parent document type for context
+            
+        Returns:
+            Dict[str, Any]: Normalized relational data structure
+        """
+        normalized = {}
+        
+        for field_name, field_value in document.items():
+            # Skip MongoDB internal fields
+            if field_name.startswith('_') and field_name != '_id':
+                continue
+            
+            # Handle nested objects
+            if isinstance(field_value, dict):
+                # Convert nested objects to JSON for PostgreSQL
+                normalized[field_name] = json.dumps(field_value)
+            elif isinstance(field_value, list):
+                # Convert arrays to JSON for PostgreSQL
+                normalized[field_name] = json.dumps(field_value)
+            elif hasattr(field_value, '__dict__'):
+                # Handle ObjectId and other MongoDB types
+                if field_name == '_id' or field_name.endswith('_id'):
+                    normalized[field_name] = self.convert_objectid_to_string(field_value)
+                else:
+                    normalized[field_name] = str(field_value)
+            else:
+                # Handle primitive types
+                normalized[field_name] = field_value
+        
+        return normalized
+    
+    def convert_user_documents(self) -> int:
+        """
+        Convert MongoDB user documents to PostgreSQL users table.
+        
+        Returns:
+            int: Number of users converted successfully
+        """
+        logger.info("Starting user document conversion...")
+        converted_count = 0
+        
+        try:
+            # Get MongoDB users collection
+            users_collection = self.mongodb_db.users
+            total_users = users_collection.count_documents({})
+            
+            logger.info(f"Found {total_users} user documents to convert")
+            
+            # Process users in batches for memory efficiency
+            batch_size = 100
+            for skip in range(0, total_users, batch_size):
+                batch_users = users_collection.find().skip(skip).limit(batch_size)
+                
+                for user_doc in batch_users:
+                    try:
+                        # Convert MongoDB user document to PostgreSQL format
+                        user_data = self.convert_user_document(user_doc)
+                        
+                        # Insert into PostgreSQL users table
+                        insert_query = text("""
+                            INSERT INTO users (
+                                id, username, email, password_hash, first_name, last_name,
+                                is_active, is_verified, is_admin, failed_login_attempts,
+                                last_login_at, last_login_ip, created_at, updated_at
+                            ) VALUES (
+                                :id, :username, :email, :password_hash, :first_name, :last_name,
+                                :is_active, :is_verified, :is_admin, :failed_login_attempts,
+                                :last_login_at, :last_login_ip, :created_at, :updated_at
+                            )
+                        """)
+                        
+                        self.connection.execute(insert_query, user_data)
+                        converted_count += 1
+                        
+                        if converted_count % 50 == 0:
+                            logger.info(f"Converted {converted_count}/{total_users} users")
+                    
+                    except Exception as e:
+                        error_msg = f"Failed to convert user {user_doc.get('_id', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        self.conversion_stats['errors'].append(error_msg)
+                
+                # Commit batch
+                self.connection.commit()
+            
+            logger.info(f"Successfully converted {converted_count} user documents")
+            return converted_count
+            
+        except Exception as e:
+            logger.error(f"User conversion failed: {str(e)}")
+            self.connection.rollback()
             raise
     
-    connection.commit()
-    logger.info("Legacy MongoDB ID columns added successfully")
-
-
-def simulate_mongodb_data_conversion(connection, session):
-    """
-    Simulate MongoDB data conversion with sample data.
-    
-    This function creates representative sample data to demonstrate the conversion
-    process from MongoDB document structure to PostgreSQL relational format.
-    
-    Args:
-        connection: SQLAlchemy database connection
-        session: SQLAlchemy session for ORM operations
-    """
-    logger.info("Starting simulated MongoDB data conversion...")
-    
-    # Sample MongoDB-style data for conversion demonstration
-    sample_mongodb_data = {
-        'users': [
-            {
-                '_id': '507f1f77bcf86cd799439011',
-                'username': 'john_doe',
-                'email': 'john.doe@example.com',
-                'password': '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBdv6H1zPKqhOm',
-                'isActive': True,
-                'createdAt': '2024-12-01T10:00:00Z',
-                'updatedAt': '2024-12-01T10:00:00Z'
-            },
-            {
-                '_id': '507f1f77bcf86cd799439012',
-                'username': 'jane_smith',
-                'email': 'jane.smith@example.com',
-                'password': '$2b$12$DifferentHashForJaneSmithPassword',
-                'isActive': True,
-                'createdAt': '2024-12-01T10:15:00Z',
-                'updatedAt': '2024-12-01T10:15:00Z'
-            },
-            {
-                '_id': '507f1f77bcf86cd799439013',
-                'username': 'admin_user',
-                'email': 'admin@example.com',
-                'password': '$2b$12$AdminHashPasswordForSecureAccess',
-                'isActive': True,
-                'createdAt': '2024-12-01T09:00:00Z',
-                'updatedAt': '2024-12-01T09:00:00Z'
-            }
-        ],
-        'userSessions': [
-            {
-                '_id': '507f1f77bcf86cd799439021',
-                'userId': '507f1f77bcf86cd799439011',
-                'sessionToken': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiNTA3ZjFmNzdiY2Y4NmNkNzk5NDM5MDExIn0',
-                'expiresAt': '2024-12-02T10:00:00Z',
-                'isValid': True,
-                'createdAt': '2024-12-01T10:00:00Z'
-            },
-            {
-                '_id': '507f1f77bcf86cd799439022',
-                'userId': '507f1f77bcf86cd799439012',
-                'sessionToken': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiNTA3ZjFmNzdiY2Y4NmNkNzk5NDM5MDEyIn0',
-                'expiresAt': '2024-12-02T10:15:00Z',
-                'isValid': True,
-                'createdAt': '2024-12-01T10:15:00Z'
-            }
-        ],
-        'businessEntities': [
-            {
-                '_id': '507f1f77bcf86cd799439031',
-                'name': 'Acme Corporation',
-                'description': 'Leading provider of innovative business solutions',
-                'ownerId': '507f1f77bcf86cd799439011',
-                'status': 'active',
-                'createdAt': '2024-12-01T10:30:00Z',
-                'updatedAt': '2024-12-01T10:30:00Z'
-            },
-            {
-                '_id': '507f1f77bcf86cd799439032',
-                'name': 'Tech Innovators Inc',
-                'description': 'Technology consulting and development services',
-                'ownerId': '507f1f77bcf86cd799439012',
-                'status': 'active',
-                'createdAt': '2024-12-01T10:45:00Z',
-                'updatedAt': '2024-12-01T10:45:00Z'
-            },
-            {
-                '_id': '507f1f77bcf86cd799439033',
-                'name': 'Global Services Ltd',
-                'description': 'International business process outsourcing',
-                'ownerId': '507f1f77bcf86cd799439011',
-                'status': 'active',
-                'createdAt': '2024-12-01T11:00:00Z',
-                'updatedAt': '2024-12-01T11:00:00Z'
-            }
-        ],
-        'entityRelationships': [
-            {
-                '_id': '507f1f77bcf86cd799439041',
-                'sourceEntityId': '507f1f77bcf86cd799439031',
-                'targetEntityId': '507f1f77bcf86cd799439032',
-                'relationshipType': 'partnership',
-                'isActive': True,
-                'createdAt': '2024-12-01T11:15:00Z'
-            },
-            {
-                '_id': '507f1f77bcf86cd799439042',
-                'sourceEntityId': '507f1f77bcf86cd799439031',
-                'targetEntityId': '507f1f77bcf86cd799439033',
-                'relationshipType': 'subsidiary',
-                'isActive': True,
-                'createdAt': '2024-12-01T11:30:00Z'
-            }
-        ]
-    }
-    
-    # Initialize data converter
-    converter = DataConverter('', '')  # Connection strings not needed for simulation
-    mongodb_to_pg_id_mapping = {}
-    
-    # Process each collection in dependency order
-    for collection_name in ['users', 'userSessions', 'businessEntities', 'entityRelationships']:
-        if collection_name not in sample_mongodb_data:
-            continue
+    def convert_user_document(self, user_doc: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert individual MongoDB user document to PostgreSQL format.
         
-        config = COLLECTION_TABLE_MAPPING[collection_name]
-        table_name = config['table_name']
-        documents = sample_mongodb_data[collection_name]
+        Args:
+            user_doc: MongoDB user document
+            
+        Returns:
+            Dict[str, Any]: PostgreSQL-compatible user data
+        """
+        # Generate sequential ID for PostgreSQL
+        user_id = self.get_next_sequence_value('users_id_seq')
         
-        logger.info(f"Converting {collection_name} collection to {table_name} table ({len(documents)} documents)")
+        # Convert ObjectId to string for reference mapping
+        mongodb_id = self.convert_objectid_to_string(user_doc.get('_id'))
         
-        for doc in documents:
-            try:
-                # Prepare converted data
-                converted_data = {}
-                mongodb_id = doc.get('_id')
+        # Store ObjectId mapping for relationship preservation
+        self.store_id_mapping('users', mongodb_id, user_id)
+        
+        return {
+            'id': user_id,
+            'username': user_doc.get('username'),
+            'email': user_doc.get('email'),
+            'password_hash': user_doc.get('password') or user_doc.get('passwordHash'),
+            'first_name': user_doc.get('firstName') or user_doc.get('first_name'),
+            'last_name': user_doc.get('lastName') or user_doc.get('last_name'),
+            'is_active': user_doc.get('isActive', user_doc.get('is_active', True)),
+            'is_verified': user_doc.get('isVerified', user_doc.get('is_verified', False)),
+            'is_admin': user_doc.get('isAdmin', user_doc.get('is_admin', False)),
+            'failed_login_attempts': user_doc.get('failedLoginAttempts', 0),
+            'last_login_at': self.convert_mongodb_date(user_doc.get('lastLoginAt')),
+            'last_login_ip': user_doc.get('lastLoginIP') or user_doc.get('last_login_ip'),
+            'created_at': self.convert_mongodb_date(user_doc.get('createdAt', user_doc.get('created_at'))),
+            'updated_at': self.convert_mongodb_date(user_doc.get('updatedAt', user_doc.get('updated_at')))
+        }
+    
+    def convert_session_documents(self) -> int:
+        """
+        Convert MongoDB session documents to PostgreSQL user_sessions table.
+        
+        Returns:
+            int: Number of sessions converted successfully
+        """
+        logger.info("Starting session document conversion...")
+        converted_count = 0
+        
+        try:
+            # Get MongoDB sessions collection
+            sessions_collection = self.mongodb_db.sessions
+            total_sessions = sessions_collection.count_documents({})
+            
+            logger.info(f"Found {total_sessions} session documents to convert")
+            
+            # Process sessions in batches
+            batch_size = 100
+            for skip in range(0, total_sessions, batch_size):
+                batch_sessions = sessions_collection.find().skip(skip).limit(batch_size)
                 
-                # Convert each field according to mapping configuration
-                for mongodb_field, field_config in config['field_mapping'].items():
-                    if mongodb_field in doc:
-                        column_name = field_config['column']
-                        field_type = field_config['type']
-                        value = doc[mongodb_field]
+                for session_doc in batch_sessions:
+                    try:
+                        # Convert MongoDB session document to PostgreSQL format
+                        session_data = self.convert_session_document(session_doc)
                         
-                        # Apply appropriate conversion based on type
-                        if field_type == 'ObjectId':
-                            if mongodb_field == '_id':
-                                # Store original MongoDB ID in legacy column
-                                converted_data['legacy_mongodb_id'] = converter.convert_object_id(value)
-                            else:
-                                # Handle foreign key relationships
-                                if 'foreign_key' in field_config:
-                                    # Map to PostgreSQL auto-increment ID
-                                    foreign_table = field_config['foreign_key'].split('.')[0]
-                                    if value in mongodb_to_pg_id_mapping.get(foreign_table, {}):
-                                        converted_data[column_name] = mongodb_to_pg_id_mapping[foreign_table][value]
-                                    else:
-                                        logger.warning(f"Foreign key mapping not found for {value} in {foreign_table}")
-                                        continue
-                                else:
-                                    converted_data[column_name] = converter.convert_object_id(value)
-                        elif field_type == 'Date':
-                            converted_data[column_name] = converter.convert_date(value)
-                        elif field_type == 'String':
-                            converted_data[column_name] = converter.convert_string(value)
-                        elif field_type == 'Boolean':
-                            converted_data[column_name] = converter.convert_boolean(value)
-                        else:
-                            converted_data[column_name] = value
+                        if session_data:  # Only insert if user mapping exists
+                            # Insert into PostgreSQL user_sessions table
+                            insert_query = text("""
+                                INSERT INTO user_sessions (
+                                    id, user_id, session_token, expires_at, 
+                                    created_at, is_valid
+                                ) VALUES (
+                                    :id, :user_id, :session_token, :expires_at,
+                                    :created_at, :is_valid
+                                )
+                            """)
+                            
+                            self.connection.execute(insert_query, session_data)
+                            converted_count += 1
+                    
+                    except Exception as e:
+                        error_msg = f"Failed to convert session {session_doc.get('_id', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        self.conversion_stats['errors'].append(error_msg)
                 
-                # Insert converted data into PostgreSQL table
-                if converted_data:
-                    # Dynamically build INSERT statement
-                    columns = list(converted_data.keys())
-                    placeholders = [f":{col}" for col in columns]
-                    
-                    insert_sql = f"""
-                    INSERT INTO {table_name} ({', '.join(columns)}) 
-                    VALUES ({', '.join(placeholders)})
-                    RETURNING id
-                    """
-                    
-                    result = connection.execute(text(insert_sql), converted_data)
-                    postgresql_id = result.fetchone()[0]
-                    
-                    # Store ID mapping for foreign key relationships
-                    if table_name not in mongodb_to_pg_id_mapping:
-                        mongodb_to_pg_id_mapping[table_name] = {}
-                    mongodb_to_pg_id_mapping[table_name][mongodb_id] = postgresql_id
-                    
-                    # Record ID mapping in tracking table
-                    mapping_insert_sql = """
-                    INSERT INTO mongodb_id_mapping (table_name, mongodb_id, postgresql_id) 
-                    VALUES (:table_name, :mongodb_id, :postgresql_id)
-                    """
-                    connection.execute(text(mapping_insert_sql), {
-                        'table_name': table_name,
-                        'mongodb_id': mongodb_id,
-                        'postgresql_id': postgresql_id
-                    })
-                    
-                    logger.debug(f"Converted {mongodb_id} -> {postgresql_id} in {table_name}")
+                # Commit batch
+                self.connection.commit()
                 
-            except Exception as e:
-                logger.error(f"Failed to convert document {doc.get('_id', 'unknown')} in {collection_name}: {e}")
-                logger.error(f"Document data: {doc}")
-                logger.error(f"Converted data: {converted_data}")
-                raise
+                if converted_count % 50 == 0:
+                    logger.info(f"Converted {converted_count}/{total_sessions} sessions")
+            
+            logger.info(f"Successfully converted {converted_count} session documents")
+            return converted_count
+            
+        except Exception as e:
+            logger.error(f"Session conversion failed: {str(e)}")
+            self.connection.rollback()
+            raise
     
-    connection.commit()
-    logger.info("Simulated MongoDB data conversion completed successfully")
+    def convert_session_document(self, session_doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Convert individual MongoDB session document to PostgreSQL format.
+        
+        Args:
+            session_doc: MongoDB session document
+            
+        Returns:
+            Optional[Dict[str, Any]]: PostgreSQL-compatible session data or None if user not found
+        """
+        # Get user reference and map to PostgreSQL user ID
+        user_mongodb_id = self.convert_objectid_to_string(session_doc.get('userId'))
+        user_pg_id = self.get_mapped_id('users', user_mongodb_id)
+        
+        if not user_pg_id:
+            logger.warning(f"User not found for session {session_doc.get('_id')}")
+            return None
+        
+        # Generate sequential ID for PostgreSQL
+        session_id = self.get_next_sequence_value('user_sessions_id_seq')
+        
+        return {
+            'id': session_id,
+            'user_id': user_pg_id,
+            'session_token': session_doc.get('token') or session_doc.get('sessionToken'),
+            'expires_at': self.convert_mongodb_date(session_doc.get('expiresAt')),
+            'created_at': self.convert_mongodb_date(session_doc.get('createdAt', session_doc.get('created_at'))),
+            'is_valid': session_doc.get('isValid', session_doc.get('is_valid', True))
+        }
     
-    # Log conversion statistics
-    for table_name, id_mapping in mongodb_to_pg_id_mapping.items():
-        logger.info(f"Converted {len(id_mapping)} records in {table_name}")
+    def convert_business_entity_documents(self) -> int:
+        """
+        Convert MongoDB business entity documents to PostgreSQL business_entities table.
+        
+        Returns:
+            int: Number of business entities converted successfully
+        """
+        logger.info("Starting business entity document conversion...")
+        converted_count = 0
+        
+        try:
+            # Get MongoDB business entities collection
+            entities_collection = self.mongodb_db.businessEntities or self.mongodb_db.business_entities
+            total_entities = entities_collection.count_documents({})
+            
+            logger.info(f"Found {total_entities} business entity documents to convert")
+            
+            # Process entities in batches
+            batch_size = 100
+            for skip in range(0, total_entities, batch_size):
+                batch_entities = entities_collection.find().skip(skip).limit(batch_size)
+                
+                for entity_doc in batch_entities:
+                    try:
+                        # Convert MongoDB entity document to PostgreSQL format
+                        entity_data = self.convert_business_entity_document(entity_doc)
+                        
+                        if entity_data:  # Only insert if owner mapping exists
+                            # Insert into PostgreSQL business_entities table
+                            insert_query = text("""
+                                INSERT INTO business_entities (
+                                    id, name, description, owner_id, 
+                                    created_at, updated_at, status
+                                ) VALUES (
+                                    :id, :name, :description, :owner_id,
+                                    :created_at, :updated_at, :status
+                                )
+                            """)
+                            
+                            self.connection.execute(insert_query, entity_data)
+                            converted_count += 1
+                    
+                    except Exception as e:
+                        error_msg = f"Failed to convert business entity {entity_doc.get('_id', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        self.conversion_stats['errors'].append(error_msg)
+                
+                # Commit batch
+                self.connection.commit()
+                
+                if converted_count % 50 == 0:
+                    logger.info(f"Converted {converted_count}/{total_entities} business entities")
+            
+            logger.info(f"Successfully converted {converted_count} business entity documents")
+            return converted_count
+            
+        except Exception as e:
+            logger.error(f"Business entity conversion failed: {str(e)}")
+            self.connection.rollback()
+            raise
+    
+    def convert_business_entity_document(self, entity_doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Convert individual MongoDB business entity document to PostgreSQL format.
+        
+        Args:
+            entity_doc: MongoDB business entity document
+            
+        Returns:
+            Optional[Dict[str, Any]]: PostgreSQL-compatible entity data or None if owner not found
+        """
+        # Get owner reference and map to PostgreSQL user ID
+        owner_mongodb_id = self.convert_objectid_to_string(entity_doc.get('ownerId'))
+        owner_pg_id = self.get_mapped_id('users', owner_mongodb_id)
+        
+        if not owner_pg_id:
+            logger.warning(f"Owner not found for business entity {entity_doc.get('_id')}")
+            return None
+        
+        # Generate sequential ID for PostgreSQL
+        entity_id = self.get_next_sequence_value('business_entities_id_seq')
+        
+        # Store ObjectId mapping for relationship preservation
+        mongodb_id = self.convert_objectid_to_string(entity_doc.get('_id'))
+        self.store_id_mapping('business_entities', mongodb_id, entity_id)
+        
+        return {
+            'id': entity_id,
+            'name': entity_doc.get('name'),
+            'description': entity_doc.get('description'),
+            'owner_id': owner_pg_id,
+            'created_at': self.convert_mongodb_date(entity_doc.get('createdAt', entity_doc.get('created_at'))),
+            'updated_at': self.convert_mongodb_date(entity_doc.get('updatedAt', entity_doc.get('updated_at'))),
+            'status': entity_doc.get('status', 'active')
+        }
+    
+    def convert_entity_relationship_documents(self) -> int:
+        """
+        Convert MongoDB entity relationship documents to PostgreSQL entity_relationships table.
+        
+        Returns:
+            int: Number of entity relationships converted successfully
+        """
+        logger.info("Starting entity relationship document conversion...")
+        converted_count = 0
+        
+        try:
+            # Get MongoDB entity relationships collection
+            relationships_collection = self.mongodb_db.entityRelationships or self.mongodb_db.entity_relationships
+            total_relationships = relationships_collection.count_documents({})
+            
+            logger.info(f"Found {total_relationships} entity relationship documents to convert")
+            
+            # Process relationships in batches
+            batch_size = 100
+            for skip in range(0, total_relationships, batch_size):
+                batch_relationships = relationships_collection.find().skip(skip).limit(batch_size)
+                
+                for relationship_doc in batch_relationships:
+                    try:
+                        # Convert MongoDB relationship document to PostgreSQL format
+                        relationship_data = self.convert_entity_relationship_document(relationship_doc)
+                        
+                        if relationship_data:  # Only insert if entity mappings exist
+                            # Insert into PostgreSQL entity_relationships table
+                            insert_query = text("""
+                                INSERT INTO entity_relationships (
+                                    id, source_entity_id, target_entity_id, relationship_type,
+                                    created_at, is_active
+                                ) VALUES (
+                                    :id, :source_entity_id, :target_entity_id, :relationship_type,
+                                    :created_at, :is_active
+                                )
+                            """)
+                            
+                            self.connection.execute(insert_query, relationship_data)
+                            converted_count += 1
+                    
+                    except Exception as e:
+                        error_msg = f"Failed to convert entity relationship {relationship_doc.get('_id', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        self.conversion_stats['errors'].append(error_msg)
+                
+                # Commit batch
+                self.connection.commit()
+                
+                if converted_count % 50 == 0:
+                    logger.info(f"Converted {converted_count}/{total_relationships} entity relationships")
+            
+            logger.info(f"Successfully converted {converted_count} entity relationship documents")
+            return converted_count
+            
+        except Exception as e:
+            logger.error(f"Entity relationship conversion failed: {str(e)}")
+            self.connection.rollback()
+            raise
+    
+    def convert_entity_relationship_document(self, relationship_doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Convert individual MongoDB entity relationship document to PostgreSQL format.
+        
+        Args:
+            relationship_doc: MongoDB entity relationship document
+            
+        Returns:
+            Optional[Dict[str, Any]]: PostgreSQL-compatible relationship data or None if entities not found
+        """
+        # Get source entity reference and map to PostgreSQL ID
+        source_mongodb_id = self.convert_objectid_to_string(relationship_doc.get('sourceEntityId'))
+        source_pg_id = self.get_mapped_id('business_entities', source_mongodb_id)
+        
+        # Get target entity reference and map to PostgreSQL ID
+        target_mongodb_id = self.convert_objectid_to_string(relationship_doc.get('targetEntityId'))
+        target_pg_id = self.get_mapped_id('business_entities', target_mongodb_id)
+        
+        if not source_pg_id or not target_pg_id:
+            logger.warning(f"Entities not found for relationship {relationship_doc.get('_id')}")
+            return None
+        
+        # Generate sequential ID for PostgreSQL
+        relationship_id = self.get_next_sequence_value('entity_relationships_id_seq')
+        
+        return {
+            'id': relationship_id,
+            'source_entity_id': source_pg_id,
+            'target_entity_id': target_pg_id,
+            'relationship_type': relationship_doc.get('relationshipType', relationship_doc.get('type', 'related')),
+            'created_at': self.convert_mongodb_date(relationship_doc.get('createdAt', relationship_doc.get('created_at'))),
+            'is_active': relationship_doc.get('isActive', relationship_doc.get('is_active', True))
+        }
+    
+    def get_next_sequence_value(self, sequence_name: str) -> int:
+        """
+        Get next value from PostgreSQL sequence for primary key generation.
+        
+        Args:
+            sequence_name: Name of the PostgreSQL sequence
+            
+        Returns:
+            int: Next sequence value
+        """
+        result = self.connection.execute(text(f"SELECT nextval('{sequence_name}')"))
+        return result.fetchone()[0]
+    
+    def store_id_mapping(self, table_name: str, mongodb_id: str, postgresql_id: int) -> None:
+        """
+        Store MongoDB ObjectId to PostgreSQL ID mapping for relationship preservation.
+        
+        Args:
+            table_name: Target PostgreSQL table name
+            mongodb_id: MongoDB ObjectId string representation
+            postgresql_id: PostgreSQL auto-generated ID
+        """
+        # Create ID mapping table if not exists
+        self.connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS id_mappings (
+                table_name VARCHAR(100) NOT NULL,
+                mongodb_id VARCHAR(24) NOT NULL,
+                postgresql_id INTEGER NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (table_name, mongodb_id)
+            )
+        """))
+        
+        # Insert mapping
+        self.connection.execute(text("""
+            INSERT INTO id_mappings (table_name, mongodb_id, postgresql_id)
+            VALUES (:table_name, :mongodb_id, :postgresql_id)
+            ON CONFLICT (table_name, mongodb_id) DO UPDATE SET
+                postgresql_id = EXCLUDED.postgresql_id
+        """), {
+            'table_name': table_name,
+            'mongodb_id': mongodb_id,
+            'postgresql_id': postgresql_id
+        })
+    
+    def get_mapped_id(self, table_name: str, mongodb_id: str) -> Optional[int]:
+        """
+        Retrieve PostgreSQL ID for given MongoDB ObjectId.
+        
+        Args:
+            table_name: Target PostgreSQL table name
+            mongodb_id: MongoDB ObjectId string representation
+            
+        Returns:
+            Optional[int]: PostgreSQL ID or None if not found
+        """
+        if not mongodb_id:
+            return None
+        
+        result = self.connection.execute(text("""
+            SELECT postgresql_id FROM id_mappings
+            WHERE table_name = :table_name AND mongodb_id = :mongodb_id
+        """), {
+            'table_name': table_name,
+            'mongodb_id': mongodb_id
+        })
+        
+        row = result.fetchone()
+        return row[0] if row else None
+    
+    def perform_data_verification(self) -> Dict[str, Any]:
+        """
+        Perform real-time data verification framework per Section 4.4.2.
+        
+        Returns:
+            Dict[str, Any]: Verification results including counts and integrity checks
+        """
+        logger.info("Starting real-time data verification...")
+        verification_results = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'tables_verified': {},
+            'relationship_integrity': {},
+            'constraint_violations': [],
+            'data_consistency': {},
+            'overall_status': 'PENDING'
+        }
+        
+        try:
+            # Verify record counts for each table
+            tables_to_verify = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
+            
+            for table_name in tables_to_verify:
+                # Get PostgreSQL record count
+                pg_result = self.connection.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                pg_count = pg_result.fetchone()[0]
+                
+                # Get MongoDB record count
+                mongo_collection_name = self.get_mongodb_collection_name(table_name)
+                mongo_count = 0
+                if hasattr(self.mongodb_db, mongo_collection_name):
+                    collection = getattr(self.mongodb_db, mongo_collection_name)
+                    mongo_count = collection.count_documents({})
+                
+                verification_results['tables_verified'][table_name] = {
+                    'postgresql_count': pg_count,
+                    'mongodb_count': mongo_count,
+                    'match': pg_count == mongo_count,
+                    'variance': abs(pg_count - mongo_count)
+                }
+                
+                logger.info(f"Table {table_name}: PostgreSQL={pg_count}, MongoDB={mongo_count}")
+            
+            # Verify relationship integrity
+            verification_results['relationship_integrity'] = self.verify_relationship_integrity()
+            
+            # Verify constraint violations
+            verification_results['constraint_violations'] = self.check_constraint_violations()
+            
+            # Verify data consistency
+            verification_results['data_consistency'] = self.verify_data_consistency()
+            
+            # Determine overall verification status
+            all_counts_match = all(
+                table_data['match'] for table_data in verification_results['tables_verified'].values()
+            )
+            no_constraint_violations = len(verification_results['constraint_violations']) == 0
+            relationships_intact = verification_results['relationship_integrity']['all_valid']
+            
+            if all_counts_match and no_constraint_violations and relationships_intact:
+                verification_results['overall_status'] = 'PASSED'
+                logger.info("Data verification PASSED - All checks successful")
+            else:
+                verification_results['overall_status'] = 'FAILED'
+                logger.error("Data verification FAILED - Issues detected")
+            
+            return verification_results
+            
+        except Exception as e:
+            logger.error(f"Data verification failed: {str(e)}")
+            verification_results['overall_status'] = 'ERROR'
+            verification_results['error'] = str(e)
+            return verification_results
+    
+    def get_mongodb_collection_name(self, table_name: str) -> str:
+        """
+        Map PostgreSQL table name to MongoDB collection name.
+        
+        Args:
+            table_name: PostgreSQL table name
+            
+        Returns:
+            str: Corresponding MongoDB collection name
+        """
+        collection_mapping = {
+            'users': 'users',
+            'user_sessions': 'sessions',
+            'business_entities': 'businessEntities',
+            'entity_relationships': 'entityRelationships'
+        }
+        return collection_mapping.get(table_name, table_name)
+    
+    def verify_relationship_integrity(self) -> Dict[str, Any]:
+        """
+        Verify referential integrity of relationships after conversion.
+        
+        Returns:
+            Dict[str, Any]: Relationship integrity verification results
+        """
+        logger.info("Verifying relationship integrity...")
+        integrity_results = {
+            'foreign_key_violations': [],
+            'orphaned_records': [],
+            'circular_references': [],
+            'all_valid': True
+        }
+        
+        try:
+            # Check user_sessions -> users foreign key integrity
+            orphaned_sessions = self.connection.execute(text("""
+                SELECT id, user_id FROM user_sessions us
+                WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = us.user_id)
+            """)).fetchall()
+            
+            if orphaned_sessions:
+                integrity_results['foreign_key_violations'].append({
+                    'table': 'user_sessions',
+                    'foreign_key': 'user_id',
+                    'orphaned_count': len(orphaned_sessions),
+                    'sample_ids': [row[0] for row in orphaned_sessions[:5]]
+                })
+                integrity_results['all_valid'] = False
+            
+            # Check business_entities -> users foreign key integrity
+            orphaned_entities = self.connection.execute(text("""
+                SELECT id, owner_id FROM business_entities be
+                WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = be.owner_id)
+            """)).fetchall()
+            
+            if orphaned_entities:
+                integrity_results['foreign_key_violations'].append({
+                    'table': 'business_entities',
+                    'foreign_key': 'owner_id',
+                    'orphaned_count': len(orphaned_entities),
+                    'sample_ids': [row[0] for row in orphaned_entities[:5]]
+                })
+                integrity_results['all_valid'] = False
+            
+            # Check entity_relationships -> business_entities foreign key integrity
+            orphaned_relationships = self.connection.execute(text("""
+                SELECT id, source_entity_id, target_entity_id FROM entity_relationships er
+                WHERE NOT EXISTS (SELECT 1 FROM business_entities be WHERE be.id = er.source_entity_id)
+                   OR NOT EXISTS (SELECT 1 FROM business_entities be WHERE be.id = er.target_entity_id)
+            """)).fetchall()
+            
+            if orphaned_relationships:
+                integrity_results['foreign_key_violations'].append({
+                    'table': 'entity_relationships',
+                    'foreign_key': 'source_entity_id/target_entity_id',
+                    'orphaned_count': len(orphaned_relationships),
+                    'sample_ids': [row[0] for row in orphaned_relationships[:5]]
+                })
+                integrity_results['all_valid'] = False
+            
+            logger.info(f"Relationship integrity check completed: {'PASSED' if integrity_results['all_valid'] else 'FAILED'}")
+            return integrity_results
+            
+        except Exception as e:
+            logger.error(f"Relationship integrity verification failed: {str(e)}")
+            integrity_results['all_valid'] = False
+            integrity_results['error'] = str(e)
+            return integrity_results
+    
+    def check_constraint_violations(self) -> List[Dict[str, Any]]:
+        """
+        Check for constraint violations after data conversion.
+        
+        Returns:
+            List[Dict[str, Any]]: List of constraint violations found
+        """
+        logger.info("Checking constraint violations...")
+        violations = []
+        
+        try:
+            # Check unique constraint violations for usernames
+            duplicate_usernames = self.connection.execute(text("""
+                SELECT username, COUNT(*) as count FROM users
+                GROUP BY username HAVING COUNT(*) > 1
+            """)).fetchall()
+            
+            if duplicate_usernames:
+                violations.append({
+                    'constraint': 'unique_username',
+                    'table': 'users',
+                    'violation_count': len(duplicate_usernames),
+                    'sample_violations': [{'username': row[0], 'count': row[1]} for row in duplicate_usernames[:5]]
+                })
+            
+            # Check unique constraint violations for emails
+            duplicate_emails = self.connection.execute(text("""
+                SELECT email, COUNT(*) as count FROM users
+                GROUP BY email HAVING COUNT(*) > 1
+            """)).fetchall()
+            
+            if duplicate_emails:
+                violations.append({
+                    'constraint': 'unique_email',
+                    'table': 'users',
+                    'violation_count': len(duplicate_emails),
+                    'sample_violations': [{'email': row[0], 'count': row[1]} for row in duplicate_emails[:5]]
+                })
+            
+            # Check NOT NULL constraint violations
+            null_usernames = self.connection.execute(text("""
+                SELECT COUNT(*) FROM users WHERE username IS NULL
+            """)).fetchone()[0]
+            
+            if null_usernames > 0:
+                violations.append({
+                    'constraint': 'not_null_username',
+                    'table': 'users',
+                    'violation_count': null_usernames
+                })
+            
+            null_emails = self.connection.execute(text("""
+                SELECT COUNT(*) FROM users WHERE email IS NULL
+            """)).fetchone()[0]
+            
+            if null_emails > 0:
+                violations.append({
+                    'constraint': 'not_null_email',
+                    'table': 'users',
+                    'violation_count': null_emails
+                })
+            
+            logger.info(f"Constraint violation check completed: {len(violations)} violations found")
+            return violations
+            
+        except Exception as e:
+            logger.error(f"Constraint violation check failed: {str(e)}")
+            return [{'constraint': 'check_error', 'error': str(e)}]
+    
+    def verify_data_consistency(self) -> Dict[str, Any]:
+        """
+        Verify data consistency between MongoDB and PostgreSQL.
+        
+        Returns:
+            Dict[str, Any]: Data consistency verification results
+        """
+        logger.info("Verifying data consistency...")
+        consistency_results = {
+            'sample_verification': {},
+            'data_type_consistency': {},
+            'timestamp_preservation': {},
+            'all_consistent': True
+        }
+        
+        try:
+            # Sample 10 users for detailed verification
+            sample_users = self.connection.execute(text("""
+                SELECT id, username, email, created_at FROM users 
+                ORDER BY id LIMIT 10
+            """)).fetchall()
+            
+            consistent_samples = 0
+            for user_row in sample_users:
+                user_id, username, email, created_at = user_row
+                
+                # Find corresponding MongoDB document
+                mongo_user = self.mongodb_db.users.find_one({'username': username})
+                if mongo_user:
+                    # Compare key fields
+                    if (mongo_user.get('email') == email and
+                        mongo_user.get('username') == username):
+                        consistent_samples += 1
+            
+            consistency_results['sample_verification'] = {
+                'samples_checked': len(sample_users),
+                'consistent_samples': consistent_samples,
+                'consistency_rate': consistent_samples / len(sample_users) if sample_users else 0
+            }
+            
+            # Verify timestamp preservation
+            timestamp_check = self.connection.execute(text("""
+                SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL
+            """)).fetchone()[0]
+            
+            total_users = self.connection.execute(text("""
+                SELECT COUNT(*) FROM users
+            """)).fetchone()[0]
+            
+            consistency_results['timestamp_preservation'] = {
+                'users_with_timestamps': timestamp_check,
+                'total_users': total_users,
+                'timestamp_rate': timestamp_check / total_users if total_users else 0
+            }
+            
+            # Overall consistency determination
+            sample_rate = consistency_results['sample_verification']['consistency_rate']
+            timestamp_rate = consistency_results['timestamp_preservation']['timestamp_rate']
+            
+            if sample_rate >= 0.95 and timestamp_rate >= 0.90:
+                consistency_results['all_consistent'] = True
+                logger.info("Data consistency verification PASSED")
+            else:
+                consistency_results['all_consistent'] = False
+                logger.warning("Data consistency verification FAILED")
+            
+            return consistency_results
+            
+        except Exception as e:
+            logger.error(f"Data consistency verification failed: {str(e)}")
+            consistency_results['all_consistent'] = False
+            consistency_results['error'] = str(e)
+            return consistency_results
+    
+    def cleanup_resources(self) -> None:
+        """
+        Clean up MongoDB connections and temporary resources.
+        """
+        if self.mongodb_connection:
+            self.mongodb_connection.close()
+            logger.info("MongoDB connection closed")
+        
+        if self.session:
+            self.session.close()
+            logger.info("SQLAlchemy session closed")
 
 
 def upgrade():
     """
     Execute MongoDB to PostgreSQL data conversion migration.
     
-    This function implements the complete data migration workflow including:
-    - MongoDB ID mapping table creation
-    - Legacy MongoDB ID column addition
-    - Data conversion with type mapping
-    - Comprehensive validation framework
-    - Performance benchmark validation
-    - Real-time data verification
+    This function implements the complete data conversion workflow as specified
+    in Section 4.4.1 of the technical specification, including type mapping,
+    relationship preservation, and validation rule conversion.
     """
-    logger.info("=" * 80)
-    logger.info("Starting MongoDB to PostgreSQL Data Conversion Migration")
-    logger.info("Migration: 002_20241201_130000_mongodb_data_conversion")
-    logger.info("=" * 80)
+    logger.info("Starting MongoDB to PostgreSQL data conversion migration...")
     
     # Get database connection
     connection = op.get_bind()
-    session = Session(connection)
+    converter = MongoDBDataConverter(connection)
     
     try:
-        # Phase 1: Infrastructure Setup
-        logger.info("Phase 1: Setting up migration infrastructure...")
+        # Step 1: Establish MongoDB connection
+        if not converter.establish_mongodb_connection():
+            raise Exception("Failed to establish MongoDB connection")
         
-        # Create MongoDB ID mapping table for data traceability
-        create_mongodb_id_mapping_table(connection)
+        # Step 2: Create backup snapshot
+        backup_id = converter.create_backup_snapshot()
+        logger.info(f"Backup created: {backup_id}")
         
-        # Add legacy MongoDB ID columns to all tables
-        add_legacy_mongodb_id_columns(connection)
+        # Step 3: Convert user documents
+        users_converted = converter.convert_user_documents()
+        converter.conversion_stats['users_converted'] = users_converted
         
-        # Phase 2: Data Conversion
-        logger.info("Phase 2: Executing data conversion...")
+        # Step 4: Convert session documents
+        sessions_converted = converter.convert_session_documents()
+        converter.conversion_stats['sessions_converted'] = sessions_converted
         
-        # Simulate MongoDB data conversion (in production, this would connect to actual MongoDB)
-        simulate_mongodb_data_conversion(connection, session)
+        # Step 5: Convert business entity documents
+        entities_converted = converter.convert_business_entity_documents()
+        converter.conversion_stats['business_entities_converted'] = entities_converted
         
-        # Phase 3: Data Validation
-        logger.info("Phase 3: Executing comprehensive data validation...")
+        # Step 6: Convert entity relationship documents
+        relationships_converted = converter.convert_entity_relationship_documents()
+        converter.conversion_stats['entity_relationships_converted'] = relationships_converted
         
-        validator = MigrationValidator(session)
+        # Step 7: Perform data verification
+        verification_results = converter.perform_data_verification()
+        converter.verification_results = verification_results
         
-        # Validate record counts
-        record_count_valid = validator.validate_record_counts()
+        # Step 8: Evaluate verification results
+        if verification_results['overall_status'] != 'PASSED':
+            error_msg = "Data verification failed - migration cannot be completed"
+            logger.error(error_msg)
+            logger.error(f"Verification results: {json.dumps(verification_results, indent=2)}")
+            raise Exception(error_msg)
         
-        # Validate relationship integrity
-        relationship_valid = validator.validate_relationship_integrity()
+        # Step 9: Update sequence values to prevent conflicts
+        converter.update_sequence_values()
         
-        # Validate data constraints
-        constraints_valid = validator.validate_data_constraints()
+        # Step 10: Log migration summary
+        logger.info("Migration completed successfully:")
+        logger.info(f"  - Users converted: {users_converted}")
+        logger.info(f"  - Sessions converted: {sessions_converted}")
+        logger.info(f"  - Business entities converted: {entities_converted}")
+        logger.info(f"  - Entity relationships converted: {relationships_converted}")
+        logger.info(f"  - Errors encountered: {len(converter.conversion_stats['errors'])}")
         
-        # Validate performance benchmarks
-        performance_valid = validator.validate_performance_benchmarks()
+        # Store migration metadata
+        migration_metadata = {
+            'migration_id': revision,
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+            'backup_id': backup_id,
+            'conversion_stats': converter.conversion_stats,
+            'verification_results': verification_results
+        }
         
-        # Generate validation report
-        validation_report = validator.generate_validation_report()
-        
-        # Log validation results
-        logger.info("=" * 60)
-        logger.info("MIGRATION VALIDATION RESULTS")
-        logger.info("=" * 60)
-        logger.info(f"Record Count Validation: {'PASSED' if record_count_valid else 'FAILED'}")
-        logger.info(f"Relationship Integrity: {'PASSED' if relationship_valid else 'FAILED'}")
-        logger.info(f"Data Constraints: {'PASSED' if constraints_valid else 'FAILED'}")
-        logger.info(f"Performance Benchmarks: {'PASSED' if performance_valid else 'FAILED'}")
-        logger.info("=" * 60)
-        
-        # Check overall migration success
-        migration_successful = all([
-            record_count_valid,
-            relationship_valid,
-            constraints_valid,
-            performance_valid
-        ])
-        
-        if migration_successful:
-            logger.info("✓ MongoDB to PostgreSQL data conversion completed successfully!")
-            logger.info("✓ All validation checks passed")
-            logger.info("✓ Migration meets performance targets")
-            logger.info("✓ Zero data loss verified")
-            
-            # Store validation report
-            report_insert_sql = """
-            INSERT INTO migration_validation_reports (
-                migration_revision, 
-                validation_report, 
-                migration_status,
-                created_at
-            ) VALUES (
-                :revision, 
-                :report, 
-                :status,
-                :timestamp
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS migration_metadata (
+                migration_id VARCHAR(255) PRIMARY KEY,
+                metadata JSONB NOT NULL,
+                completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             )
-            """
-            
-            try:
-                # Create validation reports table if it doesn't exist
-                connection.execute(text("""
-                CREATE TABLE IF NOT EXISTS migration_validation_reports (
-                    id SERIAL PRIMARY KEY,
-                    migration_revision VARCHAR(255) NOT NULL,
-                    validation_report JSONB NOT NULL,
-                    migration_status VARCHAR(50) NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                );
-                """))
-                
-                connection.execute(text(report_insert_sql), {
-                    'revision': revision,
-                    'report': json.dumps(validation_report),
-                    'status': 'SUCCESS',
-                    'timestamp': datetime.now(timezone.utc)
-                })
-                connection.commit()
-                
-            except Exception as e:
-                logger.warning(f"Failed to store validation report: {e}")
-            
-        else:
-            logger.error("✗ MongoDB to PostgreSQL data conversion FAILED!")
-            logger.error("✗ One or more validation checks failed")
-            logger.error("✗ Migration rollback required")
-            
-            # Store failed validation report
-            try:
-                connection.execute(text(report_insert_sql), {
-                    'revision': revision,
-                    'report': json.dumps(validation_report),
-                    'status': 'FAILED',
-                    'timestamp': datetime.now(timezone.utc)
-                })
-                connection.commit()
-            except Exception as e:
-                logger.warning(f"Failed to store failed validation report: {e}")
-            
-            raise Exception("Migration validation failed - rollback required")
+        """))
+        
+        connection.execute(text("""
+            INSERT INTO migration_metadata (migration_id, metadata)
+            VALUES (:migration_id, :metadata)
+            ON CONFLICT (migration_id) DO UPDATE SET
+                metadata = EXCLUDED.metadata,
+                completed_at = NOW()
+        """), {
+            'migration_id': revision,
+            'metadata': json.dumps(migration_metadata)
+        })
+        
+        logger.info("MongoDB to PostgreSQL data conversion completed successfully")
         
     except Exception as e:
-        logger.error(f"Migration failed with error: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Migration failed: {str(e)}")
         
-        # Ensure session rollback
-        session.rollback()
-        connection.rollback()
+        # Log error details
+        if hasattr(converter, 'conversion_stats'):
+            logger.error(f"Conversion stats: {json.dumps(converter.conversion_stats, indent=2)}")
+        
+        # Attempt rollback
+        logger.info("Attempting migration rollback...")
+        try:
+            downgrade()
+        except Exception as rollback_error:
+            logger.error(f"Rollback failed: {str(rollback_error)}")
         
         raise
     
     finally:
-        session.close()
-    
-    logger.info("=" * 80)
-    logger.info("MongoDB to PostgreSQL Data Conversion Migration Complete")
-    logger.info("=" * 80)
+        # Clean up resources
+        converter.cleanup_resources()
 
 
 def downgrade():
     """
     Rollback MongoDB to PostgreSQL data conversion migration.
     
-    This function implements comprehensive rollback procedures including:
-    - Data removal with referential integrity preservation
-    - MongoDB ID mapping cleanup
-    - Legacy column removal
-    - Infrastructure cleanup
-    - Rollback validation
+    This function implements comprehensive rollback procedures as specified
+    in Section 4.4.2 of the technical specification, ensuring zero data loss
+    and complete restoration of pre-migration state.
     """
-    logger.info("=" * 80)
-    logger.info("Starting MongoDB to PostgreSQL Migration Rollback")
-    logger.info("Migration: 002_20241201_130000_mongodb_data_conversion")
-    logger.info("=" * 80)
+    logger.info("Starting MongoDB to PostgreSQL data conversion rollback...")
     
-    # Get database connection
     connection = op.get_bind()
-    session = Session(connection)
     
     try:
-        # Phase 1: Data Removal (reverse dependency order)
-        logger.info("Phase 1: Removing converted data in reverse dependency order...")
+        # Get migration metadata to find backup
+        metadata_result = connection.execute(text("""
+            SELECT metadata FROM migration_metadata
+            WHERE migration_id = :migration_id
+        """), {'migration_id': revision})
         
-        # Remove data in reverse dependency order to maintain referential integrity
-        rollback_tables = ['entity_relationships', 'business_entities', 'user_sessions', 'users']
+        metadata_row = metadata_result.fetchone()
+        backup_id = None
         
-        for table_name in rollback_tables:
-            try:
-                # Count records before deletion
-                count_before = session.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
+        if metadata_row:
+            metadata = json.loads(metadata_row[0])
+            backup_id = metadata.get('backup_id')
+            logger.info(f"Found backup ID: {backup_id}")
+        
+        # Clear converted data from PostgreSQL tables
+        tables_to_clear = ['entity_relationships', 'business_entities', 'user_sessions', 'users']
+        
+        for table_name in tables_to_clear:
+            # Check if table exists
+            table_exists = connection.execute(text("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_name = :table_name
+            """), {'table_name': table_name}).fetchone()[0]
+            
+            if table_exists:
+                # Clear table data
+                connection.execute(text(f"DELETE FROM {table_name}"))
                 
-                # Delete all records (CASCADE will handle dependencies)
-                session.execute(text(f"DELETE FROM {table_name}"))
+                # Reset sequence if exists
+                sequence_name = f"{table_name}_id_seq"
+                sequence_exists = connection.execute(text("""
+                    SELECT COUNT(*) FROM information_schema.sequences
+                    WHERE sequence_name = :sequence_name
+                """), {'sequence_name': sequence_name}).fetchone()[0]
                 
-                # Reset auto-increment sequence
-                session.execute(text(f"ALTER SEQUENCE {table_name}_id_seq RESTART WITH 1"))
+                if sequence_exists:
+                    connection.execute(text(f"ALTER SEQUENCE {sequence_name} RESTART WITH 1"))
                 
-                logger.info(f"Removed {count_before} records from {table_name}")
+                logger.info(f"Cleared table: {table_name}")
+        
+        # Restore from backup if available
+        if backup_id:
+            backup_timestamp = backup_id.split('_')[-1]
+            backup_tables = ['users', 'user_sessions', 'business_entities', 'entity_relationships']
+            
+            for table_name in backup_tables:
+                backup_table_name = f"{table_name}_backup_{backup_timestamp}"
                 
-            except Exception as e:
-                logger.error(f"Failed to remove data from {table_name}: {e}")
-                raise
-        
-        # Phase 2: Remove Legacy Columns
-        logger.info("Phase 2: Removing legacy MongoDB ID columns...")
-        
-        for table_name in rollback_tables:
-            try:
-                # Drop legacy MongoDB ID column and index
-                session.execute(text(f"DROP INDEX IF EXISTS idx_{table_name}_legacy_mongodb_id"))
-                session.execute(text(f"ALTER TABLE {table_name} DROP COLUMN IF EXISTS legacy_mongodb_id"))
+                # Check if backup table exists
+                backup_exists = connection.execute(text("""
+                    SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_name = :backup_table_name
+                """), {'backup_table_name': backup_table_name}).fetchone()[0]
                 
-                logger.info(f"Removed legacy MongoDB ID column from {table_name}")
-                
-            except Exception as e:
-                logger.error(f"Failed to remove legacy column from {table_name}: {e}")
-                raise
+                if backup_exists:
+                    # Restore data from backup
+                    connection.execute(text(f"""
+                        INSERT INTO {table_name}
+                        SELECT * FROM {backup_table_name}
+                    """))
+                    logger.info(f"Restored table {table_name} from backup")
         
-        # Phase 3: Remove Infrastructure
-        logger.info("Phase 3: Removing migration infrastructure...")
+        # Clean up migration artifacts
+        cleanup_tables = ['id_mappings']
+        for table_name in cleanup_tables:
+            table_exists = connection.execute(text("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_name = :table_name
+            """), {'table_name': table_name}).fetchone()[0]
+            
+            if table_exists:
+                connection.execute(text(f"DROP TABLE {table_name}"))
+                logger.info(f"Dropped table: {table_name}")
         
-        # Remove MongoDB ID mapping table
-        session.execute(text("DROP TABLE IF EXISTS mongodb_id_mapping CASCADE"))
+        # Remove migration metadata
+        connection.execute(text("""
+            DELETE FROM migration_metadata
+            WHERE migration_id = :migration_id
+        """), {'migration_id': revision})
         
-        # Remove migration validation reports table
-        session.execute(text("DROP TABLE IF EXISTS migration_validation_reports CASCADE"))
-        
-        # Commit all rollback changes
-        session.commit()
-        
-        # Phase 4: Rollback Validation
-        logger.info("Phase 4: Validating rollback completion...")
-        
-        # Verify all data has been removed
-        rollback_valid = True
-        
-        for table_name in rollback_tables:
-            try:
-                count = session.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
-                if count == 0:
-                    logger.info(f"✓ {table_name}: Empty (rollback successful)")
-                else:
-                    logger.error(f"✗ {table_name}: {count} records remaining (rollback failed)")
-                    rollback_valid = False
-                    
-            except Exception as e:
-                logger.error(f"Rollback validation failed for {table_name}: {e}")
-                rollback_valid = False
-        
-        # Verify infrastructure removal
-        try:
-            session.execute(text("SELECT 1 FROM mongodb_id_mapping LIMIT 1"))
-            logger.error("✗ mongodb_id_mapping table still exists (rollback failed)")
-            rollback_valid = False
-        except:
-            logger.info("✓ mongodb_id_mapping table removed (rollback successful)")
-        
-        if rollback_valid:
-            logger.info("✓ Migration rollback completed successfully!")
-            logger.info("✓ All data removed and infrastructure cleaned up")
-            logger.info("✓ Database restored to pre-migration state")
-        else:
-            logger.error("✗ Migration rollback FAILED!")
-            logger.error("✗ Manual intervention may be required")
-            raise Exception("Rollback validation failed")
+        connection.commit()
+        logger.info("MongoDB to PostgreSQL data conversion rollback completed successfully")
         
     except Exception as e:
-        logger.error(f"Rollback failed with error: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Ensure session rollback
-        session.rollback()
+        logger.error(f"Rollback failed: {str(e)}")
         connection.rollback()
-        
         raise
+
+
+# Additional utility methods for the converter class
+def add_converter_utility_methods():
+    """
+    Add utility methods to the MongoDBDataConverter class.
+    """
     
-    finally:
-        session.close()
+    def update_sequence_values(self) -> None:
+        """
+        Update PostgreSQL sequence values to prevent conflicts with future inserts.
+        """
+        sequences = ['users_id_seq', 'user_sessions_id_seq', 'business_entities_id_seq', 'entity_relationships_id_seq']
+        
+        for sequence_name in sequences:
+            try:
+                # Get current maximum ID from the table
+                table_name = sequence_name.replace('_id_seq', '')
+                max_id_result = self.connection.execute(text(f"SELECT COALESCE(MAX(id), 0) FROM {table_name}"))
+                max_id = max_id_result.fetchone()[0]
+                
+                # Set sequence to max_id + 1
+                self.connection.execute(text(f"SELECT setval('{sequence_name}', {max_id + 1}, false)"))
+                logger.info(f"Updated sequence {sequence_name} to start from {max_id + 1}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to update sequence {sequence_name}: {str(e)}")
     
-    logger.info("=" * 80)
-    logger.info("MongoDB to PostgreSQL Migration Rollback Complete")
-    logger.info("=" * 80)
+    # Add the method to the class
+    MongoDBDataConverter.update_sequence_values = update_sequence_values
+
+
+# Initialize utility methods
+add_converter_utility_methods()
