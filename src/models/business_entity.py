@@ -1,201 +1,368 @@
 """
-BusinessEntity Model
+BusinessEntity Model Implementation for Core Business Domain Objects.
 
-This module implements the BusinessEntity model representing core business domain objects
-with ownership relationships to Users and comprehensive metadata management. The model
-provides the primary business logic entities with proper foreign key constraints,
-status management, and relationship mapping to support complex business workflows
-and entity relationship patterns.
+This module implements the BusinessEntity model using Flask-SQLAlchemy declarative patterns
+with PostgreSQL optimization and comprehensive business workflow management. The model
+represents core business domain objects with ownership relationships to Users and provides
+the foundation for complex business entity associations and relationship mapping.
 
-Migration Context:
-- Converted from MongoDB business entity schemas to Flask-SQLAlchemy declarative model
-- Implements PostgreSQL-optimized field types for enhanced performance
-- Maintains all existing data relationships and business logic patterns
-- Supports complex business workflows through proper indexing and relationship mapping
+Key Features:
+- Flask-SQLAlchemy 3.1.1 declarative model patterns for PostgreSQL integration
+- Foreign key relationship to User model for entity ownership and access control
+- Business entity metadata fields (name, description, status) with PostgreSQL optimization
+- Foundation for EntityRelationship model associations per ER diagram requirements
+- Status field with proper indexing for business workflow management
+- Comprehensive business logic preservation from Node.js to Flask migration
 
-Dependencies:
-- Flask-SQLAlchemy 3.1.1 for declarative model patterns
-- PostgreSQL 15.x for relational database backend
-- Base model for common fields and functionality
-- User model for ownership relationships
+Technical Specification References:
+- Section 6.2.1: Database Technology Transition to PostgreSQL 15.x
+- Section 6.2.2.1: Entity Relationships and Data Models
+- Feature F-003: Database Model Conversion from MongoDB patterns
+- Feature F-005: Business Logic Preservation during migration
 """
 
-from datetime import datetime
-from sqlalchemy import Index, Text, String, Integer, DateTime, ForeignKey
-from sqlalchemy.orm import relationship, Mapped, mapped_column
-from typing import TYPE_CHECKING, List, Optional
-
-# Conditional imports for type checking to avoid circular imports
-if TYPE_CHECKING:
-    from .user import User
-    from .entity_relationship import EntityRelationship
-
-try:
-    from .base import BaseModel
-except ImportError:
-    # Fallback if base model doesn't exist yet - will be replaced once base.py is created
-    from flask_sqlalchemy import SQLAlchemy
-    from flask_sqlalchemy.model import Model
-    
-    # Temporary base class until base.py is available
-    class BaseModel(Model):
-        """Temporary base model class until base.py is available"""
-        pass
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
+from sqlalchemy import (
+    Column, Integer, String, Text, ForeignKey, DateTime, Index,
+    CheckConstraint, UniqueConstraint, text
+)
+from sqlalchemy.orm import relationship, validates
+from .base import BaseModel, db
 
 
 class BusinessEntity(BaseModel):
     """
-    BusinessEntity model representing core business domain objects with comprehensive
-    metadata management and ownership relationships.
+    BusinessEntity model representing core business domain objects with ownership relationships.
     
-    This model implements the primary business logic entities converted from MongoDB
-    schemas to Flask-SQLAlchemy declarative patterns. It provides proper foreign key
-    constraints, status management, and relationship mapping to support complex 
-    business workflows and entity relationship patterns.
+    This model implements the primary business logic entities with proper foreign key constraints,
+    status management, and relationship mapping to support complex business workflows and entity
+    relationship patterns. Serves as the foundation for business operations and entity associations.
     
-    Features:
-    - PostgreSQL-optimized field types for enhanced performance
-    - Indexed status field for efficient workflow management queries
-    - Foreign key relationship to User model for entity ownership
-    - Foundation for EntityRelationship model associations
-    - Comprehensive metadata fields for business context
+    Inherits from BaseModel for common functionality including:
+    - Auto-incrementing primary key (id)
+    - Automatic timestamp management (created_at, updated_at)
+    - Common utility methods for serialization and persistence
+    - PostgreSQL-optimized field patterns
     
-    Database Design:
-    - Implements auto-incrementing integer primary key for optimal join performance
-    - Text fields optimized for PostgreSQL storage and indexing
-    - Status field indexed for business workflow state management
-    - Created/updated timestamp fields for audit tracking
+    Attributes:
+        id (int): Primary key inherited from BaseModel for optimal join performance
+        name (str): Business entity name with length constraints and validation
+        description (str): Detailed description of the business entity purpose and context
+        owner_id (int): Foreign key to User model for entity ownership and access control
+        status (str): Business workflow status for entity lifecycle management
+        created_at (datetime): Timestamp inherited from BaseModel with automatic population
+        updated_at (datetime): Timestamp inherited from BaseModel with automatic updates
+        
+    Relationships:
+        owner (User): Many-to-one relationship with User model for entity ownership
+        source_relationships (List[EntityRelationship]): One-to-many as source entity
+        target_relationships (List[EntityRelationship]): One-to-many as target entity
     """
     
     __tablename__ = 'business_entities'
     
-    # Primary key - auto-incrementing integer for optimal join performance
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    
-    # Business metadata fields with PostgreSQL text field optimization
-    name: Mapped[str] = mapped_column(
-        String(255), 
+    # Business entity identification and metadata fields
+    # Per Section 6.2.2.1: Business entity metadata fields with PostgreSQL text field optimization
+    name = Column(
+        String(255),
         nullable=False,
-        index=True,  # Index for efficient name-based queries
-        comment="Business entity name - indexed for efficient lookup operations"
+        index=True,
+        comment="Business entity name with length constraints and validation"
     )
     
-    description: Mapped[Optional[str]] = mapped_column(
+    description = Column(
         Text,
         nullable=True,
         comment="Detailed description of the business entity purpose and context"
     )
     
-    # Foreign key relationship to User model for entity ownership
-    owner_id: Mapped[int] = mapped_column(
+    # Foreign key relationship to User model for entity ownership per Section 6.2.2.1
+    owner_id = Column(
         Integer,
         ForeignKey('users.id', ondelete='CASCADE'),
         nullable=False,
-        index=True,  # Index for efficient owner-based queries
-        comment="Foreign key to User model establishing entity ownership"
+        index=True,
+        comment="Foreign key to User model for entity ownership and access control"
     )
     
-    # Status field with proper indexing for business workflow management
-    status: Mapped[str] = mapped_column(
+    # Business workflow status field with indexing per workflow management requirements
+    status = Column(
         String(50),
         nullable=False,
         default='active',
-        index=True,  # Critical index for workflow state queries
-        comment="Business entity status for workflow management - indexed for performance"
+        index=True,
+        comment="Business workflow status for entity lifecycle management"
     )
     
-    # Timestamp fields for audit tracking and temporal management
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        comment="Entity creation timestamp with timezone awareness"
+    # Relationship mapping to User model per Section 6.2.2.1
+    owner = relationship(
+        'User',
+        back_populates='business_entities',
+        lazy='select',
+        doc="Many-to-one relationship with User model for entity ownership"
     )
     
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        comment="Entity last modification timestamp with automatic updates"
+    # Foundation for EntityRelationship model associations per ER diagram requirements
+    # These relationships will be established when EntityRelationship model is available
+    source_relationships = relationship(
+        'EntityRelationship',
+        foreign_keys='[EntityRelationship.source_entity_id]',
+        back_populates='source_entity',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+        doc="One-to-many relationship as source entity in business relationships"
     )
     
-    # Relationship declarations for comprehensive entity associations
-    
-    # Ownership relationship to User model
-    owner: Mapped["User"] = relationship(
-        "User",
-        back_populates="business_entities",
-        lazy="select",  # Explicit loading strategy for performance control
-        foreign_keys=[owner_id],
-        doc="User who owns this business entity - establishes access control context"
+    target_relationships = relationship(
+        'EntityRelationship',
+        foreign_keys='[EntityRelationship.target_entity_id]',
+        back_populates='target_entity',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+        doc="One-to-many relationship as target entity in business relationships"
     )
     
-    # Foundation for EntityRelationship model associations
-    # Source relationships where this entity is the source
-    source_relationships: Mapped[List["EntityRelationship"]] = relationship(
-        "EntityRelationship",
-        foreign_keys="EntityRelationship.source_entity_id",
-        back_populates="source_entity",
-        lazy="dynamic",  # Dynamic loading for large relationship collections
-        cascade="all, delete-orphan",
-        doc="Relationships where this entity serves as the source"
-    )
-    
-    # Target relationships where this entity is the target
-    target_relationships: Mapped[List["EntityRelationship"]] = relationship(
-        "EntityRelationship", 
-        foreign_keys="EntityRelationship.target_entity_id",
-        back_populates="target_entity",
-        lazy="dynamic",  # Dynamic loading for large relationship collections
-        cascade="all, delete-orphan",
-        doc="Relationships where this entity serves as the target"
-    )
-    
-    # Database indexes for query optimization
+    # Database constraints and indexes for data integrity and performance per Section 6.2.2.2
     __table_args__ = (
-        # Composite index for owner-status queries (common business workflow pattern)
-        Index('idx_business_entity_owner_status', 'owner_id', 'status'),
+        # Check constraints for data validation and business rules
+        CheckConstraint('LENGTH(name) >= 1', name='ck_business_entity_name_length'),
+        CheckConstraint('LENGTH(name) <= 255', name='ck_business_entity_name_max_length'),
+        CheckConstraint(
+            "status IN ('active', 'inactive', 'pending', 'archived', 'deleted')",
+            name='ck_business_entity_status_values'
+        ),
         
-        # Composite index for temporal queries with status filtering
-        Index('idx_business_entity_status_created', 'status', 'created_at'),
+        # Composite indexes for performance optimization per Section 6.2.2.2
+        Index('ix_business_entity_owner_status', 'owner_id', 'status'),
+        Index('ix_business_entity_name_status', 'name', 'status'),
+        Index('ix_business_entity_status_created', 'status', 'created_at'),
+        Index('ix_business_entity_owner_created', 'owner_id', 'created_at'),
         
-        # Index for name-based searches and sorting
-        Index('idx_business_entity_name_lower', 'name'),
+        # Unique constraint for name per owner to prevent duplicates
+        UniqueConstraint('owner_id', 'name', name='uq_business_entity_owner_name'),
         
-        {'comment': 'Business entities table storing core business domain objects'}
+        # Table-level comment for documentation
+        {'comment': 'Core business domain objects with ownership and workflow management'}
     )
     
-    def __repr__(self) -> str:
+    def __init__(self, name: str, owner_id: int, description: str = None, status: str = 'active', **kwargs) -> None:
         """
-        String representation of BusinessEntity for debugging and logging.
+        Initialize a new BusinessEntity instance with validation and business rules.
+        
+        Args:
+            name (str): Business entity name (required, 1-255 characters)
+            owner_id (int): Foreign key to User model for entity ownership
+            description (str, optional): Detailed description of the business entity
+            status (str, optional): Business workflow status (default: 'active')
+            **kwargs: Additional keyword arguments for model fields
+            
+        Raises:
+            ValueError: If name is empty or owner_id is invalid
+            ValueError: If status is not in allowed values
+        """
+        # Validate required fields and business rules
+        if not name or not name.strip():
+            raise ValueError("Business entity name is required and cannot be empty")
+        
+        if len(name.strip()) > 255:
+            raise ValueError("Business entity name cannot exceed 255 characters")
+        
+        if not owner_id or not isinstance(owner_id, int) or owner_id <= 0:
+            raise ValueError("Valid owner_id is required for business entity ownership")
+        
+        # Validate status field against allowed values
+        allowed_statuses = {'active', 'inactive', 'pending', 'archived', 'deleted'}
+        if status and status not in allowed_statuses:
+            raise ValueError(f"Status must be one of: {', '.join(allowed_statuses)}")
+        
+        # Initialize the model with validated data
+        super().__init__(**kwargs)
+        self.name = name.strip()
+        self.owner_id = owner_id
+        self.description = description.strip() if description else None
+        self.status = status or 'active'
+    
+    @validates('name')
+    def validate_name(self, key: str, value: str) -> str:
+        """
+        Validate business entity name field with business rules.
+        
+        Args:
+            key (str): Field name being validated
+            value (str): Value being set for the field
+            
+        Returns:
+            str: Validated and normalized name value
+            
+        Raises:
+            ValueError: If name validation fails
+        """
+        if not value or not value.strip():
+            raise ValueError("Business entity name is required and cannot be empty")
+        
+        if len(value.strip()) > 255:
+            raise ValueError("Business entity name cannot exceed 255 characters")
+        
+        return value.strip()
+    
+    @validates('status')
+    def validate_status(self, key: str, value: str) -> str:
+        """
+        Validate business entity status field against allowed workflow states.
+        
+        Args:
+            key (str): Field name being validated
+            value (str): Value being set for the field
+            
+        Returns:
+            str: Validated status value
+            
+        Raises:
+            ValueError: If status is not in allowed values
+        """
+        allowed_statuses = {'active', 'inactive', 'pending', 'archived', 'deleted'}
+        if value and value not in allowed_statuses:
+            raise ValueError(f"Status must be one of: {', '.join(allowed_statuses)}")
+        
+        return value or 'active'
+    
+    @validates('owner_id')
+    def validate_owner_id(self, key: str, value: int) -> int:
+        """
+        Validate owner_id field to ensure valid User reference.
+        
+        Args:
+            key (str): Field name being validated
+            value (int): Value being set for the field
+            
+        Returns:
+            int: Validated owner_id value
+            
+        Raises:
+            ValueError: If owner_id is invalid
+        """
+        if not value or not isinstance(value, int) or value <= 0:
+            raise ValueError("Valid owner_id is required for business entity ownership")
+        
+        return value
+    
+    # Business logic methods for entity management and workflow operations
+    
+    def is_active(self) -> bool:
+        """
+        Check if the business entity is in active status.
         
         Returns:
-            str: Human-readable representation including ID, name, and status
+            bool: True if entity status is 'active', False otherwise
         """
-        return f"<BusinessEntity(id={self.id}, name='{self.name}', status='{self.status}')>"
+        return self.status == 'active'
     
-    def __str__(self) -> str:
+    def is_archived(self) -> bool:
         """
-        User-friendly string representation for display purposes.
+        Check if the business entity is archived.
         
         Returns:
-            str: Business entity name for user interface display
+            bool: True if entity status is 'archived', False otherwise
         """
-        return self.name
+        return self.status == 'archived'
     
-    def to_dict(self) -> dict:
+    def activate(self) -> None:
+        """
+        Activate the business entity by setting status to 'active'.
+        
+        Updates the status field and automatically updates the updated_at timestamp.
+        """
+        self.status = 'active'
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def deactivate(self) -> None:
+        """
+        Deactivate the business entity by setting status to 'inactive'.
+        
+        Updates the status field and automatically updates the updated_at timestamp.
+        """
+        self.status = 'inactive'
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def archive(self) -> None:
+        """
+        Archive the business entity by setting status to 'archived'.
+        
+        Archives the entity for long-term storage while preserving relationships.
+        Updates the status field and automatically updates the updated_at timestamp.
+        """
+        self.status = 'archived'
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def soft_delete(self) -> None:
+        """
+        Soft delete the business entity by setting status to 'deleted'.
+        
+        Implements soft deletion pattern to preserve data integrity and relationships.
+        Updates the status field and automatically updates the updated_at timestamp.
+        """
+        self.status = 'deleted'
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def get_all_relationships(self) -> List['EntityRelationship']:
+        """
+        Retrieve all relationships where this entity is either source or target.
+        
+        Returns:
+            List[EntityRelationship]: Combined list of source and target relationships
+        """
+        source_rels = list(self.source_relationships.filter_by(is_active=True))
+        target_rels = list(self.target_relationships.filter_by(is_active=True))
+        return source_rels + target_rels
+    
+    def get_related_entities(self) -> List['BusinessEntity']:
+        """
+        Retrieve all business entities related to this entity through relationships.
+        
+        Returns:
+            List[BusinessEntity]: List of related business entities
+        """
+        related_entities = []
+        
+        # Get entities where this is the source
+        for rel in self.source_relationships.filter_by(is_active=True):
+            if rel.target_entity:
+                related_entities.append(rel.target_entity)
+        
+        # Get entities where this is the target
+        for rel in self.target_relationships.filter_by(is_active=True):
+            if rel.source_entity:
+                related_entities.append(rel.source_entity)
+        
+        return related_entities
+    
+    def can_be_accessed_by(self, user_id: int) -> bool:
+        """
+        Check if a user can access this business entity based on ownership.
+        
+        Args:
+            user_id (int): ID of the user to check access for
+            
+        Returns:
+            bool: True if user can access the entity, False otherwise
+        """
+        return self.owner_id == user_id
+    
+    def to_dict(self, include_relationships: bool = False, include_owner: bool = False) -> Dict[str, Any]:
         """
         Convert BusinessEntity instance to dictionary representation.
         
-        This method provides a standardized way to serialize the model
-        for API responses, maintaining consistency with original Node.js
-        implementation patterns.
-        
+        Args:
+            include_relationships (bool): Whether to include relationship data
+            include_owner (bool): Whether to include owner information
+            
         Returns:
-            dict: Dictionary containing all model fields and metadata
+            Dict[str, Any]: Dictionary representation of the business entity
         """
-        return {
+        result = {
             'id': self.id,
             'name': self.name,
             'description': self.description,
@@ -204,111 +371,125 @@ class BusinessEntity(BaseModel):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+        
+        # Include owner information if requested
+        if include_owner and self.owner:
+            result['owner'] = {
+                'id': self.owner.id,
+                'username': self.owner.username,
+                'email': self.owner.email
+            }
+        
+        # Include relationship data if requested
+        if include_relationships:
+            result['relationships'] = {
+                'source_count': self.source_relationships.count(),
+                'target_count': self.target_relationships.count(),
+                'total_count': (self.source_relationships.count() + 
+                              self.target_relationships.count())
+            }
+        
+        return result
     
     @classmethod
-    def get_active_entities(cls, owner_id: Optional[int] = None):
+    def find_by_owner(cls, owner_id: int, status: Optional[str] = None) -> List['BusinessEntity']:
         """
-        Class method to retrieve active business entities with optional owner filtering.
-        
-        This method provides a common query pattern for business workflow
-        operations that need to work with active entities only.
+        Find all business entities owned by a specific user.
         
         Args:
-            owner_id (Optional[int]): Filter results by owner ID if provided
+            owner_id (int): ID of the owner user
+            status (Optional[str]): Filter by specific status (optional)
             
         Returns:
-            Query: SQLAlchemy query object for active entities
+            List[BusinessEntity]: List of business entities owned by the user
         """
-        from flask_sqlalchemy import db
+        query = cls.query.filter_by(owner_id=owner_id)
         
-        query = db.session.query(cls).filter(cls.status == 'active')
+        if status:
+            query = query.filter_by(status=status)
         
-        if owner_id is not None:
-            query = query.filter(cls.owner_id == owner_id)
-            
-        return query.order_by(cls.name)
+        return query.order_by(cls.created_at.desc()).all()
     
     @classmethod
-    def get_by_status(cls, status: str, owner_id: Optional[int] = None):
+    def find_by_name_and_owner(cls, name: str, owner_id: int) -> Optional['BusinessEntity']:
         """
-        Class method to retrieve business entities by status with optional owner filtering.
-        
-        This method supports business workflow operations that need to query
-        entities based on their current workflow state.
+        Find business entity by name and owner (unique constraint).
         
         Args:
-            status (str): Entity status to filter by
-            owner_id (Optional[int]): Filter results by owner ID if provided
+            name (str): Name of the business entity
+            owner_id (int): ID of the owner user
             
         Returns:
-            Query: SQLAlchemy query object for entities with specified status
+            Optional[BusinessEntity]: Business entity if found, None otherwise
         """
-        from flask_sqlalchemy import db
-        
-        query = db.session.query(cls).filter(cls.status == status)
-        
-        if owner_id is not None:
-            query = query.filter(cls.owner_id == owner_id)
-            
-        return query.order_by(cls.created_at.desc())
+        return cls.query.filter_by(name=name, owner_id=owner_id).first()
     
-    def update_status(self, new_status: str) -> None:
+    @classmethod
+    def find_active_entities(cls, limit: Optional[int] = None) -> List['BusinessEntity']:
         """
-        Update entity status with automatic timestamp management.
-        
-        This method provides a controlled way to update entity status
-        while ensuring proper audit trail maintenance through automatic
-        timestamp updates.
+        Find all active business entities across all users.
         
         Args:
-            new_status (str): New status value for the entity
-        """
-        self.status = new_status
-        self.updated_at = datetime.utcnow()
-    
-    def get_related_entities(self, relationship_type: Optional[str] = None):
-        """
-        Retrieve entities related to this business entity through EntityRelationship.
-        
-        This method provides access to complex business relationship patterns
-        by traversing both source and target relationships.
-        
-        Args:
-            relationship_type (Optional[str]): Filter by specific relationship type
+            limit (Optional[int]): Maximum number of entities to return
             
         Returns:
-            List[BusinessEntity]: List of related business entities
+            List[BusinessEntity]: List of active business entities
         """
-        related_entities = []
+        query = cls.query.filter_by(status='active').order_by(cls.created_at.desc())
         
-        # Get entities where this is the source
-        source_query = self.source_relationships
-        if relationship_type:
-            source_query = source_query.filter_by(relationship_type=relationship_type)
+        if limit:
+            query = query.limit(limit)
         
-        for rel in source_query.filter_by(is_active=True):
-            if rel.target_entity:
-                related_entities.append(rel.target_entity)
+        return query.all()
+    
+    @classmethod
+    def get_entity_statistics(cls, owner_id: Optional[int] = None) -> Dict[str, int]:
+        """
+        Get statistics about business entities by status.
         
-        # Get entities where this is the target  
-        target_query = self.target_relationships
-        if relationship_type:
-            target_query = target_query.filter_by(relationship_type=relationship_type)
+        Args:
+            owner_id (Optional[int]): Filter by specific owner (optional)
             
-        for rel in target_query.filter_by(is_active=True):
-            if rel.source_entity:
-                related_entities.append(rel.source_entity)
+        Returns:
+            Dict[str, int]: Statistics dictionary with counts by status
+        """
+        query = cls.query
         
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_entities = []
-        for entity in related_entities:
-            if entity.id not in seen:
-                seen.add(entity.id)
-                unique_entities.append(entity)
-                
-        return unique_entities
+        if owner_id:
+            query = query.filter_by(owner_id=owner_id)
+        
+        stats = {
+            'total': query.count(),
+            'active': query.filter_by(status='active').count(),
+            'inactive': query.filter_by(status='inactive').count(),
+            'pending': query.filter_by(status='pending').count(),
+            'archived': query.filter_by(status='archived').count(),
+            'deleted': query.filter_by(status='deleted').count(),
+        }
+        
+        return stats
+    
+    def __repr__(self) -> str:
+        """
+        String representation of BusinessEntity instance for debugging and logging.
+        
+        Returns:
+            str: String representation of BusinessEntity instance
+        """
+        return (
+            f"<BusinessEntity(id={self.id}, name='{self.name}', "
+            f"owner_id={self.owner_id}, status='{self.status}')>"
+        )
+    
+    def __str__(self) -> str:
+        """
+        Human-readable string representation of BusinessEntity instance.
+        
+        Returns:
+            str: User-friendly string representation
+        """
+        return f"BusinessEntity: {self.name} (Status: {self.status})"
 
 
-# Export the model for package-level imports
+# Export the model for use throughout the application
 __all__ = ['BusinessEntity']
