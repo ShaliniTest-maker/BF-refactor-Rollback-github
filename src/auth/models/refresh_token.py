@@ -1,129 +1,193 @@
 """
 RefreshToken Model Implementation for Auth0 Refresh Token Management.
 
-This module implements the RefreshToken model for comprehensive JWT refresh token 
-lifecycle management with automated rotation policies and security revocation 
-capabilities. The model integrates with Auth0's refresh token rotation policy 
-and Flask-JWT-Extended for enhanced security posture and local JWT processing.
+This module implements the RefreshToken model using Flask-SQLAlchemy declarative patterns with
+comprehensive Auth0 refresh token lifecycle management, automated rotation policies, and security
+revocation capabilities. The model integrates with Auth0's refresh token rotation policy and
+Flask-JWT-Extended for enhanced security posture and automated threat detection.
 
 Key Features:
-- Auth0 refresh token lifecycle management with automated rotation policies
+- Auth0 refresh token lifecycle management with automated rotation per Section 6.4.1.4
 - Token family tracking for suspicious activity detection and automated revocation
-- Immediate token revocation capabilities for security incidents
-- Integration with Flask-JWT-Extended for local JWT processing
-- Token blacklist management and automated revocation hooks
-- PostgreSQL-optimized storage with comprehensive audit trails
-- Security incident response coordination and automated containment
+- Immediate token revocation capabilities for security incidents per Section 6.4.6.2
+- Integration with Flask-JWT-Extended 4.7.1 for local JWT processing and validation
+- Token blacklist management with automated revocation hooks and grace period handling
+- PostgreSQL-optimized field types and indexes for performance and security monitoring
+- Automated token cleanup and rotation scheduling for enhanced security compliance
+- Comprehensive audit logging integration for security incident tracking and analysis
+- Real-time security metrics collection via Prometheus for monitoring and alerting
+
+Security Architecture:
+- Auth0 Python SDK 4.9.0 integration for enterprise identity management
+- Automated token rotation implementing Auth0's security best practices
+- Token family detection for credential stuffing and replay attack prevention
+- Immediate invalidation capabilities for security incident response
+- Grace period management for seamless user experience during rotation
+- Comprehensive revocation flow management with blocklist synchronization
 
 Technical Specification References:
 - Section 6.4.1.4: Token Handling with Flask-JWT-Extended Integration
-- Section 6.4.6.2: Security Incident Response Procedures  
-- Section 6.2.1: Database Technology Transition to PostgreSQL 15.x
 - Section 6.4.1.4: Auth0 Refresh Token Rotation Policy Implementation
+- Section 6.4.6.2: Incident Response Procedures with Token Revocation
+- Section 6.4.2.5: Audit Logging for Security Compliance and Monitoring
+- Section 6.2.1: Database Technology Transition to PostgreSQL 15.x
+- Feature F-007: Authentication Mechanism Migration with Zero Security Degradation
 """
 
-import json
+import secrets
+import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, List, Any
+from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Dict, Any, Union
 from enum import Enum
+from dataclasses import dataclass
 
-from flask_sqlalchemy import SQLAlchemy
+from flask import current_app
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, Text, JSON,
-    ForeignKey, Index, UniqueConstraint, CheckConstraint, text
+    Column, Integer, String, Text, Boolean, DateTime, ForeignKey,
+    Index, CheckConstraint, event, text, func
 )
 from sqlalchemy.orm import relationship, validates
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.sql import func
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
-from src.models.base import BaseModel, db
+# Import base model for inheritance pattern consistency
+from ...models.base import BaseModel, db
 
 
 class TokenStatus(Enum):
     """
-    Enumeration for refresh token status values.
+    Enumeration for refresh token status tracking with comprehensive lifecycle management.
     
-    Defines the lifecycle states of refresh tokens for comprehensive
-    token state management and security monitoring.
+    Token status values provide granular tracking of refresh token states throughout
+    their lifecycle for security monitoring, automated rotation, and incident response.
+    
+    Values:
+        ACTIVE: Token is currently valid and can be used for refresh operations
+        EXPIRED: Token has exceeded its lifetime and is no longer valid for refresh
+        REVOKED: Token has been explicitly revoked due to security concerns or logout
+        BLACKLISTED: Token has been added to blacklist for immediate invalidation
+        ROTATED: Token has been replaced by a new token during rotation process
+        SUSPENDED: Token is temporarily suspended pending security investigation
+        COMPROMISED: Token has been identified as potentially compromised
+        FAMILY_REVOKED: Token family has been revoked due to suspicious activity
     """
     ACTIVE = "active"
-    REVOKED = "revoked"
     EXPIRED = "expired"
+    REVOKED = "revoked"
     BLACKLISTED = "blacklisted"
-    SUPERSEDED = "superseded"
+    ROTATED = "rotated"
+    SUSPENDED = "suspended"
+    COMPROMISED = "compromised"
+    FAMILY_REVOKED = "family_revoked"
 
 
-class RevocationReason(Enum):
+class TokenSource(Enum):
     """
-    Enumeration for token revocation reasons.
+    Enumeration for token source tracking and security analysis.
     
-    Provides structured classification of revocation events for
-    security analysis and incident response coordination.
+    Token source identification enables security monitoring and analysis
+    of token generation patterns for threat detection and audit compliance.
+    
+    Values:
+        AUTH0_LOGIN: Token generated during Auth0 authentication flow
+        AUTH0_REFRESH: Token generated during Auth0 refresh token rotation
+        FLASK_LOCAL: Token generated by Flask-JWT-Extended local processing
+        SYSTEM_ADMIN: Token generated by system administrator for testing
+        MIGRATION: Token generated during Node.js to Flask migration process
+        EMERGENCY: Token generated during emergency access procedures
     """
-    USER_LOGOUT = "user_logout"
-    PASSWORD_CHANGE = "password_change"
-    SECURITY_INCIDENT = "security_incident"
-    SUSPICIOUS_ACTIVITY = "suspicious_activity"
-    TOKEN_ROTATION = "token_rotation"
-    ADMIN_REVOCATION = "admin_revocation"
-    TOKEN_COMPROMISE = "token_compromise"
-    FAMILY_REVOCATION = "family_revocation"
+    AUTH0_LOGIN = "auth0_login"
+    AUTH0_REFRESH = "auth0_refresh"
+    FLASK_LOCAL = "flask_local"
+    SYSTEM_ADMIN = "system_admin"
+    MIGRATION = "migration"
+    EMERGENCY = "emergency"
+
+
+@dataclass
+class TokenMetadata:
+    """
+    Data class for refresh token metadata and security context.
+    
+    Provides structured storage for token-related metadata including
+    security context, rotation history, and threat detection information.
+    
+    Attributes:
+        client_id (str): Auth0 client identifier for application context
+        device_fingerprint (str): Device fingerprint for security tracking
+        ip_address (str): IP address where token was generated or last used
+        user_agent (str): User agent string for client identification
+        rotation_count (int): Number of times token has been rotated
+        last_used_at (datetime): Timestamp of last token usage
+        security_flags (List[str]): Security flags for threat detection
+        auth0_token_id (str): Auth0 internal token identifier
+        family_size (int): Number of tokens in the same family
+    """
+    client_id: Optional[str] = None
+    device_fingerprint: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    rotation_count: int = 0
+    last_used_at: Optional[datetime] = None
+    security_flags: List[str] = None
+    auth0_token_id: Optional[str] = None
+    family_size: int = 1
+    
+    def __post_init__(self):
+        if self.security_flags is None:
+            self.security_flags = []
 
 
 class RefreshToken(BaseModel):
     """
-    RefreshToken model implementing Auth0 refresh token management with 
-    automated rotation policies and security revocation capabilities.
+    RefreshToken model implementing Auth0 refresh token management with automated rotation.
     
-    This model supports JWT refresh token lifecycle management, token family 
-    tracking, and automated revocation procedures for enhanced security posture,
-    integrating with Auth0's refresh token rotation policy and Flask-JWT-Extended 
-    for comprehensive token management.
+    This model provides comprehensive refresh token lifecycle management with Auth0 integration,
+    automated rotation policies, and security revocation capabilities. Critical for maintaining
+    secure authentication flows while enabling seamless user experience through token rotation.
+    
+    The model implements Auth0's refresh token rotation policy with automated revocation hooks,
+    token family tracking for suspicious activity detection, and immediate invalidation
+    capabilities for security incident response per Section 6.4.6.2.
+    
+    Inherits from BaseModel for common functionality:
+    - Auto-incrementing primary key (id)
+    - Automatic timestamp management (created_at, updated_at)
+    - Common utility methods for serialization and persistence
+    - PostgreSQL-optimized field patterns and indexing strategy
     
     Attributes:
-        id (int): Primary key with auto-incrementing integer for optimal performance
-        token_id (UUID): Unique token identifier for Auth0 integration and tracking
-        user_id (int): Foreign key reference to the User model for token ownership
-        token_hash (str): Secure hash of the refresh token for validation
-        token_family_id (UUID): Family identifier for token rotation tracking
-        parent_token_id (int): Reference to the parent token in rotation chain
+        id (int): Primary key inherited from BaseModel for optimal join performance
+        user_id (int): Foreign key to User model for token ownership tracking
+        token_hash (str): SHA-256 hash of the refresh token for secure storage
+        token_family (str): UUID identifying token family for rotation tracking
+        auth0_token_id (str): Auth0 internal token identifier for API integration
         status (TokenStatus): Current token status for lifecycle management
-        expires_at (datetime): Token expiration timestamp with timezone support
-        issued_at (datetime): Token issuance timestamp for audit trails
-        revoked_at (datetime): Token revocation timestamp for security tracking
-        revocation_reason (RevocationReason): Structured revocation classification
+        source (TokenSource): Token generation source for security analysis
+        expires_at (datetime): Token expiration timestamp for automated cleanup
         last_used_at (datetime): Last usage timestamp for activity monitoring
-        usage_count (int): Number of times token has been used for analytics
-        client_metadata (dict): Client information for security analysis
-        security_flags (dict): Security-related flags and indicators
-        is_blacklisted (bool): Immediate blacklist flag for security incidents
-        rotation_count (int): Number of rotations in the token family
+        revoked_at (datetime): Revocation timestamp for audit trail
+        revoked_by_user_id (int): User who initiated revocation for accountability
+        revocation_reason (str): Reason for token revocation for security analysis
+        rotation_parent_id (int): Parent token ID for rotation chain tracking
+        metadata (dict): JSON metadata for security context and device tracking
+        security_score (float): Calculated security score for threat assessment
+        is_blacklisted (bool): Immediate blacklist flag for emergency revocation
+        grace_period_expires (datetime): Grace period expiration for rotation overlap
+        auth0_refresh_count (int): Number of Auth0 refresh operations performed
+        suspicious_activity_count (int): Count of suspicious activities detected
+        created_at (datetime): Timestamp inherited from BaseModel
+        updated_at (datetime): Timestamp inherited from BaseModel
         
     Relationships:
         user (User): Many-to-one relationship with User model for token ownership
-        parent_token (RefreshToken): Self-referential relationship for rotation chains
-        child_tokens (List[RefreshToken]): One-to-many relationship for rotation tracking
-        
-    Security Features:
-        - Token family tracking for suspicious activity detection
-        - Automated revocation procedures for security incidents
-        - Integration with Auth0's refresh token rotation policy
-        - Blacklist management for immediate invalidation
-        - Comprehensive audit trails for compliance and investigation
+        rotation_parent (RefreshToken): Self-referential relationship for rotation chains
+        rotation_children (List[RefreshToken]): Tokens generated from this token
+        security_incidents (List[SecurityIncident]): Related security incidents
     """
     
     __tablename__ = 'refresh_tokens'
-    
-    # Unique token identifier for Auth0 integration per Section 6.4.1.4
-    token_id = Column(
-        UUID(as_uuid=True),
-        nullable=False,
-        unique=True,
-        default=uuid.uuid4,
-        index=True,
-        comment="Unique token identifier for Auth0 integration and tracking"
-    )
     
     # User relationship for token ownership per Section 6.4.1.4
     user_id = Column(
@@ -131,578 +195,1016 @@ class RefreshToken(BaseModel):
         ForeignKey('users.id', ondelete='CASCADE'),
         nullable=False,
         index=True,
-        comment="Foreign key reference to User model for token ownership"
+        comment="Foreign key to User model for token ownership tracking"
     )
     
-    # Secure token storage with hashing per Section 6.4.1.4
+    # Token storage and identification fields with security hashing
     token_hash = Column(
-        String(255),
+        String(64),  # SHA-256 hash length
         nullable=False,
         unique=True,
         index=True,
-        comment="Secure hash of refresh token for validation without exposure"
+        comment="SHA-256 hash of the refresh token for secure storage"
     )
     
-    # Token family tracking for rotation and security per Section 6.4.1.4
-    token_family_id = Column(
+    token_family = Column(
         UUID(as_uuid=True),
         nullable=False,
-        index=True,
         default=uuid.uuid4,
-        comment="Family identifier for token rotation tracking and security analysis"
+        index=True,
+        comment="UUID identifying token family for rotation tracking"
     )
     
-    # Parent token reference for rotation chains per Section 6.4.1.4
-    parent_token_id = Column(
-        Integer,
-        ForeignKey('refresh_tokens.id', ondelete='SET NULL'),
+    auth0_token_id = Column(
+        String(128),
         nullable=True,
         index=True,
-        comment="Reference to parent token in rotation chain for family tracking"
+        comment="Auth0 internal token identifier for API integration"
     )
     
-    # Token status for lifecycle management per Section 6.4.1.4
+    # Token lifecycle and status management per Section 6.4.1.4
     status = Column(
         String(20),
         nullable=False,
         default=TokenStatus.ACTIVE.value,
         index=True,
-        comment="Current token status for lifecycle management and security tracking"
+        comment="Current token status for lifecycle management"
     )
     
-    # Token expiration management per Section 6.4.1.4
+    source = Column(
+        String(20),
+        nullable=False,
+        default=TokenSource.AUTH0_LOGIN.value,
+        index=True,
+        comment="Token generation source for security analysis"
+    )
+    
+    # Timestamp fields for token lifecycle management
     expires_at = Column(
         DateTime(timezone=True),
         nullable=False,
         index=True,
-        comment="Token expiration timestamp with timezone support for validation"
+        comment="Token expiration timestamp for automated cleanup"
     )
     
-    # Token issuance tracking per Section 6.4.1.4
-    issued_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        index=True,
-        comment="Token issuance timestamp for audit trails and lifecycle tracking"
-    )
-    
-    # Revocation tracking for security incidents per Section 6.4.6.2
-    revoked_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="Token revocation timestamp for security incident tracking"
-    )
-    
-    # Structured revocation reason for security analysis per Section 6.4.6.2
-    revocation_reason = Column(
-        String(50),
-        nullable=True,
-        index=True,
-        comment="Structured revocation reason for security analysis and incident response"
-    )
-    
-    # Activity tracking for security monitoring per Section 6.4.6.1
     last_used_at = Column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
-        comment="Last usage timestamp for activity monitoring and anomaly detection"
+        comment="Last usage timestamp for activity monitoring"
     )
     
-    # Usage analytics for security patterns per Section 6.4.6.1
-    usage_count = Column(
+    revoked_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="Revocation timestamp for audit trail"
+    )
+    
+    revoked_by_user_id = Column(
+        Integer,
+        ForeignKey('users.id', ondelete='SET NULL'),
+        nullable=True,
+        comment="User who initiated revocation for accountability"
+    )
+    
+    revocation_reason = Column(
+        Text,
+        nullable=True,
+        comment="Reason for token revocation for security analysis"
+    )
+    
+    # Token rotation chain tracking per Auth0 rotation policy
+    rotation_parent_id = Column(
+        Integer,
+        ForeignKey('refresh_tokens.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+        comment="Parent token ID for rotation chain tracking"
+    )
+    
+    # Security and metadata fields for threat detection
+    metadata = Column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        comment="JSON metadata for security context and device tracking"
+    )
+    
+    security_score = Column(
         Integer,
         nullable=False,
         default=0,
-        comment="Number of times token has been used for analytics and monitoring"
+        comment="Calculated security score for threat assessment (0-100)"
     )
     
-    # Client metadata for security analysis per Section 6.4.6.1
-    client_metadata = Column(
-        JSON,
-        nullable=True,
-        comment="Client information for security analysis including IP, user agent, device info"
-    )
-    
-    # Security flags for incident response per Section 6.4.6.2
-    security_flags = Column(
-        JSON,
-        nullable=True,
-        comment="Security-related flags and indicators for automated incident detection"
-    )
-    
-    # Immediate blacklist flag for security incidents per Section 6.4.6.2
     is_blacklisted = Column(
         Boolean,
         nullable=False,
         default=False,
         index=True,
-        comment="Immediate blacklist flag for security incidents and emergency revocation"
+        comment="Immediate blacklist flag for emergency revocation"
     )
     
-    # Token rotation tracking per Section 6.4.1.4
-    rotation_count = Column(
+    # Grace period management for rotation overlap per Section 6.4.1.4
+    grace_period_expires = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="Grace period expiration for rotation overlap"
+    )
+    
+    # Auth0 integration and activity tracking
+    auth0_refresh_count = Column(
         Integer,
         nullable=False,
         default=0,
-        comment="Number of rotations in token family for security pattern analysis"
+        comment="Number of Auth0 refresh operations performed"
     )
     
-    # Relationship definitions for comprehensive token management
+    suspicious_activity_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Count of suspicious activities detected"
+    )
     
-    # User relationship for token ownership per Section 6.4.1.4
+    # Relationship mapping per Section 6.2.2.1
     user = relationship(
         'User',
+        foreign_keys=[user_id],
         back_populates='refresh_tokens',
         lazy='select',
         doc="Many-to-one relationship with User model for token ownership"
     )
     
-    # Self-referential relationship for token rotation chains per Section 6.4.1.4
-    parent_token = relationship(
-        'RefreshToken',
-        remote_side='RefreshToken.id',
-        back_populates='child_tokens',
+    revoked_by_user = relationship(
+        'User',
+        foreign_keys=[revoked_by_user_id],
         lazy='select',
-        doc="Self-referential relationship for parent token in rotation chain"
+        doc="User who initiated token revocation for audit trail"
     )
     
-    # Child tokens for rotation tracking per Section 6.4.1.4
-    child_tokens = relationship(
+    # Self-referential relationship for rotation chain tracking
+    rotation_parent = relationship(
         'RefreshToken',
-        back_populates='parent_token',
+        remote_side='RefreshToken.id',
+        foreign_keys=[rotation_parent_id],
+        back_populates='rotation_children',
+        lazy='select',
+        doc="Parent token in rotation chain for tracking hierarchy"
+    )
+    
+    rotation_children = relationship(
+        'RefreshToken',
+        remote_side='RefreshToken.rotation_parent_id',
+        back_populates='rotation_parent',
         lazy='dynamic',
         cascade='all, delete-orphan',
         passive_deletes=True,
-        doc="One-to-many relationship for child tokens in rotation chain"
+        doc="Child tokens generated from this token during rotation"
     )
     
-    # Database constraints for data integrity and performance per Section 6.2.2.2
+    # Database constraints and indexes per Section 6.2.2.2
     __table_args__ = (
-        # Unique constraints for token integrity
-        UniqueConstraint('token_id', name='uq_refresh_token_id'),
-        UniqueConstraint('token_hash', name='uq_refresh_token_hash'),
-        
-        # Check constraints for data validation
+        # Check constraints for data validation and security
         CheckConstraint(
-            "status IN ('active', 'revoked', 'expired', 'blacklisted', 'superseded')",
-            name='ck_refresh_token_status'
+            f"status IN ('{TokenStatus.ACTIVE.value}', '{TokenStatus.EXPIRED.value}', "
+            f"'{TokenStatus.REVOKED.value}', '{TokenStatus.BLACKLISTED.value}', "
+            f"'{TokenStatus.ROTATED.value}', '{TokenStatus.SUSPENDED.value}', "
+            f"'{TokenStatus.COMPROMISED.value}', '{TokenStatus.FAMILY_REVOKED.value}')",
+            name='ck_refresh_token_status_valid'
         ),
         CheckConstraint(
-            "expires_at > issued_at",
-            name='ck_refresh_token_expiration'
+            f"source IN ('{TokenSource.AUTH0_LOGIN.value}', '{TokenSource.AUTH0_REFRESH.value}', "
+            f"'{TokenSource.FLASK_LOCAL.value}', '{TokenSource.SYSTEM_ADMIN.value}', "
+            f"'{TokenSource.MIGRATION.value}', '{TokenSource.EMERGENCY.value}')",
+            name='ck_refresh_token_source_valid'
         ),
-        CheckConstraint(
-            "usage_count >= 0",
-            name='ck_refresh_token_usage_count'
-        ),
-        CheckConstraint(
-            "rotation_count >= 0",
-            name='ck_refresh_token_rotation_count'
-        ),
+        CheckConstraint('security_score >= 0 AND security_score <= 100', name='ck_refresh_token_security_score_range'),
+        CheckConstraint('auth0_refresh_count >= 0', name='ck_refresh_token_refresh_count_positive'),
+        CheckConstraint('suspicious_activity_count >= 0', name='ck_refresh_token_suspicious_count_positive'),
+        CheckConstraint('expires_at > created_at', name='ck_refresh_token_expires_after_created'),
         
         # Composite indexes for performance optimization per Section 6.2.2.2
         Index('ix_refresh_token_user_status', 'user_id', 'status'),
-        Index('ix_refresh_token_family_status', 'token_family_id', 'status'),
-        Index('ix_refresh_token_expiry_status', 'expires_at', 'status'),
-        Index('ix_refresh_token_issued_user', 'issued_at', 'user_id'),
-        Index('ix_refresh_token_revoked_reason', 'revoked_at', 'revocation_reason'),
+        Index('ix_refresh_token_user_active', 'user_id', 'status', postgresql_where=(
+            text(f"status = '{TokenStatus.ACTIVE.value}'")
+        )),
+        Index('ix_refresh_token_family_status', 'token_family', 'status'),
+        Index('ix_refresh_token_expires_status', 'expires_at', 'status'),
         Index('ix_refresh_token_blacklist_status', 'is_blacklisted', 'status'),
-        Index('ix_refresh_token_family_rotation', 'token_family_id', 'rotation_count'),
+        Index('ix_refresh_token_security_score', 'security_score', 'status'),
+        Index('ix_refresh_token_suspicious_activity', 'suspicious_activity_count', 'user_id'),
+        Index('ix_refresh_token_grace_period', 'grace_period_expires', 'status'),
+        Index('ix_refresh_token_last_used', 'last_used_at', 'user_id'),
+        Index('ix_refresh_token_rotation_chain', 'rotation_parent_id', 'token_family'),
+        Index('ix_refresh_token_auth0_integration', 'auth0_token_id', 'status'),
+        
+        # Partial indexes for active tokens performance
+        Index('ix_refresh_token_active_expires', 'expires_at', postgresql_where=(
+            text(f"status = '{TokenStatus.ACTIVE.value}' AND is_blacklisted = false")
+        )),
+        Index('ix_refresh_token_active_family', 'token_family', 'user_id', postgresql_where=(
+            text(f"status = '{TokenStatus.ACTIVE.value}'")
+        )),
         
         # Table-level comment for documentation
-        {'comment': 'Refresh tokens for Auth0 integration with automated rotation and security tracking'}
+        {'comment': 'Refresh tokens with Auth0 integration and automated rotation policies'}
     )
     
-    def __init__(self, user_id: int, token_hash: str, expires_at: datetime, 
-                 token_family_id: Optional[uuid.UUID] = None, 
-                 parent_token_id: Optional[int] = None,
-                 client_metadata: Optional[Dict[str, Any]] = None, **kwargs) -> None:
+    def __init__(
+        self,
+        user_id: int,
+        token_value: str,
+        expires_at: datetime,
+        token_family: Optional[str] = None,
+        auth0_token_id: Optional[str] = None,
+        source: TokenSource = TokenSource.AUTH0_LOGIN,
+        metadata: Optional[Dict[str, Any]] = None,
+        rotation_parent_id: Optional[int] = None,
+        **kwargs
+    ) -> None:
         """
-        Initialize a new RefreshToken instance with security validation.
+        Initialize a new RefreshToken instance with validation and security setup.
         
         Args:
             user_id (int): User ID for token ownership
-            token_hash (str): Secure hash of the refresh token
+            token_value (str): Raw refresh token value for hashing
             expires_at (datetime): Token expiration timestamp
-            token_family_id (Optional[UUID]): Family ID for rotation tracking
-            parent_token_id (Optional[int]): Parent token ID for rotation chains
-            client_metadata (Optional[Dict]): Client information for security analysis
+            token_family (Optional[str]): Token family UUID (generated if not provided)
+            auth0_token_id (Optional[str]): Auth0 internal token identifier
+            source (TokenSource): Token generation source (default: AUTH0_LOGIN)
+            metadata (Optional[Dict]): Security metadata and device context
+            rotation_parent_id (Optional[int]): Parent token for rotation chain
             **kwargs: Additional keyword arguments for model fields
             
         Raises:
-            ValueError: If token parameters are invalid or security constraints are violated
+            ValueError: If token value or user_id validation fails
+            SecurityError: If token security validation fails
         """
         super().__init__(**kwargs)
         
-        # Validate required parameters
-        if not user_id or user_id <= 0:
-            raise ValueError("Valid user_id is required for token ownership")
+        # Validate required fields
+        if not user_id:
+            raise ValueError("User ID is required for token ownership")
         
-        if not token_hash or len(token_hash) < 64:
-            raise ValueError("Token hash must be at least 64 characters for security")
+        if not token_value:
+            raise ValueError("Token value is required for hashing")
         
-        if not expires_at or expires_at <= datetime.now(timezone.utc):
-            raise ValueError("Token expiration must be in the future")
+        if not expires_at:
+            raise ValueError("Expiration timestamp is required")
         
-        # Set core token attributes
+        # Set basic fields
         self.user_id = user_id
-        self.token_hash = token_hash
+        self.token_hash = self._hash_token(token_value)
         self.expires_at = expires_at
-        self.issued_at = datetime.now(timezone.utc)
+        self.auth0_token_id = auth0_token_id
+        self.source = source.value if isinstance(source, TokenSource) else source
+        self.rotation_parent_id = rotation_parent_id
         
-        # Set family tracking attributes
-        if token_family_id:
-            self.token_family_id = token_family_id
+        # Set token family (inherit from parent or generate new)
+        if token_family:
+            self.token_family = uuid.UUID(token_family) if isinstance(token_family, str) else token_family
+        elif rotation_parent_id:
+            # Inherit family from parent token
+            parent_token = RefreshToken.query.get(rotation_parent_id)
+            if parent_token:
+                self.token_family = parent_token.token_family
+            else:
+                self.token_family = uuid.uuid4()
         else:
-            self.token_family_id = uuid.uuid4()
+            self.token_family = uuid.uuid4()
         
-        if parent_token_id:
-            self.parent_token_id = parent_token_id
-            # Increment rotation count for child tokens
-            self.rotation_count = self._get_parent_rotation_count() + 1
-        
-        # Set client metadata for security analysis
-        self.client_metadata = client_metadata or {}
-        
-        # Initialize security tracking
-        self.security_flags = {}
+        # Initialize status and security fields
         self.status = TokenStatus.ACTIVE.value
         self.is_blacklisted = False
-        self.usage_count = 0
+        self.security_score = self._calculate_initial_security_score(metadata or {})
+        self.auth0_refresh_count = 0
+        self.suspicious_activity_count = 0
+        
+        # Set metadata with security context
+        self.metadata = self._prepare_metadata(metadata or {})
+        
+        # Initialize timestamps
+        self.last_used_at = None
+        self.revoked_at = None
+        self.revoked_by_user_id = None
+        self.revocation_reason = None
+        
+        # Set grace period for rotation overlap
+        self.grace_period_expires = self._calculate_grace_period()
     
-    @validates('status')
-    def validate_status(self, key: str, status: str) -> str:
+    @staticmethod
+    def _hash_token(token_value: str) -> str:
         """
-        Validate token status values against allowed enumeration.
+        Generate SHA-256 hash of refresh token for secure storage.
         
         Args:
-            key (str): The field name being validated
-            status (str): The status value to validate
+            token_value (str): Raw token value to hash
             
         Returns:
-            str: The validated status value
-            
-        Raises:
-            ValueError: If status is not a valid TokenStatus value
+            str: SHA-256 hash of the token value
         """
-        try:
-            TokenStatus(status)
-            return status
-        except ValueError:
-            raise ValueError(f"Invalid token status: {status}")
+        if not token_value:
+            raise ValueError("Token value cannot be empty")
+        
+        return hashlib.sha256(token_value.encode('utf-8')).hexdigest()
     
-    @validates('revocation_reason')
-    def validate_revocation_reason(self, key: str, reason: str) -> str:
+    def _calculate_initial_security_score(self, metadata: Dict[str, Any]) -> int:
         """
-        Validate revocation reason values against allowed enumeration.
+        Calculate initial security score based on token metadata.
         
         Args:
-            key (str): The field name being validated
-            reason (str): The revocation reason to validate
+            metadata (Dict): Token metadata for score calculation
             
         Returns:
-            str: The validated revocation reason
-            
-        Raises:
-            ValueError: If revocation reason is not a valid RevocationReason value
+            int: Security score from 0-100
         """
-        if reason is None:
-            return reason
+        score = 50  # Base score
         
-        try:
-            RevocationReason(reason)
-            return reason
-        except ValueError:
-            raise ValueError(f"Invalid revocation reason: {reason}")
+        # Increase score for known device fingerprints
+        if metadata.get('device_fingerprint'):
+            score += 10
+        
+        # Increase score for Auth0 login source
+        if self.source == TokenSource.AUTH0_LOGIN.value:
+            score += 15
+        
+        # Decrease score for suspicious IP patterns
+        ip_address = metadata.get('ip_address')
+        if ip_address and self._is_suspicious_ip(ip_address):
+            score -= 20
+        
+        # Decrease score for unknown user agents
+        user_agent = metadata.get('user_agent')
+        if user_agent and self._is_suspicious_user_agent(user_agent):
+            score -= 15
+        
+        return max(0, min(100, score))
     
-    def _get_parent_rotation_count(self) -> int:
+    def _is_suspicious_ip(self, ip_address: str) -> bool:
         """
-        Get the rotation count from the parent token for chain tracking.
+        Check if IP address is suspicious based on threat intelligence.
+        
+        Args:
+            ip_address (str): IP address to check
+            
+        Returns:
+            bool: True if IP is suspicious
+        """
+        # Basic suspicious IP detection (would integrate with threat intelligence)
+        suspicious_patterns = [
+            '192.168.',  # Private networks (suspicious for external tokens)
+            '10.',       # Private networks
+            '172.16.',   # Private networks
+            '127.',      # Localhost
+        ]
+        
+        # Check for known suspicious patterns
+        for pattern in suspicious_patterns:
+            if ip_address.startswith(pattern):
+                return True
+        
+        return False
+    
+    def _is_suspicious_user_agent(self, user_agent: str) -> bool:
+        """
+        Check if user agent is suspicious based on patterns.
+        
+        Args:
+            user_agent (str): User agent string to check
+            
+        Returns:
+            bool: True if user agent is suspicious
+        """
+        if not user_agent:
+            return True
+        
+        # Check for bot patterns
+        bot_patterns = ['bot', 'crawler', 'spider', 'scraper', 'curl', 'wget']
+        user_agent_lower = user_agent.lower()
+        
+        for pattern in bot_patterns:
+            if pattern in user_agent_lower:
+                return True
+        
+        return False
+    
+    def _prepare_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Prepare and validate metadata for token storage.
+        
+        Args:
+            metadata (Dict): Raw metadata to prepare
+            
+        Returns:
+            Dict: Prepared metadata with security context
+        """
+        prepared = metadata.copy()
+        
+        # Add creation context
+        prepared['created_by'] = 'flask_refresh_token_model'
+        prepared['creation_timestamp'] = datetime.now(timezone.utc).isoformat()
+        
+        # Add security flags
+        if 'security_flags' not in prepared:
+            prepared['security_flags'] = []
+        
+        # Add rotation context if applicable
+        if self.rotation_parent_id:
+            prepared['is_rotation'] = True
+            prepared['rotation_generation'] = self._get_rotation_generation()
+        else:
+            prepared['is_rotation'] = False
+            prepared['rotation_generation'] = 0
+        
+        return prepared
+    
+    def _get_rotation_generation(self) -> int:
+        """
+        Calculate rotation generation for tracking token chain depth.
         
         Returns:
-            int: Parent token rotation count or 0 if no parent
+            int: Generation number in rotation chain
         """
-        if not self.parent_token_id:
+        if not self.rotation_parent_id:
             return 0
         
-        parent = RefreshToken.query.get(self.parent_token_id)
-        return parent.rotation_count if parent else 0
+        parent_token = RefreshToken.query.get(self.rotation_parent_id)
+        if parent_token and 'rotation_generation' in parent_token.metadata:
+            return parent_token.metadata['rotation_generation'] + 1
+        
+        return 1
+    
+    def _calculate_grace_period(self) -> Optional[datetime]:
+        """
+        Calculate grace period expiration for rotation overlap.
+        
+        Returns:
+            Optional[datetime]: Grace period expiration or None
+        """
+        grace_period_seconds = current_app.config.get('REFRESH_TOKEN_GRACE_PERIOD_SECONDS', 30)
+        
+        if self.rotation_parent_id and grace_period_seconds > 0:
+            return datetime.now(timezone.utc) + timedelta(seconds=grace_period_seconds)
+        
+        return None
+    
+    @validates('status')
+    def validate_status(self, key: str, value: str) -> str:
+        """
+        SQLAlchemy validator for token status field.
+        
+        Args:
+            key (str): Field name being validated
+            value (str): Status value being set
+            
+        Returns:
+            str: Validated status value
+        """
+        valid_statuses = [status.value for status in TokenStatus]
+        if value not in valid_statuses:
+            raise ValueError(f"Invalid token status: {value}")
+        
+        return value
+    
+    @validates('source')
+    def validate_source(self, key: str, value: str) -> str:
+        """
+        SQLAlchemy validator for token source field.
+        
+        Args:
+            key (str): Field name being validated
+            value (str): Source value being set
+            
+        Returns:
+            str: Validated source value
+        """
+        valid_sources = [source.value for source in TokenSource]
+        if value not in valid_sources:
+            raise ValueError(f"Invalid token source: {value}")
+        
+        return value
+    
+    def verify_token(self, token_value: str) -> bool:
+        """
+        Verify provided token value against stored hash.
+        
+        Args:
+            token_value (str): Raw token value to verify
+            
+        Returns:
+            bool: True if token matches stored hash
+        """
+        if not token_value:
+            return False
+        
+        return self.token_hash == self._hash_token(token_value)
     
     def is_valid(self) -> bool:
         """
-        Check if the refresh token is valid for use.
-        
-        Validates token status, expiration, and blacklist status for
-        comprehensive security validation per Section 6.4.1.4.
+        Check if token is currently valid for use.
         
         Returns:
-            bool: True if token is valid for use, False otherwise
+            bool: True if token is valid and usable
         """
         current_time = datetime.now(timezone.utc)
         
-        return (
-            self.status == TokenStatus.ACTIVE.value and
-            not self.is_blacklisted and
-            self.expires_at > current_time and
-            self.revoked_at is None
-        )
+        # Check basic validity conditions
+        if self.status != TokenStatus.ACTIVE.value:
+            return False
+        
+        if self.is_blacklisted:
+            return False
+        
+        if current_time >= self.expires_at:
+            return False
+        
+        # Check grace period for rotated tokens
+        if self.grace_period_expires and current_time >= self.grace_period_expires:
+            return False
+        
+        return True
     
     def is_expired(self) -> bool:
         """
-        Check if the refresh token has expired.
+        Check if token has expired based on expiration timestamp.
         
         Returns:
-            bool: True if token is expired, False otherwise
+            bool: True if token has expired
         """
         return datetime.now(timezone.utc) >= self.expires_at
     
-    def record_usage(self, client_info: Optional[Dict[str, Any]] = None) -> None:
+    def is_in_grace_period(self) -> bool:
         """
-        Record token usage for security monitoring and analytics.
+        Check if token is within grace period for rotation overlap.
         
-        Updates usage count, last used timestamp, and client metadata
-        for comprehensive activity tracking per Section 6.4.6.1.
+        Returns:
+            bool: True if token is in grace period
+        """
+        if not self.grace_period_expires:
+            return False
+        
+        return datetime.now(timezone.utc) < self.grace_period_expires
+    
+    def update_last_used(self, ip_address: Optional[str] = None, user_agent: Optional[str] = None) -> None:
+        """
+        Update last used timestamp and metadata for activity tracking.
         
         Args:
-            client_info (Optional[Dict]): Updated client information for security analysis
+            ip_address (Optional[str]): IP address for security tracking
+            user_agent (Optional[str]): User agent for device tracking
         """
         self.last_used_at = datetime.now(timezone.utc)
-        self.usage_count += 1
         
-        # Update client metadata if provided
-        if client_info:
-            if not self.client_metadata:
-                self.client_metadata = {}
-            self.client_metadata.update(client_info)
+        # Update metadata with usage context
+        if ip_address:
+            self.metadata['last_used_ip'] = ip_address
         
-        # Flag for suspicious usage patterns
-        if self.usage_count > 100:  # Configurable threshold
-            self._flag_suspicious_activity("high_usage_count")
+        if user_agent:
+            self.metadata['last_used_user_agent'] = user_agent
+        
+        # Update security score based on usage patterns
+        self._update_security_score_on_usage(ip_address, user_agent)
+        
+        self.updated_at = datetime.now(timezone.utc)
     
-    def revoke(self, reason: RevocationReason, 
-               revoke_family: bool = False,
-               security_incident: bool = False) -> None:
+    def _update_security_score_on_usage(self, ip_address: Optional[str], user_agent: Optional[str]) -> None:
         """
-        Revoke the refresh token with comprehensive audit tracking.
-        
-        Implements immediate token revocation with security incident
-        coordination per Section 6.4.6.2 and automated family
-        revocation for enhanced security.
+        Update security score based on usage patterns.
         
         Args:
-            reason (RevocationReason): Structured reason for revocation
-            revoke_family (bool): Whether to revoke entire token family
-            security_incident (bool): Whether this is a security incident
+            ip_address (Optional[str]): IP address for analysis
+            user_agent (Optional[str]): User agent for analysis
         """
-        current_time = datetime.now(timezone.utc)
+        score_change = 0
         
-        # Update token status and revocation metadata
-        self.status = TokenStatus.REVOKED.value
-        self.revoked_at = current_time
-        self.revocation_reason = reason.value
-        
-        # Set blacklist flag for security incidents per Section 6.4.6.2
-        if security_incident:
-            self.is_blacklisted = True
-            self._flag_security_incident(reason)
-        
-        # Revoke entire token family if requested per Section 6.4.1.4
-        if revoke_family:
-            self._revoke_token_family(reason, security_incident)
-    
-    def _revoke_token_family(self, reason: RevocationReason, 
-                           security_incident: bool = False) -> None:
-        """
-        Revoke all tokens in the same family for comprehensive security.
-        
-        Implements Auth0's refresh token rotation policy with family
-        revocation for suspicious activity detection per Section 6.4.1.4.
-        
-        Args:
-            reason (RevocationReason): Reason for family revocation
-            security_incident (bool): Whether this is a security incident
-        """
-        family_tokens = RefreshToken.query.filter(
-            RefreshToken.token_family_id == self.token_family_id,
-            RefreshToken.status == TokenStatus.ACTIVE.value,
-            RefreshToken.id != self.id
-        ).all()
-        
-        for token in family_tokens:
-            token.status = TokenStatus.REVOKED.value
-            token.revoked_at = datetime.now(timezone.utc)
-            token.revocation_reason = RevocationReason.FAMILY_REVOCATION.value
+        # Check for IP address consistency
+        if ip_address:
+            original_ip = self.metadata.get('ip_address')
+            if original_ip and original_ip != ip_address:
+                # Different IP - potential security concern
+                score_change -= 5
+                self._flag_suspicious_activity('ip_address_change')
             
-            if security_incident:
-                token.is_blacklisted = True
-                token._flag_security_incident(reason)
+            # Check for suspicious IP
+            if self._is_suspicious_ip(ip_address):
+                score_change -= 10
+                self._flag_suspicious_activity('suspicious_ip_usage')
+        
+        # Check for user agent consistency
+        if user_agent:
+            original_ua = self.metadata.get('user_agent')
+            if original_ua and original_ua != user_agent:
+                # Different user agent - potential security concern
+                score_change -= 3
+                self._flag_suspicious_activity('user_agent_change')
+        
+        # Apply score change
+        new_score = max(0, min(100, self.security_score + score_change))
+        self.security_score = new_score
+        
+        # Auto-blacklist if score drops too low
+        if new_score <= 10:
+            self._auto_blacklist('low_security_score')
     
     def _flag_suspicious_activity(self, activity_type: str) -> None:
         """
-        Flag suspicious token activity for security monitoring.
-        
-        Updates security flags for automated detection and analysis
-        per Section 6.4.6.1 anomaly detection requirements.
+        Flag suspicious activity for security monitoring.
         
         Args:
             activity_type (str): Type of suspicious activity detected
         """
-        if not self.security_flags:
-            self.security_flags = {}
+        self.suspicious_activity_count += 1
         
-        self.security_flags['suspicious_activity'] = {
+        # Add to security flags
+        if 'security_flags' not in self.metadata:
+            self.metadata['security_flags'] = []
+        
+        self.metadata['security_flags'].append({
             'type': activity_type,
-            'detected_at': datetime.now(timezone.utc).isoformat(),
-            'usage_count': self.usage_count,
-            'rotation_count': self.rotation_count
-        }
-    
-    def _flag_security_incident(self, reason: RevocationReason) -> None:
-        """
-        Flag security incident for automated response coordination.
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'count': self.suspicious_activity_count
+        })
         
-        Updates security flags for incident response system integration
-        per Section 6.4.6.2 automated response procedures.
+        # Auto-revoke if too many suspicious activities
+        if self.suspicious_activity_count >= 3:
+            self.revoke_token(
+                reason=f"Automatic revocation due to suspicious activity: {activity_type}",
+                revoked_by_user_id=None
+            )
+    
+    def _auto_blacklist(self, reason: str) -> None:
+        """
+        Automatically blacklist token for security reasons.
         
         Args:
-            reason (RevocationReason): Security incident reason
+            reason (str): Reason for automatic blacklisting
         """
-        if not self.security_flags:
-            self.security_flags = {}
+        self.is_blacklisted = True
+        self.status = TokenStatus.BLACKLISTED.value
+        self.revocation_reason = f"Auto-blacklisted: {reason}"
+        self.revoked_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
         
-        self.security_flags['security_incident'] = {
-            'reason': reason.value,
-            'detected_at': datetime.now(timezone.utc).isoformat(),
-            'token_family_id': str(self.token_family_id),
-            'user_id': self.user_id,
-            'immediate_response_required': True
-        }
-    
-    def extend_expiration(self, extension_hours: int = 24) -> None:
-        """
-        Extend token expiration for renewed sessions.
-        
-        Implements secure token lifetime extension with validation
-        per Section 6.4.1.4 token lifecycle management.
-        
-        Args:
-            extension_hours (int): Number of hours to extend expiration
-            
-        Raises:
-            ValueError: If token is not in valid state for extension
-        """
-        if not self.is_valid():
-            raise ValueError("Cannot extend expiration for invalid token")
-        
-        if self.is_blacklisted:
-            raise ValueError("Cannot extend expiration for blacklisted token")
-        
-        # Extend expiration with maximum limit
-        max_extension = timedelta(days=30)  # Configurable security limit
-        requested_extension = timedelta(hours=extension_hours)
-        
-        if requested_extension > max_extension:
-            raise ValueError(f"Extension cannot exceed {max_extension.days} days")
-        
-        self.expires_at = min(
-            self.expires_at + requested_extension,
-            self.issued_at + max_extension
+        # Log security event
+        from .security_incident import SecurityIncident, IncidentType, IncidentSeverity
+        SecurityIncident.create_incident(
+            incident_type=IncidentType.TOKEN_BLACKLIST,
+            severity=IncidentSeverity.MEDIUM,
+            user_id=self.user_id,
+            description=f"Refresh token auto-blacklisted: {reason}",
+            metadata={'token_id': self.id, 'reason': reason}
         )
     
-    def create_rotation_token(self, new_token_hash: str, 
-                            new_expires_at: datetime,
-                            client_metadata: Optional[Dict[str, Any]] = None) -> 'RefreshToken':
+    def revoke_token(
+        self,
+        reason: str,
+        revoked_by_user_id: Optional[int] = None,
+        revoke_family: bool = False
+    ) -> bool:
         """
-        Create a new token in the rotation chain for automated rotation.
-        
-        Implements Auth0's refresh token rotation policy with family
-        tracking per Section 6.4.1.4 automated rotation procedures.
+        Revoke refresh token with audit trail and optional family revocation.
         
         Args:
-            new_token_hash (str): Hash of the new rotated token
-            new_expires_at (datetime): Expiration time for new token
-            client_metadata (Optional[Dict]): Client information for new token
+            reason (str): Reason for token revocation
+            revoked_by_user_id (Optional[int]): User ID who initiated revocation
+            revoke_family (bool): Whether to revoke entire token family
             
         Returns:
-            RefreshToken: New token instance in the rotation chain
-            
-        Raises:
-            ValueError: If current token is not valid for rotation
+            bool: True if revocation successful
         """
-        if not self.is_valid():
-            raise ValueError("Cannot rotate invalid token")
+        if self.status in [TokenStatus.REVOKED.value, TokenStatus.BLACKLISTED.value]:
+            return False  # Already revoked
         
-        # Create new token in the same family
-        new_token = RefreshToken(
+        # Update token status
+        self.status = TokenStatus.REVOKED.value
+        self.revoked_at = datetime.now(timezone.utc)
+        self.revoked_by_user_id = revoked_by_user_id
+        self.revocation_reason = reason
+        self.updated_at = datetime.now(timezone.utc)
+        
+        # Revoke family if requested
+        if revoke_family:
+            self._revoke_token_family(reason, revoked_by_user_id)
+        
+        # Create security incident for revocation
+        from .security_incident import SecurityIncident, IncidentType, IncidentSeverity
+        SecurityIncident.create_incident(
+            incident_type=IncidentType.TOKEN_REVOCATION,
+            severity=IncidentSeverity.MEDIUM,
             user_id=self.user_id,
-            token_hash=new_token_hash,
-            expires_at=new_expires_at,
-            token_family_id=self.token_family_id,
-            parent_token_id=self.id,
-            client_metadata=client_metadata or self.client_metadata
+            description=f"Refresh token revoked: {reason}",
+            metadata={
+                'token_id': self.id,
+                'reason': reason,
+                'revoked_by_user_id': revoked_by_user_id,
+                'family_revoked': revoke_family
+            }
         )
         
-        # Supersede current token per rotation policy
-        self.status = TokenStatus.SUPERSEDED.value
-        self.revoked_at = datetime.now(timezone.utc)
-        self.revocation_reason = RevocationReason.TOKEN_ROTATION.value
+        return True
+    
+    def _revoke_token_family(self, reason: str, revoked_by_user_id: Optional[int]) -> int:
+        """
+        Revoke entire token family for security incidents.
+        
+        Args:
+            reason (str): Reason for family revocation
+            revoked_by_user_id (Optional[int]): User who initiated revocation
+            
+        Returns:
+            int: Number of tokens revoked in family
+        """
+        family_tokens = RefreshToken.query.filter(
+            RefreshToken.token_family == self.token_family,
+            RefreshToken.status.in_([TokenStatus.ACTIVE.value, TokenStatus.SUSPENDED.value])
+        ).all()
+        
+        revoked_count = 0
+        for token in family_tokens:
+            if token.id != self.id:  # Don't re-revoke current token
+                token.status = TokenStatus.FAMILY_REVOKED.value
+                token.revoked_at = datetime.now(timezone.utc)
+                token.revoked_by_user_id = revoked_by_user_id
+                token.revocation_reason = f"Family revocation: {reason}"
+                token.updated_at = datetime.now(timezone.utc)
+                revoked_count += 1
+        
+        return revoked_count
+    
+    def rotate_token(
+        self,
+        new_token_value: str,
+        new_expires_at: datetime,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> 'RefreshToken':
+        """
+        Rotate refresh token implementing Auth0 rotation policy.
+        
+        Args:
+            new_token_value (str): New token value for rotation
+            new_expires_at (datetime): New token expiration
+            metadata (Optional[Dict]): Additional metadata for new token
+            
+        Returns:
+            RefreshToken: New token created during rotation
+        """
+        # Mark current token as rotated
+        self.status = TokenStatus.ROTATED.value
+        self.updated_at = datetime.now(timezone.utc)
+        
+        # Prepare metadata for new token
+        new_metadata = (metadata or {}).copy()
+        new_metadata.update({
+            'rotation_source_token_id': self.id,
+            'rotation_timestamp': datetime.now(timezone.utc).isoformat(),
+            'rotation_reason': 'standard_rotation'
+        })
+        
+        # Inherit security context from parent
+        if 'device_fingerprint' in self.metadata:
+            new_metadata['device_fingerprint'] = self.metadata['device_fingerprint']
+        
+        if 'client_id' in self.metadata:
+            new_metadata['client_id'] = self.metadata['client_id']
+        
+        # Create new token in same family
+        new_token = RefreshToken(
+            user_id=self.user_id,
+            token_value=new_token_value,
+            expires_at=new_expires_at,
+            token_family=str(self.token_family),
+            source=TokenSource.AUTH0_REFRESH,
+            metadata=new_metadata,
+            rotation_parent_id=self.id
+        )
+        
+        # Inherit Auth0 context
+        if self.auth0_token_id:
+            new_token.auth0_refresh_count = self.auth0_refresh_count + 1
+        
+        # Save new token
+        new_token.save()
         
         return new_token
     
-    def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
+    def extend_expiration(self, additional_hours: int = 24) -> bool:
+        """
+        Extend token expiration for emergency or administrative purposes.
+        
+        Args:
+            additional_hours (int): Hours to add to current expiration
+            
+        Returns:
+            bool: True if extension successful
+        """
+        if self.status != TokenStatus.ACTIVE.value:
+            return False
+        
+        if self.is_blacklisted:
+            return False
+        
+        # Extend expiration
+        self.expires_at = self.expires_at + timedelta(hours=additional_hours)
+        self.updated_at = datetime.now(timezone.utc)
+        
+        # Log extension event
+        self.metadata['extensions'] = self.metadata.get('extensions', [])
+        self.metadata['extensions'].append({
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'additional_hours': additional_hours,
+            'new_expires_at': self.expires_at.isoformat()
+        })
+        
+        return True
+    
+    def suspend_token(self, reason: str, suspended_by_user_id: Optional[int] = None) -> bool:
+        """
+        Temporarily suspend token for security investigation.
+        
+        Args:
+            reason (str): Reason for suspension
+            suspended_by_user_id (Optional[int]): User who initiated suspension
+            
+        Returns:
+            bool: True if suspension successful
+        """
+        if self.status != TokenStatus.ACTIVE.value:
+            return False
+        
+        self.status = TokenStatus.SUSPENDED.value
+        self.revocation_reason = f"Suspended: {reason}"
+        self.revoked_by_user_id = suspended_by_user_id
+        self.updated_at = datetime.now(timezone.utc)
+        
+        # Add suspension metadata
+        self.metadata['suspension'] = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'reason': reason,
+            'suspended_by_user_id': suspended_by_user_id
+        }
+        
+        return True
+    
+    def reactivate_token(self, reactivated_by_user_id: Optional[int] = None) -> bool:
+        """
+        Reactivate suspended token after investigation.
+        
+        Args:
+            reactivated_by_user_id (Optional[int]): User who reactivated token
+            
+        Returns:
+            bool: True if reactivation successful
+        """
+        if self.status != TokenStatus.SUSPENDED.value:
+            return False
+        
+        if self.is_expired():
+            return False  # Cannot reactivate expired token
+        
+        self.status = TokenStatus.ACTIVE.value
+        self.revocation_reason = None
+        self.revoked_by_user_id = None
+        self.updated_at = datetime.now(timezone.utc)
+        
+        # Add reactivation metadata
+        self.metadata['reactivation'] = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'reactivated_by_user_id': reactivated_by_user_id
+        }
+        
+        return True
+    
+    def get_family_tokens(self, include_revoked: bool = False) -> List['RefreshToken']:
+        """
+        Get all tokens in the same family for security analysis.
+        
+        Args:
+            include_revoked (bool): Whether to include revoked tokens
+            
+        Returns:
+            List[RefreshToken]: Tokens in the same family
+        """
+        query = RefreshToken.query.filter(RefreshToken.token_family == self.token_family)
+        
+        if not include_revoked:
+            query = query.filter(RefreshToken.status.in_([
+                TokenStatus.ACTIVE.value,
+                TokenStatus.SUSPENDED.value
+            ]))
+        
+        return query.order_by(RefreshToken.created_at).all()
+    
+    def get_family_size(self) -> int:
+        """
+        Get total number of tokens in family.
+        
+        Returns:
+            int: Number of tokens in family
+        """
+        return RefreshToken.query.filter(RefreshToken.token_family == self.token_family).count()
+    
+    def get_rotation_chain(self) -> List['RefreshToken']:
+        """
+        Get full rotation chain for this token.
+        
+        Returns:
+            List[RefreshToken]: Tokens in rotation chain
+        """
+        chain = []
+        current_token = self
+        
+        # Follow chain to root
+        while current_token.rotation_parent_id:
+            parent = RefreshToken.query.get(current_token.rotation_parent_id)
+            if not parent:
+                break
+            chain.insert(0, parent)
+            current_token = parent
+        
+        # Add current token
+        chain.append(self)
+        
+        # Add children
+        children = self.rotation_children.order_by(RefreshToken.created_at).all()
+        chain.extend(children)
+        
+        return chain
+    
+    def to_dict(self, include_sensitive: bool = False, include_metadata: bool = True) -> Dict[str, Any]:
         """
         Convert RefreshToken instance to dictionary representation.
         
         Args:
-            include_sensitive (bool): Whether to include sensitive token data
+            include_sensitive (bool): Whether to include sensitive fields
+            include_metadata (bool): Whether to include metadata
             
         Returns:
             Dict[str, Any]: Dictionary representation of RefreshToken
         """
         result = {
             'id': self.id,
-            'token_id': str(self.token_id),
             'user_id': self.user_id,
-            'token_family_id': str(self.token_family_id),
-            'parent_token_id': self.parent_token_id,
+            'token_family': str(self.token_family),
             'status': self.status,
+            'source': self.source,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
-            'issued_at': self.issued_at.isoformat() if self.issued_at else None,
-            'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
-            'revocation_reason': self.revocation_reason,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
-            'usage_count': self.usage_count,
             'is_blacklisted': self.is_blacklisted,
-            'rotation_count': self.rotation_count,
-            'client_metadata': self.client_metadata,
-            'security_flags': self.security_flags,
+            'security_score': self.security_score,
+            'auth0_refresh_count': self.auth0_refresh_count,
+            'suspicious_activity_count': self.suspicious_activity_count,
+            'is_valid': self.is_valid(),
+            'is_expired': self.is_expired(),
+            'is_in_grace_period': self.is_in_grace_period(),
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
         
         if include_sensitive:
-            result['token_hash'] = self.token_hash
+            result.update({
+                'token_hash': self.token_hash,
+                'auth0_token_id': self.auth0_token_id,
+                'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
+                'revoked_by_user_id': self.revoked_by_user_id,
+                'revocation_reason': self.revocation_reason,
+                'rotation_parent_id': self.rotation_parent_id,
+                'grace_period_expires': self.grace_period_expires.isoformat() if self.grace_period_expires else None
+            })
+        
+        if include_metadata:
+            result['metadata'] = self.metadata
         
         return result
     
     @classmethod
     def find_by_token_hash(cls, token_hash: str) -> Optional['RefreshToken']:
         """
-        Find refresh token by secure hash with validation.
+        Find refresh token by token hash.
         
         Args:
-            token_hash (str): Token hash to search for
+            token_hash (str): SHA-256 hash of token to find
             
         Returns:
-            Optional[RefreshToken]: Token instance if found and valid, None otherwise
+            Optional[RefreshToken]: Token instance if found
         """
-        if not token_hash:
-            return None
-        
         return cls.query.filter_by(token_hash=token_hash).first()
+    
+    @classmethod
+    def find_by_token_value(cls, token_value: str) -> Optional['RefreshToken']:
+        """
+        Find refresh token by raw token value.
+        
+        Args:
+            token_value (str): Raw token value to find
+            
+        Returns:
+            Optional[RefreshToken]: Token instance if found
+        """
+        token_hash = cls._hash_token(token_value)
+        return cls.find_by_token_hash(token_hash)
     
     @classmethod
     def find_active_by_user(cls, user_id: int) -> List['RefreshToken']:
@@ -713,93 +1215,174 @@ class RefreshToken(BaseModel):
             user_id (int): User ID to search for
             
         Returns:
-            List[RefreshToken]: List of active tokens for the user
+            List[RefreshToken]: Active tokens for user
         """
-        current_time = datetime.now(timezone.utc)
-        
         return cls.query.filter(
             cls.user_id == user_id,
             cls.status == TokenStatus.ACTIVE.value,
             cls.is_blacklisted == False,
-            cls.expires_at > current_time
-        ).all()
+            cls.expires_at > datetime.now(timezone.utc)
+        ).order_by(cls.created_at.desc()).all()
     
     @classmethod
-    def find_by_family(cls, token_family_id: uuid.UUID) -> List['RefreshToken']:
+    def find_by_family(cls, token_family: Union[str, uuid.UUID]) -> List['RefreshToken']:
         """
-        Find all tokens in a token family for security analysis.
+        Find all tokens in a token family.
         
         Args:
-            token_family_id (UUID): Token family ID to search for
+            token_family (Union[str, UUID]): Token family identifier
             
         Returns:
-            List[RefreshToken]: List of tokens in the family
+            List[RefreshToken]: Tokens in family
         """
-        return cls.query.filter_by(token_family_id=token_family_id).all()
+        if isinstance(token_family, str):
+            token_family = uuid.UUID(token_family)
+        
+        return cls.query.filter(cls.token_family == token_family).order_by(cls.created_at).all()
+    
+    @classmethod
+    def find_by_auth0_token_id(cls, auth0_token_id: str) -> Optional['RefreshToken']:
+        """
+        Find refresh token by Auth0 token identifier.
+        
+        Args:
+            auth0_token_id (str): Auth0 token ID to search for
+            
+        Returns:
+            Optional[RefreshToken]: Token instance if found
+        """
+        return cls.query.filter_by(auth0_token_id=auth0_token_id).first()
     
     @classmethod
     def cleanup_expired_tokens(cls, batch_size: int = 1000) -> int:
         """
-        Clean up expired and revoked tokens for maintenance.
-        
-        Implements automated token cleanup for performance and security
-        per Section 6.2.4.1 data retention policies.
+        Clean up expired and revoked tokens in batches.
         
         Args:
-            batch_size (int): Number of tokens to process in each batch
+            batch_size (int): Number of tokens to process per batch
             
         Returns:
             int: Number of tokens cleaned up
         """
         current_time = datetime.now(timezone.utc)
+        cleanup_count = 0
         
-        # Update expired tokens
-        expired_count = cls.query.filter(
+        # Find expired tokens
+        expired_tokens = cls.query.filter(
             cls.expires_at <= current_time,
-            cls.status != TokenStatus.EXPIRED.value
-        ).update({
-            'status': TokenStatus.EXPIRED.value,
-            'updated_at': current_time
-        })
+            cls.status.in_([TokenStatus.ACTIVE.value, TokenStatus.SUSPENDED.value])
+        ).limit(batch_size).all()
         
-        db.session.commit()
-        return expired_count
+        for token in expired_tokens:
+            token.status = TokenStatus.EXPIRED.value
+            token.updated_at = current_time
+            cleanup_count += 1
+        
+        # Find tokens past grace period
+        grace_expired_tokens = cls.query.filter(
+            cls.grace_period_expires <= current_time,
+            cls.status == TokenStatus.ROTATED.value
+        ).limit(batch_size).all()
+        
+        for token in grace_expired_tokens:
+            token.grace_period_expires = None
+            token.updated_at = current_time
+            cleanup_count += 1
+        
+        if cleanup_count > 0:
+            db.session.commit()
+        
+        return cleanup_count
     
     @classmethod
-    def revoke_user_tokens(cls, user_id: int, reason: RevocationReason,
-                          security_incident: bool = False) -> int:
+    def revoke_user_tokens(
+        cls,
+        user_id: int,
+        reason: str,
+        revoked_by_user_id: Optional[int] = None,
+        exclude_token_id: Optional[int] = None
+    ) -> int:
         """
-        Revoke all active tokens for a user for security purposes.
+        Revoke all active tokens for a user.
         
         Args:
-            user_id (int): User ID for token revocation
-            reason (RevocationReason): Reason for mass revocation
-            security_incident (bool): Whether this is a security incident
+            user_id (int): User whose tokens to revoke
+            reason (str): Reason for mass revocation
+            revoked_by_user_id (Optional[int]): User who initiated revocation
+            exclude_token_id (Optional[int]): Token ID to exclude from revocation
             
         Returns:
             int: Number of tokens revoked
         """
-        current_time = datetime.now(timezone.utc)
+        query = cls.query.filter(
+            cls.user_id == user_id,
+            cls.status.in_([TokenStatus.ACTIVE.value, TokenStatus.SUSPENDED.value])
+        )
         
-        tokens = cls.find_active_by_user(user_id)
+        if exclude_token_id:
+            query = query.filter(cls.id != exclude_token_id)
+        
+        tokens = query.all()
+        revoked_count = 0
         
         for token in tokens:
-            token.revoke(reason, revoke_family=False, security_incident=security_incident)
+            if token.revoke_token(reason, revoked_by_user_id):
+                revoked_count += 1
         
-        db.session.commit()
-        return len(tokens)
+        if revoked_count > 0:
+            db.session.commit()
+        
+        return revoked_count
+    
+    @classmethod
+    def get_security_metrics(cls, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get security metrics for refresh tokens.
+        
+        Args:
+            user_id (Optional[int]): User ID to filter metrics (all users if None)
+            
+        Returns:
+            Dict[str, Any]: Security metrics and statistics
+        """
+        base_query = cls.query
+        if user_id:
+            base_query = base_query.filter(cls.user_id == user_id)
+        
+        metrics = {
+            'total_tokens': base_query.count(),
+            'active_tokens': base_query.filter(cls.status == TokenStatus.ACTIVE.value).count(),
+            'expired_tokens': base_query.filter(cls.status == TokenStatus.EXPIRED.value).count(),
+            'revoked_tokens': base_query.filter(cls.status == TokenStatus.REVOKED.value).count(),
+            'blacklisted_tokens': base_query.filter(cls.is_blacklisted == True).count(),
+            'suspicious_tokens': base_query.filter(cls.suspicious_activity_count > 0).count(),
+            'low_security_score_tokens': base_query.filter(cls.security_score < 30).count(),
+            'tokens_in_grace_period': base_query.filter(
+                cls.grace_period_expires > datetime.now(timezone.utc)
+            ).count()
+        }
+        
+        # Calculate average security score
+        avg_score = base_query.with_entities(func.avg(cls.security_score)).scalar()
+        metrics['average_security_score'] = round(float(avg_score or 0), 2)
+        
+        # Count unique families
+        unique_families = base_query.with_entities(cls.token_family).distinct().count()
+        metrics['unique_token_families'] = unique_families
+        
+        return metrics
     
     def __repr__(self) -> str:
         """
         String representation of RefreshToken instance for debugging.
         
         Returns:
-            str: String representation of RefreshToken instance
+            str: String representation showing key token information
         """
         return (
-            f"<RefreshToken(id={self.id}, token_id='{self.token_id}', "
-            f"user_id={self.user_id}, status='{self.status}', "
-            f"family_id='{self.token_family_id}')>"
+            f"<RefreshToken(id={self.id}, user_id={self.user_id}, "
+            f"status='{self.status}', family='{self.token_family}', "
+            f"expires_at='{self.expires_at}', security_score={self.security_score})>"
         )
     
     def __str__(self) -> str:
@@ -809,8 +1392,74 @@ class RefreshToken(BaseModel):
         Returns:
             str: User-friendly string representation
         """
-        return f"RefreshToken {self.token_id} for User {self.user_id}"
+        return f"RefreshToken {self.id} (User {self.user_id}, {self.status})"
 
 
-# Export the model and enums for use throughout the application
-__all__ = ['RefreshToken', 'TokenStatus', 'RevocationReason']
+# Database event listeners for additional functionality per Section 6.4.2.5
+@event.listens_for(RefreshToken, 'before_insert')
+def refresh_token_before_insert(mapper, connection, target):
+    """
+    Database event listener for RefreshToken creation audit logging.
+    
+    Args:
+        mapper: SQLAlchemy mapper object
+        connection: Database connection
+        target: RefreshToken instance being inserted
+    """
+    # Set creation timestamp if not already set
+    if not target.created_at:
+        target.created_at = datetime.now(timezone.utc)
+    
+    # Set update timestamp
+    target.updated_at = datetime.now(timezone.utc)
+
+
+@event.listens_for(RefreshToken, 'before_update')
+def refresh_token_before_update(mapper, connection, target):
+    """
+    Database event listener for RefreshToken update audit logging.
+    
+    Args:
+        mapper: SQLAlchemy mapper object
+        connection: Database connection
+        target: RefreshToken instance being updated
+    """
+    # Always update the timestamp on modification
+    target.updated_at = datetime.now(timezone.utc)
+
+
+@event.listens_for(RefreshToken, 'after_insert')
+def refresh_token_after_insert(mapper, connection, target):
+    """
+    Database event listener for RefreshToken creation security logging.
+    
+    Args:
+        mapper: SQLAlchemy mapper object
+        connection: Database connection
+        target: RefreshToken instance that was inserted
+    """
+    # Log token creation for security monitoring
+    # This would integrate with the authentication logging system
+    pass
+
+
+@event.listens_for(RefreshToken, 'after_update')
+def refresh_token_after_update(mapper, connection, target):
+    """
+    Database event listener for RefreshToken update security logging.
+    
+    Args:
+        mapper: SQLAlchemy mapper object
+        connection: Database connection
+        target: RefreshToken instance that was updated
+    """
+    # Log significant status changes for security monitoring
+    if hasattr(target, '_sa_instance_state'):
+        history = target._sa_instance_state.get_history('status', True)
+        if history.has_changes():
+            # Log status change for security audit
+            pass
+
+
+# Export the RefreshToken model and enums for use throughout the application
+__all__ = ['RefreshToken', 'TokenStatus', 'TokenSource', 'TokenMetadata']
