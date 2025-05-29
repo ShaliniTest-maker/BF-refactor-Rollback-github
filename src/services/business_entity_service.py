@@ -1,1329 +1,1321 @@
 """
-Business Entity Service
+Business Entity Service Implementation
 
-This service orchestrates complex business entity workflows including entity creation,
-relationship management, lifecycle operations, and cross-entity business rules.
-Implements the Service Layer pattern for business workflow orchestration while
-preserving all original Node.js business logic patterns through comprehensive
-entity relationship coordination.
+This module implements the Business Entity Service orchestrating complex business entity
+workflows including entity creation, relationship management, lifecycle operations,
+and cross-entity business rules. This service implements the core business domain logic
+with comprehensive entity relationship coordination while preserving all original
+Node.js business logic patterns through the Service Layer pattern.
 
-Features implemented:
-- Business logic preservation for entity management workflows (Feature F-005)
-- Complex business entity relationship mapping (Section 6.2.2.1)
-- Service Layer pattern implementation (Feature F-006)
-- Entity lifecycle management with business rule enforcement (Section 4.12.1)
-- Cross-entity business logic coordination (Section 5.2.3)
+Key Features:
+- Business entity workflow orchestration per Section 5.2.3 Service Layer requirements
+- Entity relationship management with complex business logic coordination
+- Service Layer pattern implementation for business workflow orchestration
+- Entity lifecycle management with comprehensive validation rules
+- Cross-entity business rule coordination maintaining functional equivalence
+- Transaction boundary management with Flask-SQLAlchemy integration
+- Python 3.13.3 business logic implementation preserving Node.js patterns
+
+Migration Context:
+- Converted Node.js business entity logic to Python Service Layer pattern per Feature F-005
+- Implements comprehensive business workflow orchestration per Section 4.5.3
+- Maintains functional equivalence with original Node.js business rules
+- Provides Service Layer abstraction for business logic per Feature F-006
+
+Dependencies:
+- Flask-SQLAlchemy 3.1.1 for database operations and transaction management
+- Python 3.13.3 for modern type hints and dataclass integration
+- BaseService for Service Layer pattern implementation
+- BusinessEntity and EntityRelationship models for data persistence
 """
 
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass
-from datetime import datetime
 import logging
-from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from enum import Enum
 
-from flask import current_app
+from flask import current_app, g
 from flask_sqlalchemy import SQLAlchemy
+from injector import inject, singleton
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, asc
+from sqlalchemy.orm import joinedload, selectinload
 
-# Import models
-from src.models.business_entity import BusinessEntity
-from src.models.entity_relationship import EntityRelationship
-from src.models.user import User
+from .base import BaseService, ServiceError, ValidationError, TransactionError, retry_on_failure
 
-# Import utilities
-from src.utils.validation import ValidationService
-from src.utils.error_handling import BusinessLogicError, ValidationError, DataIntegrityError
-from src.utils.logging import get_structured_logger
-from src.utils.database import DatabaseTransactionManager
-from src.utils.response import ResponseFormatter
+
+# Type definitions for business entity operations
+EntityID = int
+RelationshipID = int
+UserID = int
+
+
+class EntityStatus(str, Enum):
+    """
+    Business entity status enumeration for workflow management.
+    
+    Provides consistent status values for entity lifecycle management
+    with clear business meaning and workflow progression patterns.
+    """
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    PENDING = "pending"
+    ARCHIVED = "archived"
+    DELETED = "deleted"
+
+
+class RelationshipType(str, Enum):
+    """
+    Business entity relationship type enumeration.
+    
+    Defines standardized relationship types for complex business
+    entity associations and workflow coordination.
+    """
+    OWNS = "owns"
+    DEPENDS_ON = "depends_on"
+    CONTAINS = "contains"
+    RELATES_TO = "relates_to"
+    REPLACES = "replaces"
+    REFERENCES = "references"
+    MANAGES = "manages"
+    COLLABORATES_WITH = "collaborates_with"
 
 
 @dataclass
 class EntityCreationRequest:
     """
-    Data class for entity creation requests with type hints for validation.
-    Implements Python dataclass pattern per Section 4.5.1 requirements.
+    Data class for entity creation requests with comprehensive validation.
+    
+    Implements Python dataclass pattern for structured data handling
+    as specified in Section 4.5.1 for robust data validation and type safety.
     """
     name: str
     description: Optional[str] = None
     owner_id: Optional[int] = None
-    status: str = 'active'
-    metadata: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class EntityRelationshipRequest:
-    """
-    Data class for entity relationship creation with comprehensive validation.
-    Supports complex business entity relationship mapping per Section 6.2.2.1.
-    """
-    source_entity_id: int
-    target_entity_id: int
-    relationship_type: str
-    metadata: Optional[Dict[str, Any]] = None
-    is_active: bool = True
+    status: EntityStatus = EntityStatus.ACTIVE
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Validate entity creation request data after initialization."""
+        if not self.name or not self.name.strip():
+            raise ValidationError("Entity name is required and cannot be empty")
+        
+        if len(self.name.strip()) > 255:
+            raise ValidationError("Entity name cannot exceed 255 characters")
+        
+        self.name = self.name.strip()
+        
+        if self.description and len(self.description) > 5000:
+            raise ValidationError("Entity description cannot exceed 5000 characters")
 
 
 @dataclass
 class EntityUpdateRequest:
     """
-    Data class for entity update operations with selective field updates.
-    Maintains business rule enforcement during lifecycle operations.
+    Data class for entity update requests with validation support.
+    
+    Provides structured data representation for entity modification
+    operations with automatic validation and type safety.
     """
     entity_id: int
     name: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[EntityStatus] = None
     metadata: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """Validate entity update request data after initialization."""
+        if self.entity_id <= 0:
+            raise ValidationError("Invalid entity ID provided")
+        
+        if self.name is not None:
+            if not self.name.strip():
+                raise ValidationError("Entity name cannot be empty")
+            if len(self.name.strip()) > 255:
+                raise ValidationError("Entity name cannot exceed 255 characters")
+            self.name = self.name.strip()
+        
+        if self.description is not None and len(self.description) > 5000:
+            raise ValidationError("Entity description cannot exceed 5000 characters")
 
 
-class BusinessEntityService:
+@dataclass
+class RelationshipCreationRequest:
     """
-    Core business entity service implementing Service Layer pattern for 
-    complex entity workflow orchestration. Provides comprehensive business
-    logic abstraction for entity management operations while maintaining
-    functional equivalence with original Node.js business rules.
+    Data class for entity relationship creation requests.
     
-    This service coordinates:
-    - Entity creation and lifecycle management
-    - Complex relationship mapping and validation
-    - Cross-entity business rule enforcement
-    - Transaction boundary management
-    - Workflow orchestration for multi-step operations
+    Implements structured relationship data handling with validation
+    for complex business entity associations.
+    """
+    source_entity_id: int
+    target_entity_id: int
+    relationship_type: RelationshipType
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Validate relationship creation request data after initialization."""
+        if self.source_entity_id <= 0 or self.target_entity_id <= 0:
+            raise ValidationError("Invalid entity IDs provided for relationship")
+        
+        if self.source_entity_id == self.target_entity_id:
+            raise ValidationError("Self-relationships are not permitted")
+        
+        if not isinstance(self.relationship_type, RelationshipType):
+            raise ValidationError("Invalid relationship type provided")
+
+
+@dataclass
+class BusinessWorkflowResult:
+    """
+    Data class for business workflow operation results.
+    
+    Provides structured result reporting for complex business operations
+    with success status, data payload, and metadata tracking.
+    """
+    success: bool
+    entity_id: Optional[int] = None
+    relationship_id: Optional[int] = None
+    data: Optional[Dict[str, Any]] = None
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def add_error(self, error: str) -> None:
+        """Add error message to result."""
+        self.errors.append(error)
+        self.success = False
+    
+    def add_warning(self, warning: str) -> None:
+        """Add warning message to result."""
+        self.warnings.append(warning)
+
+
+@singleton
+class BusinessEntityService(BaseService):
+    """
+    Business Entity Service orchestrating complex business entity workflows.
+    
+    This service implements the core business domain logic with comprehensive
+    entity relationship coordination while preserving all original Node.js
+    business logic patterns through the Service Layer pattern as specified
+    in Section 5.2.3.
+    
+    Key Responsibilities:
+    - Entity creation, modification, and lifecycle management
+    - Complex entity relationship management and coordination
+    - Business rule enforcement and validation
+    - Cross-entity business logic coordination
+    - Transaction boundary management for complex operations
+    - Service composition for workflow orchestration
+    - Comprehensive error handling and retry mechanisms
+    
+    Business Logic Preservation:
+    - Maintains functional equivalence with original Node.js implementation
+    - Preserves all existing business rules and validation patterns
+    - Implements identical workflow sequences and decision logic
+    - Supports all original API contracts and data formats
+    
+    Service Layer Architecture:
+    - Clean separation of business logic from presentation layer
+    - Dependency injection support through Flask-Injector
+    - Service composition patterns for complex operations
+    - Transaction management with Flask-SQLAlchemy integration
     """
     
-    def __init__(self, db: SQLAlchemy = None):
+    @inject
+    def __init__(self, db: SQLAlchemy):
         """
-        Initialize business entity service with dependency injection support.
+        Initialize Business Entity Service with database dependency.
         
         Args:
             db: Flask-SQLAlchemy database instance for transaction management
         """
-        self.db = db
-        self.logger = get_structured_logger(__name__)
-        self.validation_service = ValidationService()
-        self.db_transaction_manager = DatabaseTransactionManager()
-        self.response_formatter = ResponseFormatter()
+        super().__init__(db)
         
-        # Valid entity statuses for lifecycle management
-        self.VALID_STATUSES = ['active', 'inactive', 'archived', 'pending']
+        # Import models after initialization to avoid circular imports
+        self._import_models()
         
-        # Valid relationship types for business logic enforcement
-        self.VALID_RELATIONSHIP_TYPES = [
-            'parent_child', 'depends_on', 'related_to', 
-            'contains', 'references', 'manages', 'owns'
-        ]
+        # Business rule configuration
+        self._max_relationships_per_entity = 1000
+        self._max_relationship_depth = 10
+        self._allowed_status_transitions = self._build_status_transition_matrix()
+        
+        self.logger.info("BusinessEntityService initialized successfully")
     
-    @contextmanager
-    def _get_db_session(self):
-        """
-        Database session context manager for transaction boundary control.
-        Implements Flask-SQLAlchemy session handling per Section 5.2.4.
-        """
-        if self.db:
-            session = self.db.session
-        else:
-            session = current_app.extensions['sqlalchemy'].db.session
-            
+    def _import_models(self) -> None:
+        """Import model classes to avoid circular import issues."""
         try:
-            yield session
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Database transaction rolled back: {str(e)}")
-            raise
-        finally:
-            session.close()
+            from ..models.business_entity import BusinessEntity
+            from ..models.entity_relationship import EntityRelationship
+            from ..models.user import User
+            
+            self.BusinessEntity = BusinessEntity
+            self.EntityRelationship = EntityRelationship
+            self.User = User
+            
+        except ImportError as e:
+            self.logger.error(f"Failed to import required models: {e}")
+            raise ServiceError("Required models not available", original_error=e)
     
-    def create_entity(self, request: EntityCreationRequest, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def _build_status_transition_matrix(self) -> Dict[EntityStatus, Set[EntityStatus]]:
         """
-        Create a new business entity with comprehensive validation and business rule enforcement.
+        Build valid status transition matrix for business rules enforcement.
         
-        Implements entity creation workflow per Section 5.2.3 Service Layer requirements
-        with complete business logic preservation from Node.js implementation.
+        Returns:
+            Dict mapping current status to allowed next statuses
+        """
+        return {
+            EntityStatus.PENDING: {EntityStatus.ACTIVE, EntityStatus.INACTIVE, EntityStatus.DELETED},
+            EntityStatus.ACTIVE: {EntityStatus.INACTIVE, EntityStatus.ARCHIVED, EntityStatus.DELETED},
+            EntityStatus.INACTIVE: {EntityStatus.ACTIVE, EntityStatus.ARCHIVED, EntityStatus.DELETED},
+            EntityStatus.ARCHIVED: {EntityStatus.ACTIVE, EntityStatus.DELETED},
+            EntityStatus.DELETED: set()  # No transitions allowed from deleted state
+        }
+    
+    def validate_business_rules(self, data: Dict[str, Any]) -> bool:
+        """
+        Validate business rules for entity operations.
+        
+        Implements comprehensive business rule validation maintaining
+        functional equivalence with original Node.js validation patterns.
         
         Args:
-            request: EntityCreationRequest with entity details
-            user_id: Optional user ID for ownership assignment
-            
+            data: Operation data to validate
+        
         Returns:
-            Dict containing created entity data and operation metadata
-            
+            True if validation passes
+        
         Raises:
-            ValidationError: For invalid input data or business rule violations
-            BusinessLogicError: For business rule enforcement failures
-            DataIntegrityError: For database constraint violations
+            ValidationError: When business rules are violated
         """
+        if not isinstance(data, dict):
+            raise ValidationError("Validation data must be a dictionary")
+        
+        # Validate entity naming conventions
+        if "name" in data:
+            name = data["name"]
+            if not name or not isinstance(name, str) or not name.strip():
+                raise ValidationError("Entity name is required and must be non-empty")
+            
+            # Business rule: entity names must be unique within owner scope
+            if "owner_id" in data and "entity_id" not in data:
+                existing_entity = self._check_entity_name_uniqueness(name.strip(), data["owner_id"])
+                if existing_entity:
+                    raise ValidationError(f"Entity name '{name}' already exists for this owner")
+        
+        # Validate status transitions
+        if "status" in data and "current_status" in data:
+            if not self._validate_status_transition(data["current_status"], data["status"]):
+                raise ValidationError(
+                    f"Invalid status transition from {data['current_status']} to {data['status']}"
+                )
+        
+        # Validate relationship constraints
+        if "relationship_type" in data:
+            if not self._validate_relationship_type(data["relationship_type"]):
+                raise ValidationError(f"Invalid relationship type: {data['relationship_type']}")
+        
+        return True
+    
+    def _check_entity_name_uniqueness(self, name: str, owner_id: int) -> Optional[object]:
+        """Check if entity name already exists for the given owner."""
         try:
-            # Input validation with comprehensive schema checking
-            self._validate_entity_creation_request(request)
+            return self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.name == name,
+                self.BusinessEntity.owner_id == owner_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            ).first()
+        except SQLAlchemyError as e:
+            self.logger.warning(f"Error checking name uniqueness: {e}")
+            return None
+    
+    def _validate_status_transition(self, current_status: str, new_status: str) -> bool:
+        """Validate if status transition is allowed by business rules."""
+        try:
+            current = EntityStatus(current_status)
+            new = EntityStatus(new_status)
+            return new in self._allowed_status_transitions.get(current, set())
+        except ValueError:
+            return False
+    
+    def _validate_relationship_type(self, relationship_type: str) -> bool:
+        """Validate if relationship type is allowed by business rules."""
+        try:
+            RelationshipType(relationship_type)
+            return True
+        except ValueError:
+            return False
+    
+    # Core Entity Management Operations
+    
+    @retry_on_failure(max_retries=3)
+    def create_entity(self, request: EntityCreationRequest) -> BusinessWorkflowResult:
+        """
+        Create a new business entity with comprehensive validation and transaction management.
+        
+        Implements business entity creation workflow orchestration per Section 5.2.3
+        with complete business rule enforcement and error handling.
+        
+        Args:
+            request: EntityCreationRequest with validated entity data
+        
+        Returns:
+            BusinessWorkflowResult with creation status and entity details
+        
+        Raises:
+            ValidationError: When business rules are violated
+            TransactionError: When database operations fail
+        """
+        result = BusinessWorkflowResult(success=False)
+        
+        try:
+            # Resolve owner ID if not provided
+            if request.owner_id is None:
+                request.owner_id = self.get_current_user_id()
+                if request.owner_id is None:
+                    result.add_error("Owner ID is required for entity creation")
+                    return result
             
-            # Business rule validation
-            self._enforce_entity_creation_rules(request, user_id)
+            # Validate business rules
+            validation_data = {
+                "name": request.name,
+                "owner_id": request.owner_id,
+                "status": request.status
+            }
+            self.validate_business_rules(validation_data)
             
-            with self._get_db_session() as session:
-                # Determine entity owner
-                owner_id = request.owner_id or user_id
-                if owner_id:
-                    owner = session.query(User).filter_by(id=owner_id).first()
-                    if not owner:
-                        raise ValidationError(f"Invalid owner_id: {owner_id}")
-                
-                # Create entity with business logic preservation
-                entity = BusinessEntity(
+            # Verify owner exists
+            owner = self.session.query(self.User).filter(
+                self.User.id == request.owner_id,
+                self.User.is_active == True
+            ).first()
+            
+            if not owner:
+                result.add_error(f"Owner with ID {request.owner_id} not found or inactive")
+                return result
+            
+            with self.transaction_boundary():
+                # Create entity instance
+                entity = self.BusinessEntity(
                     name=request.name,
                     description=request.description,
-                    owner_id=owner_id,
-                    status=request.status,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    owner_id=request.owner_id,
+                    status=request.status.value,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc)
                 )
                 
-                session.add(entity)
-                session.commit()
+                self.session.add(entity)
+                self.session.flush()  # Get entity ID without committing
                 
-                # Log entity creation for audit trail
-                self.logger.info(
-                    "Business entity created",
-                    extra={
-                        "entity_id": entity.id,
-                        "entity_name": entity.name,
-                        "owner_id": owner_id,
-                        "user_id": user_id,
-                        "status": entity.status
-                    }
-                )
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "entity_id": entity.id,
-                        "name": entity.name,
-                        "description": entity.description,
-                        "owner_id": entity.owner_id,
-                        "status": entity.status,
-                        "created_at": entity.created_at.isoformat(),
-                        "updated_at": entity.updated_at.isoformat()
-                    },
-                    message="Entity created successfully"
-                )
-                
-        except (ValidationError, BusinessLogicError) as e:
-            self.logger.warning(f"Entity creation validation failed: {str(e)}")
-            raise
-        except IntegrityError as e:
-            self.logger.error(f"Entity creation integrity error: {str(e)}")
-            raise DataIntegrityError(f"Database constraint violation: {str(e)}")
-        except Exception as e:
-            self.logger.error(f"Entity creation failed: {str(e)}")
-            raise BusinessLogicError(f"Entity creation failed: {str(e)}")
-    
-    def update_entity(self, request: EntityUpdateRequest, user_id: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Update business entity with lifecycle management and business rule enforcement.
-        
-        Implements entity lifecycle management per Section 4.12.1 with comprehensive
-        validation rules and cross-entity business logic coordination.
-        
-        Args:
-            request: EntityUpdateRequest with update parameters
-            user_id: Optional user ID for authorization checking
-            
-        Returns:
-            Dict containing updated entity data and operation metadata
-            
-        Raises:
-            ValidationError: For invalid update parameters or business rule violations
-            BusinessLogicError: For entity not found or business logic failures
-            DataIntegrityError: For database constraint violations
-        """
-        try:
-            # Input validation
-            self._validate_entity_update_request(request)
-            
-            with self._get_db_session() as session:
-                # Retrieve entity with existence validation
-                entity = session.query(BusinessEntity).filter_by(id=request.entity_id).first()
-                if not entity:
-                    raise BusinessLogicError(f"Entity not found: {request.entity_id}")
-                
-                # Authorization validation
-                if user_id and entity.owner_id and entity.owner_id != user_id:
-                    raise BusinessLogicError("Insufficient permissions to update entity")
-                
-                # Business rule enforcement for updates
-                self._enforce_entity_update_rules(entity, request)
-                
-                # Apply selective updates with validation
-                if request.name is not None:
-                    entity.name = request.name
-                if request.description is not None:
-                    entity.description = request.description
-                if request.status is not None:
-                    # Validate status transition
-                    self._validate_status_transition(entity.status, request.status)
-                    entity.status = request.status
-                if request.metadata is not None:
-                    # Merge metadata with existing data
-                    entity.metadata = {**(entity.metadata or {}), **request.metadata}
-                
-                entity.updated_at = datetime.utcnow()
-                session.commit()
-                
-                # Log entity update for audit trail
-                self.logger.info(
-                    "Business entity updated",
-                    extra={
-                        "entity_id": entity.id,
-                        "entity_name": entity.name,
-                        "user_id": user_id,
-                        "updated_fields": [
-                            field for field in ['name', 'description', 'status', 'metadata'] 
-                            if getattr(request, field) is not None
-                        ]
-                    }
-                )
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "entity_id": entity.id,
-                        "name": entity.name,
-                        "description": entity.description,
-                        "owner_id": entity.owner_id,
-                        "status": entity.status,
-                        "created_at": entity.created_at.isoformat(),
-                        "updated_at": entity.updated_at.isoformat()
-                    },
-                    message="Entity updated successfully"
-                )
-                
-        except (ValidationError, BusinessLogicError) as e:
-            self.logger.warning(f"Entity update validation failed: {str(e)}")
-            raise
-        except IntegrityError as e:
-            self.logger.error(f"Entity update integrity error: {str(e)}")
-            raise DataIntegrityError(f"Database constraint violation: {str(e)}")
-        except Exception as e:
-            self.logger.error(f"Entity update failed: {str(e)}")
-            raise BusinessLogicError(f"Entity update failed: {str(e)}")
-    
-    def create_relationship(self, request: EntityRelationshipRequest, user_id: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Create business entity relationship with complex business logic coordination.
-        
-        Implements complex business entity relationship mapping per Section 6.2.2.1
-        with comprehensive validation and cross-entity business rule enforcement.
-        
-        Args:
-            request: EntityRelationshipRequest with relationship details
-            user_id: Optional user ID for authorization checking
-            
-        Returns:
-            Dict containing created relationship data and operation metadata
-            
-        Raises:
-            ValidationError: For invalid relationship parameters or business rule violations
-            BusinessLogicError: For entity not found or relationship logic failures
-            DataIntegrityError: For database constraint violations
-        """
-        try:
-            # Input validation with relationship-specific rules
-            self._validate_relationship_request(request)
-            
-            with self._get_db_session() as session:
-                # Validate source and target entities exist
-                source_entity = session.query(BusinessEntity).filter_by(id=request.source_entity_id).first()
-                target_entity = session.query(BusinessEntity).filter_by(id=request.target_entity_id).first()
-                
-                if not source_entity:
-                    raise BusinessLogicError(f"Source entity not found: {request.source_entity_id}")
-                if not target_entity:
-                    raise BusinessLogicError(f"Target entity not found: {request.target_entity_id}")
-                
-                # Authorization validation for relationship creation
-                if user_id:
-                    if (source_entity.owner_id and source_entity.owner_id != user_id and
-                        target_entity.owner_id and target_entity.owner_id != user_id):
-                        raise BusinessLogicError("Insufficient permissions to create relationship")
-                
-                # Business rule enforcement for relationships
-                self._enforce_relationship_creation_rules(source_entity, target_entity, request)
-                
-                # Check for duplicate relationships
-                existing_relationship = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.source_entity_id == request.source_entity_id,
-                        EntityRelationship.target_entity_id == request.target_entity_id,
-                        EntityRelationship.relationship_type == request.relationship_type,
-                        EntityRelationship.is_active == True
-                    )
-                ).first()
-                
-                if existing_relationship:
-                    raise BusinessLogicError(
-                        f"Relationship already exists between entities {request.source_entity_id} "
-                        f"and {request.target_entity_id} with type {request.relationship_type}"
-                    )
-                
-                # Create relationship with business logic coordination
-                relationship = EntityRelationship(
-                    source_entity_id=request.source_entity_id,
-                    target_entity_id=request.target_entity_id,
-                    relationship_type=request.relationship_type,
-                    is_active=request.is_active,
-                    created_at=datetime.utcnow()
-                )
-                
-                session.add(relationship)
-                session.commit()
-                
-                # Log relationship creation for audit trail
-                self.logger.info(
-                    "Entity relationship created",
-                    extra={
-                        "relationship_id": relationship.id,
-                        "source_entity_id": relationship.source_entity_id,
-                        "target_entity_id": relationship.target_entity_id,
-                        "relationship_type": relationship.relationship_type,
-                        "user_id": user_id
-                    }
-                )
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "relationship_id": relationship.id,
-                        "source_entity_id": relationship.source_entity_id,
-                        "target_entity_id": relationship.target_entity_id,
-                        "relationship_type": relationship.relationship_type,
-                        "is_active": relationship.is_active,
-                        "created_at": relationship.created_at.isoformat()
-                    },
-                    message="Relationship created successfully"
-                )
-                
-        except (ValidationError, BusinessLogicError) as e:
-            self.logger.warning(f"Relationship creation validation failed: {str(e)}")
-            raise
-        except IntegrityError as e:
-            self.logger.error(f"Relationship creation integrity error: {str(e)}")
-            raise DataIntegrityError(f"Database constraint violation: {str(e)}")
-        except Exception as e:
-            self.logger.error(f"Relationship creation failed: {str(e)}")
-            raise BusinessLogicError(f"Relationship creation failed: {str(e)}")
-    
-    def get_entity(self, entity_id: int, user_id: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Retrieve business entity with relationships and metadata.
-        
-        Implements comprehensive entity retrieval with relationship mapping
-        and authorization checking per Section 5.2.3 requirements.
-        
-        Args:
-            entity_id: ID of the entity to retrieve
-            user_id: Optional user ID for authorization checking
-            
-        Returns:
-            Dict containing entity data with relationships and metadata
-            
-        Raises:
-            BusinessLogicError: For entity not found or authorization failures
-        """
-        try:
-            with self._get_db_session() as session:
-                # Retrieve entity with relationship loading
-                entity = session.query(BusinessEntity).filter_by(id=entity_id).first()
-                if not entity:
-                    raise BusinessLogicError(f"Entity not found: {entity_id}")
-                
-                # Authorization validation
-                if user_id and entity.owner_id and entity.owner_id != user_id:
-                    raise BusinessLogicError("Insufficient permissions to view entity")
-                
-                # Retrieve entity relationships
-                source_relationships = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.source_entity_id == entity_id,
-                        EntityRelationship.is_active == True
-                    )
-                ).all()
-                
-                target_relationships = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.target_entity_id == entity_id,
-                        EntityRelationship.is_active == True
-                    )
-                ).all()
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "entity_id": entity.id,
-                        "name": entity.name,
-                        "description": entity.description,
-                        "owner_id": entity.owner_id,
-                        "status": entity.status,
-                        "created_at": entity.created_at.isoformat(),
-                        "updated_at": entity.updated_at.isoformat(),
-                        "source_relationships": [
-                            {
-                                "relationship_id": rel.id,
-                                "target_entity_id": rel.target_entity_id,
-                                "relationship_type": rel.relationship_type,
-                                "created_at": rel.created_at.isoformat()
-                            } for rel in source_relationships
-                        ],
-                        "target_relationships": [
-                            {
-                                "relationship_id": rel.id,
-                                "source_entity_id": rel.source_entity_id,
-                                "relationship_type": rel.relationship_type,
-                                "created_at": rel.created_at.isoformat()
-                            } for rel in target_relationships
-                        ]
-                    },
-                    message="Entity retrieved successfully"
-                )
-                
-        except BusinessLogicError as e:
-            self.logger.warning(f"Entity retrieval failed: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Entity retrieval error: {str(e)}")
-            raise BusinessLogicError(f"Entity retrieval failed: {str(e)}")
-    
-    def list_entities(
-        self, 
-        user_id: Optional[int] = None,
-        status: Optional[str] = None,
-        owner_id: Optional[int] = None,
-        page: int = 1,
-        per_page: int = 20
-    ) -> Dict[str, Any]:
-        """
-        List business entities with filtering and pagination support.
-        
-        Implements comprehensive entity listing with business rule enforcement
-        and performance optimization per Section 6.2.5.1 requirements.
-        
-        Args:
-            user_id: Optional user ID for authorization filtering
-            status: Optional status filter
-            owner_id: Optional owner filter
-            page: Page number for pagination
-            per_page: Items per page
-            
-        Returns:
-            Dict containing paginated entity list and metadata
-        """
-        try:
-            with self._get_db_session() as session:
-                # Build query with filters
-                query = session.query(BusinessEntity)
-                
-                # Apply filters with business logic
-                if user_id and not owner_id:
-                    query = query.filter(BusinessEntity.owner_id == user_id)
-                elif owner_id:
-                    query = query.filter(BusinessEntity.owner_id == owner_id)
-                
-                if status and status in self.VALID_STATUSES:
-                    query = query.filter(BusinessEntity.status == status)
-                
-                # Apply pagination
-                total_count = query.count()
-                offset = (page - 1) * per_page
-                entities = query.order_by(desc(BusinessEntity.updated_at)).offset(offset).limit(per_page).all()
-                
-                # Format entity data
-                entity_data = []
-                for entity in entities:
-                    entity_data.append({
-                        "entity_id": entity.id,
-                        "name": entity.name,
-                        "description": entity.description,
-                        "owner_id": entity.owner_id,
-                        "status": entity.status,
-                        "created_at": entity.created_at.isoformat(),
-                        "updated_at": entity.updated_at.isoformat()
-                    })
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "entities": entity_data,
-                        "pagination": {
-                            "page": page,
-                            "per_page": per_page,
-                            "total_count": total_count,
-                            "total_pages": (total_count + per_page - 1) // per_page
-                        }
-                    },
-                    message="Entities retrieved successfully"
-                )
-                
-        except Exception as e:
-            self.logger.error(f"Entity listing failed: {str(e)}")
-            raise BusinessLogicError(f"Entity listing failed: {str(e)}")
-    
-    def delete_entity(self, entity_id: int, user_id: Optional[int] = None, soft_delete: bool = True) -> Dict[str, Any]:
-        """
-        Delete business entity with relationship cleanup and business rule enforcement.
-        
-        Implements entity lifecycle management with comprehensive cleanup procedures
-        and cross-entity business logic coordination per Section 4.12.1 requirements.
-        
-        Args:
-            entity_id: ID of the entity to delete
-            user_id: Optional user ID for authorization checking
-            soft_delete: Whether to perform soft delete (status change) or hard delete
-            
-        Returns:
-            Dict containing deletion confirmation and operation metadata
-            
-        Raises:
-            ValidationError: For deletion rule violations
-            BusinessLogicError: For entity not found or authorization failures
-        """
-        try:
-            with self._get_db_session() as session:
-                # Retrieve entity
-                entity = session.query(BusinessEntity).filter_by(id=entity_id).first()
-                if not entity:
-                    raise BusinessLogicError(f"Entity not found: {entity_id}")
-                
-                # Authorization validation
-                if user_id and entity.owner_id and entity.owner_id != user_id:
-                    raise BusinessLogicError("Insufficient permissions to delete entity")
-                
-                # Business rule enforcement for deletion
-                self._enforce_entity_deletion_rules(entity, session)
-                
-                if soft_delete:
-                    # Soft delete - change status to archived
-                    entity.status = 'archived'
-                    entity.updated_at = datetime.utcnow()
-                    
-                    # Deactivate related relationships
-                    session.query(EntityRelationship).filter(
-                        or_(
-                            EntityRelationship.source_entity_id == entity_id,
-                            EntityRelationship.target_entity_id == entity_id
-                        )
-                    ).update({"is_active": False})
-                    
-                    session.commit()
-                    action = "archived"
-                else:
-                    # Hard delete - remove entity and relationships
-                    session.query(EntityRelationship).filter(
-                        or_(
-                            EntityRelationship.source_entity_id == entity_id,
-                            EntityRelationship.target_entity_id == entity_id
-                        )
-                    ).delete()
-                    
-                    session.delete(entity)
-                    session.commit()
-                    action = "deleted"
-                
-                # Log entity deletion for audit trail
-                self.logger.info(
-                    f"Business entity {action}",
-                    extra={
-                        "entity_id": entity_id,
-                        "entity_name": entity.name if soft_delete else "N/A",
-                        "user_id": user_id,
-                        "action": action
-                    }
-                )
-                
-                return self.response_formatter.format_success_response(
-                    data={"entity_id": entity_id, "action": action},
-                    message=f"Entity {action} successfully"
-                )
-                
-        except (ValidationError, BusinessLogicError) as e:
-            self.logger.warning(f"Entity deletion failed: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Entity deletion error: {str(e)}")
-            raise BusinessLogicError(f"Entity deletion failed: {str(e)}")
-    
-    def get_entity_relationships(
-        self, 
-        entity_id: int, 
-        relationship_type: Optional[str] = None,
-        user_id: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Retrieve entity relationships with filtering and metadata.
-        
-        Implements complex business entity relationship mapping retrieval
-        per Section 6.2.2.1 with comprehensive relationship coordination.
-        
-        Args:
-            entity_id: ID of the entity to get relationships for
-            relationship_type: Optional filter by relationship type
-            user_id: Optional user ID for authorization checking
-            
-        Returns:
-            Dict containing relationship data and metadata
-        """
-        try:
-            with self._get_db_session() as session:
-                # Validate entity exists and user has access
-                entity = session.query(BusinessEntity).filter_by(id=entity_id).first()
-                if not entity:
-                    raise BusinessLogicError(f"Entity not found: {entity_id}")
-                
-                if user_id and entity.owner_id and entity.owner_id != user_id:
-                    raise BusinessLogicError("Insufficient permissions to view entity relationships")
-                
-                # Build relationship query
-                query_conditions = [
-                    or_(
-                        EntityRelationship.source_entity_id == entity_id,
-                        EntityRelationship.target_entity_id == entity_id
-                    ),
-                    EntityRelationship.is_active == True
-                ]
-                
-                if relationship_type and relationship_type in self.VALID_RELATIONSHIP_TYPES:
-                    query_conditions.append(EntityRelationship.relationship_type == relationship_type)
-                
-                relationships = session.query(EntityRelationship).filter(
-                    and_(*query_conditions)
-                ).order_by(desc(EntityRelationship.created_at)).all()
-                
-                # Format relationship data with related entity information
-                relationship_data = []
-                for rel in relationships:
-                    # Determine direction and related entity
-                    if rel.source_entity_id == entity_id:
-                        direction = "outgoing"
-                        related_entity_id = rel.target_entity_id
-                    else:
-                        direction = "incoming"
-                        related_entity_id = rel.source_entity_id
-                    
-                    # Get related entity basic info
-                    related_entity = session.query(BusinessEntity).filter_by(id=related_entity_id).first()
-                    
-                    relationship_data.append({
-                        "relationship_id": rel.id,
-                        "direction": direction,
-                        "relationship_type": rel.relationship_type,
-                        "related_entity": {
-                            "entity_id": related_entity.id,
-                            "name": related_entity.name,
-                            "status": related_entity.status
-                        } if related_entity else None,
-                        "created_at": rel.created_at.isoformat()
-                    })
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "entity_id": entity_id,
-                        "relationships": relationship_data,
-                        "total_count": len(relationship_data)
-                    },
-                    message="Entity relationships retrieved successfully"
-                )
-                
-        except BusinessLogicError as e:
-            self.logger.warning(f"Relationship retrieval failed: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Relationship retrieval error: {str(e)}")
-            raise BusinessLogicError(f"Relationship retrieval failed: {str(e)}")
-    
-    def orchestrate_entity_workflow(
-        self, 
-        workflow_type: str, 
-        entity_ids: List[int], 
-        workflow_params: Dict[str, Any],
-        user_id: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Orchestrate complex business entity workflows across multiple entities.
-        
-        Implements advanced workflow orchestration patterns per Section 4.5.3
-        with service composition for complex business operations and comprehensive
-        transaction boundary management across multiple entities.
-        
-        Args:
-            workflow_type: Type of workflow to execute
-            entity_ids: List of entity IDs involved in the workflow
-            workflow_params: Parameters specific to the workflow
-            user_id: Optional user ID for authorization checking
-            
-        Returns:
-            Dict containing workflow execution results and metadata
-            
-        Raises:
-            ValidationError: For invalid workflow parameters
-            BusinessLogicError: For workflow execution failures
-        """
-        try:
-            # Validate workflow parameters
-            self._validate_workflow_request(workflow_type, entity_ids, workflow_params)
-            
-            with self._get_db_session() as session:
-                # Validate all entities exist and user has access
-                entities = []
-                for entity_id in entity_ids:
-                    entity = session.query(BusinessEntity).filter_by(id=entity_id).first()
-                    if not entity:
-                        raise BusinessLogicError(f"Entity not found: {entity_id}")
-                    
-                    if user_id and entity.owner_id and entity.owner_id != user_id:
-                        raise BusinessLogicError(f"Insufficient permissions for entity: {entity_id}")
-                    
-                    entities.append(entity)
-                
-                # Execute workflow based on type
-                workflow_result = self._execute_workflow(workflow_type, entities, workflow_params, session)
-                
-                session.commit()
-                
-                # Log workflow execution for audit trail
-                self.logger.info(
-                    "Entity workflow executed",
-                    extra={
-                        "workflow_type": workflow_type,
-                        "entity_ids": entity_ids,
-                        "user_id": user_id,
-                        "workflow_result": workflow_result
-                    }
-                )
-                
-                return self.response_formatter.format_success_response(
-                    data={
-                        "workflow_type": workflow_type,
-                        "entity_ids": entity_ids,
-                        "workflow_result": workflow_result,
-                        "executed_at": datetime.utcnow().isoformat()
-                    },
-                    message="Workflow executed successfully"
-                )
-                
-        except (ValidationError, BusinessLogicError) as e:
-            self.logger.warning(f"Workflow execution failed: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Workflow execution error: {str(e)}")
-            raise BusinessLogicError(f"Workflow execution failed: {str(e)}")
-    
-    # Private validation and business rule methods
-    
-    def _validate_entity_creation_request(self, request: EntityCreationRequest) -> None:
-        """
-        Validate entity creation request with comprehensive input validation.
-        
-        Implements input validation per Section 4.12.1 validation rules
-        with business rule enforcement and security compliance.
-        """
-        if not request.name or not request.name.strip():
-            raise ValidationError("Entity name is required")
-        
-        if len(request.name) > 255:
-            raise ValidationError("Entity name must be 255 characters or less")
-        
-        if request.status and request.status not in self.VALID_STATUSES:
-            raise ValidationError(f"Invalid status. Must be one of: {', '.join(self.VALID_STATUSES)}")
-        
-        if request.description and len(request.description) > 1000:
-            raise ValidationError("Entity description must be 1000 characters or less")
-        
-        # Validate metadata if provided
-        if request.metadata:
-            if not isinstance(request.metadata, dict):
-                raise ValidationError("Entity metadata must be a dictionary")
-            
-            # Basic sanitization for security
-            self.validation_service.validate_metadata_security(request.metadata)
-    
-    def _validate_entity_update_request(self, request: EntityUpdateRequest) -> None:
-        """
-        Validate entity update request with selective field validation.
-        
-        Implements entity lifecycle validation per Section 4.12.1 requirements
-        with comprehensive business rule enforcement.
-        """
-        if not request.entity_id:
-            raise ValidationError("Entity ID is required")
-        
-        if request.name is not None:
-            if not request.name.strip():
-                raise ValidationError("Entity name cannot be empty")
-            if len(request.name) > 255:
-                raise ValidationError("Entity name must be 255 characters or less")
-        
-        if request.status is not None and request.status not in self.VALID_STATUSES:
-            raise ValidationError(f"Invalid status. Must be one of: {', '.join(self.VALID_STATUSES)}")
-        
-        if request.description is not None and len(request.description) > 1000:
-            raise ValidationError("Entity description must be 1000 characters or less")
-        
-        if request.metadata is not None:
-            if not isinstance(request.metadata, dict):
-                raise ValidationError("Entity metadata must be a dictionary")
-            self.validation_service.validate_metadata_security(request.metadata)
-    
-    def _validate_relationship_request(self, request: EntityRelationshipRequest) -> None:
-        """
-        Validate entity relationship request with business logic coordination.
-        
-        Implements complex business entity relationship validation per Section 6.2.2.1
-        with comprehensive constraint checking and business rule enforcement.
-        """
-        if not request.source_entity_id:
-            raise ValidationError("Source entity ID is required")
-        
-        if not request.target_entity_id:
-            raise ValidationError("Target entity ID is required")
-        
-        if request.source_entity_id == request.target_entity_id:
-            raise ValidationError("Source and target entities cannot be the same")
-        
-        if not request.relationship_type:
-            raise ValidationError("Relationship type is required")
-        
-        if request.relationship_type not in self.VALID_RELATIONSHIP_TYPES:
-            raise ValidationError(
-                f"Invalid relationship type. Must be one of: {', '.join(self.VALID_RELATIONSHIP_TYPES)}"
-            )
-        
-        if request.metadata is not None:
-            if not isinstance(request.metadata, dict):
-                raise ValidationError("Relationship metadata must be a dictionary")
-            self.validation_service.validate_metadata_security(request.metadata)
-    
-    def _validate_workflow_request(
-        self, 
-        workflow_type: str, 
-        entity_ids: List[int], 
-        workflow_params: Dict[str, Any]
-    ) -> None:
-        """
-        Validate workflow orchestration request parameters.
-        
-        Implements workflow validation per Section 4.5.3 advanced workflow
-        orchestration patterns with comprehensive parameter validation.
-        """
-        valid_workflow_types = [
-            'bulk_status_update', 'relationship_cascade', 'entity_merge', 
-            'ownership_transfer', 'dependency_check', 'cleanup_orphaned'
-        ]
-        
-        if not workflow_type:
-            raise ValidationError("Workflow type is required")
-        
-        if workflow_type not in valid_workflow_types:
-            raise ValidationError(
-                f"Invalid workflow type. Must be one of: {', '.join(valid_workflow_types)}"
-            )
-        
-        if not entity_ids or len(entity_ids) == 0:
-            raise ValidationError("At least one entity ID is required")
-        
-        if len(entity_ids) > 100:
-            raise ValidationError("Cannot process more than 100 entities in a single workflow")
-        
-        if not isinstance(workflow_params, dict):
-            raise ValidationError("Workflow parameters must be a dictionary")
-        
-        # Workflow-specific parameter validation
-        if workflow_type == 'bulk_status_update':
-            if 'new_status' not in workflow_params:
-                raise ValidationError("new_status parameter is required for bulk_status_update workflow")
-            if workflow_params['new_status'] not in self.VALID_STATUSES:
-                raise ValidationError(f"Invalid new_status. Must be one of: {', '.join(self.VALID_STATUSES)}")
-        
-        elif workflow_type == 'relationship_cascade':
-            if 'relationship_type' not in workflow_params:
-                raise ValidationError("relationship_type parameter is required for relationship_cascade workflow")
-            if workflow_params['relationship_type'] not in self.VALID_RELATIONSHIP_TYPES:
-                raise ValidationError(
-                    f"Invalid relationship_type. Must be one of: {', '.join(self.VALID_RELATIONSHIP_TYPES)}"
-                )
-        
-        elif workflow_type == 'ownership_transfer':
-            if 'new_owner_id' not in workflow_params:
-                raise ValidationError("new_owner_id parameter is required for ownership_transfer workflow")
-    
-    def _enforce_entity_creation_rules(self, request: EntityCreationRequest, user_id: Optional[int]) -> None:
-        """
-        Enforce business rules for entity creation.
-        
-        Implements business rule enforcement per Section 4.12.1 with
-        comprehensive business logic preservation from Node.js implementation.
-        """
-        # Business rule: Entity name must be unique per owner
-        with self._get_db_session() as session:
-            owner_id = request.owner_id or user_id
-            if owner_id:
-                existing_entity = session.query(BusinessEntity).filter(
-                    and_(
-                        BusinessEntity.name == request.name,
-                        BusinessEntity.owner_id == owner_id,
-                        BusinessEntity.status != 'archived'
-                    )
-                ).first()
-                
-                if existing_entity:
-                    raise BusinessLogicError(f"Entity with name '{request.name}' already exists for this owner")
-        
-        # Business rule: Default status validation
-        if not request.status:
-            request.status = 'pending'  # Default to pending for new entities
-    
-    def _enforce_entity_update_rules(self, entity: BusinessEntity, request: EntityUpdateRequest) -> None:
-        """
-        Enforce business rules for entity updates.
-        
-        Implements entity lifecycle business rule enforcement per Section 4.12.1
-        with comprehensive validation and cross-entity coordination.
-        """
-        # Business rule: Cannot update archived entities
-        if entity.status == 'archived':
-            raise BusinessLogicError("Cannot update archived entities")
-        
-        # Business rule: Name uniqueness check for updates
-        if request.name and request.name != entity.name:
-            with self._get_db_session() as session:
-                existing_entity = session.query(BusinessEntity).filter(
-                    and_(
-                        BusinessEntity.name == request.name,
-                        BusinessEntity.owner_id == entity.owner_id,
-                        BusinessEntity.id != entity.id,
-                        BusinessEntity.status != 'archived'
-                    )
-                ).first()
-                
-                if existing_entity:
-                    raise BusinessLogicError(f"Entity with name '{request.name}' already exists for this owner")
-    
-    def _enforce_relationship_creation_rules(
-        self, 
-        source_entity: BusinessEntity, 
-        target_entity: BusinessEntity, 
-        request: EntityRelationshipRequest
-    ) -> None:
-        """
-        Enforce business rules for relationship creation.
-        
-        Implements complex business entity relationship rules per Section 6.2.2.1
-        with comprehensive cross-entity business logic coordination.
-        """
-        # Business rule: Cannot create relationships with archived entities
-        if source_entity.status == 'archived' or target_entity.status == 'archived':
-            raise BusinessLogicError("Cannot create relationships with archived entities")
-        
-        # Business rule: Specific relationship type restrictions
-        if request.relationship_type == 'parent_child':
-            # Check for circular dependencies
-            with self._get_db_session() as session:
-                circular_check = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.source_entity_id == request.target_entity_id,
-                        EntityRelationship.target_entity_id == request.source_entity_id,
-                        EntityRelationship.relationship_type == 'parent_child',
-                        EntityRelationship.is_active == True
-                    )
-                ).first()
-                
-                if circular_check:
-                    raise BusinessLogicError("Cannot create circular parent-child relationships")
-        
-        # Business rule: Ownership validation for certain relationship types
-        if request.relationship_type in ['owns', 'manages']:
-            if source_entity.owner_id != target_entity.owner_id:
-                raise BusinessLogicError(
-                    f"'{request.relationship_type}' relationships can only exist between entities with the same owner"
-                )
-    
-    def _enforce_entity_deletion_rules(self, entity: BusinessEntity, session: Session) -> None:
-        """
-        Enforce business rules for entity deletion.
-        
-        Implements entity lifecycle deletion rules per Section 4.12.1
-        with comprehensive dependency checking and business logic coordination.
-        """
-        # Business rule: Check for critical relationships before deletion
-        critical_relationships = session.query(EntityRelationship).filter(
-            and_(
-                EntityRelationship.target_entity_id == entity.id,
-                EntityRelationship.relationship_type.in_(['depends_on', 'parent_child']),
-                EntityRelationship.is_active == True
-            )
-        ).count()
-        
-        if critical_relationships > 0:
-            raise ValidationError(
-                f"Cannot delete entity with {critical_relationships} critical dependencies. "
-                "Remove dependencies first."
-            )
-    
-    def _validate_status_transition(self, current_status: str, new_status: str) -> None:
-        """
-        Validate entity status transitions according to business rules.
-        
-        Implements entity lifecycle status validation per Section 4.12.1
-        with comprehensive state transition management.
-        """
-        # Define valid status transitions
-        valid_transitions = {
-            'pending': ['active', 'inactive', 'archived'],
-            'active': ['inactive', 'archived'],
-            'inactive': ['active', 'archived'],
-            'archived': []  # Archived entities cannot transition to other states
-        }
-        
-        if current_status not in valid_transitions:
-            raise ValidationError(f"Invalid current status: {current_status}")
-        
-        if new_status not in valid_transitions[current_status]:
-            raise ValidationError(
-                f"Invalid status transition from '{current_status}' to '{new_status}'. "
-                f"Valid transitions: {', '.join(valid_transitions[current_status])}"
-            )
-    
-    def _execute_workflow(
-        self, 
-        workflow_type: str, 
-        entities: List[BusinessEntity], 
-        workflow_params: Dict[str, Any],
-        session: Session
-    ) -> Dict[str, Any]:
-        """
-        Execute specific workflow types with comprehensive business logic coordination.
-        
-        Implements advanced workflow orchestration patterns per Section 4.5.3
-        with service composition and transaction boundary management.
-        """
-        workflow_result = {"processed_entities": [], "errors": [], "summary": {}}
-        
-        try:
-            if workflow_type == 'bulk_status_update':
-                return self._execute_bulk_status_update(entities, workflow_params, session)
-            
-            elif workflow_type == 'relationship_cascade':
-                return self._execute_relationship_cascade(entities, workflow_params, session)
-            
-            elif workflow_type == 'ownership_transfer':
-                return self._execute_ownership_transfer(entities, workflow_params, session)
-            
-            elif workflow_type == 'dependency_check':
-                return self._execute_dependency_check(entities, workflow_params, session)
-            
-            elif workflow_type == 'cleanup_orphaned':
-                return self._execute_cleanup_orphaned(entities, workflow_params, session)
-            
-            else:
-                raise BusinessLogicError(f"Unsupported workflow type: {workflow_type}")
-                
-        except Exception as e:
-            self.logger.error(f"Workflow execution failed for {workflow_type}: {str(e)}")
-            workflow_result["errors"].append(str(e))
-            return workflow_result
-    
-    def _execute_bulk_status_update(
-        self, 
-        entities: List[BusinessEntity], 
-        workflow_params: Dict[str, Any],
-        session: Session
-    ) -> Dict[str, Any]:
-        """Execute bulk status update workflow with validation."""
-        new_status = workflow_params['new_status']
-        processed_entities = []
-        errors = []
-        
-        for entity in entities:
-            try:
-                self._validate_status_transition(entity.status, new_status)
-                entity.status = new_status
-                entity.updated_at = datetime.utcnow()
-                processed_entities.append(entity.id)
-            except Exception as e:
-                errors.append(f"Entity {entity.id}: {str(e)}")
-        
-        return {
-            "processed_entities": processed_entities,
-            "errors": errors,
-            "summary": {"total_processed": len(processed_entities), "total_errors": len(errors)}
-        }
-    
-    def _execute_relationship_cascade(
-        self, 
-        entities: List[BusinessEntity], 
-        workflow_params: Dict[str, Any],
-        session: Session
-    ) -> Dict[str, Any]:
-        """Execute relationship cascade workflow with business logic coordination."""
-        relationship_type = workflow_params['relationship_type']
-        processed_entities = []
-        errors = []
-        
-        # Create relationships between consecutive entities in the list
-        for i in range(len(entities) - 1):
-            try:
-                source_entity = entities[i]
-                target_entity = entities[i + 1]
-                
-                # Check if relationship already exists
-                existing_rel = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.source_entity_id == source_entity.id,
-                        EntityRelationship.target_entity_id == target_entity.id,
-                        EntityRelationship.relationship_type == relationship_type,
-                        EntityRelationship.is_active == True
-                    )
-                ).first()
-                
-                if not existing_rel:
-                    relationship = EntityRelationship(
-                        source_entity_id=source_entity.id,
-                        target_entity_id=target_entity.id,
-                        relationship_type=relationship_type,
-                        is_active=True,
-                        created_at=datetime.utcnow()
-                    )
-                    session.add(relationship)
-                    processed_entities.append(f"{source_entity.id}->{target_entity.id}")
-                
-            except Exception as e:
-                errors.append(f"Relationship {source_entity.id}->{target_entity.id}: {str(e)}")
-        
-        return {
-            "processed_entities": processed_entities,
-            "errors": errors,
-            "summary": {"total_processed": len(processed_entities), "total_errors": len(errors)}
-        }
-    
-    def _execute_ownership_transfer(
-        self, 
-        entities: List[BusinessEntity], 
-        workflow_params: Dict[str, Any],
-        session: Session
-    ) -> Dict[str, Any]:
-        """Execute ownership transfer workflow with validation."""
-        new_owner_id = workflow_params['new_owner_id']
-        processed_entities = []
-        errors = []
-        
-        # Validate new owner exists
-        new_owner = session.query(User).filter_by(id=new_owner_id).first()
-        if not new_owner:
-            return {
-                "processed_entities": [],
-                "errors": [f"New owner not found: {new_owner_id}"],
-                "summary": {"total_processed": 0, "total_errors": 1}
-            }
-        
-        for entity in entities:
-            try:
-                if entity.status != 'archived':
-                    entity.owner_id = new_owner_id
-                    entity.updated_at = datetime.utcnow()
-                    processed_entities.append(entity.id)
-                else:
-                    errors.append(f"Entity {entity.id}: Cannot transfer ownership of archived entity")
-            except Exception as e:
-                errors.append(f"Entity {entity.id}: {str(e)}")
-        
-        return {
-            "processed_entities": processed_entities,
-            "errors": errors,
-            "summary": {"total_processed": len(processed_entities), "total_errors": len(errors)}
-        }
-    
-    def _execute_dependency_check(
-        self, 
-        entities: List[BusinessEntity], 
-        workflow_params: Dict[str, Any],
-        session: Session
-    ) -> Dict[str, Any]:
-        """Execute dependency check workflow for entities."""
-        processed_entities = []
-        dependency_report = {}
-        
-        for entity in entities:
-            try:
-                # Check incoming dependencies
-                incoming_deps = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.target_entity_id == entity.id,
-                        EntityRelationship.is_active == True
-                    )
-                ).count()
-                
-                # Check outgoing dependencies
-                outgoing_deps = session.query(EntityRelationship).filter(
-                    and_(
-                        EntityRelationship.source_entity_id == entity.id,
-                        EntityRelationship.is_active == True
-                    )
-                ).count()
-                
-                dependency_report[entity.id] = {
-                    "incoming_dependencies": incoming_deps,
-                    "outgoing_dependencies": outgoing_deps,
-                    "total_dependencies": incoming_deps + outgoing_deps
+                result.success = True
+                result.entity_id = entity.id
+                result.data = {
+                    "entity": entity.to_dict(),
+                    "owner": {"id": owner.id, "username": owner.username}
                 }
                 
-                processed_entities.append(entity.id)
-            except Exception as e:
-                dependency_report[entity.id] = {"error": str(e)}
+                self.log_service_operation(
+                    f"Created entity '{request.name}' with ID {entity.id}",
+                    {"entity_id": entity.id, "owner_id": request.owner_id}
+                )
         
-        return {
-            "processed_entities": processed_entities,
-            "errors": [],
-            "summary": {"total_processed": len(processed_entities), "dependency_report": dependency_report}
-        }
+        except IntegrityError as e:
+            self.handle_integrity_error(e, "entity creation")
+            result.add_error("Entity creation failed due to data integrity constraints")
+            
+        except ValidationError as e:
+            result.add_error(str(e))
+            
+        except Exception as e:
+            self.logger.error(f"Unexpected error in entity creation: {e}", exc_info=True)
+            result.add_error("Entity creation failed due to unexpected error")
+        
+        return result
     
-    def _execute_cleanup_orphaned(
-        self, 
-        entities: List[BusinessEntity], 
-        workflow_params: Dict[str, Any],
-        session: Session
-    ) -> Dict[str, Any]:
-        """Execute cleanup workflow for orphaned entities."""
-        processed_entities = []
-        cleaned_relationships = 0
+    @retry_on_failure(max_retries=3)
+    def update_entity(self, request: EntityUpdateRequest) -> BusinessWorkflowResult:
+        """
+        Update existing business entity with validation and transaction management.
         
-        for entity in entities:
-            try:
-                # Clean up inactive relationships
-                inactive_rels = session.query(EntityRelationship).filter(
-                    and_(
-                        or_(
-                            EntityRelationship.source_entity_id == entity.id,
-                            EntityRelationship.target_entity_id == entity.id
-                        ),
-                        EntityRelationship.is_active == False
-                    )
-                ).count()
-                
-                session.query(EntityRelationship).filter(
-                    and_(
-                        or_(
-                            EntityRelationship.source_entity_id == entity.id,
-                            EntityRelationship.target_entity_id == entity.id
-                        ),
-                        EntityRelationship.is_active == False
-                    )
-                ).delete()
-                
-                cleaned_relationships += inactive_rels
-                processed_entities.append(entity.id)
-                
-            except Exception as e:
-                self.logger.warning(f"Cleanup failed for entity {entity.id}: {str(e)}")
+        Implements entity modification workflow with business rule enforcement
+        and comprehensive validation per Section 4.12.1.
         
-        return {
-            "processed_entities": processed_entities,
-            "errors": [],
-            "summary": {
-                "total_processed": len(processed_entities), 
-                "cleaned_relationships": cleaned_relationships
+        Args:
+            request: EntityUpdateRequest with validated update data
+        
+        Returns:
+            BusinessWorkflowResult with update status and entity details
+        """
+        result = BusinessWorkflowResult(success=False)
+        
+        try:
+            # Retrieve existing entity
+            entity = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == request.entity_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            ).first()
+            
+            if not entity:
+                result.add_error(f"Entity with ID {request.entity_id} not found")
+                return result
+            
+            # Check ownership permissions
+            current_user_id = self.get_current_user_id()
+            if current_user_id and entity.owner_id != current_user_id:
+                result.add_error("Insufficient permissions to update entity")
+                return result
+            
+            # Validate business rules for updates
+            validation_data = {"entity_id": request.entity_id}
+            
+            if request.name is not None:
+                validation_data.update({"name": request.name, "owner_id": entity.owner_id})
+            
+            if request.status is not None:
+                validation_data.update({
+                    "status": request.status.value,
+                    "current_status": entity.status
+                })
+            
+            self.validate_business_rules(validation_data)
+            
+            with self.transaction_boundary():
+                # Apply updates
+                if request.name is not None:
+                    entity.name = request.name
+                
+                if request.description is not None:
+                    entity.description = request.description
+                
+                if request.status is not None:
+                    entity.status = request.status.value
+                
+                entity.updated_at = datetime.now(timezone.utc)
+                
+                result.success = True
+                result.entity_id = entity.id
+                result.data = {"entity": entity.to_dict()}
+                
+                self.log_service_operation(
+                    f"Updated entity with ID {entity.id}",
+                    {"entity_id": entity.id, "updates": len([x for x in [request.name, request.description, request.status] if x is not None])}
+                )
+        
+        except IntegrityError as e:
+            self.handle_integrity_error(e, "entity update")
+            result.add_error("Entity update failed due to data integrity constraints")
+            
+        except ValidationError as e:
+            result.add_error(str(e))
+            
+        except Exception as e:
+            self.logger.error(f"Unexpected error in entity update: {e}", exc_info=True)
+            result.add_error("Entity update failed due to unexpected error")
+        
+        return result
+    
+    def get_entity_by_id(self, entity_id: int, include_relationships: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve business entity by ID with optional relationship data.
+        
+        Implements entity retrieval with comprehensive data loading
+        and relationship mapping per Section 6.2.2.1.
+        
+        Args:
+            entity_id: Entity identifier
+            include_relationships: Whether to include relationship data
+        
+        Returns:
+            Entity data dictionary or None if not found
+        """
+        try:
+            query = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == entity_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            )
+            
+            if include_relationships:
+                query = query.options(
+                    selectinload(self.BusinessEntity.source_relationships),
+                    selectinload(self.BusinessEntity.target_relationships),
+                    joinedload(self.BusinessEntity.owner)
+                )
+            
+            entity = query.first()
+            
+            if not entity:
+                return None
+            
+            entity_data = entity.to_dict()
+            
+            if include_relationships:
+                entity_data["relationships"] = self._build_relationship_data(entity)
+                if entity.owner:
+                    entity_data["owner"] = {
+                        "id": entity.owner.id,
+                        "username": entity.owner.username
+                    }
+            
+            return entity_data
+        
+        except SQLAlchemyError as e:
+            self.logger.error(f"Error retrieving entity {entity_id}: {e}")
+            return None
+    
+    def _build_relationship_data(self, entity) -> Dict[str, List[Dict[str, Any]]]:
+        """Build comprehensive relationship data for entity."""
+        relationship_data = {
+            "source_relationships": [],
+            "target_relationships": [],
+            "bidirectional_summary": {}
+        }
+        
+        # Process source relationships
+        for rel in entity.source_relationships.filter_by(is_active=True):
+            relationship_data["source_relationships"].append({
+                "id": rel.id,
+                "target_entity_id": rel.target_entity_id,
+                "relationship_type": rel.relationship_type,
+                "created_at": rel.created_at.isoformat() if rel.created_at else None
+            })
+        
+        # Process target relationships
+        for rel in entity.target_relationships.filter_by(is_active=True):
+            relationship_data["target_relationships"].append({
+                "id": rel.id,
+                "source_entity_id": rel.source_entity_id,
+                "relationship_type": rel.relationship_type,
+                "created_at": rel.created_at.isoformat() if rel.created_at else None
+            })
+        
+        # Build relationship type summary
+        all_types = set()
+        for rel in relationship_data["source_relationships"]:
+            all_types.add(rel["relationship_type"])
+        for rel in relationship_data["target_relationships"]:
+            all_types.add(rel["relationship_type"])
+        
+        for rel_type in all_types:
+            source_count = len([r for r in relationship_data["source_relationships"] if r["relationship_type"] == rel_type])
+            target_count = len([r for r in relationship_data["target_relationships"] if r["relationship_type"] == rel_type])
+            relationship_data["bidirectional_summary"][rel_type] = {
+                "as_source": source_count,
+                "as_target": target_count,
+                "total": source_count + target_count
+            }
+        
+        return relationship_data
+    
+    def list_entities(self, owner_id: Optional[int] = None, status: Optional[EntityStatus] = None,
+                     limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+        """
+        List business entities with filtering and pagination.
+        
+        Implements entity listing with comprehensive filtering options
+        and performance optimization through pagination.
+        
+        Args:
+            owner_id: Optional owner filter
+            status: Optional status filter
+            limit: Maximum number of entities to return (default: 100)
+            offset: Number of entities to skip (default: 0)
+        
+        Returns:
+            Dictionary with entities list and pagination metadata
+        """
+        try:
+            query = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.status != EntityStatus.DELETED
+            )
+            
+            # Apply filters
+            if owner_id is not None:
+                query = query.filter(self.BusinessEntity.owner_id == owner_id)
+            
+            if status is not None:
+                query = query.filter(self.BusinessEntity.status == status.value)
+            
+            # Get total count for pagination
+            total_count = query.count()
+            
+            # Apply pagination and ordering
+            entities = query.order_by(
+                self.BusinessEntity.updated_at.desc()
+            ).offset(offset).limit(limit).all()
+            
+            # Convert to dictionaries
+            entity_list = [entity.to_dict() for entity in entities]
+            
+            return {
+                "entities": entity_list,
+                "pagination": {
+                    "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": (offset + limit) < total_count
+                }
+            }
+        
+        except SQLAlchemyError as e:
+            self.logger.error(f"Error listing entities: {e}")
+            return {"entities": [], "pagination": {"total": 0, "limit": limit, "offset": offset, "has_more": False}}
+    
+    # Entity Relationship Management Operations
+    
+    @retry_on_failure(max_retries=3)
+    def create_relationship(self, request: RelationshipCreationRequest) -> BusinessWorkflowResult:
+        """
+        Create entity relationship with comprehensive validation and business rule enforcement.
+        
+        Implements complex entity relationship creation per Section 6.2.2.1
+        with transaction management and business logic coordination.
+        
+        Args:
+            request: RelationshipCreationRequest with validated relationship data
+        
+        Returns:
+            BusinessWorkflowResult with creation status and relationship details
+        """
+        result = BusinessWorkflowResult(success=False)
+        
+        try:
+            # Validate entities exist and are accessible
+            source_entity = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == request.source_entity_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            ).first()
+            
+            target_entity = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == request.target_entity_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            ).first()
+            
+            if not source_entity:
+                result.add_error(f"Source entity with ID {request.source_entity_id} not found")
+                return result
+            
+            if not target_entity:
+                result.add_error(f"Target entity with ID {request.target_entity_id} not found")
+                return result
+            
+            # Check permissions
+            current_user_id = self.get_current_user_id()
+            if current_user_id:
+                if (source_entity.owner_id != current_user_id and 
+                    target_entity.owner_id != current_user_id):
+                    result.add_error("Insufficient permissions to create relationship")
+                    return result
+            
+            # Validate business rules
+            validation_data = {
+                "relationship_type": request.relationship_type.value,
+                "source_entity_id": request.source_entity_id,
+                "target_entity_id": request.target_entity_id
+            }
+            self.validate_business_rules(validation_data)
+            
+            # Check for relationship limit
+            if not self._check_relationship_limits(request.source_entity_id):
+                result.add_error("Maximum number of relationships exceeded for source entity")
+                return result
+            
+            # Check for duplicate relationships
+            existing_rel = self.session.query(self.EntityRelationship).filter(
+                self.EntityRelationship.source_entity_id == request.source_entity_id,
+                self.EntityRelationship.target_entity_id == request.target_entity_id,
+                self.EntityRelationship.relationship_type == request.relationship_type.value,
+                self.EntityRelationship.is_active == True
+            ).first()
+            
+            if existing_rel:
+                result.add_error("Relationship already exists between these entities")
+                return result
+            
+            with self.transaction_boundary():
+                # Create relationship instance
+                relationship = self.EntityRelationship(
+                    source_entity_id=request.source_entity_id,
+                    target_entity_id=request.target_entity_id,
+                    relationship_type=request.relationship_type.value,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc)
+                )
+                
+                self.session.add(relationship)
+                self.session.flush()  # Get relationship ID without committing
+                
+                result.success = True
+                result.relationship_id = relationship.id
+                result.data = {
+                    "relationship": relationship.to_dict(),
+                    "source_entity": source_entity.to_dict(),
+                    "target_entity": target_entity.to_dict()
+                }
+                
+                self.log_service_operation(
+                    f"Created {request.relationship_type.value} relationship between entities {request.source_entity_id} and {request.target_entity_id}",
+                    {"relationship_id": relationship.id, "type": request.relationship_type.value}
+                )
+        
+        except IntegrityError as e:
+            self.handle_integrity_error(e, "relationship creation")
+            result.add_error("Relationship creation failed due to data integrity constraints")
+            
+        except ValidationError as e:
+            result.add_error(str(e))
+            
+        except Exception as e:
+            self.logger.error(f"Unexpected error in relationship creation: {e}", exc_info=True)
+            result.add_error("Relationship creation failed due to unexpected error")
+        
+        return result
+    
+    def _check_relationship_limits(self, entity_id: int) -> bool:
+        """Check if entity has reached maximum relationship limit."""
+        try:
+            relationship_count = self.session.query(self.EntityRelationship).filter(
+                (self.EntityRelationship.source_entity_id == entity_id) |
+                (self.EntityRelationship.target_entity_id == entity_id),
+                self.EntityRelationship.is_active == True
+            ).count()
+            
+            return relationship_count < self._max_relationships_per_entity
+        
+        except SQLAlchemyError as e:
+            self.logger.warning(f"Error checking relationship limits: {e}")
+            return True  # Allow operation if check fails
+    
+    def remove_relationship(self, relationship_id: int, soft_delete: bool = True) -> BusinessWorkflowResult:
+        """
+        Remove entity relationship with soft or hard deletion support.
+        
+        Implements relationship removal with configurable deletion strategy
+        and comprehensive validation per business rules.
+        
+        Args:
+            relationship_id: Relationship identifier
+            soft_delete: Whether to soft delete (default) or hard delete
+        
+        Returns:
+            BusinessWorkflowResult with removal status
+        """
+        result = BusinessWorkflowResult(success=False)
+        
+        try:
+            relationship = self.session.query(self.EntityRelationship).filter(
+                self.EntityRelationship.id == relationship_id,
+                self.EntityRelationship.is_active == True
+            ).first()
+            
+            if not relationship:
+                result.add_error(f"Relationship with ID {relationship_id} not found")
+                return result
+            
+            # Check permissions
+            current_user_id = self.get_current_user_id()
+            if current_user_id:
+                source_entity = self.session.query(self.BusinessEntity).get(relationship.source_entity_id)
+                target_entity = self.session.query(self.BusinessEntity).get(relationship.target_entity_id)
+                
+                if (source_entity.owner_id != current_user_id and 
+                    target_entity.owner_id != current_user_id):
+                    result.add_error("Insufficient permissions to remove relationship")
+                    return result
+            
+            with self.transaction_boundary():
+                if soft_delete:
+                    relationship.is_active = False
+                    relationship.updated_at = datetime.now(timezone.utc)
+                    action = "deactivated"
+                else:
+                    self.session.delete(relationship)
+                    action = "deleted"
+                
+                result.success = True
+                result.relationship_id = relationship_id
+                result.data = {"action": action}
+                
+                self.log_service_operation(
+                    f"Relationship {relationship_id} {action}",
+                    {"relationship_id": relationship_id, "soft_delete": soft_delete}
+                )
+        
+        except Exception as e:
+            self.logger.error(f"Unexpected error in relationship removal: {e}", exc_info=True)
+            result.add_error("Relationship removal failed due to unexpected error")
+        
+        return result
+    
+    def get_entity_relationships(self, entity_id: int, relationship_type: Optional[RelationshipType] = None,
+                               include_inactive: bool = False) -> Dict[str, Any]:
+        """
+        Retrieve all relationships for a business entity with filtering options.
+        
+        Implements comprehensive relationship retrieval with business logic
+        support for complex entity association patterns.
+        
+        Args:
+            entity_id: Entity identifier
+            relationship_type: Optional relationship type filter
+            include_inactive: Whether to include inactive relationships
+        
+        Returns:
+            Dictionary with relationship data and metadata
+        """
+        try:
+            # Verify entity exists
+            entity = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == entity_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            ).first()
+            
+            if not entity:
+                return {"relationships": [], "summary": {}, "error": "Entity not found"}
+            
+            # Build query filters
+            filters = [
+                (self.EntityRelationship.source_entity_id == entity_id) |
+                (self.EntityRelationship.target_entity_id == entity_id)
+            ]
+            
+            if not include_inactive:
+                filters.append(self.EntityRelationship.is_active == True)
+            
+            if relationship_type:
+                filters.append(self.EntityRelationship.relationship_type == relationship_type.value)
+            
+            # Execute query with eager loading
+            relationships = self.session.query(self.EntityRelationship).filter(
+                *filters
+            ).options(
+                joinedload(self.EntityRelationship.source_entity),
+                joinedload(self.EntityRelationship.target_entity)
+            ).order_by(self.EntityRelationship.created_at.desc()).all()
+            
+            # Process relationships
+            relationship_data = []
+            summary = {"by_type": {}, "total": len(relationships)}
+            
+            for rel in relationships:
+                rel_dict = rel.to_dict(include_entities=True)
+                rel_dict["direction"] = "outgoing" if rel.source_entity_id == entity_id else "incoming"
+                relationship_data.append(rel_dict)
+                
+                # Update summary
+                rel_type = rel.relationship_type
+                if rel_type not in summary["by_type"]:
+                    summary["by_type"][rel_type] = {"total": 0, "outgoing": 0, "incoming": 0}
+                
+                summary["by_type"][rel_type]["total"] += 1
+                if rel.source_entity_id == entity_id:
+                    summary["by_type"][rel_type]["outgoing"] += 1
+                else:
+                    summary["by_type"][rel_type]["incoming"] += 1
+            
+            return {
+                "relationships": relationship_data,
+                "summary": summary,
+                "entity": entity.to_dict()
+            }
+        
+        except SQLAlchemyError as e:
+            self.logger.error(f"Error retrieving relationships for entity {entity_id}: {e}")
+            return {"relationships": [], "summary": {}, "error": "Database error occurred"}
+    
+    # Advanced Workflow Orchestration Methods
+    
+    def execute_bulk_entity_operation(self, operation: str, entity_ids: List[int],
+                                    operation_data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Execute bulk operations on multiple entities with transaction management.
+        
+        Implements advanced workflow orchestration patterns per Section 4.5.3
+        with comprehensive error handling and rollback capabilities.
+        
+        Args:
+            operation: Operation type ('update_status', 'bulk_delete', 'bulk_archive')
+            entity_ids: List of entity identifiers
+            operation_data: Additional operation parameters
+        
+        Returns:
+            Dictionary with operation results and detailed status
+        """
+        operation_data = operation_data or {}
+        results = {
+            "operation": operation,
+            "total_entities": len(entity_ids),
+            "successful": [],
+            "failed": [],
+            "errors": []
+        }
+        
+        if not entity_ids:
+            results["errors"].append("No entity IDs provided")
+            return results
+        
+        try:
+            with self.transaction_boundary():
+                for entity_id in entity_ids:
+                    try:
+                        entity = self.session.query(self.BusinessEntity).filter(
+                            self.BusinessEntity.id == entity_id,
+                            self.BusinessEntity.status != EntityStatus.DELETED
+                        ).first()
+                        
+                        if not entity:
+                            results["failed"].append({
+                                "entity_id": entity_id,
+                                "error": "Entity not found"
+                            })
+                            continue
+                        
+                        # Check permissions
+                        current_user_id = self.get_current_user_id()
+                        if current_user_id and entity.owner_id != current_user_id:
+                            results["failed"].append({
+                                "entity_id": entity_id,
+                                "error": "Insufficient permissions"
+                            })
+                            continue
+                        
+                        # Execute operation
+                        operation_result = self._execute_single_bulk_operation(
+                            operation, entity, operation_data
+                        )
+                        
+                        if operation_result["success"]:
+                            results["successful"].append({
+                                "entity_id": entity_id,
+                                "data": operation_result.get("data", {})
+                            })
+                        else:
+                            results["failed"].append({
+                                "entity_id": entity_id,
+                                "error": operation_result.get("error", "Unknown error")
+                            })
+                    
+                    except Exception as e:
+                        self.logger.error(f"Error in bulk operation for entity {entity_id}: {e}")
+                        results["failed"].append({
+                            "entity_id": entity_id,
+                            "error": str(e)
+                        })
+                
+                self.log_service_operation(
+                    f"Bulk operation '{operation}' completed",
+                    {
+                        "total": results["total_entities"],
+                        "successful": len(results["successful"]),
+                        "failed": len(results["failed"])
+                    }
+                )
+        
+        except Exception as e:
+            self.logger.error(f"Critical error in bulk operation: {e}", exc_info=True)
+            results["errors"].append(f"Bulk operation failed: {str(e)}")
+        
+        return results
+    
+    def _execute_single_bulk_operation(self, operation: str, entity, operation_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a single operation within a bulk operation context."""
+        try:
+            if operation == "update_status":
+                new_status = operation_data.get("status")
+                if not new_status:
+                    return {"success": False, "error": "Status not provided"}
+                
+                # Validate status transition
+                if not self._validate_status_transition(entity.status, new_status):
+                    return {"success": False, "error": f"Invalid status transition from {entity.status} to {new_status}"}
+                
+                entity.status = new_status
+                entity.updated_at = datetime.now(timezone.utc)
+                
+                return {"success": True, "data": {"old_status": entity.status, "new_status": new_status}}
+            
+            elif operation == "bulk_delete":
+                entity.status = EntityStatus.DELETED.value
+                entity.updated_at = datetime.now(timezone.utc)
+                
+                return {"success": True, "data": {"action": "deleted"}}
+            
+            elif operation == "bulk_archive":
+                if entity.status != EntityStatus.ACTIVE.value:
+                    return {"success": False, "error": "Only active entities can be archived"}
+                
+                entity.status = EntityStatus.ARCHIVED.value
+                entity.updated_at = datetime.now(timezone.utc)
+                
+                return {"success": True, "data": {"action": "archived"}}
+            
+            else:
+                return {"success": False, "error": f"Unknown operation: {operation}"}
+        
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def analyze_entity_relationship_graph(self, entity_id: int, max_depth: int = 3) -> Dict[str, Any]:
+        """
+        Analyze entity relationship graph with configurable depth traversal.
+        
+        Implements complex relationship analysis for business intelligence
+        and workflow orchestration with performance optimization.
+        
+        Args:
+            entity_id: Root entity identifier
+            max_depth: Maximum traversal depth (default: 3)
+        
+        Returns:
+            Dictionary with relationship graph analysis
+        """
+        max_depth = min(max_depth, self._max_relationship_depth)  # Enforce business rule
+        
+        analysis = {
+            "root_entity_id": entity_id,
+            "max_depth": max_depth,
+            "nodes": {},
+            "edges": [],
+            "statistics": {
+                "total_nodes": 0,
+                "total_edges": 0,
+                "depth_distribution": {},
+                "relationship_types": {}
             }
         }
+        
+        try:
+            # Verify root entity exists
+            root_entity = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == entity_id,
+                self.BusinessEntity.status != EntityStatus.DELETED
+            ).first()
+            
+            if not root_entity:
+                analysis["error"] = "Root entity not found"
+                return analysis
+            
+            # Traverse relationship graph
+            visited_entities = set()
+            entity_queue = [(entity_id, 0)]  # (entity_id, depth)
+            
+            while entity_queue and len(visited_entities) < 1000:  # Prevent infinite loops
+                current_entity_id, depth = entity_queue.pop(0)
+                
+                if current_entity_id in visited_entities or depth > max_depth:
+                    continue
+                
+                visited_entities.add(current_entity_id)
+                
+                # Get entity details
+                entity = self.session.query(self.BusinessEntity).get(current_entity_id)
+                if entity and entity.status != EntityStatus.DELETED.value:
+                    analysis["nodes"][current_entity_id] = {
+                        "id": entity.id,
+                        "name": entity.name,
+                        "status": entity.status,
+                        "depth": depth,
+                        "owner_id": entity.owner_id
+                    }
+                    
+                    # Update depth distribution
+                    depth_key = str(depth)
+                    if depth_key not in analysis["statistics"]["depth_distribution"]:
+                        analysis["statistics"]["depth_distribution"][depth_key] = 0
+                    analysis["statistics"]["depth_distribution"][depth_key] += 1
+                
+                # Get relationships if not at max depth
+                if depth < max_depth:
+                    relationships = self.session.query(self.EntityRelationship).filter(
+                        (self.EntityRelationship.source_entity_id == current_entity_id) |
+                        (self.EntityRelationship.target_entity_id == current_entity_id),
+                        self.EntityRelationship.is_active == True
+                    ).all()
+                    
+                    for rel in relationships:
+                        # Add edge to analysis
+                        analysis["edges"].append({
+                            "source": rel.source_entity_id,
+                            "target": rel.target_entity_id,
+                            "type": rel.relationship_type,
+                            "id": rel.id
+                        })
+                        
+                        # Update relationship type statistics
+                        rel_type = rel.relationship_type
+                        if rel_type not in analysis["statistics"]["relationship_types"]:
+                            analysis["statistics"]["relationship_types"][rel_type] = 0
+                        analysis["statistics"]["relationship_types"][rel_type] += 1
+                        
+                        # Add connected entities to queue
+                        if rel.source_entity_id == current_entity_id:
+                            entity_queue.append((rel.target_entity_id, depth + 1))
+                        else:
+                            entity_queue.append((rel.source_entity_id, depth + 1))
+            
+            # Finalize statistics
+            analysis["statistics"]["total_nodes"] = len(analysis["nodes"])
+            analysis["statistics"]["total_edges"] = len(analysis["edges"])
+            
+            self.log_service_operation(
+                f"Analyzed relationship graph for entity {entity_id}",
+                {
+                    "nodes": analysis["statistics"]["total_nodes"],
+                    "edges": analysis["statistics"]["total_edges"],
+                    "max_depth": max_depth
+                }
+            )
+        
+        except SQLAlchemyError as e:
+            self.logger.error(f"Error analyzing relationship graph: {e}")
+            analysis["error"] = "Database error during analysis"
+        
+        return analysis
+    
+    def validate_entity_consistency(self, entity_id: int) -> Dict[str, Any]:
+        """
+        Validate entity data consistency and business rule compliance.
+        
+        Implements comprehensive validation for business integrity
+        and data consistency per Section 4.12.1.
+        
+        Args:
+            entity_id: Entity identifier to validate
+        
+        Returns:
+            Dictionary with validation results and recommendations
+        """
+        validation_result = {
+            "entity_id": entity_id,
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+            "recommendations": []
+        }
+        
+        try:
+            entity = self.session.query(self.BusinessEntity).filter(
+                self.BusinessEntity.id == entity_id
+            ).first()
+            
+            if not entity:
+                validation_result["valid"] = False
+                validation_result["errors"].append("Entity not found")
+                return validation_result
+            
+            # Validate entity basic properties
+            if not entity.name or not entity.name.strip():
+                validation_result["valid"] = False
+                validation_result["errors"].append("Entity name is missing or empty")
+            
+            if len(entity.name) > 255:
+                validation_result["valid"] = False
+                validation_result["errors"].append("Entity name exceeds maximum length")
+            
+            # Validate owner relationship
+            owner = self.session.query(self.User).get(entity.owner_id)
+            if not owner:
+                validation_result["valid"] = False
+                validation_result["errors"].append("Entity owner not found")
+            elif not owner.is_active:
+                validation_result["warnings"].append("Entity owner is inactive")
+            
+            # Validate status
+            try:
+                EntityStatus(entity.status)
+            except ValueError:
+                validation_result["valid"] = False
+                validation_result["errors"].append(f"Invalid entity status: {entity.status}")
+            
+            # Validate relationships
+            relationship_issues = self._validate_entity_relationships(entity)
+            validation_result["errors"].extend(relationship_issues["errors"])
+            validation_result["warnings"].extend(relationship_issues["warnings"])
+            validation_result["recommendations"].extend(relationship_issues["recommendations"])
+            
+            if relationship_issues["errors"]:
+                validation_result["valid"] = False
+            
+            # Performance recommendations
+            if relationship_issues["relationship_count"] > 100:
+                validation_result["recommendations"].append(
+                    "Consider archiving some relationships for better performance"
+                )
+            
+            self.log_service_operation(
+                f"Validated entity {entity_id} consistency",
+                {
+                    "valid": validation_result["valid"],
+                    "errors": len(validation_result["errors"]),
+                    "warnings": len(validation_result["warnings"])
+                }
+            )
+        
+        except Exception as e:
+            self.logger.error(f"Error validating entity consistency: {e}", exc_info=True)
+            validation_result["valid"] = False
+            validation_result["errors"].append("Validation process failed")
+        
+        return validation_result
+    
+    def _validate_entity_relationships(self, entity) -> Dict[str, Any]:
+        """Validate entity relationships for consistency and business rules."""
+        result = {
+            "errors": [],
+            "warnings": [],
+            "recommendations": [],
+            "relationship_count": 0
+        }
+        
+        try:
+            # Get all relationships
+            relationships = self.session.query(self.EntityRelationship).filter(
+                (self.EntityRelationship.source_entity_id == entity.id) |
+                (self.EntityRelationship.target_entity_id == entity.id)
+            ).all()
+            
+            result["relationship_count"] = len(relationships)
+            
+            # Check for orphaned relationships
+            for rel in relationships:
+                source_exists = self.session.query(self.BusinessEntity).filter(
+                    self.BusinessEntity.id == rel.source_entity_id
+                ).first()
+                target_exists = self.session.query(self.BusinessEntity).filter(
+                    self.BusinessEntity.id == rel.target_entity_id
+                ).first()
+                
+                if not source_exists:
+                    result["errors"].append(f"Relationship {rel.id} references non-existent source entity")
+                
+                if not target_exists:
+                    result["errors"].append(f"Relationship {rel.id} references non-existent target entity")
+                
+                # Check for invalid relationship types
+                try:
+                    RelationshipType(rel.relationship_type)
+                except ValueError:
+                    result["errors"].append(f"Relationship {rel.id} has invalid type: {rel.relationship_type}")
+            
+            # Check for duplicate relationships
+            seen_relationships = set()
+            for rel in relationships:
+                if rel.is_active:
+                    rel_key = (rel.source_entity_id, rel.target_entity_id, rel.relationship_type)
+                    if rel_key in seen_relationships:
+                        result["warnings"].append(f"Duplicate active relationship detected: {rel_key}")
+                    seen_relationships.add(rel_key)
+            
+            # Check relationship limits
+            if len(relationships) > self._max_relationships_per_entity * 0.8:
+                result["warnings"].append("Entity approaching maximum relationship limit")
+            
+        except Exception as e:
+            result["errors"].append(f"Relationship validation failed: {str(e)}")
+        
+        return result
+
+
+# Export service for application registration
+__all__ = ['BusinessEntityService', 'EntityCreationRequest', 'EntityUpdateRequest', 
+           'RelationshipCreationRequest', 'BusinessWorkflowResult', 'EntityStatus', 'RelationshipType']
