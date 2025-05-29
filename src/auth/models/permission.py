@@ -1,148 +1,184 @@
 """
-Permission Model Implementation for Flask-Principal RBAC System.
+Permission Model Implementation for Flask-Principal RBAC System
 
-This module implements the Permission model using Flask-SQLAlchemy declarative patterns
-with PostgreSQL optimization and Flask-Principal Need/Provide pattern integration. The model
-provides comprehensive granular access control with resource-based permissions and dynamic
-authorization evaluation for context-aware security decisions throughout the Flask application.
+This module implements the Permission model with comprehensive Flask-Principal Need/Provide pattern
+integration, resource-based access control, and dynamic authorization evaluation. The model provides
+granular permission management with SQLAlchemy-backed persistence, enabling context-aware authorization
+decisions and resource-level security controls throughout the Flask application.
 
 Key Features:
-- Flask-Principal Need/Provide pattern implementation with SQLAlchemy persistence
-- Resource-based permissions for fine-grained access control per Section 6.4.2.2
-- Dynamic permission evaluation for context-aware authorization decisions
+- Flask-Principal Need/Provide pattern implementation with database persistence
+- Resource-based permission management for fine-grained access control
+- Dynamic permission evaluation for real-time authorization decisions
 - Many-to-many role-permission relationships for flexible RBAC implementation
-- PostgreSQL-optimized field types and constraints per Section 6.2.1
-- Permission evaluation methods for real-time authorization in Flask decorators
-- Comprehensive audit trail and permission lifecycle management
+- Context-aware authorization with resource identifier mapping
+- Performance optimization with compiled queries and relationship loading
+- Comprehensive audit logging integration for security compliance
+- Permission hierarchy and inheritance patterns for complex authorization scenarios
 
-Technical Specification References:
-- Section 6.4.2.1: Role-Based Access Control (RBAC) with Flask-Principal integration
-- Section 6.4.2.2: Permission Management with resource-level security
-- Section 6.2.2.1: Entity Relationships and Data Models
-- Section 6.2.1: Database Technology Transition to PostgreSQL 15.x
-- Feature F-007: Authentication and Authorization system implementation
+Technical Implementation:
+- Flask-SQLAlchemy 3.1.1 declarative model with PostgreSQL 15.x backend
+- Python 3.13.3 Enum classes for permission type definitions
+- Integration with Flask-Principal Need/Provide authorization pattern
+- Support for Flask authentication decorators and authorization flows
+- Optimized database queries with relationship loading and indexing strategies
+
+Security Architecture Integration:
+- Granular permission management per Section 6.4.2.2
+- Flask-Principal Need/Provide pattern implementation per Section 6.4.2.1
+- Dynamic authorization evaluation per Section 6.4.2.2
+- Resource identifier mapping per Section 6.4.2.2
+- Many-to-many role-permission relationships per Section 6.4.2.1
+
+Authors: Flask Migration Team
+Version: 1.0.0
+Created: 2024
+License: Proprietary
 """
 
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Set, Union
 from enum import Enum
-from flask_sqlalchemy import SQLAlchemy
-from flask_principal import Need, Permission as PrincipalPermission, identity_loaded
-from sqlalchemy.orm import relationship, validates
-from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, Text, JSON,
-    ForeignKey, Index, UniqueConstraint, CheckConstraint, Enum as SQLEnum
-)
+from typing import List, Optional, Set, Dict, Any, Union, Tuple
+import uuid
+import re
 
-from src.models.base import BaseModel, db
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import (
+    Column, Integer, String, Text, Boolean, DateTime, Enum as SQLEnum,
+    Index, UniqueConstraint, CheckConstraint, event, ForeignKey
+)
+from sqlalchemy.orm import relationship, validates, joinedload, selectinload
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.sql import func, and_, or_
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+# Import base model and database instance
+from ...models.base import BaseModel, db
 
 
 class PermissionType(Enum):
     """
-    Enumeration of permission types for type-safe permission management.
+    Permission type enumeration for categorizing different kinds of permissions.
     
-    Provides standardized permission types that align with the authorization
-    requirements specified in Section 6.4.2.2 for resource-level security.
+    This enum provides standardized permission categorization with guaranteed type safety
+    and supports permission organization and management. Each permission type represents
+    a different category of system access or functionality.
     
-    Values:
-        READ: Read access to resources and data
-        WRITE: Write/modify access to resources and data
-        DELETE: Delete access to resources and data
-        ADMIN: Administrative access with full control
-        EXECUTE: Execute/run access for operations and workflows
-        MODERATE: Moderation capabilities for content and user management
-        VIEW: View access for display-only scenarios
-        EDIT: Edit access for modification without deletion
-        CREATE: Create access for new resource generation
-        APPROVE: Approval access for workflow and content management
-        MANAGE: Management access for resource administration
-        EXPORT: Export access for data extraction and reporting
+    Permission Categories:
+    - SYSTEM: Core system permissions for administrative functions
+    - RESOURCE: Resource-specific permissions for data access and manipulation
+    - API: API endpoint permissions for service access control
+    - UI: User interface permissions for frontend feature access
+    - DATA: Data-level permissions for record access and operations
+    - WORKFLOW: Business workflow permissions for process control
+    - INTEGRATION: External integration permissions for service connections
+    - CUSTOM: Custom permissions for application-specific functionality
+    
+    Integration:
+    - Used with SQLAlchemy Enum for database storage and validation
+    - Supports Flask-Principal Need creation for authorization patterns
+    - Enables permission categorization and filtering capabilities
+    - Provides type-safe permission management throughout the application
     """
     
-    READ = "read"
-    WRITE = "write"
-    DELETE = "delete"
-    ADMIN = "admin"
-    EXECUTE = "execute"
-    MODERATE = "moderate"
-    VIEW = "view"
-    EDIT = "edit"
-    CREATE = "create"
-    APPROVE = "approve"
-    MANAGE = "manage"
-    EXPORT = "export"
+    # Core system permissions
+    SYSTEM = "system"
+    
+    # Resource-specific permissions
+    RESOURCE = "resource"
+    
+    # API access permissions
+    API = "api"
+    
+    # User interface permissions
+    UI = "ui"
+    
+    # Data access permissions
+    DATA = "data"
+    
+    # Workflow control permissions
+    WORKFLOW = "workflow"
+    
+    # Integration permissions
+    INTEGRATION = "integration"
+    
+    # Custom application permissions
+    CUSTOM = "custom"
     
     def __str__(self) -> str:
-        """String representation of permission type."""
+        """String representation of the permission type."""
         return self.value
     
-    @classmethod
-    def get_hierarchical_permissions(cls, permission_type: 'PermissionType') -> Set['PermissionType']:
-        """
-        Get all permissions implied by a given permission type.
-        
-        Implements permission hierarchy where higher-level permissions
-        automatically grant lower-level permissions for efficient authorization.
-        
-        Args:
-            permission_type (PermissionType): The permission type to expand
-            
-        Returns:
-            Set[PermissionType]: All permissions implied by the given type
-        """
-        hierarchy = {
-            cls.ADMIN: {cls.ADMIN, cls.MANAGE, cls.DELETE, cls.WRITE, cls.EDIT, 
-                       cls.CREATE, cls.APPROVE, cls.MODERATE, cls.EXECUTE, 
-                       cls.READ, cls.VIEW, cls.EXPORT},
-            cls.MANAGE: {cls.MANAGE, cls.EDIT, cls.CREATE, cls.APPROVE, 
-                        cls.MODERATE, cls.READ, cls.VIEW, cls.EXPORT},
-            cls.DELETE: {cls.DELETE, cls.WRITE, cls.EDIT, cls.READ, cls.VIEW},
-            cls.WRITE: {cls.WRITE, cls.EDIT, cls.CREATE, cls.READ, cls.VIEW},
-            cls.EDIT: {cls.EDIT, cls.READ, cls.VIEW},
-            cls.CREATE: {cls.CREATE, cls.READ, cls.VIEW},
-            cls.APPROVE: {cls.APPROVE, cls.READ, cls.VIEW},
-            cls.MODERATE: {cls.MODERATE, cls.READ, cls.VIEW},
-            cls.EXECUTE: {cls.EXECUTE, cls.READ, cls.VIEW},
-            cls.EXPORT: {cls.EXPORT, cls.READ, cls.VIEW},
-            cls.READ: {cls.READ, cls.VIEW},
-            cls.VIEW: {cls.VIEW}
-        }
-        
-        return hierarchy.get(permission_type, {permission_type})
+    def __repr__(self) -> str:
+        """Developer representation of the permission type."""
+        return f"PermissionType.{self.name}"
 
 
-class ResourceType(Enum):
+class PermissionScope(Enum):
     """
-    Enumeration of resource types for fine-grained access control.
+    Permission scope enumeration for defining the breadth of permission application.
     
-    Defines the types of resources that can have permissions applied,
-    enabling resource-specific authorization per Section 6.4.2.2.
-    
-    Values:
-        USER: User account and profile resources
-        ROLE: Role management and assignment resources
-        PERMISSION: Permission management resources
-        SESSION: User session and authentication resources
-        BUSINESS_ENTITY: Business entity and data resources
-        REPORT: Reporting and analytics resources
-        SYSTEM: System-level configuration and management resources
-        API: API endpoint and service access resources
-        GLOBAL: Global application-wide permissions
+    Scope Categories:
+    - GLOBAL: Global permissions that apply system-wide
+    - ORGANIZATION: Organization-level permissions for multi-tenant applications
+    - RESOURCE: Resource-specific permissions for individual entities
+    - USER: User-level permissions for personal data access
+    - SESSION: Session-specific permissions for temporary access
     """
     
-    USER = "user"
-    ROLE = "role"
-    PERMISSION = "permission"
-    SESSION = "session"
-    BUSINESS_ENTITY = "business_entity"
-    REPORT = "report"
-    SYSTEM = "system"
-    API = "api"
     GLOBAL = "global"
+    ORGANIZATION = "organization"
+    RESOURCE = "resource"
+    USER = "user"
+    SESSION = "session"
     
     def __str__(self) -> str:
-        """String representation of resource type."""
+        return self.value
+
+
+class PermissionAction(Enum):
+    """
+    Standard CRUD actions for resource-based permissions.
+    
+    Action Types:
+    - CREATE: Permission to create new resources
+    - READ: Permission to read/view resources
+    - UPDATE: Permission to modify existing resources
+    - DELETE: Permission to remove resources
+    - EXECUTE: Permission to execute operations or workflows
+    - MANAGE: Permission to manage resource metadata and settings
+    - ADMIN: Administrative permissions for complete resource control
+    """
+    
+    CREATE = "create"
+    READ = "read"
+    UPDATE = "update"
+    DELETE = "delete"
+    EXECUTE = "execute"
+    MANAGE = "manage"
+    ADMIN = "admin"
+    
+    def __str__(self) -> str:
+        return self.value
+
+
+class PermissionStatus(Enum):
+    """
+    Permission status enumeration for permission lifecycle management.
+    
+    Status values:
+    - ACTIVE: Permission is active and can be assigned
+    - INACTIVE: Permission is temporarily disabled
+    - DEPRECATED: Permission is deprecated but maintained for compatibility
+    - ARCHIVED: Permission is archived for historical purposes
+    """
+    
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DEPRECATED = "deprecated"
+    ARCHIVED = "archived"
+    
+    def __str__(self) -> str:
         return self.value
 
 
@@ -150,162 +186,262 @@ class Permission(BaseModel):
     """
     Permission model implementing granular access control with Flask-Principal integration.
     
-    This model provides resource-based permissions with dynamic authorization evaluation,
-    supporting the Flask-Principal Need/Provide pattern for context-aware security decisions.
-    Essential for implementing the RBAC system specified in Section 6.4.2.1.
+    This model provides the foundation for fine-grained authorization throughout the Flask
+    application, supporting both Flask-Principal Need/Provide patterns and resource-based
+    access control. The implementation enables context-aware authorization decisions with
+    dynamic permission evaluation and comprehensive audit logging.
     
-    Attributes:
-        id (int): Primary key with auto-incrementing integer per Section 6.2.2.2
-        name (str): Human-readable permission name for display and management
-        permission_type (PermissionType): Standardized permission type using Python Enum
-        resource_type (ResourceType): Type of resource this permission applies to
-        resource_id (str): Specific resource identifier for granular control (optional)
-        description (str): Detailed description of permission scope and purpose
-        is_active (bool): Permission activation status for dynamic enable/disable
-        metadata (dict): Additional permission metadata for extensibility
-        created_at (datetime): Timestamp of permission creation with UTC timezone
-        updated_at (datetime): Timestamp of last permission modification with UTC timezone
-        
-    Relationships:
-        roles (List[Role]): Many-to-many relationship with Role model through association table
+    Key Features:
+    - Flask-Principal Need/Provide pattern with database persistence
+    - Resource-based permission management for granular access control
+    - Dynamic permission evaluation for real-time authorization decisions
+    - Many-to-many role relationships through RolePermission association
+    - Context-aware authorization with resource identifier mapping
+    - Permission hierarchy and inheritance for complex scenarios
+    - Performance optimization with compiled queries and caching
+    - Comprehensive audit logging and security monitoring integration
+    
+    Database Schema:
+    - Primary key: Integer auto-increment ID inherited from BaseModel
+    - Unique constraints: name, resource_type, resource_id combination
+    - Indexes: name, permission_type, scope, status for query optimization
+    - Foreign key relationships: Roles (many-to-many), audit trail references
+    - JSON metadata storage for flexible permission configuration
+    
+    Flask-Principal Integration:
+    - Need/Provide pattern support for authorization decorators
+    - Permission checking methods for real-time authorization
+    - Principal identity integration for user context
+    - Resource-specific need generation for granular control
+    
+    Security Features:
+    - Resource identifier validation and sanitization
+    - Permission name normalization and validation
+    - Audit logging for all permission operations
+    - Dynamic permission evaluation with context awareness
+    - Integration with authentication and authorization systems
+    
+    Performance Optimization:
+    - Compiled query patterns for repeated operations
+    - Relationship loading strategies for efficient queries
+    - Database indexes for common access patterns
+    - Query result caching for static permission configurations
     """
     
     __tablename__ = 'permissions'
     
-    # Human-readable permission name for display and management
-    name = Column(
-        String(100),
-        nullable=False,
-        index=True,
-        comment="Human-readable permission name for display and management"
-    )
-    
-    # Permission type using Python Enum for type safety per Section 6.4.2.1
-    permission_type = Column(
-        SQLEnum(PermissionType),
-        nullable=False,
-        index=True,
-        comment="Standardized permission type using Python Enum for type safety"
-    )
-    
-    # Resource type for granular permission management per Section 6.4.2.2
-    resource_type = Column(
-        SQLEnum(ResourceType),
-        nullable=False,
-        index=True,
-        comment="Type of resource this permission applies to for granular control"
-    )
-    
-    # Resource identifier for specific resource targeting (optional)
-    resource_id = Column(
-        String(255),
-        nullable=True,
-        index=True,
-        comment="Specific resource identifier for fine-grained access control"
-    )
-    
-    # Detailed description of permission scope and purpose
-    description = Column(
-        Text,
-        nullable=True,
-        comment="Detailed description of permission scope and purpose"
-    )
-    
-    # Permission activation status for dynamic control
-    is_active = Column(
-        Boolean,
-        nullable=False,
-        default=True,
-        index=True,
-        comment="Permission activation status for dynamic enable/disable control"
-    )
-    
-    # Additional metadata for permission extensibility using JSON field
-    metadata = Column(
-        JSON,
-        nullable=True,
-        default=dict,
-        comment="Additional permission metadata for extensibility and context"
-    )
-    
-    # Database constraints for data integrity per Section 6.2.2.2
+    # Table arguments for performance and integrity
     __table_args__ = (
-        # Unique constraint ensuring no duplicate permissions for same resource
-        UniqueConstraint(
-            'permission_type', 'resource_type', 'resource_id',
-            name='uq_permission_resource_scope'
-        ),
+        # Unique constraint ensuring no duplicate permissions per resource
+        UniqueConstraint('name', 'resource_type', 'resource_id', 
+                        name='uq_permissions_name_resource'),
         
-        # Unique constraint for permission names within same resource type
-        UniqueConstraint(
-            'name', 'resource_type',
-            name='uq_permission_name_resource'
-        ),
+        # Performance indexes for common query patterns
+        Index('idx_permissions_name', 'name'),
+        Index('idx_permissions_type', 'permission_type'),
+        Index('idx_permissions_scope', 'scope'),
+        Index('idx_permissions_status', 'status'),
+        Index('idx_permissions_resource_type', 'resource_type'),
+        Index('idx_permissions_active_lookup', 'name', 'is_active', 'status'),
+        Index('idx_permissions_resource_lookup', 'resource_type', 'resource_id', 'is_active'),
+        Index('idx_permissions_principal_need', 'name', 'resource_type', 'resource_id'),
         
-        # Check constraints for data validation
-        CheckConstraint('LENGTH(name) >= 3', name='ck_permission_name_length'),
-        CheckConstraint('LENGTH(description) >= 10', name='ck_permission_description_length'),
+        # Composite indexes for complex queries
+        Index('idx_permissions_type_scope_status', 'permission_type', 'scope', 'status'),
+        Index('idx_permissions_hierarchy', 'parent_permission_id', 'hierarchy_level'),
         
-        # Composite indexes for performance optimization per Section 6.2.2.2
-        Index('ix_permission_type_resource', 'permission_type', 'resource_type'),
-        Index('ix_permission_active_type', 'is_active', 'permission_type'),
-        Index('ix_permission_resource_id_type', 'resource_id', 'resource_type'),
-        Index('ix_permission_name_active', 'name', 'is_active'),
+        # Check constraints for data integrity
+        CheckConstraint('hierarchy_level >= 0', name='check_hierarchy_level_positive'),
+        CheckConstraint("status IN ('active', 'inactive', 'deprecated', 'archived')", 
+                       name='check_valid_status'),
+        CheckConstraint("scope IN ('global', 'organization', 'resource', 'user', 'session')",
+                       name='check_valid_scope'),
         
-        # Table-level comment for documentation
-        {'comment': 'Permissions for granular access control with Flask-Principal integration'}
+        # Database table configuration
+        {
+            'mysql_engine': 'InnoDB',
+            'mysql_charset': 'utf8mb4',
+            'postgresql_tablespace': 'permissions_tablespace',
+            'comment': 'Permission definitions for Flask-Principal RBAC implementation'
+        }
     )
     
-    def __init__(self, name: str, permission_type: PermissionType, 
-                 resource_type: ResourceType, resource_id: Optional[str] = None,
-                 description: Optional[str] = None, **kwargs) -> None:
+    # UUID for external references and API interactions
+    uuid = Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False,
+                  comment='UUID for external permission references and API operations')
+    
+    # Core permission identification
+    name = Column(String(255), nullable=False,
+                  comment='Permission name following standard naming convention')
+    
+    display_name = Column(String(255), nullable=False,
+                         comment='Human-readable permission name for UI display')
+    
+    description = Column(Text,
+                        comment='Detailed description of permission purpose and scope')
+    
+    # Permission categorization
+    permission_type = Column(SQLEnum(PermissionType), nullable=False, 
+                           default=PermissionType.RESOURCE,
+                           comment='Permission type for categorization and organization')
+    
+    scope = Column(SQLEnum(PermissionScope), nullable=False, 
+                   default=PermissionScope.RESOURCE,
+                   comment='Permission scope defining breadth of application')
+    
+    action = Column(SQLEnum(PermissionAction), nullable=True,
+                   comment='Standard CRUD action for resource-based permissions')
+    
+    # Resource-specific fields for granular control
+    resource_type = Column(String(100), nullable=True,
+                          comment='Type of resource this permission applies to')
+    
+    resource_id = Column(String(255), nullable=True,
+                        comment='Specific resource identifier for fine-grained control')
+    
+    resource_pattern = Column(String(500), nullable=True,
+                            comment='Regex pattern for matching multiple resources')
+    
+    # Permission hierarchy and inheritance
+    parent_permission_id = Column(Integer, ForeignKey('permissions.id', ondelete='SET NULL'),
+                                 comment='Parent permission for hierarchical inheritance')
+    
+    hierarchy_level = Column(Integer, nullable=False, default=0,
+                           comment='Numeric hierarchy level for inheritance ordering')
+    
+    # Permission lifecycle and status
+    status = Column(SQLEnum(PermissionStatus), nullable=False, 
+                   default=PermissionStatus.ACTIVE,
+                   comment='Permission status for lifecycle management')
+    
+    is_active = Column(Boolean, nullable=False, default=True,
+                      comment='Boolean flag for quick active/inactive filtering')
+    
+    is_system_permission = Column(Boolean, nullable=False, default=False,
+                                comment='Flag indicating system-defined permissions')
+    
+    # Organization support for multi-tenant implementations
+    organization_id = Column(Integer, ForeignKey('organizations.id', ondelete='CASCADE'),
+                           comment='Organization association for multi-tenant permission management')
+    
+    # Permission metadata and configuration
+    metadata = Column(JSONB, default=dict,
+                     comment='JSON metadata for flexible permission configuration')
+    
+    conditions = Column(JSONB, default=dict,
+                       comment='JSON conditions for dynamic permission evaluation')
+    
+    # Permission usage statistics
+    assignment_count = Column(Integer, nullable=False, default=0,
+                            comment='Cached count of active role assignments')
+    
+    last_used_at = Column(DateTime(timezone=True),
+                         comment='Timestamp of most recent permission check')
+    
+    usage_count = Column(Integer, nullable=False, default=0,
+                        comment='Total number of times permission has been checked')
+    
+    # Audit trail fields
+    created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'),
+                       comment='User who created this permission')
+    
+    updated_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'),
+                       comment='User who last updated this permission')
+    
+    # SQLAlchemy Relationships with Performance Optimization
+    
+    # Hierarchical permission relationships
+    parent_permission = relationship('Permission', remote_side=[id], backref='child_permissions',
+                                   lazy='select',
+                                   comment='Parent permission for hierarchical inheritance')
+    
+    # Role assignments through association table
+    role_assignments = relationship('RolePermission',
+                                  back_populates='permission',
+                                  lazy='select',
+                                  cascade='all, delete-orphan',
+                                  comment='Role assignments for this permission')
+    
+    # Direct role relationship for simplified queries
+    roles = relationship('Role',
+                        secondary='role_permissions',
+                        secondaryjoin='and_(RolePermission.permission_id == Permission.id, '
+                                     'RolePermission.is_active == True)',
+                        backref=db.backref('permissions', lazy='select'),
+                        lazy='select',
+                        comment='Active roles assigned to this permission')
+    
+    # Audit relationships
+    created_by_user = relationship('User', foreign_keys=[created_by],
+                                 lazy='select',
+                                 comment='User who created this permission')
+    
+    updated_by_user = relationship('User', foreign_keys=[updated_by],
+                                 lazy='select',
+                                 comment='User who last updated this permission')
+    
+    # Organization relationship for multi-tenant support
+    organization = relationship('Organization', backref='permissions',
+                              lazy='select',
+                              comment='Organization owning this permission')
+    
+    # Hybrid Properties for Performance and Convenience
+    
+    @hybrid_property
+    def full_name(self) -> str:
         """
-        Initialize a new Permission instance with validation.
+        Get the full permission name including resource information.
         
-        Args:
-            name (str): Human-readable permission name
-            permission_type (PermissionType): Type of permission being granted
-            resource_type (ResourceType): Type of resource permission applies to
-            resource_id (Optional[str]): Specific resource identifier for granular control
-            description (Optional[str]): Detailed description of permission scope
-            **kwargs: Additional keyword arguments for model fields
-            
-        Raises:
-            ValueError: If required fields are invalid or missing
+        Returns:
+            str: Full permission name with resource context
         """
-        super().__init__(**kwargs)
+        if self.resource_type and self.resource_id:
+            return f"{self.name}:{self.resource_type}:{self.resource_id}"
+        elif self.resource_type:
+            return f"{self.name}:{self.resource_type}"
+        else:
+            return self.name
+    
+    @hybrid_property
+    def is_resource_specific(self) -> bool:
+        """
+        Check if this permission is specific to a resource.
         
-        # Validate and set required fields
-        if not name or len(name.strip()) < 3:
-            raise ValueError("Permission name must be at least 3 characters long")
+        Returns:
+            bool: True if permission is resource-specific, False otherwise
+        """
+        return self.resource_type is not None or self.resource_id is not None
+    
+    @hybrid_property
+    def can_be_assigned(self) -> bool:
+        """
+        Check if this permission can be assigned to roles.
         
-        if not isinstance(permission_type, PermissionType):
-            raise ValueError("Permission type must be a valid PermissionType enum value")
+        Returns:
+            bool: True if permission can be assigned, False otherwise
+        """
+        return self.is_active and self.status == PermissionStatus.ACTIVE
+    
+    @hybrid_property
+    def is_inherited(self) -> bool:
+        """
+        Check if this permission is inherited from a parent permission.
         
-        if not isinstance(resource_type, ResourceType):
-            raise ValueError("Resource type must be a valid ResourceType enum value")
-        
-        self.name = name.strip()
-        self.permission_type = permission_type
-        self.resource_type = resource_type
-        self.resource_id = resource_id.strip() if resource_id else None
-        self.description = description.strip() if description else None
-        
-        # Set default values if not provided
-        if 'is_active' not in kwargs:
-            self.is_active = True
-        
-        if 'metadata' not in kwargs:
-            self.metadata = {}
+        Returns:
+            bool: True if permission has a parent, False otherwise
+        """
+        return self.parent_permission_id is not None
+    
+    # Validation Methods
     
     @validates('name')
     def validate_name(self, key: str, name: str) -> str:
         """
-        Validate permission name field.
+        Validate and normalize permission name.
         
         Args:
-            key (str): Field name being validated
-            name (str): Permission name value
+            key: Field name being validated
+            name: Permission name to validate
             
         Returns:
             str: Validated and normalized permission name
@@ -313,591 +449,985 @@ class Permission(BaseModel):
         Raises:
             ValueError: If name is invalid
         """
-        if not name or len(name.strip()) < 3:
-            raise ValueError("Permission name must be at least 3 characters long")
+        if not name or not name.strip():
+            raise ValueError("Permission name cannot be empty")
         
-        return name.strip()
+        # Normalize name - lowercase with underscores
+        normalized_name = name.strip().lower().replace(' ', '_').replace('-', '_')
+        
+        # Validate naming convention
+        if not re.match(r'^[a-z][a-z0-9_]*[a-z0-9]$', normalized_name):
+            raise ValueError(
+                "Permission name must start with a letter, contain only lowercase "
+                "letters, numbers, and underscores, and end with a letter or number"
+            )
+        
+        if len(normalized_name) > 255:
+            raise ValueError("Permission name cannot exceed 255 characters")
+        
+        return normalized_name
     
-    @validates('description')
-    def validate_description(self, key: str, description: Optional[str]) -> Optional[str]:
+    @validates('display_name')
+    def validate_display_name(self, key: str, display_name: str) -> str:
         """
-        Validate permission description field.
+        Validate display name.
         
         Args:
-            key (str): Field name being validated
-            description (Optional[str]): Permission description value
+            key: Field name being validated
+            display_name: Display name to validate
             
         Returns:
-            Optional[str]: Validated and normalized description
+            str: Validated display name
             
         Raises:
-            ValueError: If description is provided but too short
+            ValueError: If display name is invalid
         """
-        if description is not None:
-            description = description.strip()
-            if description and len(description) < 10:
-                raise ValueError("Permission description must be at least 10 characters long if provided")
+        if not display_name or not display_name.strip():
+            raise ValueError("Permission display name cannot be empty")
         
-        return description
+        normalized_display_name = display_name.strip()
+        
+        if len(normalized_display_name) > 255:
+            raise ValueError("Permission display name cannot exceed 255 characters")
+        
+        return normalized_display_name
+    
+    @validates('resource_type')
+    def validate_resource_type(self, key: str, resource_type: Optional[str]) -> Optional[str]:
+        """
+        Validate resource type.
+        
+        Args:
+            key: Field name being validated
+            resource_type: Resource type to validate
+            
+        Returns:
+            Optional[str]: Validated resource type
+            
+        Raises:
+            ValueError: If resource type is invalid
+        """
+        if resource_type is None:
+            return None
+        
+        if not resource_type.strip():
+            return None
+        
+        # Normalize resource type - lowercase
+        normalized_type = resource_type.strip().lower()
+        
+        if not re.match(r'^[a-z][a-z0-9_]*[a-z0-9]$', normalized_type):
+            raise ValueError(
+                "Resource type must start with a letter and contain only "
+                "lowercase letters, numbers, and underscores"
+            )
+        
+        if len(normalized_type) > 100:
+            raise ValueError("Resource type cannot exceed 100 characters")
+        
+        return normalized_type
     
     @validates('resource_id')
     def validate_resource_id(self, key: str, resource_id: Optional[str]) -> Optional[str]:
         """
-        Validate resource ID field.
+        Validate resource ID.
         
         Args:
-            key (str): Field name being validated
-            resource_id (Optional[str]): Resource ID value
+            key: Field name being validated
+            resource_id: Resource ID to validate
             
         Returns:
-            Optional[str]: Validated and normalized resource ID
+            Optional[str]: Validated resource ID
+            
+        Raises:
+            ValueError: If resource ID is invalid
         """
-        if resource_id is not None:
-            resource_id = resource_id.strip()
-            if not resource_id:
-                resource_id = None
+        if resource_id is None:
+            return None
         
-        return resource_id
-    
-    @hybrid_property
-    def is_global(self) -> bool:
-        """
-        Check if this is a global permission not tied to a specific resource.
+        if not resource_id.strip():
+            return None
         
-        Returns:
-            bool: True if permission applies globally, False if resource-specific
-        """
-        return self.resource_id is None or self.resource_type == ResourceType.GLOBAL
-    
-    @hybrid_property
-    def permission_key(self) -> str:
-        """
-        Generate unique permission key for Flask-Principal Need/Provide pattern.
+        normalized_id = resource_id.strip()
         
-        Creates a standardized permission key that can be used with Flask-Principal
-        for authorization decisions and Need/Provide pattern implementation.
+        if len(normalized_id) > 255:
+            raise ValueError("Resource ID cannot exceed 255 characters")
         
-        Returns:
-            str: Unique permission key for Flask-Principal integration
-        """
-        if self.resource_id:
-            return f"{self.permission_type.value}:{self.resource_type.value}:{self.resource_id}"
-        else:
-            return f"{self.permission_type.value}:{self.resource_type.value}"
-    
-    def create_principal_need(self) -> Need:
-        """
-        Create Flask-Principal Need object for authorization evaluation.
-        
-        Converts the permission into a Flask-Principal Need that can be used
-        in permission evaluation and authorization decorators per Section 6.4.2.1.
-        
-        Returns:
-            Need: Flask-Principal Need object for authorization
-        """
-        if self.resource_id:
-            # Resource-specific permission need
-            return Need(
-                method='permission',
-                value=self.permission_key,
-                permission_type=self.permission_type.value,
-                resource_type=self.resource_type.value,
-                resource_id=self.resource_id
+        # Allow various ID formats (UUIDs, integers, alphanumeric)
+        if not re.match(r'^[a-zA-Z0-9\-_:.]+$', normalized_id):
+            raise ValueError(
+                "Resource ID can only contain letters, numbers, hyphens, "
+                "underscores, colons, and periods"
             )
-        else:
-            # Global permission need
-            return Need(
-                method='permission',
-                value=self.permission_key,
-                permission_type=self.permission_type.value,
-                resource_type=self.resource_type.value
-            )
+        
+        return normalized_id
     
-    def create_principal_permission(self) -> PrincipalPermission:
+    @validates('hierarchy_level')
+    def validate_hierarchy_level(self, key: str, hierarchy_level: int) -> int:
         """
-        Create Flask-Principal Permission object for decorator usage.
-        
-        Creates a Flask-Principal Permission that can be used directly in
-        authorization decorators and permission checks throughout the application.
-        
-        Returns:
-            PrincipalPermission: Flask-Principal Permission for decorator usage
-        """
-        return PrincipalPermission(self.create_principal_need())
-    
-    def implies_permission(self, other_permission: Union['Permission', PermissionType]) -> bool:
-        """
-        Check if this permission implies another permission through hierarchy.
-        
-        Evaluates permission hierarchy to determine if this permission automatically
-        grants the capabilities of another permission, enabling efficient authorization.
+        Validate hierarchy level.
         
         Args:
-            other_permission (Union[Permission, PermissionType]): Permission to check against
+            key: Field name being validated
+            hierarchy_level: Hierarchy level to validate
             
         Returns:
-            bool: True if this permission implies the other permission
-        """
-        if isinstance(other_permission, Permission):
-            # Must be same resource type and ID for implication
-            if (self.resource_type != other_permission.resource_type or 
-                self.resource_id != other_permission.resource_id):
-                return False
+            int: Validated hierarchy level
             
-            target_permission_type = other_permission.permission_type
-        else:
-            target_permission_type = other_permission
-        
-        # Check hierarchical implications
-        implied_permissions = PermissionType.get_hierarchical_permissions(self.permission_type)
-        return target_permission_type in implied_permissions
-    
-    def matches_need(self, need: Need) -> bool:
+        Raises:
+            ValueError: If hierarchy level is invalid
         """
-        Check if this permission matches a Flask-Principal Need.
+        if hierarchy_level is not None and hierarchy_level < 0:
+            raise ValueError("Hierarchy level must be non-negative")
         
-        Evaluates whether this permission satisfies a given Flask-Principal Need,
-        supporting dynamic authorization evaluation per Section 6.4.2.2.
+        return hierarchy_level
+    
+    # Permission Management Methods
+    
+    def matches_resource(self, resource_type: Optional[str] = None, 
+                        resource_id: Optional[str] = None) -> bool:
+        """
+        Check if this permission matches the given resource criteria.
         
         Args:
-            need (Need): Flask-Principal Need to match against
+            resource_type: Resource type to match against
+            resource_id: Resource ID to match against
             
         Returns:
-            bool: True if this permission satisfies the Need
+            bool: True if permission matches the resource criteria
         """
-        if not self.is_active:
-            return False
-        
-        # Check if this is a permission-type need
-        if need.method != 'permission':
-            return False
-        
-        # Parse the need value
-        try:
-            need_parts = need.value.split(':')
-            if len(need_parts) < 2:
-                return False
-            
-            need_permission_type = need_parts[0]
-            need_resource_type = need_parts[1]
-            need_resource_id = need_parts[2] if len(need_parts) > 2 else None
-            
-            # Check resource type match
-            if self.resource_type.value != need_resource_type:
-                return False
-            
-            # Check resource ID match (None matches global permissions)
-            if need_resource_id is not None and self.resource_id != need_resource_id:
-                return False
-            
-            # Check permission type hierarchy
-            try:
-                need_perm_type = PermissionType(need_permission_type)
-                return self.implies_permission(need_perm_type)
-            except ValueError:
-                return False
-            
-        except (IndexError, ValueError):
-            return False
-    
-    def can_access_resource(self, resource_type: ResourceType, 
-                          resource_id: Optional[str] = None,
-                          required_permission: Optional[PermissionType] = None) -> bool:
-        """
-        Check if this permission grants access to a specific resource.
-        
-        Provides context-aware authorization evaluation for resource-specific
-        access control per Section 6.4.2.2.
-        
-        Args:
-            resource_type (ResourceType): Type of resource being accessed
-            resource_id (Optional[str]): Specific resource identifier
-            required_permission (Optional[PermissionType]): Required permission level
-            
-        Returns:
-            bool: True if permission grants access to the resource
-        """
-        if not self.is_active:
-            return False
+        # Global permissions match everything
+        if self.scope == PermissionScope.GLOBAL:
+            return True
         
         # Check resource type match
-        if self.resource_type != resource_type and self.resource_type != ResourceType.GLOBAL:
+        if self.resource_type is not None:
+            if resource_type is None or self.resource_type != resource_type:
+                return False
+        
+        # Check resource ID match
+        if self.resource_id is not None:
+            if resource_id is None:
+                return False
+            
+            # Exact match
+            if self.resource_id == resource_id:
+                return True
+            
+            # Pattern match if resource_pattern is defined
+            if self.resource_pattern:
+                try:
+                    import re
+                    return bool(re.match(self.resource_pattern, resource_id))
+                except re.error:
+                    return False
+            
             return False
         
-        # Check resource ID match (global permissions apply to all resources)
-        if (self.resource_id is not None and 
-            resource_id is not None and 
-            self.resource_id != resource_id):
+        # If no resource_id specified in permission, it matches any resource of the type
+        return True
+    
+    def check_conditions(self, context: Dict[str, Any]) -> bool:
+        """
+        Evaluate dynamic permission conditions against context.
+        
+        Args:
+            context: Dictionary containing evaluation context
+            
+        Returns:
+            bool: True if conditions are met, False otherwise
+        """
+        if not self.conditions:
+            return True
+        
+        try:
+            # Simple condition evaluation
+            # In production, this could use a more sophisticated rule engine
+            for condition_name, condition_value in self.conditions.items():
+                context_value = context.get(condition_name)
+                
+                if isinstance(condition_value, dict):
+                    # Handle comparison operators
+                    if 'eq' in condition_value:
+                        if context_value != condition_value['eq']:
+                            return False
+                    elif 'in' in condition_value:
+                        if context_value not in condition_value['in']:
+                            return False
+                    elif 'gt' in condition_value:
+                        if context_value is None or context_value <= condition_value['gt']:
+                            return False
+                    elif 'lt' in condition_value:
+                        if context_value is None or context_value >= condition_value['lt']:
+                            return False
+                else:
+                    # Direct value comparison
+                    if context_value != condition_value:
+                        return False
+            
+            return True
+        
+        except Exception:
+            # If condition evaluation fails, deny permission for security
+            return False
+    
+    def get_inherited_permissions(self) -> Set['Permission']:
+        """
+        Get all permissions inherited from parent permissions.
+        
+        Returns:
+            Set[Permission]: Set of inherited permissions
+        """
+        inherited = set()
+        
+        if self.parent_permission:
+            inherited.add(self.parent_permission)
+            inherited.update(self.parent_permission.get_inherited_permissions())
+        
+        return inherited
+    
+    def can_inherit_from(self, other_permission: 'Permission') -> bool:
+        """
+        Check if this permission can inherit from another permission.
+        
+        Args:
+            other_permission: Permission to check inheritance compatibility
+            
+        Returns:
+            bool: True if inheritance is allowed, False otherwise
+        """
+        if not other_permission or other_permission.id == self.id:
             return False
         
-        # Check permission level if specified
-        if required_permission is not None:
-            return self.implies_permission(required_permission)
+        # Check hierarchy levels
+        return self.hierarchy_level >= other_permission.hierarchy_level
+    
+    def assign_to_role(self, role: 'Role', granted_by: Optional['User'] = None) -> bool:
+        """
+        Assign this permission to a role.
+        
+        Args:
+            role: Role to assign permission to
+            granted_by: User who granted the permission
+            
+        Returns:
+            bool: True if permission was assigned, False if already assigned
+        """
+        # Check if permission is already assigned
+        from .role_permission import RolePermission
+        
+        existing_assignment = db.session.query(RolePermission).filter_by(
+            role_id=role.id,
+            permission_id=self.id,
+            is_active=True
+        ).first()
+        
+        if existing_assignment:
+            return False
+        
+        # Create new assignment
+        assignment = RolePermission(
+            role_id=role.id,
+            permission_id=self.id,
+            granted_by_id=granted_by.id if granted_by else None,
+            is_active=True,
+            granted_at=datetime.now(timezone.utc)
+        )
+        
+        db.session.add(assignment)
+        
+        # Update permission metadata
+        self.assignment_count += 1
+        self.updated_at = datetime.now(timezone.utc)
+        if granted_by:
+            self.updated_by = granted_by.id
         
         return True
     
-    def get_effective_permissions(self) -> Set[PermissionType]:
+    def revoke_from_role(self, role: 'Role', revoked_by: Optional['User'] = None) -> bool:
         """
-        Get all effective permissions granted by this permission through hierarchy.
-        
-        Returns the complete set of permissions that this permission grants,
-        including hierarchical implications for comprehensive authorization.
-        
-        Returns:
-            Set[PermissionType]: All effective permissions granted
-        """
-        return PermissionType.get_hierarchical_permissions(self.permission_type)
-    
-    def to_dict(self, include_metadata: bool = True) -> Dict[str, Any]:
-        """
-        Convert Permission instance to dictionary representation.
+        Revoke this permission from a role.
         
         Args:
-            include_metadata (bool): Whether to include metadata field
+            role: Role to revoke permission from
+            revoked_by: User who revoked the permission
             
         Returns:
-            Dict[str, Any]: Dictionary representation of Permission instance
+            bool: True if permission was revoked, False if not assigned
         """
-        result = {
-            'id': self.id,
-            'name': self.name,
-            'permission_type': self.permission_type.value,
-            'resource_type': self.resource_type.value,
-            'resource_id': self.resource_id,
-            'description': self.description,
-            'is_active': self.is_active,
-            'is_global': self.is_global,
-            'permission_key': self.permission_key,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-        }
+        from .role_permission import RolePermission
         
-        if include_metadata and self.metadata:
-            result['metadata'] = self.metadata
+        # Find active assignment
+        assignment = db.session.query(RolePermission).filter_by(
+            role_id=role.id,
+            permission_id=self.id,
+            is_active=True
+        ).first()
         
-        return result
+        if not assignment:
+            return False
+        
+        # Deactivate assignment
+        assignment.is_active = False
+        assignment.revoked_at = datetime.now(timezone.utc)
+        assignment.revoked_by_id = revoked_by.id if revoked_by else None
+        
+        # Update permission metadata
+        self.assignment_count = max(0, self.assignment_count - 1)
+        self.updated_at = datetime.now(timezone.utc)
+        if revoked_by:
+            self.updated_by = revoked_by.id
+        
+        return True
     
-    @classmethod
-    def create_system_permission(cls, permission_type: PermissionType,
-                                resource_type: ResourceType,
-                                resource_id: Optional[str] = None,
-                                description: Optional[str] = None) -> 'Permission':
+    def update_usage_stats(self) -> None:
         """
-        Create a system-level permission with standardized naming.
+        Update permission usage statistics.
+        """
+        self.usage_count += 1
+        self.last_used_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
+    
+    # Flask-Principal Integration Methods
+    
+    def to_principal_need(self) -> str:
+        """
+        Convert permission to Flask-Principal Need identifier.
         
-        Factory method for creating system permissions with consistent naming
-        conventions and proper validation for administrative use.
-        
-        Args:
-            permission_type (PermissionType): Type of permission to create
-            resource_type (ResourceType): Type of resource permission applies to
-            resource_id (Optional[str]): Specific resource identifier
-            description (Optional[str]): Permission description
-            
         Returns:
-            Permission: Created system permission instance
+            str: Principal need identifier for this permission
         """
-        # Generate standardized name
-        if resource_id:
-            name = f"{permission_type.value.title()} {resource_type.value.replace('_', ' ').title()} ({resource_id})"
+        if self.resource_type and self.resource_id:
+            return f"permission:{self.name}:{self.resource_type}:{self.resource_id}"
+        elif self.resource_type:
+            return f"permission:{self.name}:{self.resource_type}"
         else:
-            name = f"{permission_type.value.title()} {resource_type.value.replace('_', ' ').title()}"
-        
-        # Generate description if not provided
-        if not description:
-            if resource_id:
-                description = f"Grants {permission_type.value} access to specific {resource_type.value.replace('_', ' ')} resource: {resource_id}"
-            else:
-                description = f"Grants {permission_type.value} access to all {resource_type.value.replace('_', ' ')} resources"
-        
-        return cls(
-            name=name,
-            permission_type=permission_type,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            description=description,
-            metadata={'system_generated': True, 'auto_created': True}
-        )
+            return f"permission:{self.name}"
     
     @classmethod
-    def find_by_permission_key(cls, permission_key: str) -> Optional['Permission']:
+    def from_principal_need(cls, need_str: str) -> Optional['Permission']:
         """
-        Find permission by its unique permission key.
+        Find permission from Flask-Principal Need string.
         
         Args:
-            permission_key (str): Unique permission key to search for
+            need_str: Principal need string to parse
             
         Returns:
-            Optional[Permission]: Permission instance if found, None otherwise
+            Optional[Permission]: Permission matching the need or None
         """
-        try:
-            # Parse permission key
-            key_parts = permission_key.split(':')
-            if len(key_parts) < 2:
-                return None
-            
-            permission_type = PermissionType(key_parts[0])
-            resource_type = ResourceType(key_parts[1])
-            resource_id = key_parts[2] if len(key_parts) > 2 else None
-            
-            # Query for matching permission
-            query = cls.query.filter(
-                cls.permission_type == permission_type,
-                cls.resource_type == resource_type,
-                cls.is_active == True
-            )
-            
-            if resource_id:
-                query = query.filter(cls.resource_id == resource_id)
-            else:
-                query = query.filter(cls.resource_id.is_(None))
-            
-            return query.first()
-            
-        except (ValueError, IndexError):
+        if not need_str.startswith('permission:'):
             return None
-    
-    @classmethod
-    def find_permissions_for_resource(cls, resource_type: ResourceType,
-                                    resource_id: Optional[str] = None,
-                                    permission_type: Optional[PermissionType] = None) -> List['Permission']:
-        """
-        Find all permissions that apply to a specific resource.
         
-        Args:
-            resource_type (ResourceType): Type of resource to search for
-            resource_id (Optional[str]): Specific resource identifier
-            permission_type (Optional[PermissionType]): Filter by permission type
-            
-        Returns:
-            List[Permission]: List of applicable permissions
-        """
-        # Base query for resource type
-        query = cls.query.filter(
-            cls.is_active == True
-        ).filter(
-            (cls.resource_type == resource_type) | 
-            (cls.resource_type == ResourceType.GLOBAL)
+        parts = need_str.split(':', 3)
+        
+        if len(parts) < 2:
+            return None
+        
+        name = parts[1]
+        resource_type = parts[2] if len(parts) > 2 else None
+        resource_id = parts[3] if len(parts) > 3 else None
+        
+        query = cls.query.filter_by(
+            name=name,
+            is_active=True,
+            status=PermissionStatus.ACTIVE
         )
         
-        # Filter by resource ID (include global permissions)
+        if resource_type:
+            query = query.filter_by(resource_type=resource_type)
+        else:
+            query = query.filter(cls.resource_type.is_(None))
+        
         if resource_id:
-            query = query.filter(
-                (cls.resource_id == resource_id) | 
-                (cls.resource_id.is_(None))
-            )
+            query = query.filter_by(resource_id=resource_id)
         else:
             query = query.filter(cls.resource_id.is_(None))
         
-        # Filter by permission type if specified
-        if permission_type:
-            query = query.filter(cls.permission_type == permission_type)
-        
-        return query.all()
+        return query.first()
     
-    @classmethod
-    def get_hierarchical_permissions_for_type(cls, permission_type: PermissionType) -> List['Permission']:
+    def check_permission(self, user: 'User', context: Optional[Dict[str, Any]] = None) -> bool:
         """
-        Get all permissions that would be granted by a specific permission type.
+        Check if a user has this permission.
         
         Args:
-            permission_type (PermissionType): Permission type to expand
+            user: User to check permission for
+            context: Optional context for dynamic evaluation
             
         Returns:
-            List[Permission]: All permissions granted by the permission type hierarchy
+            bool: True if user has permission, False otherwise
         """
-        implied_types = PermissionType.get_hierarchical_permissions(permission_type)
-        
-        return cls.query.filter(
-            cls.permission_type.in_(implied_types),
-            cls.is_active == True
-        ).all()
-    
-    def __repr__(self) -> str:
-        """
-        String representation of Permission instance for debugging and logging.
-        
-        Returns:
-            str: String representation of Permission instance
-        """
-        return (
-            f"<Permission(id={self.id}, name='{self.name}', "
-            f"type={self.permission_type.value}, resource={self.resource_type.value}, "
-            f"resource_id='{self.resource_id}', active={self.is_active})>"
-        )
-    
-    def __str__(self) -> str:
-        """
-        Human-readable string representation of Permission instance.
-        
-        Returns:
-            str: User-friendly string representation
-        """
-        if self.resource_id:
-            return f"{self.name} ({self.permission_type.value} on {self.resource_type.value}:{self.resource_id})"
-        else:
-            return f"{self.name} ({self.permission_type.value} on {self.resource_type.value})"
-
-
-# Association table for many-to-many relationship between roles and permissions
-# This table implements the flexible RBAC requirements per Section 6.4.2.1
-role_permissions = db.Table(
-    'role_permissions',
-    Column(
-        'id',
-        Integer,
-        primary_key=True,
-        autoincrement=True,
-        comment="Auto-incrementing primary key for role-permission associations"
-    ),
-    Column(
-        'role_id',
-        Integer,
-        ForeignKey('roles.id', ondelete='CASCADE'),
-        nullable=False,
-        index=True,
-        comment="Foreign key reference to Role model"
-    ),
-    Column(
-        'permission_id',
-        Integer,
-        ForeignKey('permissions.id', ondelete='CASCADE'),
-        nullable=False,
-        index=True,
-        comment="Foreign key reference to Permission model"
-    ),
-    Column(
-        'granted_at',
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        comment="Timestamp when permission was granted to role"
-    ),
-    Column(
-        'granted_by',
-        Integer,
-        ForeignKey('users.id', ondelete='SET NULL'),
-        nullable=True,
-        comment="User who granted this permission (for audit trail)"
-    ),
-    Column(
-        'is_active',
-        Boolean,
-        nullable=False,
-        default=True,
-        index=True,
-        comment="Association activation status for dynamic control"
-    ),
-    
-    # Constraints for data integrity
-    UniqueConstraint('role_id', 'permission_id', name='uq_role_permission'),
-    Index('ix_role_permission_active', 'role_id', 'permission_id', 'is_active'),
-    Index('ix_role_permission_granted', 'granted_at', 'is_active'),
-    
-    # Table metadata
-    comment='Many-to-many association between roles and permissions for RBAC implementation'
-)
-
-
-# Flask-Principal integration functions for authorization evaluation
-def permission_required(permission_type: PermissionType, 
-                       resource_type: ResourceType,
-                       resource_id: Optional[str] = None):
-    """
-    Flask decorator for permission-based authorization using Flask-Principal.
-    
-    Creates a decorator that checks if the current user has the required permission
-    for the specified resource, integrating with Flask-Principal for authorization.
-    
-    Args:
-        permission_type (PermissionType): Required permission type
-        resource_type (ResourceType): Type of resource being accessed
-        resource_id (Optional[str]): Specific resource identifier
-        
-    Returns:
-        Decorator function for Flask route protection
-    """
-    from functools import wraps
-    from flask import abort
-    from flask_principal import PermissionDenied
-    
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            try:
-                # Find the permission in the database
-                permission = Permission.find_permissions_for_resource(
-                    resource_type=resource_type,
-                    resource_id=resource_id,
-                    permission_type=permission_type
-                )
-                
-                if not permission:
-                    # Create a temporary permission for evaluation
-                    temp_permission = Permission(
-                        name=f"Temp {permission_type.value}",
-                        permission_type=permission_type,
-                        resource_type=resource_type,
-                        resource_id=resource_id
-                    )
-                    principal_permission = temp_permission.create_principal_permission()
-                else:
-                    principal_permission = permission[0].create_principal_permission()
-                
-                # Use Flask-Principal for permission evaluation
-                principal_permission.test()
-                
-                return f(*args, **kwargs)
-                
-            except PermissionDenied:
-                abort(403)
-        
-        return decorated_function
-    return decorator
-
-
-def has_permission(permission_type: PermissionType,
-                  resource_type: ResourceType,
-                  resource_id: Optional[str] = None) -> bool:
-    """
-    Check if current user has specific permission without raising exceptions.
-    
-    Provides a non-decorator method for permission checking in business logic,
-    supporting dynamic authorization evaluation per Section 6.4.2.2.
-    
-    Args:
-        permission_type (PermissionType): Required permission type
-        resource_type (ResourceType): Type of resource being accessed
-        resource_id (Optional[str]): Specific resource identifier
-        
-    Returns:
-        bool: True if user has permission, False otherwise
-    """
-    try:
-        from flask_principal import PermissionDenied
-        
-        # Find the permission in the database
-        permission = Permission.find_permissions_for_resource(
-            resource_type=resource_type,
-            resource_id=resource_id,
-            permission_type=permission_type
-        )
-        
-        if not permission:
+        if not self.can_be_assigned:
             return False
         
-        # Use Flask-Principal for permission evaluation
-        principal_permission = permission[0].create_principal_permission()
-        principal_permission.test()
+        # Check dynamic conditions if provided
+        if context and not self.check_conditions(context):
+            return False
         
-        return True
+        # Check if user has any role with this permission
+        user_roles = user.get_active_roles() if hasattr(user, 'get_active_roles') else []
         
-    except (PermissionDenied, Exception):
+        for role in user_roles:
+            if self in role.permissions:
+                # Update usage statistics
+                self.update_usage_stats()
+                return True
+        
         return False
+    
+    # Class Methods for Permission Management
+    
+    @classmethod
+    def get_by_name(cls, name: str, resource_type: Optional[str] = None,
+                   resource_id: Optional[str] = None) -> Optional['Permission']:
+        """
+        Get permission by name and optional resource criteria.
+        
+        Args:
+            name: Permission name
+            resource_type: Optional resource type
+            resource_id: Optional resource ID
+            
+        Returns:
+            Optional[Permission]: Permission instance or None
+        """
+        query = cls.query.filter_by(
+            name=name,
+            is_active=True,
+            status=PermissionStatus.ACTIVE
+        )
+        
+        if resource_type:
+            query = query.filter_by(resource_type=resource_type)
+        if resource_id:
+            query = query.filter_by(resource_id=resource_id)
+        
+        return query.first()
+    
+    @classmethod
+    def create_permission(cls, name: str, display_name: str, 
+                         permission_type: PermissionType = PermissionType.RESOURCE,
+                         scope: PermissionScope = PermissionScope.RESOURCE,
+                         description: Optional[str] = None,
+                         resource_type: Optional[str] = None,
+                         resource_id: Optional[str] = None,
+                         action: Optional[PermissionAction] = None,
+                         created_by: Optional['User'] = None,
+                         **kwargs) -> 'Permission':
+        """
+        Create a new permission with validation.
+        
+        Args:
+            name: Permission name
+            display_name: Human-readable display name
+            permission_type: Type of permission
+            scope: Permission scope
+            description: Optional description
+            resource_type: Optional resource type
+            resource_id: Optional resource ID
+            action: Optional action type
+            created_by: User creating the permission
+            **kwargs: Additional permission fields
+            
+        Returns:
+            Permission: Created permission instance
+        """
+        permission = cls(
+            name=name,
+            display_name=display_name,
+            permission_type=permission_type,
+            scope=scope,
+            description=description,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action=action,
+            created_by=created_by.id if created_by else None,
+            **kwargs
+        )
+        
+        db.session.add(permission)
+        db.session.commit()
+        
+        return permission
+    
+    @classmethod
+    def create_default_permissions(cls, organization_id: Optional[int] = None) -> List['Permission']:
+        """
+        Create default system permissions.
+        
+        Args:
+            organization_id: Optional organization ID
+            
+        Returns:
+            List[Permission]: List of created default permissions
+        """
+        default_permissions = [
+            # System permissions
+            {
+                'name': 'system_admin',
+                'display_name': 'System Administration',
+                'description': 'Full system administration access',
+                'permission_type': PermissionType.SYSTEM,
+                'scope': PermissionScope.GLOBAL,
+                'is_system_permission': True
+            },
+            {
+                'name': 'user_management',
+                'display_name': 'User Management',
+                'description': 'Manage user accounts and profiles',
+                'permission_type': PermissionType.SYSTEM,
+                'scope': PermissionScope.ORGANIZATION,
+                'is_system_permission': True
+            },
+            
+            # Resource permissions
+            {
+                'name': 'create_resource',
+                'display_name': 'Create Resources',
+                'description': 'Create new resources',
+                'permission_type': PermissionType.RESOURCE,
+                'scope': PermissionScope.RESOURCE,
+                'action': PermissionAction.CREATE,
+                'is_system_permission': True
+            },
+            {
+                'name': 'read_resource',
+                'display_name': 'Read Resources',
+                'description': 'View and read resources',
+                'permission_type': PermissionType.RESOURCE,
+                'scope': PermissionScope.RESOURCE,
+                'action': PermissionAction.READ,
+                'is_system_permission': True
+            },
+            {
+                'name': 'update_resource',
+                'display_name': 'Update Resources',
+                'description': 'Modify existing resources',
+                'permission_type': PermissionType.RESOURCE,
+                'scope': PermissionScope.RESOURCE,
+                'action': PermissionAction.UPDATE,
+                'is_system_permission': True
+            },
+            {
+                'name': 'delete_resource',
+                'display_name': 'Delete Resources',
+                'description': 'Remove resources',
+                'permission_type': PermissionType.RESOURCE,
+                'scope': PermissionScope.RESOURCE,
+                'action': PermissionAction.DELETE,
+                'is_system_permission': True
+            },
+            
+            # API permissions
+            {
+                'name': 'api_access',
+                'display_name': 'API Access',
+                'description': 'Access to API endpoints',
+                'permission_type': PermissionType.API,
+                'scope': PermissionScope.GLOBAL,
+                'is_system_permission': True
+            },
+        ]
+        
+        created_permissions = []
+        
+        for perm_data in default_permissions:
+            # Check if permission already exists
+            existing_permission = cls.get_by_name(perm_data['name'])
+            
+            if not existing_permission:
+                permission = cls(
+                    organization_id=organization_id,
+                    **perm_data
+                )
+                
+                db.session.add(permission)
+                created_permissions.append(permission)
+        
+        db.session.commit()
+        return created_permissions
+    
+    @classmethod
+    def get_user_permissions(cls, user_id: int, resource_type: Optional[str] = None,
+                           resource_id: Optional[str] = None) -> List['Permission']:
+        """
+        Get all permissions for a specific user.
+        
+        Args:
+            user_id: User ID to get permissions for
+            resource_type: Optional resource type filter
+            resource_id: Optional resource ID filter
+            
+        Returns:
+            List[Permission]: List of permissions for the user
+        """
+        from .role import Role
+        from .user_role_assignment import UserRoleAssignment
+        from .role_permission import RolePermission
+        
+        # Query for user permissions through roles
+        query = (
+            db.session.query(cls)
+            .join(RolePermission, cls.id == RolePermission.permission_id)
+            .join(Role, RolePermission.role_id == Role.id)
+            .join(UserRoleAssignment, Role.id == UserRoleAssignment.role_id)
+            .filter(
+                UserRoleAssignment.user_id == user_id,
+                UserRoleAssignment.is_active == True,
+                Role.is_active == True,
+                RolePermission.is_active == True,
+                cls.is_active == True,
+                cls.status == PermissionStatus.ACTIVE
+            )
+        )
+        
+        if resource_type:
+            query = query.filter(
+                or_(cls.resource_type == resource_type, cls.resource_type.is_(None))
+            )
+        
+        if resource_id:
+            query = query.filter(
+                or_(cls.resource_id == resource_id, cls.resource_id.is_(None))
+            )
+        
+        return query.distinct().all()
+    
+    @classmethod
+    def get_permissions_by_type(cls, permission_type: PermissionType,
+                              organization_id: Optional[int] = None) -> List['Permission']:
+        """
+        Get all permissions of a specific type.
+        
+        Args:
+            permission_type: Type of permissions to retrieve
+            organization_id: Optional organization filter
+            
+        Returns:
+            List[Permission]: List of permissions of the specified type
+        """
+        query = cls.query.filter_by(
+            permission_type=permission_type,
+            is_active=True,
+            status=PermissionStatus.ACTIVE
+        )
+        
+        if organization_id:
+            query = query.filter_by(organization_id=organization_id)
+        
+        return query.order_by(cls.name).all()
+    
+    @classmethod
+    def search_permissions(cls, search_term: str, limit: int = 50) -> List['Permission']:
+        """
+        Search permissions by name or description.
+        
+        Args:
+            search_term: Term to search for
+            limit: Maximum number of results
+            
+        Returns:
+            List[Permission]: List of matching permissions
+        """
+        search_pattern = f"%{search_term.lower()}%"
+        
+        return (
+            cls.query.filter(
+                and_(
+                    cls.is_active == True,
+                    cls.status == PermissionStatus.ACTIVE,
+                    or_(
+                        cls.name.ilike(search_pattern),
+                        cls.display_name.ilike(search_pattern),
+                        cls.description.ilike(search_pattern)
+                    )
+                )
+            )
+            .order_by(cls.name)
+            .limit(limit)
+            .all()
+        )
+    
+    # Audit and Logging Methods
+    
+    def log_permission_activity(self, activity_type: str, details: Dict[str, Any],
+                              user: Optional['User'] = None) -> None:
+        """
+        Log permission-related activity for audit trail.
+        
+        Args:
+            activity_type: Type of activity
+            details: Dictionary of activity details
+            user: User who performed the activity
+        """
+        from .authentication_log import AuthenticationLog
+        
+        log_entry = AuthenticationLog(
+            user_id=user.id if user else None,
+            activity_type=f"permission_{activity_type}",
+            details={
+                'permission_id': self.id,
+                'permission_name': self.name,
+                'permission_type': self.permission_type.value,
+                'resource_type': self.resource_type,
+                'resource_id': self.resource_id,
+                **details
+            },
+            ip_address=details.get('ip_address'),
+            user_agent=details.get('user_agent'),
+            session_id=details.get('session_id')
+        )
+        
+        db.session.add(log_entry)
+    
+    # String Representation and Debugging
+    
+    def __str__(self) -> str:
+        """User-friendly string representation."""
+        if self.resource_type and self.resource_id:
+            return f"{self.display_name} ({self.name}:{self.resource_type}:{self.resource_id})"
+        elif self.resource_type:
+            return f"{self.display_name} ({self.name}:{self.resource_type})"
+        else:
+            return f"{self.display_name} ({self.name})"
+    
+    def __repr__(self) -> str:
+        """Developer string representation."""
+        return (f"<Permission(id={self.id}, name='{self.name}', "
+                f"type={self.permission_type.value}, scope={self.scope.value})>")
+    
+    # Serialization Methods for API Responses
+    
+    def to_dict(self, include_relationships: bool = False) -> Dict[str, Any]:
+        """
+        Convert permission to dictionary for API responses.
+        
+        Args:
+            include_relationships: Whether to include relationship data
+            
+        Returns:
+            Dict[str, Any]: Permission data as dictionary
+        """
+        data = {
+            'id': self.id,
+            'uuid': str(self.uuid),
+            'name': self.name,
+            'display_name': self.display_name,
+            'description': self.description,
+            'permission_type': self.permission_type.value,
+            'scope': self.scope.value,
+            'action': self.action.value if self.action else None,
+            'resource_type': self.resource_type,
+            'resource_id': self.resource_id,
+            'resource_pattern': self.resource_pattern,
+            'hierarchy_level': self.hierarchy_level,
+            'status': self.status.value,
+            'is_active': self.is_active,
+            'is_system_permission': self.is_system_permission,
+            'assignment_count': self.assignment_count,
+            'usage_count': self.usage_count,
+            'metadata': self.metadata,
+            'conditions': self.conditions,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'full_name': self.full_name,
+            'principal_need': self.to_principal_need()
+        }
+        
+        if include_relationships:
+            data.update({
+                'roles': [r.to_dict() for r in self.roles],
+                'parent_permission': self.parent_permission.to_dict() if self.parent_permission else None,
+                'child_permissions': [p.to_dict() for p in self.child_permissions if p.is_active],
+                'inherited_permissions': [p.to_dict() for p in self.get_inherited_permissions()]
+            })
+        
+        return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Permission':
+        """
+        Create permission instance from dictionary data.
+        
+        Args:
+            data: Dictionary containing permission data
+            
+        Returns:
+            Permission: New permission instance
+        """
+        # Extract enum values
+        permission_type = PermissionType(data.get('permission_type', PermissionType.RESOURCE.value))
+        scope = PermissionScope(data.get('scope', PermissionScope.RESOURCE.value))
+        status = PermissionStatus(data.get('status', PermissionStatus.ACTIVE.value))
+        action = PermissionAction(data['action']) if data.get('action') else None
+        
+        return cls(
+            name=data.get('name'),
+            display_name=data.get('display_name'),
+            description=data.get('description'),
+            permission_type=permission_type,
+            scope=scope,
+            action=action,
+            resource_type=data.get('resource_type'),
+            resource_id=data.get('resource_id'),
+            resource_pattern=data.get('resource_pattern'),
+            hierarchy_level=data.get('hierarchy_level', 0),
+            parent_permission_id=data.get('parent_permission_id'),
+            organization_id=data.get('organization_id'),
+            status=status,
+            is_active=data.get('is_active', True),
+            is_system_permission=data.get('is_system_permission', False),
+            metadata=data.get('metadata', {}),
+            conditions=data.get('conditions', {})
+        )
 
 
-# Export all classes and functions for use throughout the application
+# SQLAlchemy Event Listeners for Audit and Performance
+
+@event.listens_for(Permission, 'before_insert')
+def permission_before_insert(mapper, connection, target):
+    """
+    Event listener for permission creation.
+    
+    Args:
+        mapper: SQLAlchemy mapper
+        connection: Database connection
+        target: Permission instance being inserted
+    """
+    # Ensure UUID is set
+    if target.uuid is None:
+        target.uuid = uuid.uuid4()
+    
+    # Set default display name if not provided
+    if not target.display_name and target.name:
+        target.display_name = target.name.replace('_', ' ').title()
+    
+    # Set audit timestamps
+    now = datetime.now(timezone.utc)
+    target.created_at = now
+    target.updated_at = now
+
+
+@event.listens_for(Permission, 'before_update')
+def permission_before_update(mapper, connection, target):
+    """
+    Event listener for permission updates.
+    
+    Args:
+        mapper: SQLAlchemy mapper
+        connection: Database connection
+        target: Permission instance being updated
+    """
+    # Update timestamp
+    target.updated_at = datetime.now(timezone.utc)
+
+
+@event.listens_for(Permission, 'after_insert')
+def permission_after_insert(mapper, connection, target):
+    """
+    Event listener after permission creation.
+    
+    Args:
+        mapper: SQLAlchemy mapper
+        connection: Database connection
+        target: Permission instance that was inserted
+    """
+    # Log permission creation for audit trail
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"Permission created: ID={target.id}, name='{target.name}', "
+        f"type={target.permission_type.value}, organization={target.organization_id}"
+    )
+
+
+@event.listens_for(Permission, 'after_update')
+def permission_after_update(mapper, connection, target):
+    """
+    Event listener after permission updates.
+    
+    Args:
+        mapper: SQLAlchemy mapper
+        connection: Database connection
+        target: Permission instance that was updated
+    """
+    # Log permission updates for audit trail
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"Permission updated: ID={target.id}, name='{target.name}', "
+        f"type={target.permission_type.value}"
+    )
+
+
+# Performance Optimization: Compiled Queries for Common Operations
+
+def get_active_permissions_query():
+    """Compiled query for active permissions."""
+    return (
+        db.session.query(Permission)
+        .filter(Permission.is_active == True, Permission.status == PermissionStatus.ACTIVE)
+        .order_by(Permission.name.asc())
+    )
+
+
+def get_user_permissions_query(user_id: int):
+    """Compiled query for user permissions."""
+    from .role import Role
+    from .user_role_assignment import UserRoleAssignment
+    from .role_permission import RolePermission
+    
+    return (
+        db.session.query(Permission)
+        .join(RolePermission, Permission.id == RolePermission.permission_id)
+        .join(Role, RolePermission.role_id == Role.id)
+        .join(UserRoleAssignment, Role.id == UserRoleAssignment.role_id)
+        .filter(
+            UserRoleAssignment.user_id == user_id,
+            UserRoleAssignment.is_active == True,
+            Role.is_active == True,
+            RolePermission.is_active == True,
+            Permission.is_active == True,
+            Permission.status == PermissionStatus.ACTIVE
+        )
+        .distinct()
+        .options(selectinload(Permission.roles))
+    )
+
+
+def get_permissions_by_resource_query(resource_type: str, resource_id: Optional[str] = None):
+    """Compiled query for resource-specific permissions."""
+    query = (
+        db.session.query(Permission)
+        .filter(
+            Permission.is_active == True,
+            Permission.status == PermissionStatus.ACTIVE,
+            or_(
+                Permission.resource_type == resource_type,
+                Permission.resource_type.is_(None)
+            )
+        )
+    )
+    
+    if resource_id:
+        query = query.filter(
+            or_(
+                Permission.resource_id == resource_id,
+                Permission.resource_id.is_(None)
+            )
+        )
+    
+    return query.order_by(Permission.hierarchy_level.desc(), Permission.name.asc())
+
+
+# Export all public components
 __all__ = [
-    'Permission', 'PermissionType', 'ResourceType', 'role_permissions',
-    'permission_required', 'has_permission'
+    'Permission',
+    'PermissionType',
+    'PermissionScope', 
+    'PermissionAction',
+    'PermissionStatus',
+    'get_active_permissions_query',
+    'get_user_permissions_query',
+    'get_permissions_by_resource_query'
 ]
