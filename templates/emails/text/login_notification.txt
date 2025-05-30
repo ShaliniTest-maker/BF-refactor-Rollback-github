@@ -1,99 +1,89 @@
-SECURITY NOTIFICATION - Login Detected
-=====================================
+SECURITY NOTIFICATION: Login Activity Alert
 
-Hello,
+Hello {{ user.full_name or user.username }},
 
-We detected a login to your account. If this was you, no action is needed. 
-If you don't recognize this activity, please take immediate action to secure 
-your account.
+We are writing to inform you about recent login activity on your account.
 
-LOGIN DETAILS:
---------------
-Date & Time: {{ login_time.strftime('%B %d, %Y at %I:%M %p %Z') }}
+LOGIN DETAILS
+=============
+Date & Time: {{ login_timestamp }}
+Location: {{ login_location or 'Unknown location' }}
 IP Address: {{ ip_address }}
-Location: {{ location_city }}, {{ location_region }}, {{ location_country }}
-Device: {{ device_type }} ({{ user_agent }})
-Browser: {{ browser_name }} {{ browser_version }}
-Platform: {{ operating_system }}
+Device: {{ device_info.device_type or 'Unknown device' }}
+Browser: {{ device_info.browser or 'Unknown browser' }}
+Operating System: {{ device_info.os or 'Unknown OS' }}
 
-AUTHENTICATION METHOD:
-----------------------
-Login Method: {{ auth_method }}
-Session Duration: {{ session_duration }}
-Two-Factor Authentication: {{ 'Enabled' if mfa_enabled else 'Not Used' }}
+{% if is_suspicious_login %}
+SECURITY ALERT: This login was flagged as unusual or suspicious based on your typical access patterns.
+{% endif %}
 
-ACCOUNT SECURITY STATUS:
-------------------------
-Account Status: Active
-Last Password Change: {{ last_password_change.strftime('%B %d, %Y') if last_password_change else 'Not Available' }}
-Recent Logins: {{ recent_login_count }} in the last 24 hours
-Security Alerts: {{ security_alert_count }} active alerts
+WHAT THIS MEANS
+===============
+{% if login_status == 'success' %}
+This email confirms a successful login to your account. If this was you, no action is required.
+{% else %}
+This email alerts you to a failed login attempt on your account.
+{% endif %}
 
-IF THIS WAS NOT YOU:
---------------------
-Take these steps immediately:
+IF THIS WAS NOT YOU
+===================
+If you did not authorize this login activity, please take the following steps immediately:
 
-1. CHANGE YOUR PASSWORD
-   - Log in to your account using a trusted device
-   - Update your password to something strong and unique
-   - Ensure it's different from passwords used elsewhere
+1. Change your password using the password reset link:
+   {{ password_reset_url }}
 
-2. ENABLE TWO-FACTOR AUTHENTICATION
-   - Add an extra layer of security to your account
-   - Use an authenticator app or SMS verification
-   - This prevents unauthorized access even with your password
+2. Review your account settings and recent activity:
+   {{ account_settings_url }}
 
-3. REVIEW ACCOUNT ACTIVITY
-   - Check your recent login history for suspicious activity
-   - Look for unrecognized devices or locations
-   - Review any changes made to your account settings
+3. Enable two-factor authentication for enhanced security:
+   {{ two_factor_setup_url }}
 
-4. SECURE YOUR DEVICES
-   - Log out of all sessions on shared or public devices
-   - Ensure your devices have up-to-date security software
-   - Use secure networks for accessing your account
+4. Contact our security team if you suspect unauthorized access:
+   Email: {{ security_contact_email }}
+   Phone: {{ security_contact_phone }}
 
-5. CONTACT SUPPORT IMMEDIATELY
-   - Report this incident to our security team
-   - We can help secure your account and investigate the activity
-   - Keep this email for reference when contacting support
+SECURITY BEST PRACTICES
+=======================
+To keep your account secure:
+- Use a strong, unique password
+- Enable two-factor authentication
+- Only log in from trusted devices and networks
+- Log out when using shared or public computers
+- Regularly review your account activity
 
-SECURITY TIPS:
---------------
-- Always use strong, unique passwords for each account
-- Enable two-factor authentication when available
-- Be cautious when accessing accounts on public or shared devices
-- Regularly review your account activity and settings
-- Keep your devices and browsers updated with latest security patches
-- Never share your login credentials with others
+ACCOUNT INFORMATION
+==================
+Username: {{ user.username }}
+Email: {{ user.email }}
+Account Status: {{ user.status or 'Active' }}
+Last Password Change: {{ last_password_change or 'Not available' }}
 
-CONTACT INFORMATION:
---------------------
-Security Team: security@{{ company_domain }}
-Support Portal: https://{{ company_domain }}/support
-Emergency Contact: 1-800-SECURITY (1-800-732-8748)
-
-For immediate assistance, please contact our 24/7 security hotline.
-
-ABOUT THIS NOTIFICATION:
--------------------------
-This email was sent from a monitored security system. We send these 
-notifications to help protect your account from unauthorized access. 
-These alerts are sent to: {{ user_email }}
-
-If you have questions about this notification or need to update your 
-contact preferences, please visit your account settings or contact 
-our support team.
-
-Technical Details (for our support team):
-Session ID: {{ session_id }}
-Request ID: {{ request_id }}
-Timestamp: {{ utc_timestamp }}
-Security Level: {{ security_level }}
-
+{% if recent_login_summary %}
+RECENT LOGIN ACTIVITY (Last 5 logins)
 =====================================
-This is an automated security notification from {{ company_name }}.
-Please do not reply to this email. For assistance, use the contact 
-information provided above.
+{% for login in recent_login_summary %}
+{{ login.timestamp }} - {{ login.location }} ({{ login.ip_address }})
+{% endfor %}
+{% endif %}
 
-© {{ current_year }} {{ company_name }}. All rights reserved.
+CONTACT SUPPORT
+===============
+If you have questions about this notification or need assistance with your account:
+
+Security Team: {{ security_contact_email }}
+General Support: {{ support_contact_email }}
+Phone Support: {{ support_contact_phone }}
+Help Center: {{ help_center_url }}
+
+This is an automated security notification from our Flask application monitoring system. 
+Please do not reply directly to this email.
+
+For your security, this notification was sent to all email addresses associated with your account.
+
+---
+{{ application_name }}
+Security & Compliance Team
+{{ company_address }}
+
+Notification ID: {{ notification_id }}
+Generated: {{ notification_timestamp }}
