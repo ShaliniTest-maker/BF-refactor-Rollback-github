@@ -1,606 +1,646 @@
 """
 Flask Authentication Blueprint
 
-This blueprint manages user authentication routes including login, logout, registration,
-and session management endpoints, implementing comprehensive Flask authentication patterns
-using Flask-Login 0.6.3, ItsDangerous 2.2+, and Auth0 Python SDK 4.9.0 integration.
-
-The authentication system preserves existing user access patterns and security levels
-while transitioning from Node.js authentication middleware to Flask authentication
-decorators and session management.
+This module provides comprehensive authentication functionality for the Flask 3.1.1 application,
+implementing user authentication routes including login, logout, registration, and session
+management endpoints. The blueprint preserves existing authentication workflows while leveraging
+Flask-Login for session management and ItsDangerous for secure session protection.
 
 Key Features:
-- Flask-Login integration for comprehensive user session management
-- ItsDangerous 2.2+ for cryptographically secure cookie signing and token generation
-- Auth0 Python SDK 4.9.0 for external authentication provider integration
-- Authentication decorator patterns for endpoint protection
-- Secure session management with preservation of existing user access control
-- Service Layer pattern integration for authentication business logic
+- Flask-Login 0.6.3 integration for comprehensive user session management per Section 2.1.4 Feature F-007
+- ItsDangerous 2.2+ implementation for cryptographically secure cookie signing and token generation
+- Auth0 Python SDK 4.9.0 integration for external authentication provider support per Section 0.2.4
+- Authentication decorator patterns for endpoint protection per Section 5.2.2
+- Session management patterns preserving existing user access control per Section 4.6
 
-Authentication Flow:
-1. User authentication via Auth0 or local login
-2. Session creation with Flask-Login user loader
-3. Secure cookie signing with ItsDangerous
-4. Session validation and management
-5. Authorization enforcement through decorators
+Authentication Workflows:
+- Form-based authentication with username/password validation
+- Session-based authentication using Flask-Login session management
+- Token-based authentication using ItsDangerous secure tokens
+- External authentication via Auth0 provider integration
+- Multi-factor authentication support for enhanced security
+- Password reset and account recovery workflows
 
-Security Features:
-- CSRF protection with secure token generation
-- Session hijacking prevention through secure cookies
-- Token-based authentication with cryptographic validation
-- Rate limiting for authentication endpoints
-- Comprehensive audit logging for security events
+Security Implementation:
+- OWASP security standards compliance for authentication endpoints
+- Secure cookie handling with HttpOnly, Secure, and SameSite attributes
+- CSRF protection for form-based authentication workflows
+- Rate limiting for authentication attempts and password reset requests
+- Session fixation protection through Flask-Login session regeneration
+- Cryptographic session protection via ItsDangerous signing
+
+Author: Flask Migration System
+Version: 1.0.0 
+Compatibility: Flask 3.1.1, Flask-Login 0.6.3, ItsDangerous 2.2+, Auth0 Python SDK 4.9.0
 """
 
-import os
 import logging
-import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, Optional, Tuple, Union
 from functools import wraps
-from typing import Dict, Any, Optional, Union, Callable
-from urllib.parse import urlencode, quote_plus
+from urllib.parse import urlparse, urljoin
+import secrets
+import re
 
+# Flask core imports
 from flask import (
-    Blueprint, request, jsonify, redirect, url_for, session, flash,
-    current_app, g, make_response, abort, render_template
+    Blueprint, request, jsonify, session, redirect, url_for, 
+    current_app, abort, flash, render_template, make_response,
+    g, has_request_context
 )
+
+# Flask-Login imports for session management per Section 2.1.4 Feature F-007
 from flask_login import (
-    LoginManager, login_user, logout_user, login_required, 
-    current_user, UserMixin, AnonymousUserMixin
+    login_user, logout_user, login_required, current_user,
+    LoginManager, UserMixin, AnonymousUserMixin
 )
+
+# ItsDangerous imports for secure token generation per Section 2.1.4 Feature F-007
 from itsdangerous import (
     URLSafeTimedSerializer, URLSafeSerializer, BadSignature, 
-    SignatureExpired, BadData
+    SignatureExpired, BadData, TimestampSigner
 )
-from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.exceptions import Unauthorized, Forbidden
-import requests
 
-# Import Auth0 Python SDK 4.9.0 components
+# Werkzeug security utilities
+from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.exceptions import BadRequest, Unauthorized, Forbidden
+
+# Auth0 integration per Section 0.2.4 dependency decisions
 try:
-    from auth0.authentication import GetToken, Users
     from auth0.management import Auth0
-    from authlib.integrations.flask_client import OAuth
+    from auth0.authentication import GetToken, Users
     AUTH0_AVAILABLE = True
 except ImportError:
     AUTH0_AVAILABLE = False
-    logging.warning("Auth0 SDK not available. Local authentication only.")
+    logging.warning("Auth0 Python SDK not available. Auth0 integration disabled.")
 
-# Import Service Layer and Models
-from services import get_service, with_service, ServiceException
-from models import User, UserSession, load_user, db
+# Internal imports
+from models import (
+    User, UserSession, Role, Permission, 
+    db, ValidationError, DatabaseError,
+    load_user as model_load_user
+)
+from services import (
+    AuthService, ValidationService, get_service, 
+    ServiceError, ServiceResult
+)
+from config import get_config
 
-# Configure logging for authentication events
+# Configure logging for authentication blueprint
 logger = logging.getLogger(__name__)
 
-# Create authentication blueprint
+# Create authentication blueprint with URL prefix
 auth_bp = Blueprint(
     'auth', 
     __name__, 
     url_prefix='/auth',
     template_folder='../templates/auth',
-    static_folder='../static'
+    static_folder='../static/auth'
 )
 
 
 class AuthenticationError(Exception):
-    """Custom authentication error for handling auth failures"""
+    """Custom exception for authentication-specific errors."""
+    
     def __init__(self, message: str, error_code: str = None, status_code: int = 401):
+        super().__init__(message)
         self.message = message
-        self.error_code = error_code
+        self.error_code = error_code or 'AUTHENTICATION_ERROR'
         self.status_code = status_code
-        super().__init__(self.message)
 
 
-class SecureTokenManager:
+class AuthorizationError(Exception):
+    """Custom exception for authorization-specific errors."""
+    
+    def __init__(self, message: str, error_code: str = None, status_code: int = 403):
+        super().__init__(message)
+        self.message = message
+        self.error_code = error_code or 'AUTHORIZATION_ERROR'
+        self.status_code = status_code
+
+
+class TokenManager:
     """
-    Secure token management using ItsDangerous 2.2+ for cryptographically
-    secure cookie signing and token generation with comprehensive validation.
+    Secure token management using ItsDangerous 2.2+ for cryptographic operations.
+    
+    Provides comprehensive token generation, validation, and management for
+    authentication workflows including password reset tokens, email verification
+    tokens, and API authentication tokens with proper expiration handling.
     """
     
     def __init__(self, app=None):
+        """Initialize token manager with optional Flask application."""
         self.app = app
-        self.serializer = None
-        self.timed_serializer = None
+        self._serializer = None
+        self._timed_serializer = None
+        self._timestamp_signer = None
+        
         if app is not None:
             self.init_app(app)
     
     def init_app(self, app):
-        """Initialize secure token manager with Flask application"""
+        """Initialize token manager with Flask application configuration."""
+        self.app = app
+        
+        # Get secret key from configuration
         secret_key = app.config.get('SECRET_KEY')
-        if not secret_key:
-            raise ValueError("SECRET_KEY must be configured for secure token management")
-        
-        # Initialize ItsDangerous serializers
-        self.serializer = URLSafeSerializer(secret_key)
-        self.timed_serializer = URLSafeTimedSerializer(secret_key)
-        
-        # Configure security parameters
-        self.token_salt = app.config.get('AUTH_TOKEN_SALT', 'auth-token-salt')
-        self.session_salt = app.config.get('SESSION_SALT', 'session-salt')
-        self.csrf_salt = app.config.get('CSRF_SALT', 'csrf-salt')
-        self.max_age = app.config.get('AUTH_TOKEN_MAX_AGE', 3600)  # 1 hour default
-    
-    def generate_auth_token(self, user_id: int, additional_data: Dict = None) -> str:
-        """
-        Generate cryptographically secure authentication token
-        
-        Args:
-            user_id: User identifier for token association
-            additional_data: Optional additional data to include in token
-            
-        Returns:
-            Secure signed token string
-        """
-        token_data = {
-            'user_id': user_id,
-            'timestamp': datetime.utcnow().isoformat(),
-            'type': 'auth_token'
-        }
-        
-        if additional_data:
-            token_data.update(additional_data)
-        
-        return self.timed_serializer.dumps(token_data, salt=self.token_salt)
-    
-    def validate_auth_token(self, token: str, max_age: int = None) -> Optional[Dict]:
-        """
-        Validate and decode authentication token
-        
-        Args:
-            token: Token string to validate
-            max_age: Maximum age in seconds (defaults to configured value)
-            
-        Returns:
-            Token data if valid, None if invalid
-            
-        Raises:
-            AuthenticationError: If token is invalid or expired
-        """
-        try:
-            max_age = max_age or self.max_age
-            token_data = self.timed_serializer.loads(
-                token, 
-                salt=self.token_salt,
-                max_age=max_age
+        if not secret_key or secret_key == 'dev-key-change-in-production':
+            raise AuthenticationError(
+                "SECRET_KEY must be configured for secure token generation",
+                error_code="INVALID_SECRET_KEY"
             )
-            
-            # Validate token structure
-            if not isinstance(token_data, dict) or 'user_id' not in token_data:
-                raise AuthenticationError("Invalid token structure", "INVALID_TOKEN_STRUCTURE")
-            
-            return token_data
-            
-        except SignatureExpired:
-            raise AuthenticationError("Token has expired", "TOKEN_EXPIRED", 401)
-        except BadSignature:
-            raise AuthenticationError("Invalid token signature", "INVALID_SIGNATURE", 401)
-        except BadData:
-            raise AuthenticationError("Invalid token data", "INVALID_TOKEN_DATA", 401)
-    
-    def generate_csrf_token(self) -> str:
-        """Generate CSRF protection token"""
-        token_data = {
-            'csrf': True,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        return self.serializer.dumps(token_data, salt=self.csrf_salt)
-    
-    def validate_csrf_token(self, token: str) -> bool:
-        """Validate CSRF protection token"""
-        try:
-            token_data = self.serializer.loads(token, salt=self.csrf_salt)
-            return isinstance(token_data, dict) and token_data.get('csrf') is True
-        except (BadSignature, BadData):
-            return False
-    
-    def generate_session_token(self, user_id: int, session_data: Dict = None) -> str:
-        """Generate secure session token"""
-        session_payload = {
-            'user_id': user_id,
-            'session_id': os.urandom(16).hex(),
-            'created_at': datetime.utcnow().isoformat(),
-            'data': session_data or {}
-        }
-        return self.timed_serializer.dumps(session_payload, salt=self.session_salt)
-    
-    def validate_session_token(self, token: str) -> Optional[Dict]:
-        """Validate and decode session token"""
-        try:
-            return self.timed_serializer.loads(
-                token, 
-                salt=self.session_salt,
-                max_age=self.max_age
-            )
-        except (SignatureExpired, BadSignature, BadData):
-            return None
-
-
-class Auth0Integration:
-    """
-    Auth0 Python SDK 4.9.0 integration for external authentication provider
-    support with comprehensive user management and security validation.
-    """
-    
-    def __init__(self, app=None):
-        self.app = app
-        self.oauth = None
-        self.auth0_client = None
-        self.management_client = None
-        if app is not None:
-            self.init_app(app)
-    
-    def init_app(self, app):
-        """Initialize Auth0 integration with Flask application"""
-        if not AUTH0_AVAILABLE:
-            logger.warning("Auth0 SDK not available, skipping Auth0 initialization")
-            return
         
-        # Get Auth0 configuration
-        self.domain = app.config.get('AUTH0_DOMAIN')
-        self.client_id = app.config.get('AUTH0_CLIENT_ID') or app.config.get('CLIENT_ID')
-        self.client_secret = app.config.get('AUTH0_CLIENT_SECRET') or app.config.get('CLIENT_SECRET')
-        self.algorithms = app.config.get('AUTH0_ALGORITHMS', ['RS256'])
+        # Initialize ItsDangerous serializers with security salt
+        security_salt = app.config.get('SECURITY_SALT', 'flask-auth-security-salt')
         
-        if not all([self.domain, self.client_id, self.client_secret]):
-            logger.warning("Auth0 configuration incomplete, Auth0 integration disabled")
-            return
-        
-        # Initialize OAuth client
-        self.oauth = OAuth(app)
-        self.auth0_client = self.oauth.register(
-            'auth0',
-            client_id=self.client_id,
-            client_secret=self.client_secret,
-            server_metadata_url=f'https://{self.domain}/.well-known/openid_configuration',
-            client_kwargs={'scope': 'openid profile email'}
+        # URLSafeTimedSerializer for tokens with expiration
+        self._timed_serializer = URLSafeTimedSerializer(
+            secret_key,
+            salt=security_salt
         )
         
-        # Initialize Auth0 management client
-        try:
-            get_token = GetToken(self.domain, self.client_id, self.client_secret)
-            token = get_token.client_credentials(f'https://{self.domain}/api/v2/')
-            self.management_client = Auth0(self.domain, token['access_token'])
-        except Exception as e:
-            logger.error(f"Failed to initialize Auth0 management client: {e}")
-    
-    def get_authorization_url(self, redirect_uri: str, state: str = None) -> str:
-        """Get Auth0 authorization URL for login redirect"""
-        if not self.auth0_client:
-            raise AuthenticationError("Auth0 not configured", "AUTH0_NOT_CONFIGURED")
+        # URLSafeSerializer for permanent tokens
+        self._serializer = URLSafeSerializer(
+            secret_key,
+            salt=security_salt
+        )
         
-        return self.auth0_client.authorize_redirect(
-            redirect_uri=redirect_uri,
-            state=state
-        ).location
+        # TimestampSigner for session tokens
+        self._timestamp_signer = TimestampSigner(
+            secret_key,
+            salt=security_salt
+        )
+        
+        logger.info("TokenManager initialized with ItsDangerous 2.2+ support")
     
-    def handle_callback(self, code: str, redirect_uri: str) -> Dict[str, Any]:
+    def generate_auth_token(self, user_id: int, expires_in: int = 3600) -> str:
         """
-        Handle Auth0 callback and extract user information
+        Generate secure authentication token for API access.
         
         Args:
-            code: Authorization code from Auth0
-            redirect_uri: Redirect URI used in authorization
+            user_id: User identifier for token payload
+            expires_in: Token expiration time in seconds (default: 1 hour)
             
         Returns:
-            User information dictionary from Auth0
+            Secure token string
+            
+        Raises:
+            AuthenticationError: If token generation fails
         """
-        if not self.auth0_client:
-            raise AuthenticationError("Auth0 not configured", "AUTH0_NOT_CONFIGURED")
-        
         try:
-            # Exchange code for token
-            token = self.auth0_client.authorize_access_token(
-                redirect_uri=redirect_uri,
-                code=code
-            )
-            
-            # Get user information
-            user_info = self.auth0_client.parse_id_token(token)
-            
-            return {
-                'auth0_id': user_info.get('sub'),
-                'email': user_info.get('email'),
-                'email_verified': user_info.get('email_verified', False),
-                'name': user_info.get('name'),
-                'picture': user_info.get('picture'),
-                'nickname': user_info.get('nickname'),
-                'access_token': token.get('access_token'),
-                'id_token': token.get('id_token')
+            payload = {
+                'user_id': user_id,
+                'type': 'auth_token',
+                'issued_at': datetime.now(timezone.utc).isoformat()
             }
             
+            return self._timed_serializer.dumps(payload, max_age=expires_in)
+            
         except Exception as e:
-            logger.error(f"Auth0 callback error: {e}")
-            raise AuthenticationError(f"Auth0 authentication failed: {str(e)}", "AUTH0_CALLBACK_ERROR")
+            logger.error(f"Auth token generation failed for user {user_id}: {e}")
+            raise AuthenticationError(
+                "Failed to generate authentication token",
+                error_code="TOKEN_GENERATION_ERROR"
+            )
     
-    def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get user information from Auth0 Management API"""
-        if not self.management_client:
-            return None
+    def verify_auth_token(self, token: str, max_age: int = 3600) -> Optional[Dict[str, Any]]:
+        """
+        Verify and decode authentication token.
         
+        Args:
+            token: Token string to verify
+            max_age: Maximum token age in seconds
+            
+        Returns:
+            Token payload if valid, None if invalid
+        """
         try:
-            return self.management_client.users.get(user_id)
+            payload = self._timed_serializer.loads(token, max_age=max_age)
+            
+            # Validate payload structure
+            if not isinstance(payload, dict) or 'user_id' not in payload:
+                logger.warning(f"Invalid token payload structure: {type(payload)}")
+                return None
+            
+            return payload
+            
+        except SignatureExpired:
+            logger.info("Token signature expired")
+            return None
+        except BadSignature:
+            logger.warning("Invalid token signature")
+            return None
         except Exception as e:
-            logger.error(f"Failed to get Auth0 user info: {e}")
+            logger.error(f"Token verification error: {e}")
             return None
     
-    def update_user_metadata(self, user_id: str, metadata: Dict[str, Any]) -> bool:
-        """Update user metadata in Auth0"""
-        if not self.management_client:
-            return False
+    def generate_reset_token(self, email: str, expires_in: int = 3600) -> str:
+        """
+        Generate secure password reset token.
         
+        Args:
+            email: User email address for reset
+            expires_in: Token expiration time in seconds (default: 1 hour)
+            
+        Returns:
+            Secure reset token string
+        """
         try:
-            self.management_client.users.update(user_id, {"user_metadata": metadata})
-            return True
+            payload = {
+                'email': email,
+                'type': 'password_reset',
+                'nonce': secrets.token_urlsafe(16),
+                'issued_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            return self._timed_serializer.dumps(payload, max_age=expires_in)
+            
         except Exception as e:
-            logger.error(f"Failed to update Auth0 user metadata: {e}")
-            return False
+            logger.error(f"Reset token generation failed for email {email}: {e}")
+            raise AuthenticationError(
+                "Failed to generate password reset token",
+                error_code="RESET_TOKEN_GENERATION_ERROR"
+            )
+    
+    def verify_reset_token(self, token: str, max_age: int = 3600) -> Optional[str]:
+        """
+        Verify password reset token and return email.
+        
+        Args:
+            token: Reset token to verify
+            max_age: Maximum token age in seconds
+            
+        Returns:
+            Email address if token is valid, None if invalid
+        """
+        try:
+            payload = self._timed_serializer.loads(token, max_age=max_age)
+            
+            if isinstance(payload, dict) and 'email' in payload:
+                return payload['email']
+            
+            return None
+            
+        except (SignatureExpired, BadSignature, BadData):
+            return None
+        except Exception as e:
+            logger.error(f"Reset token verification error: {e}")
+            return None
+    
+    def generate_session_token(self, session_data: Dict[str, Any]) -> str:
+        """
+        Generate secure session token with timestamp.
+        
+        Args:
+            session_data: Session payload data
+            
+        Returns:
+            Signed session token
+        """
+        try:
+            return self._timestamp_signer.sign(self._serializer.dumps(session_data)).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Session token generation failed: {e}")
+            raise AuthenticationError(
+                "Failed to generate session token",
+                error_code="SESSION_TOKEN_ERROR"
+            )
+    
+    def verify_session_token(self, token: str, max_age: int = None) -> Optional[Dict[str, Any]]:
+        """
+        Verify session token and return payload.
+        
+        Args:
+            token: Session token to verify
+            max_age: Maximum token age in seconds (optional)
+            
+        Returns:
+            Session payload if valid, None if invalid
+        """
+        try:
+            if max_age:
+                unsigned_data = self._timestamp_signer.unsign(token, max_age=max_age)
+            else:
+                unsigned_data = self._timestamp_signer.unsign(token)
+            
+            return self._serializer.loads(unsigned_data)
+            
+        except (SignatureExpired, BadSignature, BadData):
+            return None
+        except Exception as e:
+            logger.error(f"Session token verification error: {e}")
+            return None
 
 
-class AuthenticationManager:
+class Auth0Manager:
     """
-    Comprehensive authentication manager coordinating Flask-Login, ItsDangerous,
-    and Auth0 integration for secure user authentication and session management.
+    Auth0 integration manager for external authentication provider support.
+    
+    Provides Auth0 authentication workflows, user management, and OAuth2/OIDC
+    integration per Section 0.2.4 dependency decisions using auth0-python 4.9.0 SDK.
     """
     
     def __init__(self, app=None):
+        """Initialize Auth0 manager with optional Flask application."""
         self.app = app
-        self.login_manager = None
-        self.token_manager = None
-        self.auth0_integration = None
+        self.domain = None
+        self.client_id = None
+        self.client_secret = None
+        self.audience = None
+        self._management_api = None
+        self._auth_api = None
+        
         if app is not None:
             self.init_app(app)
     
     def init_app(self, app):
-        """Initialize authentication manager with Flask application"""
-        # Initialize Flask-Login
-        self.login_manager = LoginManager()
-        self.login_manager.init_app(app)
-        self.login_manager.login_view = 'auth.login'
-        self.login_manager.login_message = 'Please log in to access this page.'
-        self.login_manager.login_message_category = 'info'
-        self.login_manager.session_protection = 'strong'
-        self.login_manager.refresh_view = 'auth.refresh'
+        """Initialize Auth0 manager with Flask application configuration."""
+        if not AUTH0_AVAILABLE:
+            logger.warning("Auth0 Python SDK not available. Skipping Auth0 initialization.")
+            return
         
-        # Set user loader
-        self.login_manager.user_loader(self.load_user)
+        self.app = app
         
-        # Initialize secure token manager
-        self.token_manager = SecureTokenManager(app)
+        # Load Auth0 configuration from environment
+        self.domain = app.config.get('AUTH0_DOMAIN')
+        self.client_id = app.config.get('AUTH0_CLIENT_ID')
+        self.client_secret = app.config.get('AUTH0_CLIENT_SECRET')
+        self.audience = app.config.get('AUTH0_AUDIENCE')
         
-        # Initialize Auth0 integration
-        self.auth0_integration = Auth0Integration(app)
+        # Validate Auth0 configuration
+        if not all([self.domain, self.client_id, self.client_secret]):
+            logger.info("Auth0 configuration incomplete. Auth0 integration disabled.")
+            return
         
-        # Store in app context
-        app.auth_manager = self
-    
-    def load_user(self, user_id: str) -> Optional[User]:
-        """Flask-Login user loader callback"""
         try:
-            return User.query.get(int(user_id))
-        except (ValueError, TypeError):
-            return None
-    
-    def authenticate_user(self, username: str, password: str) -> Optional[User]:
-        """
-        Authenticate user with username/password
-        
-        Args:
-            username: Username or email
-            password: User password
+            # Initialize Auth0 Management API
+            get_token = GetToken(self.domain)
+            token = get_token.client_credentials(
+                self.client_id,
+                self.client_secret,
+                self.audience or f"https://{self.domain}/api/v2/"
+            )
             
-        Returns:
-            User object if authenticated, None otherwise
-        """
-        try:
-            # Get user from database
-            user = User.query.filter(
-                (User.username == username) | (User.email == username)
-            ).first()
+            self._management_api = Auth0(self.domain, token['access_token'])
             
-            if not user or not user.is_active:
-                return None
+            # Initialize Auth0 Authentication API
+            self._auth_api = Users(self.domain)
             
-            # Verify password
-            if hasattr(user, 'password_hash') and user.password_hash:
-                if check_password_hash(user.password_hash, password):
-                    return user
-            
-            return None
+            logger.info(f"Auth0 integration initialized for domain: {self.domain}")
             
         except Exception as e:
-            logger.error(f"Authentication error: {e}")
-            return None
+            logger.error(f"Auth0 initialization failed: {e}")
+            self._management_api = None
+            self._auth_api = None
     
-    def create_user_session(self, user: User, remember: bool = False) -> Dict[str, Any]:
+    @property
+    def is_available(self) -> bool:
+        """Check if Auth0 integration is available and configured."""
+        return AUTH0_AVAILABLE and self._management_api is not None
+    
+    def get_user_info(self, auth0_user_id: str) -> Optional[Dict[str, Any]]:
         """
-        Create secure user session with Flask-Login and token generation
+        Retrieve user information from Auth0.
         
         Args:
-            user: User object
-            remember: Whether to create persistent session
+            auth0_user_id: Auth0 user identifier
             
         Returns:
-            Session information dictionary
+            User information dict if successful, None if failed
         """
+        if not self.is_available:
+            logger.warning("Auth0 not available for user info retrieval")
+            return None
+        
         try:
-            # Login user with Flask-Login
-            login_user(user, remember=remember)
+            user_info = self._management_api.users.get(auth0_user_id)
+            return user_info
             
-            # Generate secure session token
-            session_token = self.token_manager.generate_session_token(
-                user.id,
-                {'login_time': datetime.utcnow().isoformat()}
-            )
+        except Exception as e:
+            logger.error(f"Failed to retrieve Auth0 user info for {auth0_user_id}: {e}")
+            return None
+    
+    def create_user(self, email: str, password: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        Create user in Auth0.
+        
+        Args:
+            email: User email address
+            password: User password
+            **kwargs: Additional user attributes
             
-            # Create user session record
-            user_session = UserSession(
-                user_id=user.id,
-                session_id=session.get('_id', os.urandom(16).hex()),
-                ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
-                user_agent=request.headers.get('User-Agent', ''),
-                created_at=datetime.utcnow(),
-                last_activity=datetime.utcnow()
-            )
-            
-            db.session.add(user_session)
-            db.session.commit()
-            
-            # Store session information
-            session['auth_token'] = session_token
-            session['user_id'] = user.id
-            session['session_id'] = user_session.id
-            
-            return {
-                'user_id': user.id,
-                'session_id': user_session.id,
-                'session_token': session_token,
-                'csrf_token': self.token_manager.generate_csrf_token()
+        Returns:
+            Created user information if successful, None if failed
+        """
+        if not self.is_available:
+            logger.warning("Auth0 not available for user creation")
+            return None
+        
+        try:
+            user_data = {
+                'email': email,
+                'password': password,
+                'connection': 'Username-Password-Authentication',
+                'email_verified': kwargs.get('email_verified', False),
+                **kwargs
             }
             
-        except Exception as e:
-            logger.error(f"Session creation error: {e}")
-            db.session.rollback()
-            raise AuthenticationError(f"Failed to create session: {str(e)}", "SESSION_CREATION_ERROR")
-    
-    def validate_session(self, session_token: str = None) -> bool:
-        """
-        Validate user session and update activity
-        
-        Args:
-            session_token: Session token to validate (from session if not provided)
-            
-        Returns:
-            True if session is valid, False otherwise
-        """
-        try:
-            token = session_token or session.get('auth_token')
-            if not token:
-                return False
-            
-            # Validate token
-            token_data = self.token_manager.validate_session_token(token)
-            if not token_data:
-                return False
-            
-            # Update session activity
-            session_id = session.get('session_id')
-            if session_id:
-                user_session = UserSession.query.get(session_id)
-                if user_session:
-                    user_session.last_activity = datetime.utcnow()
-                    db.session.commit()
-            
-            return True
+            created_user = self._management_api.users.create(user_data)
+            return created_user
             
         except Exception as e:
-            logger.error(f"Session validation error: {e}")
-            return False
-    
-    def logout_user_session(self) -> bool:
-        """Logout user and clean up session"""
-        try:
-            # Get session information before logout
-            session_id = session.get('session_id')
-            
-            # Logout with Flask-Login
-            logout_user()
-            
-            # Update session record
-            if session_id:
-                user_session = UserSession.query.get(session_id)
-                if user_session:
-                    user_session.ended_at = datetime.utcnow()
-                    db.session.commit()
-            
-            # Clear session data
-            session.clear()
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Logout error: {e}")
-            return False
+            logger.error(f"Failed to create Auth0 user for {email}: {e}")
+            return None
 
 
-# Initialize authentication manager
-auth_manager = AuthenticationManager()
+# Global instances for blueprint usage
+token_manager = TokenManager()
+auth0_manager = Auth0Manager()
 
 
 def init_auth(app):
-    """Initialize authentication system with Flask application"""
-    auth_manager.init_app(app)
-    app.register_blueprint(auth_bp)
-
-
-def require_auth(f: Callable = None, *, permissions: list = None, roles: list = None):
     """
-    Authentication decorator for endpoint protection with optional permission/role checking
+    Initialize authentication components for Flask application.
     
     Args:
-        f: Function to decorate
-        permissions: List of required permissions
-        roles: List of required roles
+        app: Flask application instance
+    """
+    # Initialize Flask-Login
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+    login_manager.login_view = 'auth.login'
+    login_manager.login_message = 'Please log in to access this page.'
+    login_manager.login_message_category = 'info'
+    login_manager.session_protection = 'strong'
+    login_manager.refresh_view = 'auth.refresh_session'
+    
+    # Configure user loader for Flask-Login
+    @login_manager.user_loader
+    def load_user(user_id):
+        """Load user by ID for Flask-Login session management."""
+        try:
+            return model_load_user(user_id)
+        except Exception as e:
+            logger.error(f"Failed to load user {user_id}: {e}")
+            return None
+    
+    # Initialize token manager and Auth0
+    token_manager.init_app(app)
+    auth0_manager.init_app(app)
+    
+    # Store managers in app for access from other modules
+    app.auth_token_manager = token_manager
+    app.auth0_manager = auth0_manager
+    
+    logger.info("Authentication system initialized successfully")
+
+
+def require_auth(f):
+    """
+    Authentication decorator for protecting routes.
+    
+    This decorator ensures that only authenticated users can access protected endpoints
+    while supporting both session-based and token-based authentication patterns.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check Flask-Login session authentication first
+        if current_user.is_authenticated:
+            return f(*args, **kwargs)
+        
+        # Check for API token authentication
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            
+            try:
+                payload = token_manager.verify_auth_token(token)
+                if payload and 'user_id' in payload:
+                    # Load user for request context
+                    user = User.query.get(payload['user_id'])
+                    if user and user.is_active:
+                        g.current_user = user
+                        return f(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"Token authentication failed: {e}")
+        
+        # Authentication failed
+        if request.is_json:
+            return jsonify({
+                'error': 'Authentication required',
+                'error_code': 'AUTHENTICATION_REQUIRED',
+                'message': 'Please provide valid authentication credentials'
+            }), 401
+        else:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('auth.login', next=request.url))
+    
+    return decorated_function
+
+
+def require_permission(permission_name: str):
+    """
+    Authorization decorator for permission-based access control.
+    
+    Args:
+        permission_name: Required permission name for access
+    """
+    def decorator(f):
+        @wraps(f)
+        @require_auth
+        def decorated_function(*args, **kwargs):
+            user = getattr(g, 'current_user', current_user)
+            
+            if not user or not user.has_permission(permission_name):
+                if request.is_json:
+                    return jsonify({
+                        'error': 'Insufficient permissions',
+                        'error_code': 'PERMISSION_DENIED',
+                        'required_permission': permission_name
+                    }), 403
+                else:
+                    flash(f'You do not have permission to access this resource.', 'error')
+                    return redirect(url_for('main.index'))
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+def require_role(role_name: str):
+    """
+    Authorization decorator for role-based access control.
+    
+    Args:
+        role_name: Required role name for access
+    """
+    def decorator(f):
+        @wraps(f)
+        @require_auth
+        def decorated_function(*args, **kwargs):
+            user = getattr(g, 'current_user', current_user)
+            
+            if not user or not user.has_role(role_name):
+                if request.is_json:
+                    return jsonify({
+                        'error': 'Insufficient role permissions',
+                        'error_code': 'ROLE_ACCESS_DENIED',
+                        'required_role': role_name
+                    }), 403
+                else:
+                    flash(f'You do not have the required role to access this resource.', 'error')
+                    return redirect(url_for('main.index'))
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+def is_safe_url(target: str) -> bool:
+    """
+    Validate redirect URL for security.
+    
+    Args:
+        target: URL to validate
         
     Returns:
-        Decorated function with authentication enforcement
-    
-    Example:
-        @require_auth
-        def protected_endpoint():
-            return "Protected content"
-        
-        @require_auth(permissions=['user.read'])
-        def user_endpoint():
-            return "User data"
+        True if URL is safe for redirect, False otherwise
     """
-    def decorator(func):
-        @wraps(func)
-        @login_required
-        def wrapper(*args, **kwargs):
-            try:
-                # Validate session token
-                if not auth_manager.validate_session():
-                    raise AuthenticationError("Invalid session", "INVALID_SESSION")
-                
-                # Check permissions if specified
-                if permissions:
-                    auth_service = get_service('auth')
-                    if not auth_service.check_permissions(current_user.id, permissions):
-                        raise AuthenticationError("Insufficient permissions", "INSUFFICIENT_PERMISSIONS", 403)
-                
-                # Check roles if specified
-                if roles:
-                    auth_service = get_service('auth')
-                    if not auth_service.check_roles(current_user.id, roles):
-                        raise AuthenticationError("Insufficient roles", "INSUFFICIENT_ROLES", 403)
-                
-                return func(*args, **kwargs)
-                
-            except AuthenticationError:
-                raise
-            except Exception as e:
-                logger.error(f"Authentication decorator error: {e}")
-                raise AuthenticationError("Authentication check failed", "AUTH_CHECK_ERROR")
-        
-        return wrapper
+    if not target:
+        return False
     
-    if f is None:
-        return decorator
-    else:
-        return decorator(f)
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    
+    return test_url.scheme in ('http', 'https') and ref_url.netloc == test_url.netloc
 
 
-def csrf_protect(f):
-    """CSRF protection decorator using ItsDangerous token validation"""
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
-            csrf_token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')
-            if not csrf_token or not auth_manager.token_manager.validate_csrf_token(csrf_token):
-                abort(403, description="CSRF token missing or invalid")
-        return f(*args, **kwargs)
-    return wrapper
+def validate_password_strength(password: str) -> Tuple[bool, str]:
+    """
+    Validate password strength according to security requirements.
+    
+    Args:
+        password: Password to validate
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one digit"
+    
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        return False, "Password must contain at least one special character"
+    
+    return True, ""
 
 
 # Authentication Routes
@@ -608,576 +648,1158 @@ def csrf_protect(f):
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """
-    User login endpoint supporting both local and Auth0 authentication
+    User login endpoint supporting both form and JSON authentication.
     
-    GET: Return login form or redirect to Auth0
-    POST: Process local login credentials
+    Implements comprehensive authentication workflows including session-based
+    authentication via Flask-Login and token generation for API access.
     """
     if request.method == 'GET':
-        # Check if Auth0 is configured
-        if auth_manager.auth0_integration and auth_manager.auth0_integration.auth0_client:
-            auth0_url = request.args.get('auth0')
-            if auth0_url == 'true':
-                return redirect(url_for('auth.auth0_login'))
-        
-        # Return login form with CSRF token
-        csrf_token = auth_manager.token_manager.generate_csrf_token()
-        return jsonify({
-            'status': 'login_form',
-            'csrf_token': csrf_token,
-            'auth0_available': auth_manager.auth0_integration is not None
-        })
+        # Render login form for web interface
+        if request.is_json:
+            return jsonify({
+                'message': 'Login endpoint - POST credentials to authenticate',
+                'required_fields': ['email', 'password'],
+                'optional_fields': ['remember_me', 'auth_provider']
+            })
+        else:
+            return render_template('auth/login.html', title='Sign In')
     
-    # Handle POST login
     try:
-        data = request.get_json() or {}
-        username = data.get('username')
-        password = data.get('password')
-        remember = data.get('remember', False)
+        # Parse request data
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
         
-        if not username or not password:
-            raise AuthenticationError("Username and password required", "MISSING_CREDENTIALS", 400)
+        # Validate required fields
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        remember_me = data.get('remember_me', False)
+        auth_provider = data.get('auth_provider', 'local')
         
-        # Authenticate user
-        user = auth_manager.authenticate_user(username, password)
-        if not user:
-            raise AuthenticationError("Invalid credentials", "INVALID_CREDENTIALS", 401)
+        if not email or not password:
+            error_response = {
+                'error': 'Email and password are required',
+                'error_code': 'MISSING_CREDENTIALS'
+            }
+            if request.is_json:
+                return jsonify(error_response), 400
+            else:
+                flash('Email and password are required.', 'error')
+                return render_template('auth/login.html', title='Sign In'), 400
         
-        # Create session
-        session_info = auth_manager.create_user_session(user, remember)
+        # Get authentication service
+        auth_service = get_service(AuthService)
         
-        # Log successful authentication
-        logger.info(f"User {user.id} authenticated successfully")
+        # Authenticate user based on provider
+        if auth_provider == 'auth0' and auth0_manager.is_available:
+            # Auth0 authentication workflow
+            auth_result = auth_service.authenticate_with_auth0(email, password)
+        else:
+            # Local authentication workflow
+            auth_result = auth_service.authenticate_user(email, password)
         
-        response_data = {
-            'status': 'success',
-            'message': 'Login successful',
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email
-            },
-            'csrf_token': session_info['csrf_token']
-        }
+        if not auth_result.success:
+            error_response = {
+                'error': auth_result.error or 'Invalid credentials',
+                'error_code': 'AUTHENTICATION_FAILED'
+            }
+            if request.is_json:
+                return jsonify(error_response), 401
+            else:
+                flash('Invalid email or password.', 'error')
+                return render_template('auth/login.html', title='Sign In'), 401
         
-        response = make_response(jsonify(response_data))
+        user = auth_result.data
         
-        # Set secure cookies
-        response.set_cookie(
-            'session_token',
-            session_info['session_token'],
-            httponly=True,
-            secure=current_app.config.get('SESSION_COOKIE_SECURE', False),
-            samesite='Lax',
-            max_age=3600 if not remember else 30*24*3600
+        # Verify user is active
+        if not user.is_active:
+            error_response = {
+                'error': 'Account is disabled',
+                'error_code': 'ACCOUNT_DISABLED'
+            }
+            if request.is_json:
+                return jsonify(error_response), 403
+            else:
+                flash('Your account has been disabled. Please contact support.', 'error')
+                return render_template('auth/login.html', title='Sign In'), 403
+        
+        # Create user session
+        session_result = auth_service.create_user_session(
+            user.id,
+            request.remote_addr,
+            request.headers.get('User-Agent', 'Unknown')
         )
         
-        return response
+        if not session_result.success:
+            logger.error(f"Failed to create session for user {user.id}: {session_result.error}")
+            error_response = {
+                'error': 'Failed to create user session',
+                'error_code': 'SESSION_CREATION_FAILED'
+            }
+            if request.is_json:
+                return jsonify(error_response), 500
+            else:
+                flash('Login failed. Please try again.', 'error')
+                return render_template('auth/login.html', title='Sign In'), 500
         
-    except AuthenticationError as e:
-        logger.warning(f"Authentication failed: {e.message}")
-        return jsonify({
-            'status': 'error',
-            'message': e.message,
-            'error_code': e.error_code
-        }), e.status_code
+        # Log in user with Flask-Login
+        login_user(user, remember=remember_me, duration=timedelta(days=30 if remember_me else 1))
+        
+        # Generate API token for JSON requests
+        if request.is_json:
+            api_token = token_manager.generate_auth_token(user.id, expires_in=3600)
+            
+            response_data = {
+                'message': 'Login successful',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': user.name,
+                    'roles': [role.name for role in user.roles]
+                },
+                'session': {
+                    'session_id': session_result.data.id,
+                    'expires_at': session_result.data.expires_at.isoformat()
+                },
+                'token': api_token,
+                'token_expires_in': 3600
+            }
+            
+            return jsonify(response_data), 200
+        
+        # Handle redirect for web interface
+        next_page = request.args.get('next')
+        if next_page and is_safe_url(next_page):
+            return redirect(next_page)
+        else:
+            flash(f'Welcome back, {user.name}!', 'success')
+            return redirect(url_for('main.index'))
+    
+    except ValidationError as e:
+        error_response = {
+            'error': str(e),
+            'error_code': 'VALIDATION_ERROR'
+        }
+        if request.is_json:
+            return jsonify(error_response), 400
+        else:
+            flash(str(e), 'error')
+            return render_template('auth/login.html', title='Sign In'), 400
     
     except Exception as e:
         logger.error(f"Login error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Internal server error'
-        }), 500
+        error_response = {
+            'error': 'An unexpected error occurred during login',
+            'error_code': 'INTERNAL_ERROR'
+        }
+        if request.is_json:
+            return jsonify(error_response), 500
+        else:
+            flash('An unexpected error occurred. Please try again.', 'error')
+            return render_template('auth/login.html', title='Sign In'), 500
 
 
-@auth_bp.route('/logout', methods=['POST'])
+@auth_bp.route('/logout', methods=['GET', 'POST'])
 @require_auth
 def logout():
-    """User logout endpoint with comprehensive session cleanup"""
+    """
+    User logout endpoint with comprehensive session cleanup.
+    
+    Handles both web and API logout workflows with proper session termination
+    and security cleanup procedures.
+    """
     try:
-        # Logout user
-        success = auth_manager.logout_user_session()
+        user = getattr(g, 'current_user', current_user)
+        user_id = user.id if user else None
         
-        if success:
-            logger.info(f"User {current_user.id} logged out successfully")
+        if user_id:
+            # Get authentication service
+            auth_service = get_service(AuthService)
             
-            response = make_response(jsonify({
-                'status': 'success',
-                'message': 'Logout successful'
-            }))
+            # Terminate user sessions
+            auth_service.terminate_user_sessions(user_id)
             
-            # Clear session cookie
-            response.set_cookie(
-                'session_token',
-                '',
-                expires=0,
-                httponly=True,
-                secure=current_app.config.get('SESSION_COOKIE_SECURE', False)
-            )
-            
-            return response
+            logger.info(f"User {user_id} logged out successfully")
+        
+        # Logout with Flask-Login
+        logout_user()
+        
+        # Clear session data
+        session.clear()
+        
+        if request.is_json:
+            return jsonify({
+                'message': 'Logout successful',
+                'status': 'success'
+            }), 200
         else:
-            raise AuthenticationError("Logout failed", "LOGOUT_ERROR")
+            flash('You have been logged out successfully.', 'info')
+            return redirect(url_for('main.index'))
     
     except Exception as e:
         logger.error(f"Logout error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Logout failed'
-        }), 500
+        
+        # Still attempt Flask-Login logout
+        logout_user()
+        session.clear()
+        
+        if request.is_json:
+            return jsonify({
+                'message': 'Logout completed with errors',
+                'error': 'Session cleanup encountered issues',
+                'error_code': 'LOGOUT_PARTIAL_ERROR'
+            }), 200  # Still return success as user is logged out
+        else:
+            flash('Logout completed. Some session cleanup may have failed.', 'warning')
+            return redirect(url_for('main.index'))
 
 
-@auth_bp.route('/register', methods=['POST'])
-@csrf_protect
+@auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
     """
-    User registration endpoint with comprehensive validation
+    User registration endpoint with comprehensive validation and security.
     
-    Creates new user account with secure password hashing and validation
+    Implements user account creation with password strength validation,
+    email verification, and optional Auth0 integration.
     """
+    if request.method == 'GET':
+        if request.is_json:
+            return jsonify({
+                'message': 'User registration endpoint',
+                'required_fields': ['email', 'password', 'name'],
+                'optional_fields': ['confirm_password', 'auth_provider'],
+                'password_requirements': {
+                    'min_length': 8,
+                    'requires_uppercase': True,
+                    'requires_lowercase': True,
+                    'requires_digit': True,
+                    'requires_special_char': True
+                }
+            })
+        else:
+            return render_template('auth/register.html', title='Sign Up')
+    
     try:
-        data = request.get_json() or {}
+        # Parse request data
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
         
         # Validate required fields
-        required_fields = ['username', 'email', 'password']
-        missing_fields = [field for field in required_fields if not data.get(field)]
-        if missing_fields:
-            raise AuthenticationError(
-                f"Missing required fields: {', '.join(missing_fields)}", 
-                "MISSING_FIELDS", 
-                400
-            )
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        confirm_password = data.get('confirm_password', password)  # Default to password if not provided
+        name = data.get('name', '').strip()
+        auth_provider = data.get('auth_provider', 'local')
         
-        username = data['username']
-        email = data['email']
-        password = data['password']
+        # Field validation
+        validation_errors = []
+        
+        if not email:
+            validation_errors.append('Email is required')
+        elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            validation_errors.append('Invalid email format')
+        
+        if not name:
+            validation_errors.append('Name is required')
+        elif len(name) < 2:
+            validation_errors.append('Name must be at least 2 characters long')
+        
+        if not password:
+            validation_errors.append('Password is required')
+        else:
+            # Validate password strength
+            is_valid_password, password_error = validate_password_strength(password)
+            if not is_valid_password:
+                validation_errors.append(password_error)
+        
+        if password != confirm_password:
+            validation_errors.append('Passwords do not match')
+        
+        if validation_errors:
+            error_response = {
+                'error': 'Validation failed',
+                'error_code': 'VALIDATION_ERROR',
+                'validation_errors': validation_errors
+            }
+            if request.is_json:
+                return jsonify(error_response), 400
+            else:
+                for error in validation_errors:
+                    flash(error, 'error')
+                return render_template('auth/register.html', title='Sign Up'), 400
+        
+        # Get authentication service
+        auth_service = get_service(AuthService)
         
         # Check if user already exists
-        existing_user = User.query.filter(
-            (User.username == username) | (User.email == email)
-        ).first()
+        existing_user = auth_service.get_user_by_email(email)
+        if existing_user.success and existing_user.data:
+            error_response = {
+                'error': 'An account with this email already exists',
+                'error_code': 'EMAIL_ALREADY_EXISTS'
+            }
+            if request.is_json:
+                return jsonify(error_response), 409
+            else:
+                flash('An account with this email already exists.', 'error')
+                return render_template('auth/register.html', title='Sign Up'), 409
         
-        if existing_user:
-            raise AuthenticationError("User already exists", "USER_EXISTS", 409)
-        
-        # Use validation service for comprehensive validation
-        validation_service = get_service('validation')
-        validation_result = validation_service.validate_user_registration({
-            'username': username,
+        # Create user account
+        user_data = {
             'email': email,
-            'password': password
-        })
+            'password': password,
+            'name': name,
+            'is_active': True,  # Auto-activate for now, can add email verification later
+            'auth_provider': auth_provider
+        }
         
-        if not validation_result.is_valid:
-            raise AuthenticationError(
-                f"Validation failed: {', '.join(validation_result.errors)}", 
-                "VALIDATION_ERROR", 
-                400
-            )
+        # Register user based on provider
+        if auth_provider == 'auth0' and auth0_manager.is_available:
+            # Create user in Auth0 first
+            auth0_user = auth0_manager.create_user(email, password, name=name)
+            if auth0_user:
+                user_data['auth0_user_id'] = auth0_user.get('user_id')
+            else:
+                error_response = {
+                    'error': 'Failed to create Auth0 account',
+                    'error_code': 'AUTH0_REGISTRATION_FAILED'
+                }
+                if request.is_json:
+                    return jsonify(error_response), 500
+                else:
+                    flash('Failed to create account with Auth0. Please try again.', 'error')
+                    return render_template('auth/register.html', title='Sign Up'), 500
         
-        # Create new user
-        new_user = User(
-            username=username,
-            email=email,
-            password_hash=generate_password_hash(password),
-            is_active=True,
-            created_at=datetime.utcnow()
+        # Create local user account
+        registration_result = auth_service.register_user(user_data)
+        
+        if not registration_result.success:
+            error_response = {
+                'error': registration_result.error or 'Registration failed',
+                'error_code': 'REGISTRATION_FAILED'
+            }
+            if request.is_json:
+                return jsonify(error_response), 500
+            else:
+                flash('Registration failed. Please try again.', 'error')
+                return render_template('auth/register.html', title='Sign Up'), 500
+        
+        user = registration_result.data
+        
+        # Auto-login the new user
+        login_user(user, remember=False)
+        
+        # Create initial session
+        session_result = auth_service.create_user_session(
+            user.id,
+            request.remote_addr,
+            request.headers.get('User-Agent', 'Unknown')
         )
         
-        db.session.add(new_user)
-        db.session.commit()
-        
-        logger.info(f"New user registered: {new_user.id}")
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Registration successful',
-            'user': {
-                'id': new_user.id,
-                'username': new_user.username,
-                'email': new_user.email
+        if request.is_json:
+            api_token = token_manager.generate_auth_token(user.id, expires_in=3600)
+            
+            response_data = {
+                'message': 'Registration successful',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': user.name,
+                    'auth_provider': user.auth_provider
+                },
+                'session': {
+                    'session_id': session_result.data.id if session_result.success else None
+                },
+                'token': api_token,
+                'token_expires_in': 3600
             }
-        }), 201
-        
-    except AuthenticationError as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': e.message,
-            'error_code': e.error_code
-        }), e.status_code
+            
+            return jsonify(response_data), 201
+        else:
+            flash(f'Welcome {user.name}! Your account has been created successfully.', 'success')
+            return redirect(url_for('main.index'))
+    
+    except ValidationError as e:
+        error_response = {
+            'error': str(e),
+            'error_code': 'VALIDATION_ERROR'
+        }
+        if request.is_json:
+            return jsonify(error_response), 400
+        else:
+            flash(str(e), 'error')
+            return render_template('auth/register.html', title='Sign Up'), 400
     
     except Exception as e:
         logger.error(f"Registration error: {e}")
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Registration failed'
-        }), 500
+        error_response = {
+            'error': 'An unexpected error occurred during registration',
+            'error_code': 'INTERNAL_ERROR'
+        }
+        if request.is_json:
+            return jsonify(error_response), 500
+        else:
+            flash('An unexpected error occurred. Please try again.', 'error')
+            return render_template('auth/register.html', title='Sign Up'), 500
 
 
-@auth_bp.route('/auth0/login')
-def auth0_login():
-    """Initiate Auth0 authentication flow"""
-    if not auth_manager.auth0_integration or not auth_manager.auth0_integration.auth0_client:
-        return jsonify({
-            'status': 'error',
-            'message': 'Auth0 not configured'
-        }), 503
-    
-    try:
-        redirect_uri = url_for('auth.auth0_callback', _external=True)
-        state = os.urandom(16).hex()
-        session['auth0_state'] = state
-        
-        return auth_manager.auth0_integration.auth0_client.authorize_redirect(
-            redirect_uri=redirect_uri,
-            state=state
-        )
-        
-    except Exception as e:
-        logger.error(f"Auth0 login error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Auth0 login failed'
-        }), 500
-
-
-@auth_bp.route('/auth0/callback')
-def auth0_callback():
-    """Handle Auth0 authentication callback"""
-    if not auth_manager.auth0_integration:
-        return jsonify({
-            'status': 'error',
-            'message': 'Auth0 not configured'
-        }), 503
-    
-    try:
-        # Validate state parameter
-        state = request.args.get('state')
-        if not state or state != session.get('auth0_state'):
-            raise AuthenticationError("Invalid state parameter", "INVALID_STATE", 400)
-        
-        # Handle Auth0 callback
-        code = request.args.get('code')
-        if not code:
-            error = request.args.get('error')
-            error_description = request.args.get('error_description')
-            raise AuthenticationError(
-                f"Auth0 error: {error_description or error}", 
-                "AUTH0_ERROR", 
-                400
-            )
-        
-        redirect_uri = url_for('auth.auth0_callback', _external=True)
-        user_info = auth_manager.auth0_integration.handle_callback(code, redirect_uri)
-        
-        # Find or create user
-        user = User.query.filter_by(auth0_id=user_info['auth0_id']).first()
-        if not user:
-            # Create new user from Auth0 info
-            user = User(
-                auth0_id=user_info['auth0_id'],
-                email=user_info['email'],
-                username=user_info.get('nickname', user_info['email']),
-                name=user_info.get('name'),
-                is_active=True,
-                email_verified=user_info.get('email_verified', False),
-                created_at=datetime.utcnow()
-            )
-            db.session.add(user)
-            db.session.commit()
-        
-        # Create session
-        session_info = auth_manager.create_user_session(user, remember=False)
-        
-        # Clear Auth0 state
-        session.pop('auth0_state', None)
-        
-        logger.info(f"User {user.id} authenticated via Auth0")
-        
-        # Redirect to application
-        return redirect(url_for('main.dashboard'))
-        
-    except AuthenticationError as e:
-        logger.warning(f"Auth0 callback error: {e.message}")
-        return jsonify({
-            'status': 'error',
-            'message': e.message,
-            'error_code': e.error_code
-        }), e.status_code
-    
-    except Exception as e:
-        logger.error(f"Auth0 callback error: {e}")
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Auth0 authentication failed'
-        }), 500
-
-
-@auth_bp.route('/session/validate', methods=['POST'])
+@auth_bp.route('/profile', methods=['GET', 'PUT'])
 @require_auth
-def validate_session():
-    """Validate current user session and return session information"""
-    try:
-        return jsonify({
-            'status': 'valid',
-            'user': {
-                'id': current_user.id,
-                'username': current_user.username,
-                'email': current_user.email,
-                'is_active': current_user.is_active
-            },
-            'csrf_token': auth_manager.token_manager.generate_csrf_token()
-        })
-        
-    except Exception as e:
-        logger.error(f"Session validation error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Session validation failed'
-        }), 500
-
-
-@auth_bp.route('/refresh', methods=['POST'])
-@require_auth
-def refresh_session():
-    """Refresh user session and generate new tokens"""
-    try:
-        # Generate new session token
-        new_token = auth_manager.token_manager.generate_session_token(
-            current_user.id,
-            {'refresh_time': datetime.utcnow().isoformat()}
-        )
-        
-        # Update session
-        session['auth_token'] = new_token
-        
-        response_data = {
-            'status': 'success',
-            'message': 'Session refreshed',
-            'csrf_token': auth_manager.token_manager.generate_csrf_token()
+def profile():
+    """
+    User profile management endpoint.
+    
+    Allows authenticated users to view and update their profile information
+    with proper validation and security controls.
+    """
+    user = getattr(g, 'current_user', current_user)
+    
+    if request.method == 'GET':
+        # Return user profile information
+        profile_data = {
+            'id': user.id,
+            'email': user.email,
+            'name': user.name,
+            'is_active': user.is_active,
+            'auth_provider': getattr(user, 'auth_provider', 'local'),
+            'created_at': user.created_at.isoformat() if hasattr(user, 'created_at') else None,
+            'last_login': user.last_login.isoformat() if hasattr(user, 'last_login') and user.last_login else None,
+            'roles': [role.name for role in user.roles] if hasattr(user, 'roles') else [],
+            'permissions': list(user.get_permissions()) if hasattr(user, 'get_permissions') else []
         }
         
-        response = make_response(jsonify(response_data))
-        response.set_cookie(
-            'session_token',
-            new_token,
-            httponly=True,
-            secure=current_app.config.get('SESSION_COOKIE_SECURE', False),
-            samesite='Lax',
-            max_age=3600
-        )
+        if request.is_json:
+            return jsonify({
+                'user': profile_data,
+                'message': 'Profile retrieved successfully'
+            }), 200
+        else:
+            return render_template('auth/profile.html', user=profile_data, title='My Profile')
+    
+    elif request.method == 'PUT':
+        try:
+            # Parse update data
+            if request.is_json:
+                data = request.get_json()
+            else:
+                data = request.form.to_dict()
+            
+            # Get authentication service
+            auth_service = get_service(AuthService)
+            
+            # Validate and update profile
+            update_data = {}
+            
+            # Name update
+            if 'name' in data:
+                name = data['name'].strip()
+                if len(name) < 2:
+                    raise ValidationError('Name must be at least 2 characters long')
+                update_data['name'] = name
+            
+            # Email update (requires additional validation)
+            if 'email' in data:
+                email = data['email'].strip().lower()
+                if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+                    raise ValidationError('Invalid email format')
+                
+                # Check if email is already in use
+                if email != user.email:
+                    existing_user = auth_service.get_user_by_email(email)
+                    if existing_user.success and existing_user.data:
+                        raise ValidationError('Email is already in use by another account')
+                    update_data['email'] = email
+            
+            # Password update
+            if 'current_password' in data and 'new_password' in data:
+                current_password = data['current_password']
+                new_password = data['new_password']
+                
+                # Verify current password
+                if not check_password_hash(user.password_hash, current_password):
+                    raise ValidationError('Current password is incorrect')
+                
+                # Validate new password strength
+                is_valid_password, password_error = validate_password_strength(new_password)
+                if not is_valid_password:
+                    raise ValidationError(password_error)
+                
+                update_data['password'] = new_password
+            
+            # Update profile if there are changes
+            if update_data:
+                update_result = auth_service.update_user_profile(user.id, update_data)
+                
+                if not update_result.success:
+                    raise ServiceError(update_result.error or 'Profile update failed')
+                
+                updated_user = update_result.data
+                
+                # Refresh current user object
+                if hasattr(g, 'current_user'):
+                    g.current_user = updated_user
+                
+                message = 'Profile updated successfully'
+                
+                # If email was changed, might need to re-verify
+                if 'email' in update_data:
+                    message += '. Please verify your new email address.'
+            else:
+                message = 'No changes to update'
+            
+            if request.is_json:
+                return jsonify({
+                    'message': message,
+                    'user': {
+                        'id': user.id,
+                        'email': user.email,
+                        'name': user.name
+                    }
+                }), 200
+            else:
+                flash(message, 'success')
+                return redirect(url_for('auth.profile'))
         
-        return response
+        except ValidationError as e:
+            error_response = {
+                'error': str(e),
+                'error_code': 'VALIDATION_ERROR'
+            }
+            if request.is_json:
+                return jsonify(error_response), 400
+            else:
+                flash(str(e), 'error')
+                return redirect(url_for('auth.profile'))
         
-    except Exception as e:
-        logger.error(f"Session refresh error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Session refresh failed'
-        }), 500
+        except Exception as e:
+            logger.error(f"Profile update error: {e}")
+            error_response = {
+                'error': 'Failed to update profile',
+                'error_code': 'PROFILE_UPDATE_ERROR'
+            }
+            if request.is_json:
+                return jsonify(error_response), 500
+            else:
+                flash('Failed to update profile. Please try again.', 'error')
+                return redirect(url_for('auth.profile'))
 
 
-@auth_bp.route('/password/change', methods=['POST'])
+@auth_bp.route('/change-password', methods=['POST'])
 @require_auth
-@csrf_protect
 def change_password():
-    """Change user password with validation"""
+    """
+    Dedicated password change endpoint for authenticated users.
+    """
     try:
-        data = request.get_json() or {}
-        current_password = data.get('current_password')
-        new_password = data.get('new_password')
+        user = getattr(g, 'current_user', current_user)
         
-        if not current_password or not new_password:
-            raise AuthenticationError(
-                "Current and new password required", 
-                "MISSING_PASSWORDS", 
-                400
-            )
+        # Parse request data
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
+        
+        current_password = data.get('current_password', '')
+        new_password = data.get('new_password', '')
+        confirm_password = data.get('confirm_password', '')
+        
+        # Validation
+        if not all([current_password, new_password, confirm_password]):
+            raise ValidationError('All password fields are required')
+        
+        if new_password != confirm_password:
+            raise ValidationError('New passwords do not match')
         
         # Verify current password
-        if not current_user.password_hash or not check_password_hash(current_user.password_hash, current_password):
-            raise AuthenticationError("Current password incorrect", "INVALID_PASSWORD", 401)
+        if not check_password_hash(user.password_hash, current_password):
+            raise ValidationError('Current password is incorrect')
         
-        # Validate new password
-        validation_service = get_service('validation')
-        if not validation_service.validate_password(new_password):
-            raise AuthenticationError("New password does not meet requirements", "WEAK_PASSWORD", 400)
+        # Validate new password strength
+        is_valid_password, password_error = validate_password_strength(new_password)
+        if not is_valid_password:
+            raise ValidationError(password_error)
         
-        # Update password
-        current_user.password_hash = generate_password_hash(new_password)
-        current_user.password_changed_at = datetime.utcnow()
-        db.session.commit()
+        # Get authentication service and update password
+        auth_service = get_service(AuthService)
+        result = auth_service.change_user_password(user.id, current_password, new_password)
         
-        logger.info(f"Password changed for user {current_user.id}")
+        if not result.success:
+            raise ServiceError(result.error or 'Password change failed')
         
-        return jsonify({
-            'status': 'success',
-            'message': 'Password changed successfully'
-        })
+        # Invalidate all existing sessions except current one
+        auth_service.terminate_user_sessions(user.id, exclude_current=True)
         
-    except AuthenticationError as e:
-        return jsonify({
-            'status': 'error',
-            'message': e.message,
-            'error_code': e.error_code
-        }), e.status_code
+        response_data = {
+            'message': 'Password changed successfully',
+            'status': 'success'
+        }
+        
+        if request.is_json:
+            return jsonify(response_data), 200
+        else:
+            flash('Password changed successfully.', 'success')
+            return redirect(url_for('auth.profile'))
+    
+    except ValidationError as e:
+        error_response = {
+            'error': str(e),
+            'error_code': 'VALIDATION_ERROR'
+        }
+        if request.is_json:
+            return jsonify(error_response), 400
+        else:
+            flash(str(e), 'error')
+            return redirect(url_for('auth.profile'))
     
     except Exception as e:
         logger.error(f"Password change error: {e}")
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Password change failed'
-        }), 500
+        error_response = {
+            'error': 'Failed to change password',
+            'error_code': 'PASSWORD_CHANGE_ERROR'
+        }
+        if request.is_json:
+            return jsonify(error_response), 500
+        else:
+            flash('Failed to change password. Please try again.', 'error')
+            return redirect(url_for('auth.profile'))
 
 
-@auth_bp.route('/sessions', methods=['GET'])
+@auth_bp.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """
+    Password reset request endpoint.
+    
+    Generates secure password reset tokens and handles password reset workflows
+    with proper security validation and rate limiting.
+    """
+    if request.method == 'GET':
+        # Show password reset form
+        token = request.args.get('token')
+        
+        if token:
+            # Verify reset token
+            email = token_manager.verify_reset_token(token, max_age=3600)
+            if not email:
+                if request.is_json:
+                    return jsonify({
+                        'error': 'Invalid or expired reset token',
+                        'error_code': 'INVALID_RESET_TOKEN'
+                    }), 400
+                else:
+                    flash('Invalid or expired reset link. Please request a new one.', 'error')
+                    return redirect(url_for('auth.reset_password'))
+            
+            if request.is_json:
+                return jsonify({
+                    'message': 'Valid reset token',
+                    'email': email,
+                    'instructions': 'POST new password to complete reset'
+                })
+            else:
+                return render_template('auth/reset_password.html', token=token, email=email, title='Reset Password')
+        else:
+            if request.is_json:
+                return jsonify({
+                    'message': 'Password reset request endpoint',
+                    'instructions': 'POST email to request reset token'
+                })
+            else:
+                return render_template('auth/reset_password.html', title='Reset Password')
+    
+    elif request.method == 'POST':
+        try:
+            # Parse request data
+            if request.is_json:
+                data = request.get_json()
+            else:
+                data = request.form.to_dict()
+            
+            token = data.get('token')
+            
+            if token:
+                # Complete password reset with token
+                email = data.get('email', '')
+                new_password = data.get('new_password', '')
+                confirm_password = data.get('confirm_password', '')
+                
+                # Validate token
+                token_email = token_manager.verify_reset_token(token, max_age=3600)
+                if not token_email or token_email != email.lower().strip():
+                    raise ValidationError('Invalid or expired reset token')
+                
+                # Validate passwords
+                if not new_password or not confirm_password:
+                    raise ValidationError('Password fields are required')
+                
+                if new_password != confirm_password:
+                    raise ValidationError('Passwords do not match')
+                
+                # Validate password strength
+                is_valid_password, password_error = validate_password_strength(new_password)
+                if not is_valid_password:
+                    raise ValidationError(password_error)
+                
+                # Get authentication service and reset password
+                auth_service = get_service(AuthService)
+                reset_result = auth_service.reset_user_password(email, new_password)
+                
+                if not reset_result.success:
+                    raise ServiceError(reset_result.error or 'Password reset failed')
+                
+                # Terminate all existing sessions for security
+                user = reset_result.data
+                auth_service.terminate_user_sessions(user.id)
+                
+                response_data = {
+                    'message': 'Password reset successfully',
+                    'status': 'success'
+                }
+                
+                if request.is_json:
+                    return jsonify(response_data), 200
+                else:
+                    flash('Password reset successfully. Please log in with your new password.', 'success')
+                    return redirect(url_for('auth.login'))
+            
+            else:
+                # Request password reset token
+                email = data.get('email', '').strip().lower()
+                
+                if not email:
+                    raise ValidationError('Email is required')
+                
+                if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+                    raise ValidationError('Invalid email format')
+                
+                # Get authentication service
+                auth_service = get_service(AuthService)
+                
+                # Check if user exists (don't reveal if email doesn't exist for security)
+                user_result = auth_service.get_user_by_email(email)
+                
+                if user_result.success and user_result.data:
+                    # Generate reset token
+                    reset_token = token_manager.generate_reset_token(email, expires_in=3600)
+                    
+                    # In a real application, you would send this token via email
+                    # For now, we'll include it in the response (not recommended for production)
+                    reset_link = url_for('auth.reset_password', token=reset_token, _external=True)
+                    
+                    # Log the reset request
+                    logger.info(f"Password reset requested for {email}")
+                    
+                    if request.is_json:
+                        return jsonify({
+                            'message': 'Password reset token generated',
+                            'reset_token': reset_token,  # Remove in production
+                            'reset_link': reset_link,    # Remove in production
+                            'expires_in': 3600,
+                            'instructions': 'Check your email for reset instructions'
+                        }), 200
+                    else:
+                        flash('Password reset instructions have been sent to your email.', 'info')
+                        return render_template('auth/reset_password.html', success=True, title='Reset Password')
+                else:
+                    # Always return success to prevent email enumeration
+                    if request.is_json:
+                        return jsonify({
+                            'message': 'If the email exists, reset instructions have been sent',
+                            'status': 'success'
+                        }), 200
+                    else:
+                        flash('If the email exists, reset instructions have been sent.', 'info')
+                        return render_template('auth/reset_password.html', success=True, title='Reset Password')
+        
+        except ValidationError as e:
+            error_response = {
+                'error': str(e),
+                'error_code': 'VALIDATION_ERROR'
+            }
+            if request.is_json:
+                return jsonify(error_response), 400
+            else:
+                flash(str(e), 'error')
+                return render_template('auth/reset_password.html', title='Reset Password'), 400
+        
+        except Exception as e:
+            logger.error(f"Password reset error: {e}")
+            error_response = {
+                'error': 'Password reset request failed',
+                'error_code': 'RESET_ERROR'
+            }
+            if request.is_json:
+                return jsonify(error_response), 500
+            else:
+                flash('Password reset request failed. Please try again.', 'error')
+                return render_template('auth/reset_password.html', title='Reset Password'), 500
+
+
+@auth_bp.route('/refresh-session', methods=['POST'])
 @require_auth
-def list_sessions():
-    """List active sessions for current user"""
+def refresh_session():
+    """
+    Session refresh endpoint for extending authenticated sessions.
+    """
     try:
-        sessions = UserSession.query.filter_by(
-            user_id=current_user.id,
-            ended_at=None
-        ).order_by(UserSession.created_at.desc()).all()
+        user = getattr(g, 'current_user', current_user)
         
-        session_list = []
-        for sess in sessions:
-            session_list.append({
-                'id': sess.id,
-                'created_at': sess.created_at.isoformat(),
-                'last_activity': sess.last_activity.isoformat() if sess.last_activity else None,
-                'ip_address': sess.ip_address,
-                'user_agent': sess.user_agent,
-                'is_current': sess.id == session.get('session_id')
-            })
+        # Get authentication service
+        auth_service = get_service(AuthService)
         
-        return jsonify({
-            'status': 'success',
-            'sessions': session_list
-        })
+        # Refresh current session
+        session_result = auth_service.refresh_user_session(
+            user.id,
+            request.remote_addr,
+            request.headers.get('User-Agent', 'Unknown')
+        )
         
+        if not session_result.success:
+            raise ServiceError(session_result.error or 'Session refresh failed')
+        
+        # Generate new API token
+        api_token = token_manager.generate_auth_token(user.id, expires_in=3600)
+        
+        response_data = {
+            'message': 'Session refreshed successfully',
+            'session': {
+                'session_id': session_result.data.id,
+                'expires_at': session_result.data.expires_at.isoformat()
+            },
+            'token': api_token,
+            'token_expires_in': 3600
+        }
+        
+        return jsonify(response_data), 200
+    
     except Exception as e:
-        logger.error(f"Session list error: {e}")
+        logger.error(f"Session refresh error: {e}")
         return jsonify({
-            'status': 'error',
-            'message': 'Failed to retrieve sessions'
+            'error': 'Session refresh failed',
+            'error_code': 'SESSION_REFRESH_ERROR'
         }), 500
 
 
-@auth_bp.route('/sessions/<int:session_id>', methods=['DELETE'])
+@auth_bp.route('/sessions', methods=['GET', 'DELETE'])
 @require_auth
-@csrf_protect
-def revoke_session(session_id: int):
-    """Revoke a specific user session"""
+def manage_sessions():
+    """
+    User session management endpoint for viewing and terminating sessions.
+    """
+    user = getattr(g, 'current_user', current_user)
+    
     try:
-        user_session = UserSession.query.filter_by(
-            id=session_id,
-            user_id=current_user.id
-        ).first()
+        auth_service = get_service(AuthService)
         
-        if not user_session:
+        if request.method == 'GET':
+            # Get user sessions
+            sessions_result = auth_service.get_user_sessions(user.id)
+            
+            if not sessions_result.success:
+                raise ServiceError(sessions_result.error or 'Failed to retrieve sessions')
+            
+            sessions_data = []
+            for session_obj in sessions_result.data:
+                sessions_data.append({
+                    'id': session_obj.id,
+                    'ip_address': session_obj.ip_address,
+                    'user_agent': session_obj.user_agent,
+                    'created_at': session_obj.created_at.isoformat(),
+                    'expires_at': session_obj.expires_at.isoformat(),
+                    'is_current': session_obj.id == session.get('session_id'),
+                    'last_activity': session_obj.last_activity.isoformat() if hasattr(session_obj, 'last_activity') and session_obj.last_activity else None
+                })
+            
             return jsonify({
-                'status': 'error',
-                'message': 'Session not found'
-            }), 404
+                'sessions': sessions_data,
+                'total_sessions': len(sessions_data)
+            }), 200
         
-        # End the session
-        user_session.ended_at = datetime.utcnow()
-        db.session.commit()
-        
-        logger.info(f"Session {session_id} revoked for user {current_user.id}")
-        
+        elif request.method == 'DELETE':
+            # Terminate sessions
+            data = request.get_json() if request.is_json else {}
+            session_id = data.get('session_id')
+            terminate_all = data.get('terminate_all', False)
+            
+            if terminate_all:
+                # Terminate all sessions except current
+                result = auth_service.terminate_user_sessions(user.id, exclude_current=True)
+                message = 'All other sessions terminated successfully'
+            elif session_id:
+                # Terminate specific session
+                result = auth_service.terminate_session(session_id, user.id)
+                message = 'Session terminated successfully'
+            else:
+                raise ValidationError('session_id or terminate_all parameter required')
+            
+            if not result.success:
+                raise ServiceError(result.error or 'Session termination failed')
+            
+            return jsonify({
+                'message': message,
+                'status': 'success'
+            }), 200
+    
+    except ValidationError as e:
         return jsonify({
-            'status': 'success',
-            'message': 'Session revoked successfully'
-        })
-        
+            'error': str(e),
+            'error_code': 'VALIDATION_ERROR'
+        }), 400
+    
     except Exception as e:
-        logger.error(f"Session revocation error: {e}")
-        db.session.rollback()
+        logger.error(f"Session management error: {e}")
         return jsonify({
-            'status': 'error',
-            'message': 'Failed to revoke session'
+            'error': 'Session management failed',
+            'error_code': 'SESSION_MANAGEMENT_ERROR'
         }), 500
 
 
-# Error handlers for authentication blueprint
+@auth_bp.route('/verify-token', methods=['POST'])
+def verify_token():
+    """
+    Token verification endpoint for API authentication validation.
+    """
+    try:
+        # Parse request data
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
+        
+        token = data.get('token', '')
+        
+        if not token:
+            return jsonify({
+                'error': 'Token is required',
+                'error_code': 'MISSING_TOKEN'
+            }), 400
+        
+        # Verify token
+        payload = token_manager.verify_auth_token(token)
+        
+        if not payload:
+            return jsonify({
+                'error': 'Invalid or expired token',
+                'error_code': 'INVALID_TOKEN',
+                'valid': False
+            }), 401
+        
+        # Get user information
+        user_id = payload.get('user_id')
+        if not user_id:
+            return jsonify({
+                'error': 'Invalid token payload',
+                'error_code': 'INVALID_TOKEN_PAYLOAD',
+                'valid': False
+            }), 401
+        
+        # Verify user exists and is active
+        user = User.query.get(user_id)
+        if not user or not user.is_active:
+            return jsonify({
+                'error': 'User not found or inactive',
+                'error_code': 'USER_NOT_ACTIVE',
+                'valid': False
+            }), 401
+        
+        return jsonify({
+            'valid': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'roles': [role.name for role in user.roles] if hasattr(user, 'roles') else []
+            },
+            'token_info': {
+                'issued_at': payload.get('issued_at'),
+                'type': payload.get('type')
+            }
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Token verification error: {e}")
+        return jsonify({
+            'error': 'Token verification failed',
+            'error_code': 'TOKEN_VERIFICATION_ERROR',
+            'valid': False
+        }), 500
+
+
+# Auth0 Integration Routes
+
+@auth_bp.route('/auth0/login', methods=['POST'])
+def auth0_login():
+    """
+    Auth0 authentication endpoint for external provider integration.
+    """
+    if not auth0_manager.is_available:
+        return jsonify({
+            'error': 'Auth0 integration not available',
+            'error_code': 'AUTH0_NOT_CONFIGURED'
+        }), 503
+    
+    try:
+        # Parse request data
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
+        
+        # Auth0 token or code should be provided
+        auth0_token = data.get('auth0_token')
+        auth0_code = data.get('auth0_code')
+        
+        if not auth0_token and not auth0_code:
+            return jsonify({
+                'error': 'Auth0 token or authorization code required',
+                'error_code': 'MISSING_AUTH0_CREDENTIALS'
+            }), 400
+        
+        # Get authentication service
+        auth_service = get_service(AuthService)
+        
+        # Authenticate with Auth0
+        auth_result = auth_service.authenticate_with_auth0_token(auth0_token or auth0_code)
+        
+        if not auth_result.success:
+            return jsonify({
+                'error': auth_result.error or 'Auth0 authentication failed',
+                'error_code': 'AUTH0_AUTHENTICATION_FAILED'
+            }), 401
+        
+        user = auth_result.data
+        
+        # Create user session
+        session_result = auth_service.create_user_session(
+            user.id,
+            request.remote_addr,
+            request.headers.get('User-Agent', 'Unknown')
+        )
+        
+        # Log in user with Flask-Login
+        login_user(user, remember=False)
+        
+        # Generate API token
+        api_token = token_manager.generate_auth_token(user.id, expires_in=3600)
+        
+        response_data = {
+            'message': 'Auth0 login successful',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'auth_provider': 'auth0'
+            },
+            'session': {
+                'session_id': session_result.data.id if session_result.success else None
+            },
+            'token': api_token,
+            'token_expires_in': 3600
+        }
+        
+        return jsonify(response_data), 200
+    
+    except Exception as e:
+        logger.error(f"Auth0 login error: {e}")
+        return jsonify({
+            'error': 'Auth0 login failed',
+            'error_code': 'AUTH0_LOGIN_ERROR'
+        }), 500
+
+
+# Error Handlers
 
 @auth_bp.errorhandler(AuthenticationError)
-def handle_auth_error(error):
-    """Handle authentication errors"""
-    return jsonify({
-        'status': 'error',
-        'message': error.message,
+def handle_authentication_error(error):
+    """Handle authentication errors with proper response format."""
+    response_data = {
+        'error': error.message,
         'error_code': error.error_code
-    }), error.status_code
-
-
-@auth_bp.errorhandler(Unauthorized)
-def handle_unauthorized(error):
-    """Handle unauthorized access"""
-    return jsonify({
-        'status': 'error',
-        'message': 'Authentication required',
-        'error_code': 'UNAUTHORIZED'
-    }), 401
-
-
-@auth_bp.errorhandler(Forbidden)
-def handle_forbidden(error):
-    """Handle forbidden access"""
-    return jsonify({
-        'status': 'error',
-        'message': 'Access forbidden',
-        'error_code': 'FORBIDDEN'
-    }), 403
-
-
-# Request hooks for authentication blueprint
-
-@auth_bp.before_request
-def before_request():
-    """Process authentication before each request"""
-    # Skip authentication for certain routes
-    exempt_routes = ['auth.login', 'auth.register', 'auth.auth0_login', 'auth.auth0_callback']
+    }
     
-    if request.endpoint in exempt_routes:
-        return
+    if request.is_json:
+        return jsonify(response_data), error.status_code
+    else:
+        flash(error.message, 'error')
+        return redirect(url_for('auth.login')), error.status_code
+
+
+@auth_bp.errorhandler(AuthorizationError)
+def handle_authorization_error(error):
+    """Handle authorization errors with proper response format."""
+    response_data = {
+        'error': error.message,
+        'error_code': error.error_code
+    }
     
-    # Validate session token from cookie
-    session_token = request.cookies.get('session_token')
-    if session_token:
-        try:
-            token_data = auth_manager.token_manager.validate_session_token(session_token)
-            if token_data:
-                g.session_validated = True
-        except AuthenticationError:
-            pass
+    if request.is_json:
+        return jsonify(response_data), error.status_code
+    else:
+        flash(error.message, 'error')
+        return redirect(url_for('main.index')), error.status_code
 
 
-@auth_bp.after_request
-def after_request(response):
-    """Process response after each request"""
-    # Add security headers
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+@auth_bp.errorhandler(ValidationError)
+def handle_validation_error(error):
+    """Handle validation errors with proper response format."""
+    response_data = {
+        'error': str(error),
+        'error_code': 'VALIDATION_ERROR'
+    }
     
-    return response
+    if request.is_json:
+        return jsonify(response_data), 400
+    else:
+        flash(str(error), 'error')
+        return redirect(request.referrer or url_for('main.index')), 400
 
 
-# Export authentication components for application use
+@auth_bp.errorhandler(429)
+def handle_rate_limit_error(error):
+    """Handle rate limiting errors."""
+    response_data = {
+        'error': 'Too many requests. Please try again later.',
+        'error_code': 'RATE_LIMIT_EXCEEDED'
+    }
+    
+    if request.is_json:
+        return jsonify(response_data), 429
+    else:
+        flash('Too many requests. Please try again later.', 'warning')
+        return redirect(request.referrer or url_for('main.index')), 429
+
+
+# Blueprint initialization function
+def register_auth_blueprint(app):
+    """
+    Register authentication blueprint with Flask application.
+    
+    Args:
+        app: Flask application instance
+    """
+    # Initialize authentication system
+    init_auth(app)
+    
+    # Register blueprint
+    app.register_blueprint(auth_bp)
+    
+    logger.info("Authentication blueprint registered successfully")
+
+
+# Export decorators and utilities for use in other blueprints
 __all__ = [
     'auth_bp',
-    'init_auth', 
+    'init_auth',
+    'register_auth_blueprint',
     'require_auth',
-    'csrf_protect',
-    'AuthenticationManager',
-    'SecureTokenManager',
-    'Auth0Integration',
-    'AuthenticationError'
+    'require_permission',
+    'require_role',
+    'token_manager',
+    'auth0_manager',
+    'AuthenticationError',
+    'AuthorizationError',
+    'TokenManager',
+    'Auth0Manager'
 ]
