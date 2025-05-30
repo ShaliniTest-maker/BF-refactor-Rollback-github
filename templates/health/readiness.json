@@ -1,0 +1,126 @@
+{% extends "health/base_health.json" %}
+
+{% block status %}{{ "healthy" if readiness_status == "ready" else "unhealthy" }}{% endblock %}
+
+{% block check_type %}readiness{% endblock %}
+
+{% block health_checks %}
+"database": {
+  "status": "{{ database_status | default('unknown') }}",
+  "details": "{{ database_details | default('Database connectivity not checked') }}",
+  "connection_pool": {
+    "active_connections": {{ active_connections | default(0) }},
+    "pool_size": {{ pool_size | default(0) }},
+    "pool_utilization_percent": {{ pool_utilization_percent | default(0) }}
+  },
+  "query_performance": {
+    "last_query_time_ms": {{ last_query_time_ms | default(0) }},
+    "average_query_time_ms": {{ average_query_time_ms | default(0) }}
+  }
+},
+"auth0_integration": {
+  "status": "{{ auth0_status | default('unknown') }}",
+  "details": "{{ auth0_details | default('Auth0 integration not checked') }}",
+  "token_validation": {
+    "last_validation_time_ms": {{ auth0_validation_time_ms | default(0) }},
+    "jwks_cache_status": "{{ jwks_cache_status | default('unknown') }}"
+  },
+  "management_api": {
+    "status": "{{ auth0_mgmt_api_status | default('unknown') }}",
+    "last_check_time_ms": {{ auth0_mgmt_api_time_ms | default(0) }}
+  }
+},
+"application": {
+  "status": "{{ application_status | default('healthy') }}",
+  "details": "Flask application running and ready to serve requests",
+  "wsgi_server": {
+    "status": "{{ wsgi_status | default('healthy') }}",
+    "worker_count": {{ worker_count | default(1) }},
+    "active_requests": {{ active_requests | default(0) }}
+  },
+  "service_layer": {
+    "status": "{{ service_layer_status | default('healthy') }}",
+    "initialized_services": {{ initialized_services | default([]) | tojson }}
+  }
+},
+"external_dependencies": {
+  "status": "{{ external_deps_status | default('unknown') }}",
+  "aws_services": {
+    "cloudwatch": "{{ cloudwatch_status | default('unknown') }}",
+    "rds": "{{ rds_status | default('unknown') }}"
+  },
+  "third_party_apis": {
+    "auth0": "{{ auth0_api_status | default('unknown') }}"
+  }
+}
+{% endblock %}
+
+{% block additional_metadata %}
+"readiness": {
+  "deployment_ready": {{ deployment_ready | default(false) | tojson }},
+  "migration_status": "{{ migration_status | default('unknown') }}",
+  "container_orchestration": {
+    "platform": "{{ orchestration_platform | default('docker') }}",
+    "instance_ready": {{ instance_ready | default(false) | tojson }},
+    "scaling_group": "{{ scaling_group | default('') }}",
+    "availability_zone": "{{ availability_zone | default('') }}"
+  },
+  "performance_validation": {
+    "response_time_sla_met": {{ response_time_sla_met | default(false) | tojson }},
+    "database_sla_met": {{ database_sla_met | default(false) | tojson }},
+    "auth0_sla_met": {{ auth0_sla_met | default(false) | tojson }}
+  },
+  "health_check_timing": {
+    "total_check_duration_ms": {{ total_check_duration_ms | default(0) }},
+    "database_check_duration_ms": {{ database_check_duration_ms | default(0) }},
+    "auth0_check_duration_ms": {{ auth0_check_duration_ms | default(0) }},
+    "sla_compliance": {{ (total_check_duration_ms | default(0)) < 100 | tojson }}
+  }
+},
+{% endblock %}
+
+{% block custom_fields %}
+"deployment": {
+  "environment": "{{ config.FLASK_ENV | default('development') }}",
+  "deployment_id": "{{ deployment_id | default('') }}",
+  "build_version": "{{ build_version | default('') }}",
+  "deployment_timestamp": "{{ deployment_timestamp | default('') }}",
+  "rollback_available": {{ rollback_available | default(false) | tojson }}
+},
+"migration": {
+  "phase": "{{ migration_phase | default('completed') }}",
+  "node_js_baseline": {
+    "performance_ratio": {{ nodejs_performance_ratio | default(1.0) }},
+    "feature_parity": {{ feature_parity_percent | default(100) }}
+  },
+  "validation_results": {
+    "api_endpoints_validated": {{ api_endpoints_validated | default(0) }},
+    "database_migration_status": "{{ db_migration_status | default('completed') }}",
+    "business_logic_validated": {{ business_logic_validated | default(false) | tojson }}
+  }
+},
+"aws_integration": {
+  "region": "{{ aws_region | default('') }}",
+  "instance_id": "{{ ec2_instance_id | default('') }}",
+  "load_balancer": {
+    "target_group": "{{ target_group | default('') }}",
+    "health_check_grace_period": {{ health_check_grace_period | default(300) }}
+  },
+  "auto_scaling": {
+    "group_name": "{{ auto_scaling_group | default('') }}",
+    "min_capacity": {{ min_capacity | default(1) }},
+    "max_capacity": {{ max_capacity | default(10) }},
+    "desired_capacity": {{ desired_capacity | default(2) }}
+  }
+},
+{% endblock %}
+
+{% block related_links %}
+"liveness": "/health/liveness",
+"readiness": "/health/readiness",
+"detailed": "/health/detailed",
+"metrics": "/metrics",
+"migration_status": "/health/migration",
+"database_status": "/health/database",
+"auth0_status": "/health/auth0"
+{% endblock %}

@@ -1,0 +1,280 @@
+SECURITY INCIDENT ALERT - IMMEDIATE ACTION REQUIRED
+
+================================================================================
+FLASK APPLICATION SECURITY MONITORING SYSTEM
+================================================================================
+
+INCIDENT CLASSIFICATION: {{ incident.severity | upper }}
+INCIDENT ID: {{ incident.id }}
+DETECTION TIME: {{ incident.timestamp | strftime('%Y-%m-%d %H:%M:%S UTC') }}
+ALERT SOURCE: {{ incident.source }}
+
+================================================================================
+THREAT SUMMARY
+================================================================================
+
+THREAT TYPE: {{ incident.threat_type }}
+SECURITY LEVEL: {{ incident.security_level | upper }}
+AFFECTED SYSTEMS: {{ incident.affected_systems | join(', ') }}
+
+DESCRIPTION:
+{{ incident.description }}
+
+{% if incident.guardduty_findings %}
+GUARDDUTY THREAT DETECTION:
+- Finding Type: {{ incident.guardduty_findings.type }}
+- Confidence Level: {{ incident.guardduty_findings.confidence }}/10
+- Severity Score: {{ incident.guardduty_findings.severity }}/10
+- AWS Region: {{ incident.guardduty_findings.region }}
+{% endif %}
+
+================================================================================
+INFRASTRUCTURE IMPACT ANALYSIS
+================================================================================
+
+{% if incident.container_impact %}
+CONTAINER INFRASTRUCTURE STATUS:
+- ECS/EKS Cluster: {{ incident.container_impact.cluster_name }}
+- Affected Containers: {{ incident.container_impact.container_count }}
+- Service Status: {{ incident.container_impact.service_status }}
+- WSGI Worker Health: {{ incident.container_impact.wsgi_status }}
+{% endif %}
+
+{% if incident.network_impact %}
+NETWORK SECURITY STATUS:
+- VPC Security: {{ incident.network_impact.vpc_status }}
+- Security Groups: {{ incident.network_impact.security_groups_affected }}
+- Network ACLs: {{ incident.network_impact.nacl_status }}
+- External Traffic: {{ incident.network_impact.external_traffic_status }}
+{% endif %}
+
+{% if incident.database_impact %}
+DATABASE SECURITY STATUS:
+- PostgreSQL Status: {{ incident.database_impact.db_status }}
+- Connection Pool Health: {{ incident.database_impact.pool_health }}
+- Encryption Status: {{ incident.database_impact.encryption_status }}
+- Access Patterns: {{ incident.database_impact.access_anomalies }}
+{% endif %}
+
+================================================================================
+AUTHENTICATION & AUTHORIZATION STATUS
+================================================================================
+
+{% if incident.auth_status %}
+AUTH0 INTEGRATION STATUS:
+- Service Health: {{ incident.auth_status.service_health }}
+- Token Validation: {{ incident.auth_status.token_validation }}
+- User Session Impact: {{ incident.auth_status.session_impact }}
+- MFA Status: {{ incident.auth_status.mfa_status }}
+
+FLASK-JWT-EXTENDED STATUS:
+- JWT Processing: {{ incident.auth_status.jwt_processing }}
+- Session Security: {{ incident.auth_status.session_security }}
+- CSRF Protection: {{ incident.auth_status.csrf_status }}
+{% endif %}
+
+{% if incident.user_impact %}
+USER IMPACT ASSESSMENT:
+- Active Sessions Affected: {{ incident.user_impact.sessions_affected }}
+- User Accounts at Risk: {{ incident.user_impact.accounts_at_risk }}
+- Privilege Escalation Risk: {{ incident.user_impact.privilege_risk }}
+{% endif %}
+
+================================================================================
+AUTOMATED RESPONSE ACTIONS TAKEN
+================================================================================
+
+IMMEDIATE CONTAINMENT MEASURES:
+{% for action in incident.automated_actions %}
+[{{ action.timestamp }}] {{ action.description }}
+  Status: {{ action.status }}
+  {% if action.details %}Result: {{ action.details }}{% endif %}
+{% endfor %}
+
+{% if incident.container_isolation %}
+CONTAINER ISOLATION STATUS:
+- Isolation Applied: {{ incident.container_isolation.status }}
+- Quarantined Containers: {{ incident.container_isolation.quarantined_count }}
+- Traffic Redirection: {{ incident.container_isolation.traffic_status }}
+- Security Group Updates: {{ incident.container_isolation.sg_updates }}
+{% endif %}
+
+{% if incident.credential_revocation %}
+CREDENTIAL SECURITY MEASURES:
+- IAM Roles Revoked: {{ incident.credential_revocation.roles_revoked }}
+- Access Keys Disabled: {{ incident.credential_revocation.keys_disabled }}
+- Emergency Policies Applied: {{ incident.credential_revocation.policies_applied }}
+{% endif %}
+
+================================================================================
+REQUIRED IMMEDIATE ACTIONS
+================================================================================
+
+SECURITY TEAM - IMMEDIATE (0-15 MINUTES):
+1. Acknowledge this incident in PagerDuty
+2. Join security incident Slack channel: #security-incident-{{ incident.id }}
+3. Verify automated containment measures are effective
+4. Assess threat scope and potential data exposure
+5. Coordinate with infrastructure team for additional isolation if needed
+
+INFRASTRUCTURE TEAM - URGENT (15-30 MINUTES):
+1. Validate container isolation effectiveness
+2. Monitor ECS/EKS cluster health and scaling
+3. Review AWS GuardDuty findings and correlate with system logs
+4. Prepare infrastructure rollback procedures if necessary
+5. Document all infrastructure changes for post-incident review
+
+DEVELOPMENT TEAM - HIGH PRIORITY (30-60 MINUTES):
+1. Review Flask application logs for suspicious activity
+2. Validate database integrity and connection security
+3. Check SQLAlchemy connection pool for anomalies
+4. Assess Auth0 integration and user session impact
+5. Prepare application-level security patches if required
+
+================================================================================
+ESCALATION PROCEDURES
+================================================================================
+
+SEVERITY LEVEL: {{ incident.severity | upper }}
+
+{% if incident.severity == 'CRITICAL' %}
+CRITICAL INCIDENT ESCALATION:
+- Engineering Manager: Notify immediately
+- Security Lead: Already notified
+- CTO: Notify within 15 minutes if business impact confirmed
+- Executive Team: Standby notification prepared
+
+BUSINESS IMPACT THRESHOLD:
+- Customer data exposure: IMMEDIATE executive notification
+- Service availability < 95%: Escalate to CTO
+- Authentication system compromise: Escalate to CTO
+{% elif incident.severity == 'HIGH' %}
+HIGH SEVERITY ESCALATION:
+- Security Team Lead: Notify within 15 minutes
+- Engineering Manager: Notify within 30 minutes
+- On-call rotation: All team members on standby
+
+ESCALATION TRIGGERS:
+- No resolution within 2 hours: Escalate to management
+- Additional threats detected: Escalate to CRITICAL
+- Customer impact confirmed: Immediate management notification
+{% endif %}
+
+================================================================================
+MONITORING AND VALIDATION CHECKPOINTS
+================================================================================
+
+CONTINUOUS MONITORING REQUIREMENTS:
+□ CloudWatch security metrics - Review every 5 minutes
+□ Sentry error tracking - Monitor for new security exceptions
+□ Prometheus container metrics - Watch for resource anomalies
+□ AWS GuardDuty findings - Check for related threats
+□ Auth0 audit logs - Monitor authentication patterns
+□ Flask application logs - Search for security events
+
+VALIDATION CHECKPOINTS (15-minute intervals):
+□ Container isolation effectiveness verification
+□ User session security and access pattern analysis
+□ Database connection monitoring and query validation
+□ Network traffic analysis and intrusion detection
+□ Authentication service health and token validation
+
+================================================================================
+COMMUNICATION PROTOCOLS
+================================================================================
+
+PRIMARY COMMUNICATION CHANNELS:
+- Incident Slack Channel: #security-incident-{{ incident.id }}
+- Security Hotline: +1-555-SECURITY (automated)
+- Email Thread: This notification chain
+- PagerDuty: Incident #{{ incident.pagerduty_id }}
+
+UPDATE FREQUENCY:
+- Critical/High: Every 15 minutes until resolution
+- Medium: Every 30 minutes during business hours
+- All stakeholders: Hourly executive summary
+
+STATUS UPDATE REQUIREMENTS:
+1. Current threat containment status
+2. Investigation progress and findings
+3. Estimated time to resolution
+4. Additional resources needed
+5. Customer impact assessment
+
+================================================================================
+POST-INCIDENT REQUIREMENTS
+================================================================================
+
+IMMEDIATE POST-RESOLUTION (0-2 hours):
+□ Security incident summary documentation
+□ Lessons learned analysis initiation
+□ Infrastructure security posture validation
+□ Customer communication if external impact
+□ Monitoring alert tuning recommendations
+
+FOLLOW-UP ACTIONS (24-48 hours):
+□ Complete post-mortem with all stakeholders
+□ Security process improvement recommendations
+□ Infrastructure hardening assessment
+□ Monitoring enhancement identification
+□ Training needs assessment for team
+
+================================================================================
+TECHNICAL CONTACT INFORMATION
+================================================================================
+
+SECURITY TEAM EMERGENCY CONTACTS:
+- Security Lead: security-lead@company.com | +1-555-SEC-LEAD
+- Security Engineer On-Call: security-oncall@company.com
+- Incident Commander: incident-commander@company.com
+
+INFRASTRUCTURE TEAM CONTACTS:
+- Infrastructure Lead: infra-lead@company.com | +1-555-INFRA-OPS
+- AWS Operations: aws-ops@company.com
+- Container Platform Team: container-ops@company.com
+
+DEVELOPMENT TEAM CONTACTS:
+- Engineering Manager: eng-manager@company.com
+- Flask Application Lead: flask-lead@company.com
+- Database Administrator: db-admin@company.com
+
+================================================================================
+SYSTEM REFERENCE INFORMATION
+================================================================================
+
+MONITORING DASHBOARDS:
+- Security Dashboard: https://grafana.company.com/security
+- Container Health: https://cloudwatch.aws.amazon.com/containers
+- Application Performance: https://sentry.company.com/flask-app
+- Infrastructure Status: https://prometheus.company.com/infrastructure
+
+RUNBOOK REFERENCES:
+- Security Incident Response: https://wiki.company.com/security/incident-response
+- Container Isolation Procedures: https://wiki.company.com/infra/container-isolation
+- Database Security Protocols: https://wiki.company.com/db/security-procedures
+- Auth0 Integration Troubleshooting: https://wiki.company.com/auth/auth0-issues
+
+AWS SECURITY RESOURCES:
+- GuardDuty Console: https://console.aws.amazon.com/guardduty
+- CloudTrail Events: https://console.aws.amazon.com/cloudtrail
+- VPC Flow Logs: https://console.aws.amazon.com/vpc/flowlogs
+- Security Hub: https://console.aws.amazon.com/securityhub
+
+================================================================================
+INCIDENT METADATA
+================================================================================
+
+Generated: {{ current_timestamp | strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Template Version: v2.1.0
+Alert System: Flask Security Monitor
+Classification: {{ incident.classification }}
+Correlation ID: {{ incident.correlation_id }}
+
+This alert was automatically generated by the Flask Application Security 
+Monitoring System. For system issues, contact system-admin@company.com.
+
+DO NOT REPLY TO THIS EMAIL. Use the designated communication channels above.
+
+================================================================================
+END OF SECURITY INCIDENT ALERT
+================================================================================

@@ -1,0 +1,484 @@
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}Login Security Notification{% endblock %}
+
+{% block header_title %}Security Notification{% endblock %}
+{% block header_subtitle %}Account Access Alert{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Login notification specific styles */
+    .login-event-card {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+        border-left: 4px solid #28a745;
+    }
+
+    .login-event-card.suspicious {
+        border-left-color: #dc3545;
+        background-color: #fff5f5;
+        border-color: #fed7d7;
+    }
+
+    .login-event-card.warning {
+        border-left-color: #ffc107;
+        background-color: #fffbf0;
+        border-color: #ffeaa7;
+    }
+
+    .event-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+
+    .event-icon {
+        width: 24px;
+        height: 24px;
+        margin-right: 12px;
+        display: inline-block;
+    }
+
+    .event-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+        color: #333333;
+    }
+
+    .event-timestamp {
+        font-size: 14px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+
+    .device-info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin: 20px 0;
+    }
+
+    .info-item {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 6px;
+        border: 1px solid #e9ecef;
+    }
+
+    .info-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+    }
+
+    .info-value {
+        font-size: 14px;
+        color: #333333;
+        font-weight: 500;
+    }
+
+    .location-info {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #ffffff;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 20px 0;
+    }
+
+    .location-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+    }
+
+    .location-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 8px;
+        fill: currentColor;
+    }
+
+    .security-actions {
+        background-color: #e3f2fd;
+        border: 1px solid #90caf9;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .security-actions.urgent {
+        background-color: #ffebee;
+        border-color: #ef5350;
+    }
+
+    .security-actions-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #1565c0;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .security-actions.urgent .security-actions-title {
+        color: #c62828;
+    }
+
+    .shield-icon {
+        width: 22px;
+        height: 22px;
+        margin-right: 10px;
+        fill: currentColor;
+    }
+
+    .action-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .action-list li {
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        display: flex;
+        align-items: flex-start;
+    }
+
+    .action-list li:last-child {
+        border-bottom: none;
+    }
+
+    .action-list li:before {
+        content: "✓";
+        color: #28a745;
+        font-weight: bold;
+        margin-right: 10px;
+        margin-top: 2px;
+    }
+
+    .security-actions.urgent .action-list li:before {
+        content: "⚠";
+        color: #dc3545;
+    }
+
+    .risk-indicator {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .risk-low {
+        background-color: #d4edda;
+        color: #155724;
+    }
+
+    .risk-medium {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+
+    .risk-high {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+
+    .auth0-branding {
+        font-size: 12px;
+        color: #6c757d;
+        text-align: center;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #e9ecef;
+    }
+
+    /* Mobile responsiveness */
+    @media only screen and (max-width: 600px) {
+        .device-info-grid {
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+
+        .event-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .event-icon {
+            margin-bottom: 10px;
+        }
+
+        .location-info {
+            padding: 15px;
+        }
+
+        .security-actions {
+            padding: 20px;
+        }
+    }
+
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .login-event-card {
+            background-color: #4a5568 !important;
+            border-color: #718096 !important;
+        }
+
+        .info-item {
+            background-color: #2d3748 !important;
+            border-color: #4a5568 !important;
+        }
+
+        .info-value {
+            color: #e2e8f0 !important;
+        }
+
+        .event-title {
+            color: #e2e8f0 !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Main notification content -->
+<div class="login-event-card {{ 'suspicious' if event_type == 'suspicious_login' else ('warning' if event_type == 'security_warning' else '') }}">
+    <div class="event-header">
+        <div class="event-icon">
+            {% if event_type == 'successful_login' %}
+            <svg viewBox="0 0 24 24" class="event-icon" style="fill: #28a745;">
+                <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+            </svg>
+            {% elif event_type == 'suspicious_login' %}
+            <svg viewBox="0 0 24 24" class="event-icon" style="fill: #dc3545;">
+                <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+            </svg>
+            {% else %}
+            <svg viewBox="0 0 24 24" class="event-icon" style="fill: #ffc107;">
+                <path d="M12,2L13.09,8.26L22,9L14.74,13.09L18,22L12,18L6,22L9.26,13.09L2,9L10.91,8.26L12,2Z"/>
+            </svg>
+            {% endif %}
+        </div>
+        <div>
+            <h2 class="event-title">
+                {% if event_type == 'successful_login' %}
+                    New Login to Your Account
+                {% elif event_type == 'suspicious_login' %}
+                    Suspicious Login Attempt Detected
+                {% elif event_type == 'security_warning' %}
+                    Security Alert for Your Account
+                {% elif event_type == 'password_reset' %}
+                    Password Reset Request
+                {% elif event_type == 'account_locked' %}
+                    Account Security Lock
+                {% else %}
+                    Account Security Notification
+                {% endif %}
+            </h2>
+            <div class="event-timestamp">
+                {{ login_timestamp or timestamp }}
+            </div>
+            {% if risk_level %}
+            <div style="margin-top: 8px;">
+                <span class="risk-indicator risk-{{ risk_level }}">{{ risk_level }} Risk</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="content-text">
+        {% if event_type == 'successful_login' %}
+            {% if user_name %}Hello {{ user_name }},{% endif %}
+            <p>We detected a successful login to your account. If this was you, no action is needed.</p>
+        {% elif event_type == 'suspicious_login' %}
+            {% if user_name %}Hello {{ user_name }},{% endif %}
+            <p><strong>We detected unusual activity on your account.</strong> A login attempt was made that doesn't match your typical usage patterns.</p>
+        {% elif event_type == 'security_warning' %}
+            {% if user_name %}Hello {{ user_name }},{% endif %}
+            <p>We're writing to inform you about recent security activity on your account that requires your attention.</p>
+        {% elif event_type == 'password_reset' %}
+            {% if user_name %}Hello {{ user_name }},{% endif %}
+            <p>A password reset was requested for your account. If you didn't request this change, please secure your account immediately.</p>
+        {% elif event_type == 'account_locked' %}
+            {% if user_name %}Hello {{ user_name }},{% endif %}
+            <p>Your account has been temporarily locked due to suspicious activity. This is a security measure to protect your account.</p>
+        {% else %}
+            {% if user_name %}Hello {{ user_name }},{% endif %}
+            <p>We're notifying you about recent activity on your account for your security awareness.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Device and Location Information -->
+{% if device_info or location_info %}
+<div class="device-info-grid">
+    {% if device_info %}
+    <div class="info-item">
+        <div class="info-label">Device</div>
+        <div class="info-value">{{ device_info.device_type or 'Unknown Device' }}</div>
+    </div>
+    {% endif %}
+
+    {% if device_info and device_info.browser %}
+    <div class="info-item">
+        <div class="info-label">Browser</div>
+        <div class="info-value">{{ device_info.browser }} {{ device_info.browser_version or '' }}</div>
+    </div>
+    {% endif %}
+
+    {% if device_info and device_info.operating_system %}
+    <div class="info-item">
+        <div class="info-label">Operating System</div>
+        <div class="info-value">{{ device_info.operating_system }}</div>
+    </div>
+    {% endif %}
+
+    {% if ip_address %}
+    <div class="info-item">
+        <div class="info-label">IP Address</div>
+        <div class="info-value">{{ ip_address }}</div>
+    </div>
+    {% endif %}
+
+    {% if login_method %}
+    <div class="info-item">
+        <div class="info-label">Login Method</div>
+        <div class="info-value">{{ login_method }}</div>
+    </div>
+    {% endif %}
+
+    {% if session_id %}
+    <div class="info-item">
+        <div class="info-label">Session ID</div>
+        <div class="info-value">{{ session_id[:8] }}...{{ session_id[-4:] if session_id|length > 12 else session_id }}</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Location Information -->
+{% if location_info %}
+<div class="location-info">
+    <div class="location-title">
+        <svg class="location-icon" viewBox="0 0 24 24">
+            <path d="M12,2C15.31,2 18,4.66 18,7.95C18,12.41 12,19 12,19S6,12.41 6,7.95C6,4.66 8.69,2 12,2M12,6A2,2 0 0,0 10,8A2,2 0 0,0 12,10A2,2 0 0,0 14,8A2,2 0 0,0 12,6Z"/>
+        </svg>
+        Login Location
+    </div>
+    <div style="font-size: 14px; opacity: 0.9;">
+        {% if location_info.city and location_info.country %}
+            {{ location_info.city }}, {{ location_info.region or '' }} {{ location_info.country }}
+        {% elif location_info.country %}
+            {{ location_info.country }}
+        {% else %}
+            Location information unavailable
+        {% endif %}
+        {% if location_info.timezone %}
+            <br><small>Timezone: {{ location_info.timezone }}</small>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Security Actions -->
+{% if event_type in ['suspicious_login', 'security_warning', 'account_locked'] %}
+<div class="security-actions urgent">
+    <h3 class="security-actions-title">
+        <svg class="shield-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,7C13.4,7 14.8,8.6 14.8,10V11.5C15.4,11.5 16,12.4 16,13V16C16,16.6 15.6,17 15,17H9C8.4,17 8,16.6 8,16V13C8,12.4 8.4,11.5 9,11.5V10C9,8.6 10.6,7 12,7M12,8.2C11.2,8.2 10.2,9.2 10.2,10V11.5H13.8V10C13.8,9.2 12.8,8.2 12,8.2Z"/>
+        </svg>
+        Immediate Security Actions Required
+    </h3>
+    <ul class="action-list">
+        {% if event_type == 'suspicious_login' %}
+        <li>Change your password immediately if you didn't perform this login</li>
+        <li>Review your recent account activity for any unauthorized changes</li>
+        <li>Enable two-factor authentication for enhanced security</li>
+        <li>Log out of all devices and sessions</li>
+        <li>Contact our security team if you need assistance</li>
+        {% elif event_type == 'account_locked' %}
+        <li>Verify your identity through our security verification process</li>
+        <li>Change your password once your account is unlocked</li>
+        <li>Review and update your security settings</li>
+        <li>Enable additional security measures like two-factor authentication</li>
+        {% else %}
+        <li>Review your account settings and recent activity</li>
+        <li>Change your password if you suspect unauthorized access</li>
+        <li>Update your security preferences and contact information</li>
+        <li>Report any suspicious activity to our security team</li>
+        {% endif %}
+    </ul>
+</div>
+{% else %}
+<div class="security-actions">
+    <h3 class="security-actions-title">
+        <svg class="shield-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M10,17L6,13L7.41,11.59L10,14.17L16.59,7.58L18,9L10,17Z"/>
+        </svg>
+        Security Best Practices
+    </h3>
+    <ul class="action-list">
+        <li>Keep your password secure and don't share it with anyone</li>
+        <li>Always log out when using shared or public computers</li>
+        <li>Enable two-factor authentication for additional security</li>
+        <li>Regularly review your account activity and settings</li>
+        <li>Report any suspicious emails or communications</li>
+        <li>Keep your contact information up to date</li>
+    </ul>
+</div>
+{% endif %}
+
+<!-- Action Buttons -->
+<div class="button-container">
+    {% if event_type in ['suspicious_login', 'security_warning', 'account_locked'] %}
+    <a href="{{ secure_account_url or '#' }}" class="button">Secure My Account</a>
+    <a href="{{ change_password_url or '#' }}" class="button button-secondary">Change Password</a>
+    {% else %}
+    <a href="{{ account_settings_url or '#' }}" class="button">Review Account Settings</a>
+    {% endif %}
+</div>
+
+<!-- Additional Information -->
+{% if additional_info %}
+<div class="alert alert-info mt-25">
+    <strong>Additional Information:</strong><br>
+    {{ additional_info }}
+</div>
+{% endif %}
+
+<!-- Support Information -->
+<div class="alert alert-info mt-25">
+    <strong>Need Help?</strong><br>
+    If you didn't perform this action or have concerns about your account security, please contact our support team immediately at {{ support_email or 'security@company.com' }} or visit our security help center.
+</div>
+
+<!-- Auth0 Integration Notice -->
+<div class="auth0-branding">
+    <p>This security notification is powered by our authentication system and monitoring tools. 
+    Authentication events are logged and monitored for your security.</p>
+    {% if event_id %}
+    <p style="font-family: monospace; font-size: 11px; color: #adb5bd;">
+        Event ID: {{ event_id }}
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ privacy_policy_url or '#' }}" class="footer-link">Privacy Policy</a>
+<a href="{{ security_center_url or '#' }}" class="footer-link">Security Center</a>
+<a href="{{ contact_support_url or '#' }}" class="footer-link">Contact Support</a>
+<a href="{{ account_settings_url or '#' }}" class="footer-link">Account Settings</a>
+{% endblock %}

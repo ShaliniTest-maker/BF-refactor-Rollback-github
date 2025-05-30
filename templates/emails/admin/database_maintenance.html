@@ -1,0 +1,620 @@
+{% extends "templates/emails/base/email_base.html" %}
+
+{% block title %}Database Maintenance Notification - {{ maintenance_type|title }} Operations{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Database maintenance specific styles */
+    .maintenance-header {
+        background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        color: #ffffff;
+    }
+    
+    .critical-maintenance .maintenance-header {
+        background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    }
+    
+    .migration-status {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+        border-left: 5px solid #f39c12;
+    }
+    
+    .migration-status.in-progress {
+        background-color: #cce5ff;
+        border-color: #74b9ff;
+        border-left-color: #0984e3;
+    }
+    
+    .migration-status.completed {
+        background-color: #d4edda;
+        border-color: #c3e6cb;
+        border-left-color: #28a745;
+    }
+    
+    .migration-status.failed {
+        background-color: #f8d7da;
+        border-color: #f5c6cb;
+        border-left-color: #dc3545;
+    }
+    
+    .status-icon {
+        width: 24px;
+        height: 24px;
+        display: inline-block;
+        margin-right: 10px;
+        vertical-align: middle;
+    }
+    
+    .migration-details {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+    }
+    
+    .migration-command {
+        background-color: #263238;
+        color: #00e676;
+        padding: 15px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        margin: 15px 0;
+    }
+    
+    .affected-tables {
+        background-color: #fafafa;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    .table-list {
+        list-style: none;
+        padding: 0;
+        margin: 10px 0;
+    }
+    
+    .table-list li {
+        padding: 8px 12px;
+        border-bottom: 1px solid #eeeeee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .table-list li:last-child {
+        border-bottom: none;
+    }
+    
+    .table-operation {
+        background-color: #e3f2fd;
+        color: #1976d2;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    
+    .table-operation.create {
+        background-color: #e8f5e8;
+        color: #2e7d2e;
+    }
+    
+    .table-operation.modify {
+        background-color: #fff3e0;
+        color: #e65100;
+    }
+    
+    .table-operation.drop {
+        background-color: #ffebee;
+        color: #c62828;
+    }
+    
+    .downtime-estimate {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #ffffff;
+        padding: 20px;
+        border-radius: 6px;
+        text-align: center;
+        margin: 25px 0;
+    }
+    
+    .downtime-duration {
+        font-size: 28px;
+        font-weight: 700;
+        margin: 10px 0;
+    }
+    
+    .rollback-procedures {
+        background-color: #fff3e0;
+        border: 2px solid #ff9800;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+    
+    .rollback-title {
+        color: #e65100;
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+    
+    .rollback-command {
+        background-color: #ff5722;
+        color: #ffffff;
+        padding: 12px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        margin: 10px 0;
+    }
+    
+    .performance-metrics {
+        background-color: #f1f8e9;
+        border: 1px solid #c5e1a5;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+    
+    .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+    
+    .metric-item {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #e0e0e0;
+        text-align: center;
+    }
+    
+    .metric-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: #2e7d2e;
+        margin: 5px 0;
+    }
+    
+    .metric-label {
+        font-size: 12px;
+        color: #666666;
+        text-transform: uppercase;
+    }
+    
+    .contact-emergency {
+        background-color: #ffebee;
+        border: 2px solid #f44336;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+        text-align: center;
+    }
+    
+    .emergency-title {
+        color: #d32f2f;
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 15px 0;
+    }
+    
+    .emergency-contacts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+    
+    .contact-card {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 4px;
+        border: 1px solid #e0e0e0;
+    }
+    
+    .contact-name {
+        font-weight: 600;
+        color: #333333;
+        margin-bottom: 5px;
+    }
+    
+    .contact-role {
+        color: #666666;
+        font-size: 14px;
+        margin-bottom: 10px;
+    }
+    
+    .contact-method {
+        font-size: 14px;
+        color: #1976d2;
+        margin: 3px 0;
+    }
+    
+    /* Mobile responsiveness */
+    @media only screen and (max-width: 600px) {
+        .migration-command,
+        .rollback-command {
+            font-size: 11px;
+            padding: 10px;
+        }
+        
+        .metric-grid,
+        .emergency-contacts {
+            grid-template-columns: 1fr;
+        }
+        
+        .downtime-duration {
+            font-size: 20px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}Database Maintenance Operations{% endblock %}
+{% block header_subtitle %}Flask-Migrate {{ maintenance_type|title }} Coordination{% endblock %}
+
+{% block header %}
+<div class="maintenance-header {% if migration.priority == 'critical' %}critical-maintenance{% endif %}">
+    <div class="header-content">
+        <div class="logo">
+            <!-- Database maintenance icon -->
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3C16.97 3 21 4.79 21 7C21 9.21 16.97 11 12 11C7.03 11 3 9.21 3 7C3 4.79 7.03 3 12 3M21 9C21 11.21 16.97 13 12 13C7.03 13 3 11.21 3 9V7C3 9.21 7.03 11 12 11C16.97 11 21 9.21 21 7V9M21 13C21 15.21 16.97 17 12 17C7.03 17 3 15.21 3 13V11C3 13.21 7.03 15 12 15C16.97 15 21 13.21 21 11V13M21 17C21 19.21 16.97 21 12 21C7.03 21 3 19.21 3 17V15C3 17.21 7.03 19 12 19C16.97 19 21 17.21 21 15V17Z"/>
+            </svg>
+        </div>
+        <h1 class="header-title">Database Maintenance Operations</h1>
+        <p class="header-subtitle">Flask-Migrate {{ maintenance_type|title }} Coordination</p>
+        {% if migration.priority == 'critical' %}
+        <div class="alert alert-warning" style="margin-top: 20px; background-color: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.3);">
+            <strong>⚠️ CRITICAL MAINTENANCE</strong> - Immediate attention required
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Migration Status Overview -->
+<div class="migration-status {% if migration.status %}{{ migration.status }}{% endif %}">
+    <h2 class="content-title" style="margin-bottom: 15px;">
+        {% if migration.status == 'pending' %}
+            <span class="status-icon">⏳</span>Migration Scheduled
+        {% elif migration.status == 'in-progress' %}
+            <span class="status-icon">🔄</span>Migration In Progress
+        {% elif migration.status == 'completed' %}
+            <span class="status-icon">✅</span>Migration Completed
+        {% elif migration.status == 'failed' %}
+            <span class="status-icon">❌</span>Migration Failed
+        {% else %}
+            <span class="status-icon">📋</span>Migration Planning
+        {% endif %}
+    </h2>
+    <p class="content-text">
+        <strong>Migration ID:</strong> {{ migration.id or 'TBD' }}<br>
+        <strong>Type:</strong> {{ maintenance_type|title }} Operation<br>
+        <strong>Priority:</strong> {{ migration.priority|title or 'Standard' }}<br>
+        <strong>Scheduled Time:</strong> {{ migration.scheduled_time or 'To be determined' }}<br>
+        <strong>Environment:</strong> {{ environment|title or 'Production' }}
+    </p>
+</div>
+
+<!-- Maintenance Overview -->
+<h3 class="content-title">Maintenance Overview</h3>
+<p class="content-text">
+    This notification provides comprehensive details about the {{ maintenance_type }} database maintenance operation
+    scheduled for the Flask application. The operation involves Flask-Migrate {{ flask_migrate_version or '4.1.0' }}
+    with Alembic backend for systematic database schema evolution and Service Layer coordination.
+</p>
+
+{% if migration.description %}
+<div class="alert alert-info">
+    <strong>Operation Description:</strong><br>
+    {{ migration.description }}
+</div>
+{% endif %}
+
+<!-- Flask-Migrate Operation Details -->
+<h3 class="content-title">Flask-Migrate Operation Details</h3>
+<div class="migration-details">
+    <strong>Migration Commands:</strong>
+    <div class="migration-command">
+# Initialize migration environment (if needed)
+flask db init
+
+# Generate migration script
+flask db migrate -m "{{ migration.message or 'Database maintenance operation' }}"
+
+# Review generated migration
+cat migrations/versions/{{ migration.revision_id or 'XXXXX' }}_{{ migration.message|replace(' ', '_')|lower or 'maintenance' }}.py
+
+# Execute migration
+flask db upgrade{{ ' ' + migration.target_revision if migration.target_revision else '' }}
+
+# Verify migration status
+flask db current
+flask db show {{ migration.revision_id or 'current' }}
+    </div>
+    
+    <strong>Alembic Configuration:</strong>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        <li>Environment: {{ environment|title or 'Production' }}</li>
+        <li>Database URL: {{ migration.database_url|replace(migration.database_url.split('@')[0].split('://')[1], '***') if migration.database_url else 'postgresql://***:***@hostname:5432/database' }}</li>
+        <li>Connection Pool: {{ migration.pool_config.pool_size or 20 }} connections (max overflow: {{ migration.pool_config.max_overflow or 30 }})</li>
+        <li>Transaction Isolation: {{ migration.isolation_level or 'READ_COMMITTED' }}</li>
+        <li>Backup Strategy: {{ migration.backup_strategy or 'Automated pre-migration snapshot' }}</li>
+    </ul>
+</div>
+
+<!-- Affected Database Tables -->
+{% if migration.affected_tables %}
+<h3 class="content-title">Affected Database Tables</h3>
+<div class="affected-tables">
+    <p><strong>Schema Changes Summary:</strong></p>
+    <ul class="table-list">
+        {% for table in migration.affected_tables %}
+        <li>
+            <span><strong>{{ table.name }}</strong> - {{ table.description or 'Schema modification' }}</span>
+            <span class="table-operation {{ table.operation|lower }}">{{ table.operation|upper }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+    
+    {% if migration.indexes_affected %}
+    <p style="margin-top: 20px;"><strong>Index Operations:</strong></p>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        {% for index in migration.indexes_affected %}
+        <li>{{ index.operation|title }}: {{ index.name }} on {{ index.table }} ({{ index.columns|join(', ') }})</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    
+    {% if migration.constraints_affected %}
+    <p style="margin-top: 20px;"><strong>Constraint Changes:</strong></p>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        {% for constraint in migration.constraints_affected %}
+        <li>{{ constraint.operation|title }}: {{ constraint.type|title }} constraint on {{ constraint.table }}.{{ constraint.column or '' }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Downtime Estimate -->
+<div class="downtime-estimate">
+    <h3 style="margin: 0; font-size: 18px;">Estimated Maintenance Window</h3>
+    <div class="downtime-duration">{{ migration.estimated_downtime or '15-30 minutes' }}</div>
+    <p style="margin: 10px 0 0 0; opacity: 0.9;">
+        Includes pre-migration backup, schema changes, data validation, and post-migration verification
+    </p>
+    {% if migration.maintenance_window %}
+    <p style="margin: 15px 0 0 0; font-size: 14px;">
+        <strong>Maintenance Window:</strong> {{ migration.maintenance_window.start }} to {{ migration.maintenance_window.end }} ({{ migration.maintenance_window.timezone or 'UTC' }})
+    </p>
+    {% endif %}
+</div>
+
+<!-- Performance Impact Assessment -->
+{% if migration.performance_impact %}
+<div class="performance-metrics">
+    <h3 style="margin: 0 0 15px 0;">Performance Impact Assessment</h3>
+    <p class="content-text">
+        Expected performance characteristics during and after the migration operation:
+    </p>
+    <div class="metric-grid">
+        <div class="metric-item">
+            <div class="metric-value">{{ migration.performance_impact.query_performance or '+5%' }}</div>
+            <div class="metric-label">Query Performance Impact</div>
+        </div>
+        <div class="metric-item">
+            <div class="metric-value">{{ migration.performance_impact.connection_overhead or '< 2%' }}</div>
+            <div class="metric-label">Connection Pool Overhead</div>
+        </div>
+        <div class="metric-item">
+            <div class="metric-value">{{ migration.performance_impact.api_latency or '< 50ms' }}</div>
+            <div class="metric-label">Additional API Latency</div>
+        </div>
+        <div class="metric-item">
+            <div class="metric-value">{{ migration.performance_impact.recovery_time or '< 5 min' }}</div>
+            <div class="metric-label">Service Recovery Time</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Service Layer Integration -->
+<div class="security-info">
+    <h3 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,7C13.4,7 14.8,7.9 15.5,9.4C16.2,10.9 16,12.7 15,14C14,15.3 12.6,16 11.2,16C9.8,16 8.4,15.1 7.7,13.6C7,12.1 7.2,10.3 8.2,9C9.2,7.7 10.6,7 12,7Z"/>
+        </svg>
+        Service Layer Coordination
+    </h3>
+    <p class="security-text">
+        The migration integrates with Flask application Service Layer patterns for coordinated database operations:
+    </p>
+    <ul style="margin: 15px 0; padding-left: 20px; color: #6c757d; font-size: 14px;">
+        <li><strong>Database Service Coordination:</strong> Automatic connection pool management and transaction coordination</li>
+        <li><strong>Migration Validation Service:</strong> Real-time validation of schema changes and data integrity</li>
+        <li><strong>Rollback Service Integration:</strong> Automated rollback triggers and emergency recovery procedures</li>
+        <li><strong>Monitoring Service Hooks:</strong> CloudWatch integration for performance metrics and alert generation</li>
+        <li><strong>Health Check Service:</strong> Updated health endpoints to reflect migration status and database connectivity</li>
+    </ul>
+</div>
+
+<!-- Rollback Procedures -->
+<div class="rollback-procedures">
+    <h3 class="rollback-title">
+        🔄 Emergency Rollback Procedures
+    </h3>
+    <p style="margin: 0 0 15px 0; color: #e65100;">
+        In case of migration failure or critical issues, the following rollback procedures are available:
+    </p>
+    
+    <strong>Immediate Rollback Commands:</strong>
+    <div class="rollback-command">
+# Rollback to previous migration
+flask db downgrade{{ ' ' + migration.previous_revision if migration.previous_revision else '' }}
+
+# Emergency database restore (if needed)
+pg_restore --clean --if-exists -d {{ migration.database_name or 'production_db' }} backup_{{ migration.backup_timestamp or 'TIMESTAMP' }}.sql
+
+# Verify rollback success
+flask db current
+flask db history
+    </div>
+    
+    <strong>Rollback Validation Steps:</strong>
+    <ol style="margin: 15px 0; padding-left: 20px; color: #e65100;">
+        <li>Verify database schema matches previous state</li>
+        <li>Validate application connectivity and basic functionality</li>
+        <li>Execute smoke tests for critical business operations</li>
+        <li>Check data integrity and referential constraints</li>
+        <li>Monitor application performance metrics</li>
+        <li>Notify stakeholders of rollback completion</li>
+    </ol>
+</div>
+
+<!-- Monitoring and Alerts -->
+<div class="alert alert-info">
+    <h4 style="margin: 0 0 15px 0;">Monitoring and Alerting Configuration</h4>
+    <p style="margin: 0 0 15px 0;">
+        The following monitoring capabilities are active during the migration process:
+    </p>
+    <ul style="margin: 0; padding-left: 20px;">
+        <li><strong>CloudWatch Logs:</strong> Real-time migration progress tracking in log group <code>/aws/flask/database</code></li>
+        <li><strong>Performance Metrics:</strong> SQLAlchemy query performance monitoring via Prometheus exporters</li>
+        <li><strong>Health Check Monitoring:</strong> Automated health endpoint validation at <code>/health</code></li>
+        <li><strong>Error Detection:</strong> Automated alert triggers for migration failures or performance degradation</li>
+        <li><strong>Database Connectivity:</strong> Connection pool monitoring and automatic failover capabilities</li>
+    </ul>
+</div>
+
+<!-- Pre/Post Migration Checklist -->
+{% if migration.checklist %}
+<h3 class="content-title">Migration Execution Checklist</h3>
+<div class="migration-details">
+    <strong>Pre-Migration Verification:</strong>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        {% for item in migration.checklist.pre_migration %}
+        <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+    
+    <strong>Post-Migration Validation:</strong>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        {% for item in migration.checklist.post_migration %}
+        <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Action Items for Administrators -->
+<div class="button-container">
+    {% if migration.status == 'pending' %}
+    <a href="{{ approval_url or '#' }}" class="button">Approve Migration</a>
+    <a href="{{ reschedule_url or '#' }}" class="button button-secondary">Reschedule Operation</a>
+    {% elif migration.status == 'in-progress' %}
+    <a href="{{ monitoring_dashboard_url or '#' }}" class="button">View Live Dashboard</a>
+    <a href="{{ rollback_url or '#' }}" class="button button-secondary">Emergency Rollback</a>
+    {% elif migration.status == 'completed' %}
+    <a href="{{ validation_report_url or '#' }}" class="button">View Migration Report</a>
+    <a href="{{ performance_metrics_url or '#' }}" class="button button-secondary">Performance Analysis</a>
+    {% elif migration.status == 'failed' %}
+    <a href="{{ incident_report_url or '#' }}" class="button">View Incident Report</a>
+    <a href="{{ recovery_url or '#' }}" class="button button-secondary">Initiate Recovery</a>
+    {% else %}
+    <a href="{{ migration_dashboard_url or '#' }}" class="button">View Migration Dashboard</a>
+    {% endif %}
+</div>
+
+<!-- Emergency Contact Information -->
+<div class="contact-emergency">
+    <h3 class="emergency-title">🚨 Emergency Contacts</h3>
+    <p style="margin: 0 0 15px 0; color: #d32f2f;">
+        For critical issues during migration operations, contact the following team members:
+    </p>
+    <div class="emergency-contacts">
+        <div class="contact-card">
+            <div class="contact-name">{{ emergency_contacts.database_admin.name or 'Database Administrator' }}</div>
+            <div class="contact-role">Database Operations Lead</div>
+            <div class="contact-method">📧 {{ emergency_contacts.database_admin.email or 'dba@company.com' }}</div>
+            <div class="contact-method">📱 {{ emergency_contacts.database_admin.phone or '+1-555-0100' }}</div>
+            <div class="contact-method">💬 Slack: {{ emergency_contacts.database_admin.slack or '@database-team' }}</div>
+        </div>
+        <div class="contact-card">
+            <div class="contact-name">{{ emergency_contacts.infrastructure_lead.name or 'Infrastructure Lead' }}</div>
+            <div class="contact-role">Infrastructure & DevOps</div>
+            <div class="contact-method">📧 {{ emergency_contacts.infrastructure_lead.email or 'infra@company.com' }}</div>
+            <div class="contact-method">📱 {{ emergency_contacts.infrastructure_lead.phone or '+1-555-0200' }}</div>
+            <div class="contact-method">💬 Slack: {{ emergency_contacts.infrastructure_lead.slack or '@infra-team' }}</div>
+        </div>
+        <div class="contact-card">
+            <div class="contact-name">{{ emergency_contacts.on_call_engineer.name or 'On-Call Engineer' }}</div>
+            <div class="contact-role">24/7 Emergency Response</div>
+            <div class="contact-method">📧 {{ emergency_contacts.on_call_engineer.email or 'oncall@company.com' }}</div>
+            <div class="contact-method">📱 {{ emergency_contacts.on_call_engineer.phone or '+1-555-0911' }}</div>
+            <div class="contact-method">💬 PagerDuty: {{ emergency_contacts.on_call_engineer.pagerduty or 'Database Emergency' }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Additional Information -->
+{% if migration.additional_info %}
+<div class="alert alert-warning">
+    <h4 style="margin: 0 0 15px 0;">Additional Information</h4>
+    <p style="margin: 0;">{{ migration.additional_info }}</p>
+</div>
+{% endif %}
+
+<!-- Security Notice -->
+<div class="security-info">
+    <h3 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,7C13.4,7 14.8,7.9 15.5,9.4C16.2,10.9 16,12.7 15,14C14,15.3 12.6,16 11.2,16C9.8,16 8.4,15.1 7.7,13.6C7,12.1 7.2,10.3 8.2,9C9.2,7.7 10.6,7 12,7Z"/>
+        </svg>
+        Security and Compliance Notice
+    </h3>
+    <p class="security-text">
+        This database maintenance operation maintains all existing security postures and compliance requirements.
+        All migration activities are logged and audited according to company security policies. Database backups
+        are encrypted and stored in compliance with data retention policies.
+    </p>
+</div>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This database maintenance notification was generated by the Flask Migration Coordination Service.
+    All database operations are logged and monitored for compliance and audit purposes.
+</p>
+
+<div class="footer-links">
+    <a href="{{ migration_docs_url or '#' }}" class="footer-link">Migration Documentation</a>
+    <a href="{{ database_status_url or '#' }}" class="footer-link">Database Status Dashboard</a>
+    <a href="{{ support_url or '#' }}" class="footer-link">Technical Support</a>
+    <a href="{{ incident_management_url or '#' }}" class="footer-link">Incident Management</a>
+</div>
+
+<p class="footer-copyright">
+    Database Migration Notification - Generated {{ current_timestamp or 'at migration time' }}<br>
+    Flask-Migrate {{ flask_migrate_version or '4.1.0' }} • Alembic Migration Engine • PostgreSQL {{ postgres_version or '14.12' }}
+</p>
+{% endblock %}

@@ -1,0 +1,288 @@
+============================================================
+INFRASTRUCTURE ALERT - {{alert_severity|upper}}
+============================================================
+
+Alert ID: {{alert_id}}
+Timestamp: {{timestamp|strftime('%Y-%m-%d %H:%M:%S UTC')}}
+Environment: {{environment|upper}}
+Alert Type: INFRASTRUCTURE MONITORING
+Severity: {{alert_severity|upper}}
+
+{% if alert_severity == 'CRITICAL' %}
+!!! IMMEDIATE ACTION REQUIRED !!!
+{% elif alert_severity == 'HIGH' %}
+*** URGENT ATTENTION NEEDED ***
+{% endif %}
+
+============================================================
+ALERT SUMMARY
+============================================================
+
+Component: {{component_name}}
+Issue: {{alert_message}}
+Duration: {{alert_duration}}
+Status: {{current_status|upper}}
+
+{% if alert_severity in ['CRITICAL', 'HIGH'] %}
+Escalation: {{escalation_path}}
+Response Required: {{response_time_requirement}}
+{% endif %}
+
+============================================================
+INFRASTRUCTURE HEALTH OVERVIEW
+============================================================
+
+FLASK APPLICATION STATUS:
+- Application Instances: {{app_instances_total}} total, {{app_instances_healthy}} healthy
+- Response Time: {{avg_response_time}}ms (SLA: <200ms)
+- Error Rate: {{error_rate}}% (SLA: <1%)
+- Active Requests: {{active_requests}}
+- Request Queue Depth: {{request_queue_depth}}
+
+CONTAINER ORCHESTRATION STATUS:
+- Container Platform: {{container_platform}} ({{container_orchestration}})
+- Total Containers: {{container_count_total}}
+- Running Containers: {{container_count_running}}
+- Failed Containers: {{container_count_failed}}
+- Pending Restarts: {{container_restarts_pending}}
+
+CONTAINER RESOURCE UTILIZATION:
+{% for container in container_metrics %}
+Container {{container.name}}:
+  - CPU Usage: {{container.cpu_percent}}% (Threshold: 80%)
+  - Memory Usage: {{container.memory_percent}}% ({{container.memory_used}}/{{container.memory_total}})
+  - Network I/O: {{container.network_in}}/{{container.network_out}} MB/s
+  - Disk Usage: {{container.disk_percent}}%
+  - Status: {{container.status|upper}}
+{% endfor %}
+
+WSGI SERVER PERFORMANCE:
+- Gunicorn Workers: {{wsgi_workers_active}}/{{wsgi_workers_total}} active
+- Worker Memory: {{wsgi_memory_usage}}MB average per worker
+- Request Latency: {{wsgi_request_latency}}ms average
+- Worker Restarts: {{wsgi_worker_restarts}} in last hour
+- Request Timeout Rate: {{wsgi_timeout_rate}}%
+
+DATABASE CONNECTIVITY:
+- Database Status: {{database_status|upper}}
+- Connection Pool: {{db_connections_active}}/{{db_connections_max}} connections
+- Pool Utilization: {{db_pool_utilization}}% (Alert: >90%)
+- Query Response Time: {{db_avg_query_time}}ms (SLA: <100ms)
+- Failed Connections: {{db_failed_connections}} in last hour
+- Active Transactions: {{db_active_transactions}}
+
+============================================================
+AWS SERVICE STATUS
+============================================================
+
+EC2 INSTANCES:
+{% for instance in ec2_instances %}
+Instance {{instance.id}} ({{instance.type}}):
+  - Status: {{instance.status|upper}}
+  - CPU: {{instance.cpu_percent}}%
+  - Memory: {{instance.memory_percent}}%
+  - Network: {{instance.network_status}}
+  - Health Check: {{instance.health_check|upper}}
+{% endfor %}
+
+RDS POSTGRESQL:
+- Database Instance: {{rds_instance_id}}
+- Status: {{rds_status|upper}}
+- Multi-AZ: {{rds_multi_az|yesno}}
+- CPU Utilization: {{rds_cpu_percent}}%
+- Available Memory: {{rds_free_memory}}MB
+- Storage Space: {{rds_storage_used}}/{{rds_storage_total}}GB
+- Backup Status: {{rds_backup_status}}
+
+LOAD BALANCER:
+- ALB Status: {{alb_status|upper}}
+- Target Health: {{alb_healthy_targets}}/{{alb_total_targets}} healthy
+- Request Count: {{alb_request_count}}/minute
+- Response Time: {{alb_response_time}}ms
+- HTTP 5xx Errors: {{alb_5xx_errors}}/hour
+
+ECR CONTAINER REGISTRY:
+- Registry Status: {{ecr_status|upper}}
+- Last Image Push: {{ecr_last_push|timesince}} ago
+- Image Vulnerabilities: {{ecr_vulnerabilities_critical}} critical, {{ecr_vulnerabilities_high}} high
+- Storage Used: {{ecr_storage_used}}GB
+
+CLOUDWATCH MONITORING:
+- Metrics Collection: {{cloudwatch_metrics_status|upper}}
+- Log Ingestion: {{cloudwatch_logs_status|upper}}
+- Failed Metrics: {{cloudwatch_failed_metrics}} in last hour
+- Alert Rules Active: {{cloudwatch_active_alarms}}
+
+============================================================
+AFFECTED SYSTEMS AND IMPACT
+============================================================
+
+Primary Impact:
+{{primary_impact}}
+
+Secondary Systems:
+{% for system in affected_systems %}
+- {{system.name}}: {{system.impact_level}} impact
+{% endfor %}
+
+User Impact Assessment:
+- Estimated Affected Users: {{affected_users_count}}
+- Service Degradation Level: {{service_degradation_level}}
+- Business Function Impact: {{business_impact}}
+
+============================================================
+DIAGNOSTIC INFORMATION
+============================================================
+
+Error Details:
+{{error_details}}
+
+Recent Events:
+{% for event in recent_events %}
+{{event.timestamp|strftime('%H:%M:%S')}} - {{event.message}}
+{% endfor %}
+
+Resource Thresholds Exceeded:
+{% for threshold in exceeded_thresholds %}
+- {{threshold.metric}}: {{threshold.current_value}} (Threshold: {{threshold.limit}})
+{% endfor %}
+
+Container Events (Last 30 minutes):
+{% for event in container_events %}
+{{event.timestamp|strftime('%H:%M:%S')}} [{{event.container_name}}] {{event.event_type}}: {{event.message}}
+{% endfor %}
+
+WSGI Server Diagnostics:
+- Last Worker Failure: {{wsgi_last_failure|default('None')|timesince}}
+- Worker Error Log: {{wsgi_error_summary}}
+- Performance Degradation: {{wsgi_performance_degradation|yesno}}
+
+Database Diagnostics:
+- Long Running Queries: {{db_long_queries_count}}
+- Lock Contention: {{db_lock_contention|yesno}}
+- Connection Errors: {{db_connection_errors}}
+- Last Backup: {{db_last_backup|timesince}} ago
+
+============================================================
+RECOMMENDED ACTIONS
+============================================================
+
+Immediate Actions Required:
+{% for action in immediate_actions %}
+{{loop.index}}. {{action}}
+{% endfor %}
+
+Investigation Steps:
+{% for step in investigation_steps %}
+{{loop.index}}. {{step}}
+{% endfor %}
+
+{% if alert_severity == 'CRITICAL' %}
+EMERGENCY PROCEDURES:
+{% for procedure in emergency_procedures %}
+- {{procedure}}
+{% endfor %}
+
+ROLLBACK OPTIONS:
+{% for rollback in rollback_options %}
+- {{rollback.name}}: {{rollback.description}}
+  Estimated Time: {{rollback.estimated_time}}
+  Risk Level: {{rollback.risk_level}}
+{% endfor %}
+{% endif %}
+
+============================================================
+ESCALATION AND CONTACT INFORMATION
+============================================================
+
+{% if alert_severity == 'CRITICAL' %}
+PRIMARY CONTACT: On-Call Engineer ({{oncall_engineer_contact}})
+ESCALATION PATH: 
+  15 min -> Team Lead ({{team_lead_contact}})
+  30 min -> Engineering Manager ({{engineering_manager_contact}})
+  45 min -> CTO ({{cto_contact}})
+{% elif alert_severity == 'HIGH' %}
+PRIMARY CONTACT: Development Team Lead ({{team_lead_contact}})
+ESCALATION PATH:
+  1 hour -> Engineering Manager ({{engineering_manager_contact}})
+{% else %}
+PRIMARY CONTACT: Development Team ({{dev_team_contact}})
+{% endif %}
+
+Incident Response Runbook: {{runbook_url}}
+Monitoring Dashboard: {{dashboard_url}}
+Log Analysis: {{log_analysis_url}}
+
+============================================================
+MONITORING LINKS (Text Only)
+============================================================
+
+CloudWatch Dashboard:
+{{cloudwatch_dashboard_url}}
+
+Container Metrics:
+{{container_metrics_url}}
+
+Application Performance:
+{{app_performance_url}}
+
+Database Monitoring:
+{{database_monitoring_url}}
+
+Infrastructure Health:
+{{infrastructure_health_url}}
+
+AWS Service Health:
+{{aws_service_health_url}}
+
+============================================================
+ALERT DETAILS
+============================================================
+
+Alert Rule: {{alert_rule_name}}
+Metric Query: {{metric_query}}
+Threshold Condition: {{threshold_condition}}
+Evaluation Period: {{evaluation_period}}
+Data Points: {{data_points_to_alarm}}/{{evaluation_periods}}
+
+Historical Context:
+- Similar alerts in last 24h: {{similar_alerts_24h}}
+- Last occurrence: {{last_occurrence|default('None')|timesince}}
+- Average resolution time: {{avg_resolution_time}}
+
+Performance Baseline Comparison:
+- Current vs Baseline CPU: {{cpu_vs_baseline}}%
+- Current vs Baseline Memory: {{memory_vs_baseline}}%
+- Current vs Baseline Response Time: {{response_time_vs_baseline}}%
+
+============================================================
+SYSTEM RECOVERY STATUS
+============================================================
+
+Auto-Recovery Actions Attempted:
+{% for recovery_action in auto_recovery_actions %}
+- {{recovery_action.action}}: {{recovery_action.status}} ({{recovery_action.timestamp|strftime('%H:%M:%S')}})
+{% endfor %}
+
+Container Orchestration Response:
+- Auto-scaling triggered: {{autoscaling_triggered|yesno}}
+- New containers spawned: {{new_containers_count}}
+- Failed containers terminated: {{terminated_containers_count}}
+- Load balancer health checks: {{lb_health_check_status}}
+
+Database Failover Status:
+- Multi-AZ failover initiated: {{rds_failover_initiated|yesno}}
+- Connection pool recovery: {{connection_pool_recovery_status}}
+- Read replica status: {{read_replica_status}}
+
+============================================================
+
+This alert was generated by the Flask Infrastructure Monitoring System.
+For urgent issues, contact the on-call engineer immediately.
+Do not reply to this email - use the contact information above.
+
+System Time: {{system_timestamp|strftime('%Y-%m-%d %H:%M:%S UTC')}}
+Alert Generator: {{alert_generator_version}}
+Monitoring Node: {{monitoring_node_id}}
+
+============================================================

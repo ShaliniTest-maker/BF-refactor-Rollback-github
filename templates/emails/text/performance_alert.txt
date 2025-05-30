@@ -1,0 +1,166 @@
+PERFORMANCE ALERT - {{ alert_severity|upper }} SEVERITY
+================================================================
+
+Alert Type: {{ alert_type }}
+Timestamp: {{ timestamp }}
+Environment: {{ environment }}
+Application: Flask Backend ({{ app_version }})
+
+PERFORMANCE VIOLATION SUMMARY
+-----------------------------
+{% if api_response_time_alert %}
+• API Response Time: {{ current_api_response_time }}ms (SLA: <200ms)
+  Threshold Exceeded: {{ (current_api_response_time - 200)|round(2) }}ms over limit
+{% endif %}
+{% if db_query_time_alert %}
+• Database Query Time: {{ current_db_query_time }}ms (SLA: <100ms)
+  Threshold Exceeded: {{ (current_db_query_time - 100)|round(2) }}ms over limit
+{% endif %}
+{% if auth_response_time_alert %}
+• Authentication Response: {{ current_auth_response_time }}ms (SLA: <150ms)
+  Threshold Exceeded: {{ (current_auth_response_time - 150)|round(2) }}ms over limit
+{% endif %}
+{% if error_rate_alert %}
+• Application Error Rate: {{ current_error_rate }}% (SLA: <1%)
+  Threshold Exceeded: {{ (current_error_rate - 1)|round(2) }}% over limit
+{% endif %}
+
+DETAILED PERFORMANCE METRICS
+----------------------------
+Application Performance:
+  - API Endpoint Response Time: {{ current_api_response_time }}ms
+  - Database Query Response Time: {{ current_db_query_time }}ms
+  - Authentication Response Time: {{ current_auth_response_time }}ms
+  - Application Error Rate: {{ current_error_rate }}%
+  - Request Throughput: {{ current_throughput }} requests/minute
+  - Active Sessions: {{ active_sessions }}
+
+WSGI Server Metrics:
+  - Gunicorn Worker Count: {{ worker_count }} active workers
+  - Worker Utilization: {{ worker_utilization }}%
+  - Request Queue Depth: {{ request_queue_depth }}
+  - Worker Restart Count: {{ worker_restart_count }} (last 24h)
+  - Average Request Processing Time: {{ avg_request_processing_time }}ms
+
+Container Resource Utilization:
+  - CPU Usage: {{ cpu_usage }}% (across {{ container_count }} containers)
+  - Memory Usage: {{ memory_usage }}% ({{ memory_used_mb }}MB / {{ memory_total_mb }}MB)
+  - Network I/O: {{ network_io_mb }}MB/s
+  - Disk I/O: {{ disk_io_ops }}/s
+  - Container Health: {{ healthy_containers }}/{{ total_containers }} containers healthy
+
+Database Connection Pool:
+  - Active Connections: {{ active_connections }}/{{ max_connections }}
+  - Pool Utilization: {{ pool_utilization }}%
+  - Connection Acquisition Time: {{ connection_acquisition_time }}ms
+  - Pool Overflow Count: {{ pool_overflow_count }}
+
+Flask Application Metrics:
+  - Active Requests: {{ active_requests }}
+  - Request Rate: {{ request_rate }} requests/second
+  - Response Size Average: {{ avg_response_size }}KB
+  - Session Count: {{ session_count }}
+  - Cache Hit Rate: {{ cache_hit_rate }}%
+
+AFFECTED ENDPOINTS (if applicable)
+----------------------------------
+{% for endpoint in affected_endpoints %}
+• {{ endpoint.path }} ({{ endpoint.method }})
+  Response Time: {{ endpoint.response_time }}ms
+  Error Rate: {{ endpoint.error_rate }}%
+  Request Count: {{ endpoint.request_count }} (last 5 minutes)
+{% endfor %}
+
+IMMEDIATE REMEDIATION STEPS
+---------------------------
+{% if alert_severity == 'critical' %}
+CRITICAL ALERT - Immediate Action Required:
+1. Check application health endpoints: /health/readiness and /health/detailed
+2. Verify database connectivity and connection pool status
+3. Monitor WSGI worker processes for failures or timeouts
+4. Check container resource limits and scaling triggers
+5. Review recent deployments or configuration changes
+6. Escalate to on-call engineer if not resolved within 15 minutes
+
+{% elif alert_severity == 'high' %}
+HIGH PRIORITY - Action Required within 15 minutes:
+1. Investigate specific performance bottlenecks in affected endpoints
+2. Check database query performance and connection pool health
+3. Verify container resource allocation is sufficient
+4. Review application logs for error patterns
+5. Consider scaling container instances if resource constrained
+
+{% elif alert_severity == 'medium' %}
+MEDIUM PRIORITY - Action Required within 1 hour:
+1. Analyze performance trends over last 24 hours
+2. Review database query optimization opportunities
+3. Check for memory leaks or resource accumulation
+4. Validate WSGI worker configuration is optimal
+5. Plan capacity adjustments if sustained load increase detected
+
+{% elif alert_severity == 'low' %}
+LOW PRIORITY - Monitor and Schedule Review:
+1. Document performance patterns for trend analysis
+2. Schedule performance optimization review
+3. Update monitoring thresholds if needed
+4. Plan proactive capacity scaling if growth trend confirmed
+{% endif %}
+
+MONITORING RESOURCES
+-------------------
+• CloudWatch Dashboard: {{ cloudwatch_dashboard_url }}
+• Grafana Performance Dashboard: {{ grafana_dashboard_url }}
+• Flask Monitoring Dashboard: {{ flask_monitoring_url }}
+• Sentry Error Tracking: {{ sentry_url }}
+• Container Insights: {{ container_insights_url }}
+
+ESCALATION PROCEDURES
+--------------------
+{% if alert_severity == 'critical' %}
+Immediate Escalation Path:
+1. On-Call Engineer: {{ oncall_engineer_contact }}
+2. Team Lead (if no response in 15 min): {{ team_lead_contact }}
+3. Engineering Manager (if no response in 30 min): {{ manager_contact }}
+4. CTO (for business-critical impacts): {{ cto_contact }}
+
+{% else %}
+Standard Escalation Path:
+1. Development Team: {{ dev_team_contact }}
+2. Team Lead: {{ team_lead_contact }}
+3. Engineering Manager: {{ manager_contact }}
+{% endif %}
+
+ALERT CORRELATION
+-----------------
+Alert ID: {{ alert_id }}
+Correlation ID: {{ correlation_id }}
+Related Alerts: {{ related_alert_count }} similar alerts in last hour
+Previous Occurrence: {{ last_occurrence_time }}
+
+SYSTEM CONTEXT
+--------------
+Migration Status: Node.js to Flask migration ({{ migration_completion_percentage }}% complete)
+Deployment Version: {{ deployment_version }}
+Configuration Hash: {{ config_hash }}
+Infrastructure: {{ infrastructure_provider }} ({{ region }})
+Load Balancer Status: {{ load_balancer_status }}
+
+ADDITIONAL INFORMATION
+---------------------
+• This alert was generated by the Flask application monitoring system
+• Performance thresholds are set to ensure SLA compliance during migration
+• For immediate assistance, contact the on-call engineer listed above
+• Alert acknowledgment required within {{ acknowledgment_timeout }} minutes
+• Automatic escalation will occur if no response received
+
+AUTOMATED ACTIONS TAKEN
+-----------------------
+{% for action in automated_actions %}
+• {{ action.timestamp }}: {{ action.description }}
+{% endfor %}
+
+To acknowledge this alert, reply to this email or update the alert status
+in the monitoring dashboard.
+
+Alert generated at {{ generation_timestamp }}
+Monitoring System: Flask Performance Monitor v{{ monitor_version }}

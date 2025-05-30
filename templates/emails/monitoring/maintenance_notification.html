@@ -1,0 +1,798 @@
+{% extends "templates/emails/base/email_base.html" %}
+
+{% block title %}Scheduled System Maintenance Notification{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Maintenance-specific styles */
+    .maintenance-header {
+        background: linear-gradient(135deg, #ff7043 0%, #ff5722 100%);
+        color: #ffffff;
+    }
+
+    .maintenance-icon {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 20px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+    }
+
+    .schedule-section {
+        background: linear-gradient(135deg, #e3f2fd 0%, #f8f9fa 100%);
+        border: 2px solid #2196f3;
+        border-radius: 12px;
+        padding: 30px;
+        margin: 30px 0;
+        position: relative;
+    }
+
+    .schedule-section::before {
+        content: "📅";
+        position: absolute;
+        top: -12px;
+        left: 20px;
+        background: #2196f3;
+        color: white;
+        width: 32px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .schedule-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #1565c0;
+        margin: 0 0 20px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .schedule-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin: 20px 0;
+    }
+
+    .schedule-item {
+        background: #ffffff;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #e0e0e0;
+    }
+
+    .schedule-item-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #333333;
+        margin: 0 0 8px 0;
+    }
+
+    .schedule-item-value {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1976d2;
+        margin: 0;
+    }
+
+    .impact-assessment {
+        background: linear-gradient(135deg, #fff3e0 0%, #ffecb3 100%);
+        border: 2px solid #ff9800;
+        border-radius: 12px;
+        padding: 30px;
+        margin: 30px 0;
+        position: relative;
+    }
+
+    .impact-assessment::before {
+        content: "⚠️";
+        position: absolute;
+        top: -12px;
+        left: 20px;
+        background: #ff9800;
+        color: white;
+        width: 32px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .impact-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #e65100;
+        margin: 0 0 20px 0;
+    }
+
+    .impact-level {
+        display: inline-block;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 20px 0;
+    }
+
+    .impact-low {
+        background: #c8e6c9;
+        color: #2e7d2e;
+    }
+
+    .impact-medium {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .impact-high {
+        background: #ffcdd2;
+        color: #c62828;
+    }
+
+    .components-affected {
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+
+    .component-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin: 15px 0 0 0;
+    }
+
+    .component-item {
+        display: flex;
+        align-items: center;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+    }
+
+    .component-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        background: #007bff;
+        color: white;
+    }
+
+    .rollback-section {
+        background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+        border: 2px solid #9c27b0;
+        border-radius: 12px;
+        padding: 30px;
+        margin: 30px 0;
+        position: relative;
+    }
+
+    .rollback-section::before {
+        content: "🔄";
+        position: absolute;
+        top: -12px;
+        left: 20px;
+        background: #9c27b0;
+        color: white;
+        width: 32px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .rollback-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #6a1b9a;
+        margin: 0 0 20px 0;
+    }
+
+    .emergency-contacts {
+        background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+        border: 2px solid #f44336;
+        border-radius: 12px;
+        padding: 30px;
+        margin: 30px 0;
+        position: relative;
+    }
+
+    .emergency-contacts::before {
+        content: "🚨";
+        position: absolute;
+        top: -12px;
+        left: 20px;
+        background: #f44336;
+        color: white;
+        width: 32px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .emergency-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #c62828;
+        margin: 0 0 20px 0;
+    }
+
+    .contact-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin: 20px 0;
+    }
+
+    .contact-card {
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 20px;
+    }
+
+    .contact-role {
+        font-size: 16px;
+        font-weight: 600;
+        color: #333333;
+        margin: 0 0 8px 0;
+    }
+
+    .contact-info {
+        font-size: 14px;
+        color: #666666;
+        margin: 4px 0;
+    }
+
+    .contact-availability {
+        font-size: 12px;
+        color: #999999;
+        font-style: italic;
+        margin: 8px 0 0 0;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-scheduled {
+        background: #e3f2fd;
+        color: #1565c0;
+    }
+
+    .status-in-progress {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .status-completed {
+        background: #c8e6c9;
+        color: #2e7d2e;
+    }
+
+    .timeline-section {
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .timeline-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333333;
+        margin: 0 0 20px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .timeline-title::before {
+        content: "⏱️";
+        margin-right: 10px;
+        font-size: 20px;
+    }
+
+    .timeline-item {
+        display: flex;
+        align-items: flex-start;
+        margin: 15px 0;
+        padding: 15px 0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .timeline-item:last-child {
+        border-bottom: none;
+    }
+
+    .timeline-time {
+        min-width: 120px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #666666;
+        margin-right: 20px;
+    }
+
+    .timeline-content {
+        flex: 1;
+    }
+
+    .timeline-task {
+        font-size: 16px;
+        font-weight: 500;
+        color: #333333;
+        margin: 0 0 5px 0;
+    }
+
+    .timeline-description {
+        font-size: 14px;
+        color: #666666;
+        margin: 0;
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e0e0e0;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 15px 0;
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #4caf50 0%, #8bc34a 100%);
+        border-radius: 4px;
+        transition: width 0.3s ease;
+    }
+
+    /* Responsive adjustments */
+    @media only screen and (max-width: 600px) {
+        .schedule-grid,
+        .component-list,
+        .contact-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .schedule-section,
+        .impact-assessment,
+        .rollback-section,
+        .emergency-contacts {
+            padding: 20px 15px;
+        }
+
+        .timeline-item {
+            flex-direction: column;
+        }
+
+        .timeline-time {
+            min-width: auto;
+            margin-right: 0;
+            margin-bottom: 5px;
+        }
+    }
+
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .schedule-section {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1f2937 100%);
+            border-color: #3b82f6;
+        }
+
+        .impact-assessment {
+            background: linear-gradient(135deg, #451a03 0%, #1f2937 100%);
+            border-color: #f59e0b;
+        }
+
+        .rollback-section {
+            background: linear-gradient(135deg, #581c87 0%, #1f2937 100%);
+            border-color: #a855f7;
+        }
+
+        .emergency-contacts {
+            background: linear-gradient(135deg, #7f1d1d 0%, #1f2937 100%);
+            border-color: #ef4444;
+        }
+
+        .schedule-item,
+        .components-affected,
+        .timeline-section,
+        .contact-card {
+            background: #374151 !important;
+            border-color: #6b7280 !important;
+            color: #e5e7eb !important;
+        }
+
+        .component-item {
+            background: #4b5563 !important;
+            border-color: #6b7280 !important;
+        }
+
+        .schedule-item-title,
+        .contact-role,
+        .timeline-task {
+            color: #f3f4f6 !important;
+        }
+
+        .schedule-item-value {
+            color: #60a5fa !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+<div class="logo">
+    {% block logo %}
+    <!-- Company logo can be inserted here -->
+    {% endblock %}
+</div>
+<div class="maintenance-icon">
+    🔧
+</div>
+<h1 class="header-title">{% block header_title %}Scheduled System Maintenance{% endblock %}</h1>
+<p class="header-subtitle">{% block header_subtitle %}Important Infrastructure Updates and Service Information{% endblock %}</p>
+{% endblock %}
+
+{% block content %}
+<!-- Maintenance Overview -->
+<div class="content-title">
+    Scheduled Maintenance Notification
+    <span class="status-badge status-{{ maintenance_status|default('scheduled') }}">
+        {{ maintenance_status|default('scheduled')|title }}
+    </span>
+</div>
+
+<div class="content-text">
+    <strong>Dear {{ recipient_name|default('Valued User') }},</strong>
+</div>
+
+<div class="content-text">
+    We are writing to inform you of scheduled maintenance activities that will be performed on our Flask-based 
+    application infrastructure. This maintenance is part of our ongoing commitment to providing reliable, 
+    high-performance services and includes critical system upgrades, database optimizations, and security enhancements.
+</div>
+
+{% if maintenance_description %}
+<div class="content-text">
+    <strong>Maintenance Purpose:</strong> {{ maintenance_description }}
+</div>
+{% endif %}
+
+<!-- Detailed Schedule Section -->
+<div class="schedule-section">
+    <h2 class="schedule-title">Maintenance Schedule</h2>
+    
+    <div class="schedule-grid">
+        <div class="schedule-item">
+            <div class="schedule-item-title">Start Date & Time</div>
+            <p class="schedule-item-value">{{ start_datetime|default('TBD') }}</p>
+        </div>
+        
+        <div class="schedule-item">
+            <div class="schedule-item-title">End Date & Time</div>
+            <p class="schedule-item-value">{{ end_datetime|default('TBD') }}</p>
+        </div>
+        
+        <div class="schedule-item">
+            <div class="schedule-item-title">Expected Duration</div>
+            <p class="schedule-item-value">{{ expected_duration|default('TBD') }}</p>
+        </div>
+        
+        <div class="schedule-item">
+            <div class="schedule-item-title">Timezone</div>
+            <p class="schedule-item-value">{{ timezone|default('UTC') }}</p>
+        </div>
+    </div>
+
+    {% if maintenance_window_type %}
+    <div class="content-text">
+        <strong>Maintenance Window Type:</strong> {{ maintenance_window_type }}
+    </div>
+    {% endif %}
+
+    {% if recurring_schedule %}
+    <div class="alert alert-info">
+        <strong>Recurring Maintenance:</strong> {{ recurring_schedule }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Service Impact Assessment -->
+<div class="impact-assessment">
+    <h2 class="impact-title">Service Impact Assessment</h2>
+    
+    <div class="impact-level impact-{{ impact_level|default('medium') }}">
+        Impact Level: {{ impact_level|default('Medium')|title }}
+    </div>
+
+    <div class="content-text">
+        <strong>Expected Service Availability:</strong> {{ service_availability|default('Limited availability during maintenance window') }}
+    </div>
+
+    {% if downtime_estimate %}
+    <div class="content-text">
+        <strong>Estimated Downtime:</strong> {{ downtime_estimate }}
+    </div>
+    {% endif %}
+
+    <div class="components-affected">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #333;">Affected System Components</h3>
+        
+        <div class="component-list">
+            {% for component in affected_components|default([
+                {'name': 'Flask Application', 'icon': 'F', 'status': 'maintenance'},
+                {'name': 'Database (PostgreSQL)', 'icon': 'D', 'status': 'migration'},
+                {'name': 'Load Balancer', 'icon': 'L', 'status': 'active'},
+                {'name': 'AWS Infrastructure', 'icon': 'A', 'status': 'updates'},
+                {'name': 'Monitoring Systems', 'icon': 'M', 'status': 'enhanced'},
+                {'name': 'Authentication Service', 'icon': 'S', 'status': 'optimized'}
+            ]) %}
+            <div class="component-item">
+                <div class="component-icon">{{ component.icon }}</div>
+                <div>
+                    <div style="font-weight: 600;">{{ component.name }}</div>
+                    <div style="font-size: 12px; color: #666;">{{ component.status|title }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if user_impact %}
+    <div class="alert alert-warning">
+        <strong>User Impact:</strong> {{ user_impact }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Detailed Maintenance Timeline -->
+<div class="timeline-section">
+    <h2 class="timeline-title">Detailed Maintenance Timeline</h2>
+    
+    {% for timeline_item in maintenance_timeline|default([
+        {'time': 'T-60 min', 'task': 'Pre-maintenance preparations', 'description': 'Infrastructure readiness validation and backup procedures'},
+        {'time': 'T-30 min', 'task': 'Traffic routing adjustments', 'description': 'Blue-green deployment preparation and load balancer configuration'},
+        {'time': 'T-0 min', 'task': 'Maintenance window begins', 'description': 'Flask application deployment and database migration initiation'},
+        {'time': 'T+15 min', 'task': 'Database migration execution', 'description': 'Flask-Migrate schema updates and data integrity validation'},
+        {'time': 'T+45 min', 'task': 'Application validation', 'description': 'Health checks, performance benchmarking, and API endpoint testing'},
+        {'time': 'T+60 min', 'task': 'Traffic restoration', 'description': 'Gradual traffic routing to updated infrastructure'},
+        {'time': 'T+90 min', 'task': 'Post-maintenance validation', 'description': 'System monitoring and performance verification'}
+    ]) %}
+    <div class="timeline-item">
+        <div class="timeline-time">{{ timeline_item.time }}</div>
+        <div class="timeline-content">
+            <div class="timeline-task">{{ timeline_item.task }}</div>
+            <p class="timeline-description">{{ timeline_item.description }}</p>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- System Upgrades and Enhancements -->
+{% if system_upgrades %}
+<div class="alert alert-success">
+    <h3 style="margin: 0 0 15px 0; font-size: 18px;">System Upgrades and Enhancements</h3>
+    {% for upgrade in system_upgrades %}
+    <div style="margin: 10px 0;">
+        <strong>{{ upgrade.component }}:</strong> {{ upgrade.description }}
+        {% if upgrade.benefits %}<br><em>Benefits: {{ upgrade.benefits }}</em>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Rollback Procedures -->
+<div class="rollback-section">
+    <h2 class="rollback-title">Rollback Procedures and Contingency Planning</h2>
+    
+    <div class="content-text">
+        <strong>Rollback Capability:</strong> Complete rollback to previous system state available within 
+        {{ rollback_time|default('15 minutes') }} if any issues arise during maintenance.
+    </div>
+
+    <div class="content-text">
+        <strong>Rollback Triggers:</strong>
+    </div>
+    <ul style="margin: 10px 0 20px 20px; color: #666;">
+        {% for trigger in rollback_triggers|default([
+            'Performance degradation >10% from baseline metrics',
+            'Database migration validation failures',
+            'Critical system health check failures',
+            'User-reported service disruptions'
+        ]) %}
+        <li style="margin: 8px 0;">{{ trigger }}</li>
+        {% endfor %}
+    </ul>
+
+    <div class="content-text">
+        <strong>Data Integrity Protection:</strong> Comprehensive pre-migration backups with automated validation 
+        ensure zero data loss during rollback procedures. Flask-Migrate version control maintains database 
+        schema consistency throughout recovery operations.
+    </div>
+
+    {% if rollback_testing %}
+    <div class="alert alert-info">
+        <strong>Rollback Validation:</strong> {{ rollback_testing }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Emergency Contacts and Escalation -->
+<div class="emergency-contacts">
+    <h2 class="emergency-title">Emergency Contacts and Escalation Procedures</h2>
+    
+    <div class="content-text">
+        <strong>If you experience any issues during the maintenance window, please contact our support team immediately:</strong>
+    </div>
+
+    <div class="contact-grid">
+        {% for contact in emergency_contacts|default([
+            {
+                'role': 'Primary Support',
+                'name': 'Technical Support Team',
+                'email': 'support@company.com',
+                'phone': '+1-555-SUPPORT',
+                'availability': '24/7 during maintenance window'
+            },
+            {
+                'role': 'Infrastructure Team',
+                'name': 'DevOps Engineering',
+                'email': 'devops@company.com',
+                'phone': '+1-555-DEVOPS',
+                'availability': 'On-call during maintenance'
+            },
+            {
+                'role': 'Database Administration',
+                'name': 'Database Team',
+                'email': 'dba@company.com',
+                'phone': '+1-555-DATABASE',
+                'availability': 'Available for escalation'
+            },
+            {
+                'role': 'Incident Commander',
+                'name': 'Emergency Response',
+                'email': 'incident@company.com',
+                'phone': '+1-555-INCIDENT',
+                'availability': 'Critical issues only'
+            }
+        ]) %}
+        <div class="contact-card">
+            <div class="contact-role">{{ contact.role }}</div>
+            <div class="contact-info">{{ contact.name }}</div>
+            <div class="contact-info">📧 {{ contact.email }}</div>
+            <div class="contact-info">📞 {{ contact.phone }}</div>
+            <div class="contact-availability">{{ contact.availability }}</div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="alert alert-warning">
+        <strong>Escalation Process:</strong> For critical issues, contact the Incident Commander immediately. 
+        All escalated issues will be acknowledged within {{ escalation_response_time|default('5 minutes') }} 
+        and addressed according to severity level.
+    </div>
+</div>
+
+<!-- Status Monitoring Information -->
+<div class="security-info">
+    <h3 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L2 7V10C2 16 6 20.9 12 22C18 20.9 22 16 22 10V7L12 2Z"/>
+        </svg>
+        Real-Time Status Monitoring
+    </h3>
+    <div class="security-text">
+        You can monitor the maintenance progress and system status in real-time at: 
+        <strong>{{ status_page_url|default('status.company.com') }}</strong>
+    </div>
+    <div class="security-text">
+        We will provide regular updates throughout the maintenance window and notify you immediately 
+        upon completion. All system health metrics and performance indicators will be continuously 
+        monitored and reported.
+    </div>
+</div>
+
+<!-- Pre/Post Maintenance Actions -->
+<div class="alert alert-info">
+    <h3 style="margin: 0 0 15px 0; font-size: 18px;">Recommended Actions</h3>
+    
+    <div style="margin: 15px 0;">
+        <strong>Before Maintenance:</strong>
+        <ul style="margin: 8px 0 15px 20px;">
+            {% for action in pre_maintenance_actions|default([
+                'Save any unsaved work and log out of active sessions',
+                'Plan alternative workflows for critical operations',
+                'Review maintenance timeline for specific impact windows',
+                'Bookmark our status page for real-time updates'
+            ]) %}
+            <li style="margin: 5px 0;">{{ action }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div style="margin: 15px 0;">
+        <strong>After Maintenance:</strong>
+        <ul style="margin: 8px 0 15px 20px;">
+            {% for action in post_maintenance_actions|default([
+                'Clear browser cache and refresh application pages',
+                'Verify critical workflows and report any issues',
+                'Review new features and enhancements documentation',
+                'Update bookmarks if URLs have changed'
+            ]) %}
+            <li style="margin: 5px 0;">{{ action }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<!-- Closing Message -->
+<div class="content-text">
+    We appreciate your understanding and patience during this important maintenance activity. 
+    These upgrades will enhance system performance, security, and reliability, ensuring we continue 
+    to provide you with the best possible service experience.
+</div>
+
+<div class="content-text">
+    <strong>Thank you for your continued trust in our services.</strong>
+</div>
+
+{% if additional_information %}
+<div class="alert alert-info">
+    <strong>Additional Information:</strong> {{ additional_information }}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This maintenance notification was sent from our automated system monitoring infrastructure.
+    For questions about this maintenance, please contact our support team.
+</p>
+
+<div class="footer-links">
+    {% block footer_links %}
+    <a href="{{ status_page_url|default('#') }}" class="footer-link">System Status</a>
+    <a href="{{ support_url|default('#') }}" class="footer-link">Technical Support</a>
+    <a href="{{ documentation_url|default('#') }}" class="footer-link">Documentation</a>
+    <a href="{{ contact_url|default('#') }}" class="footer-link">Contact Us</a>
+    {% endblock %}
+</div>
+
+<p class="footer-copyright">
+    {% block copyright %}
+    © {% if current_year %}{{ current_year }}{% else %}2024{% endif %} {{ company_name|default('Your Company Name') }}. All rights reserved.
+    <br>This is an automated system maintenance notification. Please do not reply to this email.
+    {% endblock %}
+</p>
+{% endblock %}

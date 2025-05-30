@@ -1,0 +1,202 @@
+Welcome to {{ config.COMPANY_NAME or "Your Application" }}!
+
+Hello {{ user.first_name or user.name or "User" }},
+
+Congratulations! Your account has been successfully created and verified. Welcome to {{ config.COMPANY_NAME or "our platform" }} - we're excited to have you join our community!
+
+ACCOUNT DETAILS
+===============
+
+Name: {{ user.first_name or user.name or "User" }} {{ user.last_name or "" }}
+Email: {{ user.email }}
+Account Created: {{ user.created_at.strftime('%B %d, %Y at %I:%M %p %Z') if user.created_at else 'Just now' }}
+Account ID: {{ user.id or "Not assigned" }}
+
+GET STARTED WITH YOUR ACCOUNT
+==============================
+
+Your account is now ready to use! Here's how to get the most out of {{ config.COMPANY_NAME or "our platform" }}:
+
+1. COMPLETE YOUR PROFILE
+   • Add a profile picture
+   • Fill in your personal information
+   • Set your preferences and notifications
+   Visit: {{ config.BASE_URL or request.host_url }}profile
+
+2. EXPLORE KEY FEATURES
+   • Browse the dashboard for an overview of available tools
+   • Check out our featured capabilities and integrations
+   • Discover time-saving workflows and automation
+   Visit: {{ config.BASE_URL or request.host_url }}dashboard
+
+3. SECURE YOUR ACCOUNT
+   • Enable two-factor authentication for enhanced security
+   • Review your privacy settings
+   • Add recovery contact information
+   Visit: {{ config.BASE_URL or request.host_url }}security
+
+4. CONNECT AND INTEGRATE
+   • Link your existing tools and services
+   • Set up integrations with your workflow
+   • Import data from previous systems
+   Visit: {{ config.BASE_URL or request.host_url }}integrations
+
+FEATURE HIGHLIGHTS
+==================
+
+Here are some powerful features available to you:
+
+✓ DASHBOARD OVERVIEW
+  Get real-time insights and analytics at a glance
+
+✓ COLLABORATION TOOLS
+  Work seamlessly with your team and stakeholders
+
+✓ AUTOMATION WORKFLOWS
+  Streamline repetitive tasks and save time
+
+✓ SECURE DATA MANAGEMENT
+  Enterprise-grade security for your sensitive information
+
+✓ MOBILE ACCESS
+  Access your account anywhere with our mobile-friendly interface
+
+✓ INTEGRATIONS
+  Connect with 100+ popular tools and services
+
+✓ 24/7 SUPPORT
+  Our expert support team is here to help you succeed
+
+NEXT STEPS - YOUR 7-DAY QUICK START GUIDE
+==========================================
+
+DAY 1-2: Account Setup
+• Complete your profile and verify contact information
+• Set up two-factor authentication
+• Explore the main dashboard
+
+DAY 3-4: Core Features
+• Try creating your first project or workflow
+• Invite team members if applicable
+• Set up your notification preferences
+
+DAY 5-7: Advanced Features
+• Configure integrations with your existing tools
+• Explore automation and advanced features
+• Schedule a free consultation with our success team
+
+HELPFUL RESOURCES
+==================
+
+To help you get the most out of your experience:
+
+📚 GETTING STARTED GUIDE
+   Step-by-step tutorials and best practices
+   Visit: {{ config.BASE_URL or request.host_url }}guide
+
+🎥 VIDEO TUTORIALS
+   Watch quick tutorials on key features
+   Visit: {{ config.BASE_URL or request.host_url }}tutorials
+
+💬 COMMUNITY FORUM
+   Connect with other users and share tips
+   Visit: {{ config.BASE_URL or request.host_url }}community
+
+📖 KNOWLEDGE BASE
+   Detailed documentation and FAQs
+   Visit: {{ config.BASE_URL or request.host_url }}help
+
+🎯 FREE CONSULTATION
+   Schedule a 1-on-1 session with our success team
+   Visit: {{ config.BASE_URL or request.host_url }}consultation
+
+NEED HELP GETTING STARTED?
+===========================
+
+Our team is here to support your success:
+
+• Email Support: {{ config.SUPPORT_EMAIL or "support@example.com" }}
+• Live Chat: Available 24/7 at {{ config.BASE_URL or request.host_url }}chat
+• Phone Support: {{ config.SUPPORT_PHONE or "Available via email" }}
+• Success Team: {{ config.SUCCESS_EMAIL or config.SUPPORT_EMAIL or "success@example.com" }}
+
+QUICK ACCESS LINKS
+==================
+
+Here are some important links for easy access:
+
+• Dashboard: {{ config.BASE_URL or request.host_url }}dashboard
+• Account Settings: {{ config.BASE_URL or request.host_url }}settings
+• Security Settings: {{ config.BASE_URL or request.host_url }}security
+• Billing & Plans: {{ config.BASE_URL or request.host_url }}billing
+• Support Center: {{ config.BASE_URL or request.host_url }}support
+
+SECURITY AND PRIVACY
+====================
+
+Your security and privacy are our top priorities:
+
+✓ Your data is encrypted both in transit and at rest
+✓ We comply with industry-standard security practices
+✓ Regular security audits ensure your information stays safe
+✓ You have full control over your data and privacy settings
+
+Review our privacy policy: {{ config.BASE_URL or request.host_url }}privacy
+Review our security practices: {{ config.BASE_URL or request.host_url }}security-info
+
+WHAT'S NEXT?
+============
+
+We recommend starting with these important steps:
+
+1. Log in to your account and explore the dashboard
+2. Complete your profile setup
+3. Enable two-factor authentication
+4. Take our interactive product tour
+5. Join our community forum to connect with other users
+
+Ready to get started? Log in now: {{ config.BASE_URL or request.host_url }}login
+
+STAY CONNECTED
+==============
+
+Follow us for tips, updates, and community highlights:
+
+• Newsletter: {{ config.BASE_URL or request.host_url }}newsletter
+• Blog: {{ config.BASE_URL or request.host_url }}blog
+• Social Media: {{ config.SOCIAL_LINKS or "Find us on social media" }}
+
+Thank you for choosing {{ config.COMPANY_NAME or "our platform" }}. We're committed to helping you achieve your goals and look forward to being part of your success story!
+
+Welcome aboard!
+
+Best regards,
+The {{ config.COMPANY_NAME or "Application" }} Team
+
+---
+
+TECHNICAL INFORMATION
+======================
+
+This welcome email was automatically generated by the Flask Application Authentication System.
+Please do not reply directly to this email address.
+
+Welcome Message ID: {{ message_id or "WLC-" + user.id|string if user.id else "WLC-" + current_timestamp|string }}
+Account Reference: {{ user.id or "Not assigned" }}
+Sent: {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') if current_timestamp else 'Just now' }}
+
+If you received this email by mistake, please contact our support team at {{ config.SUPPORT_EMAIL or "support@example.com" }}.
+
+---
+
+{{ config.COMPANY_NAME or "Company Name" }}
+{{ config.COMPANY_ADDRESS or "Company Address" }}
+{{ config.COMPANY_WEBSITE or "www.example.com" }}
+
+Privacy Policy: {{ config.BASE_URL or request.host_url }}privacy
+Terms of Service: {{ config.BASE_URL or request.host_url }}terms
+Unsubscribe: {{ config.BASE_URL or request.host_url }}unsubscribe?token={{ unsubscribe_token or "contact-support" }}
+
+© {{ current_year|default(2024) }} {{ config.COMPANY_NAME or "Company Name" }}. All rights reserved.
+
+This email was sent to {{ user.email }}. If you no longer wish to receive welcome emails, please update your notification preferences in your account settings.

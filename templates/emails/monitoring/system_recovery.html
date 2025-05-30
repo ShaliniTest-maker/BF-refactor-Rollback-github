@@ -1,0 +1,468 @@
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}System Recovery Complete - Incident {{ incident_id }}{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Recovery-specific styles */
+    .recovery-header {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: #ffffff;
+    }
+
+    .recovery-icon {
+        width: 48px;
+        height: 48px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 15px;
+    }
+
+    .incident-details {
+        background-color: #f8f9fa;
+        border-left: 4px solid #28a745;
+        padding: 20px;
+        margin: 25px 0;
+        border-radius: 0 6px 6px 0;
+    }
+
+    .status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin: 30px 0;
+    }
+
+    .status-card {
+        background: #ffffff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-card.success {
+        border-left: 4px solid #28a745;
+    }
+
+    .status-card.warning {
+        border-left: 4px solid #ffc107;
+    }
+
+    .status-card.info {
+        border-left: 4px solid #17a2b8;
+    }
+
+    .status-icon {
+        font-size: 24px;
+        margin-bottom: 10px;
+        display: block;
+    }
+
+    .status-icon.success { color: #28a745; }
+    .status-icon.warning { color: #ffc107; }
+    .status-icon.info { color: #17a2b8; }
+
+    .metrics-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+        background: #ffffff;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .metrics-table th,
+    .metrics-table td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .metrics-table th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .metrics-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .metric-value.good { color: #28a745; font-weight: 600; }
+    .metric-value.warning { color: #ffc107; font-weight: 600; }
+    .metric-value.critical { color: #dc3545; font-weight: 600; }
+
+    .timeline {
+        margin: 30px 0;
+    }
+
+    .timeline-item {
+        display: flex;
+        margin-bottom: 20px;
+        align-items: flex-start;
+    }
+
+    .timeline-marker {
+        width: 12px;
+        height: 12px;
+        background: #28a745;
+        border-radius: 50%;
+        margin-right: 15px;
+        margin-top: 6px;
+        flex-shrink: 0;
+    }
+
+    .timeline-content {
+        flex: 1;
+    }
+
+    .timeline-time {
+        font-size: 14px;
+        color: #6c757d;
+        font-weight: 600;
+    }
+
+    .timeline-description {
+        margin: 5px 0 0 0;
+        color: #495057;
+    }
+
+    .recovery-actions {
+        background: #e8f5e8;
+        border: 1px solid #c3e6cb;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .action-list {
+        list-style: none;
+        padding: 0;
+        margin: 15px 0 0 0;
+    }
+
+    .action-list li {
+        padding: 8px 0;
+        border-bottom: 1px solid #d4edda;
+        display: flex;
+        align-items: center;
+    }
+
+    .action-list li:last-child {
+        border-bottom: none;
+    }
+
+    .action-icon {
+        color: #28a745;
+        margin-right: 10px;
+        font-weight: bold;
+    }
+
+    .contact-info {
+        background: #e3f2fd;
+        border: 1px solid #bbdefb;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+        text-align: center;
+    }
+
+    /* Mobile responsiveness for recovery template */
+    @media only screen and (max-width: 600px) {
+        .status-grid {
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+        
+        .metrics-table {
+            font-size: 14px;
+        }
+        
+        .metrics-table th,
+        .metrics-table td {
+            padding: 8px 10px;
+        }
+        
+        .timeline-item {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .timeline-marker {
+            margin-bottom: 10px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+<div class="recovery-icon">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22,4 12,14.01 9,11.01"></polyline>
+    </svg>
+</div>
+<h1 class="header-title">System Recovery Complete</h1>
+<p class="header-subtitle">Incident {{ incident_id }} Successfully Resolved</p>
+{% endblock %}
+
+{% block content %}
+<!-- Incident Summary -->
+<div class="incident-details">
+    <h3 style="margin: 0 0 15px 0; color: #495057;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+        Incident Summary
+    </h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div>
+            <strong>Incident ID:</strong><br>
+            <span style="color: #6c757d;">{{ incident_id }}</span>
+        </div>
+        <div>
+            <strong>Severity Level:</strong><br>
+            <span style="color: {% if severity == 'Critical' %}#dc3545{% elif severity == 'High' %}#fd7e14{% elif severity == 'Medium' %}#ffc107{% else %}#28a745{% endif %};">{{ severity }}</span>
+        </div>
+        <div>
+            <strong>Total Downtime:</strong><br>
+            <span style="color: #6c757d;">{{ total_downtime }}</span>
+        </div>
+        <div>
+            <strong>Recovery Completed:</strong><br>
+            <span style="color: #6c757d;">{{ recovery_time }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Executive Summary -->
+<h2 class="content-title">Recovery Status Overview</h2>
+<p class="content-text">
+    We are pleased to confirm that the system incident <strong>{{ incident_id }}</strong> has been successfully resolved. 
+    All services have been fully restored and are operating within normal parameters. Our automated monitoring 
+    systems confirm that performance, security, and availability metrics have returned to optimal levels.
+</p>
+
+<!-- System Status Grid -->
+<div class="status-grid">
+    <div class="status-card success">
+        <span class="status-icon success">✓</span>
+        <h4 style="margin: 0 0 5px 0;">Services Restored</h4>
+        <p style="margin: 0; color: #6c757d; font-size: 14px;">All applications online</p>
+    </div>
+    <div class="status-card success">
+        <span class="status-icon success">⚡</span>
+        <h4 style="margin: 0 0 5px 0;">Performance</h4>
+        <p style="margin: 0; color: #6c757d; font-size: 14px;">Operating within SLA</p>
+    </div>
+    <div class="status-card success">
+        <span class="status-icon success">🔒</span>
+        <h4 style="margin: 0 0 5px 0;">Security</h4>
+        <p style="margin: 0; color: #6c757d; font-size: 14px;">All systems secured</p>
+    </div>
+    <div class="status-card info">
+        <span class="status-icon info">📊</span>
+        <h4 style="margin: 0 0 5px 0;">Monitoring</h4>
+        <p style="margin: 0; color: #6c757d; font-size: 14px;">Enhanced surveillance active</p>
+    </div>
+</div>
+
+<!-- Detailed Recovery Metrics -->
+<h3 style="color: #495057; margin: 35px 0 20px 0;">System Health Validation</h3>
+<table class="metrics-table">
+    <thead>
+        <tr>
+            <th>Component</th>
+            <th>Status</th>
+            <th>Performance</th>
+            <th>Last Validated</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Flask Application Instances</td>
+            <td><span class="metric-value good">✓ Operational</span></td>
+            <td><span class="metric-value good">{{ app_response_time }}ms avg</span></td>
+            <td>{{ app_last_check }}</td>
+        </tr>
+        <tr>
+            <td>Gunicorn WSGI Workers</td>
+            <td><span class="metric-value good">✓ Healthy</span></td>
+            <td><span class="metric-value good">{{ worker_utilization }}% utilization</span></td>
+            <td>{{ worker_last_check }}</td>
+        </tr>
+        <tr>
+            <td>Container Orchestration</td>
+            <td><span class="metric-value good">✓ Running</span></td>
+            <td><span class="metric-value good">{{ container_health }}% healthy</span></td>
+            <td>{{ container_last_check }}</td>
+        </tr>
+        <tr>
+            <td>Database Connections</td>
+            <td><span class="metric-value good">✓ Connected</span></td>
+            <td><span class="metric-value good">{{ db_response_time }}ms query time</span></td>
+            <td>{{ db_last_check }}</td>
+        </tr>
+        <tr>
+            <td>Authentication Services</td>
+            <td><span class="metric-value good">✓ Verified</span></td>
+            <td><span class="metric-value good">{{ auth_response_time }}ms Auth0</span></td>
+            <td>{{ auth_last_check }}</td>
+        </tr>
+        <tr>
+            <td>Security Monitoring</td>
+            <td><span class="metric-value good">✓ Active</span></td>
+            <td><span class="metric-value good">{{ security_alerts }} alerts cleared</span></td>
+            <td>{{ security_last_check }}</td>
+        </tr>
+    </tbody>
+</table>
+
+<!-- Recovery Timeline -->
+<h3 style="color: #495057; margin: 35px 0 20px 0;">Recovery Timeline</h3>
+<div class="timeline">
+    {% for event in recovery_timeline %}
+    <div class="timeline-item">
+        <div class="timeline-marker"></div>
+        <div class="timeline-content">
+            <div class="timeline-time">{{ event.timestamp }}</div>
+            <div class="timeline-description">{{ event.description }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Post-Incident Analysis Summary -->
+<h3 style="color: #495057; margin: 35px 0 20px 0;">Post-Incident Analysis Summary</h3>
+<div class="alert alert-info">
+    <strong>Root Cause:</strong> {{ root_cause }}<br><br>
+    <strong>Impact Assessment:</strong> {{ impact_assessment }}<br><br>
+    <strong>Resolution Method:</strong> {{ resolution_method }}
+</div>
+
+<!-- Preventive Measures Implemented -->
+<div class="recovery-actions">
+    <h4 style="margin: 0 0 15px 0; color: #155724;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        Preventive Measures Implemented
+    </h4>
+    <ul class="action-list">
+        {% for measure in preventive_measures %}
+        <li>
+            <span class="action-icon">✓</span>
+            {{ measure }}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- Performance Validation Results -->
+<h3 style="color: #495057; margin: 35px 0 20px 0;">Performance Validation Results</h3>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0;">
+    <div class="alert alert-success">
+        <strong>API Response Time</strong><br>
+        <span style="font-size: 18px; font-weight: 600;">{{ api_response_time }}ms</span><br>
+        <small>Target: &lt;200ms | Status: ✓ Within SLA</small>
+    </div>
+    <div class="alert alert-success">
+        <strong>Database Query Performance</strong><br>
+        <span style="font-size: 18px; font-weight: 600;">{{ db_query_time }}ms</span><br>
+        <small>Target: &lt;100ms | Status: ✓ Within SLA</small>
+    </div>
+    <div class="alert alert-success">
+        <strong>System Availability</strong><br>
+        <span style="font-size: 18px; font-weight: 600;">{{ system_availability }}%</span><br>
+        <small>Target: &gt;99.9% | Status: ✓ Restored</small>
+    </div>
+    <div class="alert alert-success">
+        <strong>Error Rate</strong><br>
+        <span style="font-size: 18px; font-weight: 600;">{{ error_rate }}%</span><br>
+        <small>Target: &lt;1% | Status: ✓ Normal</small>
+    </div>
+</div>
+
+<!-- Security Posture Confirmation -->
+<div class="security-info">
+    <h4 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <path d="M9 12l2 2 4-4"></path>
+        </svg>
+        Security Posture Confirmation
+    </h4>
+    <p class="security-text mb-15">
+        <strong>Security Status:</strong> All security systems have been validated and confirmed operational.
+    </p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div>
+            <strong>Authentication:</strong><br>
+            <span style="color: #28a745;">✓ Auth0 Verified</span>
+        </div>
+        <div>
+            <strong>Authorization:</strong><br>
+            <span style="color: #28a745;">✓ Permissions Intact</span>
+        </div>
+        <div>
+            <strong>Encryption:</strong><br>
+            <span style="color: #28a745;">✓ Data Protected</span>
+        </div>
+        <div>
+            <strong>Monitoring:</strong><br>
+            <span style="color: #28a745;">✓ Alerts Active</span>
+        </div>
+    </div>
+</div>
+
+<!-- Next Steps and Monitoring -->
+<h3 style="color: #495057; margin: 35px 0 20px 0;">Ongoing Monitoring and Next Steps</h3>
+<p class="content-text">
+    Our engineering team will continue monitoring all systems for the next {{ monitoring_period }} to ensure 
+    stability. Enhanced monitoring is currently active to detect any potential issues early. 
+    A detailed post-incident report will be available within {{ report_timeline }}.
+</p>
+
+<div class="alert alert-info">
+    <strong>Enhanced Monitoring Period:</strong> {{ monitoring_period }}<br>
+    <strong>Full Report Available:</strong> {{ report_timeline }}<br>
+    <strong>Follow-up Review:</strong> {{ followup_date }}
+</div>
+
+<!-- Contact Information -->
+<div class="contact-info">
+    <h4 style="margin: 0 0 15px 0; color: #1565c0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        Questions or Concerns?
+    </h4>
+    <p style="margin: 0; color: #495057;">
+        If you have any questions about this recovery or notice any issues, please contact:<br>
+        <strong>Technical Support:</strong> {{ support_email }}<br>
+        <strong>Incident Manager:</strong> {{ incident_manager }}<br>
+        <strong>Status Page:</strong> <a href="{{ status_page_url }}" style="color: #1565c0;">{{ status_page_url }}</a>
+    </p>
+</div>
+
+<!-- Footer Message -->
+<p class="content-text" style="text-align: center; font-style: italic; color: #6c757d; margin-top: 40px;">
+    Thank you for your patience during this incident. We remain committed to providing reliable, 
+    secure, and high-performance services.
+</p>
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ status_page_url }}" class="footer-link">System Status</a>
+<a href="{{ incident_report_url }}" class="footer-link">Incident Report</a>
+<a href="{{ contact_support_url }}" class="footer-link">Contact Support</a>
+<a href="{{ documentation_url }}" class="footer-link">Documentation</a>
+{% endblock %}

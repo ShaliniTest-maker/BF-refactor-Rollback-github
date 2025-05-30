@@ -1,0 +1,90 @@
+{# 
+  Liveness Probe Template for Flask Application Health Checks
+  
+  Purpose: Provides standardized JSON responses for basic application responsiveness 
+  validation with <50ms response time requirement per Section 6.5.2.1
+  
+  Integration: 
+  - ALB target health verification per Section 8.5.1 
+  - Container orchestration liveness monitoring (Docker/ECS/EKS) per Section 6.5.4
+  - Load balancer health check compatibility per Section 8.5.1
+  
+  Performance Requirements:
+  - <50ms response time for basic application responsiveness
+  - HTTP 200/503 status codes for ALB compatibility
+  - Minimal dependency validation to ensure fast response
+  
+  Usage: 
+  - Primary endpoint: /health/liveness
+  - Called by ALB every 30 seconds with 5-second timeout
+  - Used by container orchestration for liveness probe validation
+#}
+{% extends "templates/health/base_health.json" %}
+
+{# Override status block for liveness-specific logic #}
+{% block status %}{{ 'healthy' if is_alive else 'unhealthy' }}{% endblock %}
+
+{# Specify check type as liveness probe #}
+{% block check_type %}liveness{% endblock %}
+
+{# Liveness-specific health checks - minimal for performance #}
+{% block health_checks %}
+"application": {
+  "status": "{{ 'healthy' if application_responsive else 'unhealthy' }}",
+  "details": "{% if application_responsive %}Flask application responsive{% else %}Flask application unresponsive{% endif %}",
+  "response_time_ms": {{ application_check_time_ms | default(0) }}
+},
+"runtime": {
+  "status": "{{ 'healthy' if python_runtime_healthy else 'unhealthy' }}",
+  "details": "Python runtime {{ python_version | default('3.13.3') }} operational",
+  "process_active": {{ process_active | default(true) | tojson }}
+},
+"server": {
+  "status": "{{ 'healthy' if wsgi_server_healthy else 'unhealthy' }}",
+  "details": "WSGI server accepting connections",
+  "worker_status": "{{ worker_status | default('active') }}",
+  "port_listening": {{ port_listening | default(true) | tojson }}
+}
+{% endblock %}
+
+{# Additional metadata for liveness probe context #}
+{% block additional_metadata %}
+"probe_type": "liveness",
+"minimal_checks": true,
+"fast_response": true,
+"alb_health_check": true,
+"container_liveness": true,
+"timeout_seconds": {{ probe_timeout | default(5) }},
+"check_interval_seconds": {{ check_interval | default(30) }},
+{% endblock %}
+
+{# Liveness-specific custom fields #}
+{% block custom_fields %}
+"liveness": {
+  "alive": {{ is_alive | default(true) | tojson }},
+  "ready_for_traffic": {{ ready_for_traffic | default(true) | tojson }},
+  "last_heartbeat": "{{ last_heartbeat | default(timestamp) }}",
+  "startup_complete": {{ startup_complete | default(true) | tojson }},
+  "graceful_shutdown": {{ graceful_shutdown | default(false) | tojson }}
+},
+"load_balancer": {
+  "target_health": "{{ 'healthy' if is_alive and ready_for_traffic else 'unhealthy' }}",
+  "registration_status": "{{ 'in_service' if is_alive and ready_for_traffic else 'out_of_service' }}",
+  "health_check_path": "/health/liveness",
+  "alb_compatible": true
+},
+"container": {
+  "orchestration_status": "{{ 'running' if is_alive else 'failing' }}",
+  "restart_policy": "{{ restart_policy | default('always') }}",
+  "liveness_probe_status": "{{ 'passing' if is_alive else 'failing' }}",
+  "container_platform": "{{ orchestration_platform | default('docker') }}"
+},
+{% endblock %}
+
+{# Override related links for liveness context #}
+{% block related_links %}
+"readiness": "/health/readiness",
+"detailed": "/health/detailed", 
+"metrics": "/metrics",
+"alb_health": "/health/liveness"
+{% endblock %}

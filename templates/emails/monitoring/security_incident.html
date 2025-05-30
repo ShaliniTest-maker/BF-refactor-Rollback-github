@@ -1,0 +1,587 @@
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}Security Incident Alert - {{ incident_type|title }}{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Security incident specific styles */
+    .security-header {
+        background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
+        color: #ffffff;
+    }
+    
+    .security-critical {
+        background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
+        color: #ffffff;
+    }
+    
+    .security-high {
+        background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+        color: #ffffff;
+    }
+    
+    .security-medium {
+        background: linear-gradient(135deg, #fbc02d 0%, #f57f17 100%);
+        color: #ffffff;
+    }
+    
+    .security-low {
+        background: linear-gradient(135deg, #388e3c 0%, #2e7d2e 100%);
+        color: #ffffff;
+    }
+    
+    .incident-summary {
+        background-color: #fff3e0;
+        border: 2px solid #ff9800;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+    
+    .incident-details {
+        background-color: #f5f5f5;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .threat-level-critical {
+        background-color: #ffebee;
+        border-left: 5px solid #d32f2f;
+        color: #c62828;
+    }
+    
+    .threat-level-high {
+        background-color: #fff3e0;
+        border-left: 5px solid #f57c00;
+        color: #e65100;
+    }
+    
+    .threat-level-medium {
+        background-color: #fffde7;
+        border-left: 5px solid #fbc02d;
+        color: #f57f17;
+    }
+    
+    .threat-level-low {
+        background-color: #e8f5e8;
+        border-left: 5px solid #4caf50;
+        color: #2e7d2e;
+    }
+    
+    .guardduty-finding {
+        background-color: #f3e5f5;
+        border: 1px solid #9c27b0;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .incident-response-actions {
+        background-color: #e3f2fd;
+        border: 1px solid #2196f3;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .forensic-info {
+        background-color: #fafafa;
+        border: 1px solid #bdbdbd;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+    }
+    
+    .action-taken {
+        background-color: #e8f5e8;
+        border-left: 4px solid #4caf50;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .action-pending {
+        background-color: #fff3e0;
+        border-left: 4px solid #ff9800;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .action-failed {
+        background-color: #ffebee;
+        border-left: 4px solid #f44336;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .severity-badge {
+        display: inline-block;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 14px;
+        text-transform: uppercase;
+        margin: 5px 0;
+    }
+    
+    .metrics-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+    }
+    
+    .metrics-table th,
+    .metrics-table td {
+        border: 1px solid #ddd;
+        padding: 12px;
+        text-align: left;
+    }
+    
+    .metrics-table th {
+        background-color: #f5f5f5;
+        font-weight: 600;
+    }
+    
+    .contact-urgent {
+        background-color: #ffebee;
+        border: 2px solid #d32f2f;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+        text-align: center;
+    }
+    
+    .timeline-item {
+        border-left: 3px solid #2196f3;
+        padding: 15px 20px;
+        margin: 10px 0;
+        background-color: #f8f9fa;
+    }
+    
+    .timeline-timestamp {
+        font-weight: 600;
+        color: #1976d2;
+        font-size: 14px;
+    }
+    
+    .container-status {
+        background-color: #e3f2fd;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    .iam-status {
+        background-color: #fff3e0;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    @media only screen and (max-width: 600px) {
+        .incident-summary,
+        .incident-details,
+        .guardduty-finding,
+        .incident-response-actions,
+        .forensic-info {
+            padding: 15px !important;
+            margin: 15px 0 !important;
+        }
+        
+        .metrics-table {
+            font-size: 12px;
+        }
+        
+        .severity-badge {
+            display: block;
+            text-align: center;
+            margin: 10px 0;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+<div class="logo">
+    🔒 Security Alert System
+</div>
+<h1 class="header-title">Security Incident Detected</h1>
+<p class="header-subtitle">Immediate Action Required</p>
+{% endblock %}
+
+{% block content %}
+<!-- Incident Summary -->
+<div class="incident-summary">
+    <h2 class="content-title mb-15">
+        🚨 {{ incident_type|title }} Security Incident
+    </h2>
+    
+    <div class="severity-badge security-{{ severity|lower }}">
+        {{ severity|upper }} SEVERITY
+    </div>
+    
+    <p class="content-text mt-15">
+        <strong>Incident ID:</strong> {{ incident_id }}<br>
+        <strong>Detected:</strong> {{ detection_time }}<br>
+        <strong>Source:</strong> {{ detection_source }}<br>
+        <strong>Affected System:</strong> {{ affected_system }}
+    </p>
+    
+    {% if threat_score %}
+    <p class="content-text">
+        <strong>Threat Score:</strong> {{ threat_score }}/100
+        {% if threat_score >= 80 %}
+        <span style="color: #d32f2f;">⚠️ Critical Threat Level</span>
+        {% elif threat_score >= 60 %}
+        <span style="color: #f57c00;">⚠️ High Threat Level</span>
+        {% elif threat_score >= 40 %}
+        <span style="color: #fbc02d;">⚠️ Medium Threat Level</span>
+        {% else %}
+        <span style="color: #4caf50;">ℹ️ Low Threat Level</span>
+        {% endif %}
+    </p>
+    {% endif %}
+</div>
+
+<!-- Incident Description -->
+<div class="incident-details threat-level-{{ severity|lower }}">
+    <h3 style="margin: 0 0 15px 0; color: inherit;">
+        🔍 Incident Description
+    </h3>
+    <p class="content-text mb-0">
+        {{ incident_description }}
+    </p>
+    
+    {% if additional_context %}
+    <p class="content-text mt-15 mb-0">
+        <strong>Additional Context:</strong><br>
+        {{ additional_context }}
+    </p>
+    {% endif %}
+</div>
+
+<!-- GuardDuty Findings (if applicable) -->
+{% if guardduty_findings %}
+<div class="guardduty-finding">
+    <h3 style="margin: 0 0 15px 0; color: #7b1fa2;">
+        🛡️ AWS GuardDuty Findings
+    </h3>
+    
+    {% for finding in guardduty_findings %}
+    <div style="background-color: #fafafa; padding: 15px; margin: 10px 0; border-radius: 4px;">
+        <p class="content-text mb-15">
+            <strong>Finding Type:</strong> {{ finding.type }}<br>
+            <strong>Severity:</strong> {{ finding.severity }}<br>
+            <strong>Confidence:</strong> {{ finding.confidence }}<br>
+            {% if finding.service %}
+            <strong>Service:</strong> {{ finding.service }}<br>
+            {% endif %}
+        </p>
+        
+        <p class="content-text mb-15">
+            <strong>Description:</strong> {{ finding.description }}
+        </p>
+        
+        {% if finding.affected_resources %}
+        <p class="content-text mb-0">
+            <strong>Affected Resources:</strong><br>
+            {% for resource in finding.affected_resources %}
+            • {{ resource.type }}: {{ resource.id }}<br>
+            {% endfor %}
+        </p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Automated Incident Response Actions -->
+{% if automated_responses %}
+<div class="incident-response-actions">
+    <h3 style="margin: 0 0 15px 0; color: #1976d2;">
+        🤖 Automated Response Actions
+    </h3>
+    
+    {% for action in automated_responses %}
+    <div class="action-{{ action.status|lower }}">
+        <p class="content-text mb-0">
+            <strong>{{ action.type|title }}:</strong> {{ action.description }}<br>
+            <strong>Status:</strong> 
+            {% if action.status == 'completed' %}
+            ✅ Completed at {{ action.completed_at }}
+            {% elif action.status == 'pending' %}
+            ⏳ In Progress (started {{ action.started_at }})
+            {% elif action.status == 'failed' %}
+            ❌ Failed: {{ action.error_message }}
+            {% endif %}
+        </p>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Container Isolation Status -->
+{% if container_isolation %}
+<div class="container-status">
+    <h3 style="margin: 0 0 15px 0; color: #1976d2;">
+        📦 Container Isolation Status
+    </h3>
+    
+    <p class="content-text">
+        <strong>Affected Containers:</strong><br>
+        {% for container in container_isolation.affected_containers %}
+        • {{ container.name }} ({{ container.platform }}): {{ container.status }}<br>
+        {% endfor %}
+    </p>
+    
+    {% if container_isolation.actions_taken %}
+    <p class="content-text">
+        <strong>Isolation Actions:</strong><br>
+        {% for action in container_isolation.actions_taken %}
+        • {{ action }}<br>
+        {% endfor %}
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- IAM Credential Revocation Status -->
+{% if iam_revocation %}
+<div class="iam-status">
+    <h3 style="margin: 0 0 15px 0; color: #f57c00;">
+        🔐 Credential Revocation Status
+    </h3>
+    
+    <p class="content-text">
+        <strong>Revoked Credentials:</strong><br>
+        {% for credential in iam_revocation.revoked_credentials %}
+        • {{ credential.type }}: {{ credential.identifier }} ({{ credential.status }})<br>
+        {% endfor %}
+    </p>
+    
+    {% if iam_revocation.emergency_policies %}
+    <p class="content-text">
+        <strong>Emergency Policies Applied:</strong><br>
+        {% for policy in iam_revocation.emergency_policies %}
+        • {{ policy }}<br>
+        {% endfor %}
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Forensic Information -->
+{% if forensic_data %}
+<div class="forensic-info">
+    <h3 style="margin: 0 0 15px 0;">
+        🔬 Forensic Analysis Data
+    </h3>
+    
+    <p class="content-text">
+        <strong>Source IP Address:</strong> {{ forensic_data.source_ip }}<br>
+        {% if forensic_data.user_agent %}
+        <strong>User Agent:</strong> {{ forensic_data.user_agent }}<br>
+        {% endif %}
+        {% if forensic_data.session_id %}
+        <strong>Session ID:</strong> {{ forensic_data.session_id }}<br>
+        {% endif %}
+        {% if forensic_data.user_id %}
+        <strong>User ID:</strong> {{ forensic_data.user_id }}<br>
+        {% endif %}
+    </p>
+    
+    {% if forensic_data.request_details %}
+    <p class="content-text">
+        <strong>Request Details:</strong><br>
+        Method: {{ forensic_data.request_details.method }}<br>
+        Path: {{ forensic_data.request_details.path }}<br>
+        {% if forensic_data.request_details.parameters %}
+        Parameters: {{ forensic_data.request_details.parameters }}<br>
+        {% endif %}
+    </p>
+    {% endif %}
+    
+    {% if forensic_data.authentication_details %}
+    <p class="content-text">
+        <strong>Authentication Context:</strong><br>
+        {% for key, value in forensic_data.authentication_details.items() %}
+        {{ key|title }}: {{ value }}<br>
+        {% endfor %}
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Security Metrics -->
+{% if security_metrics %}
+<div class="security-info">
+    <h3 class="security-title">
+        📊 Security Metrics
+    </h3>
+    
+    <table class="metrics-table">
+        <thead>
+            <tr>
+                <th>Metric</th>
+                <th>Current Value</th>
+                <th>Threshold</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for metric in security_metrics %}
+            <tr>
+                <td>{{ metric.name }}</td>
+                <td>{{ metric.value }}</td>
+                <td>{{ metric.threshold }}</td>
+                <td>
+                    {% if metric.status == 'critical' %}
+                    <span style="color: #d32f2f;">🔴 Critical</span>
+                    {% elif metric.status == 'warning' %}
+                    <span style="color: #f57c00;">🟡 Warning</span>
+                    {% else %}
+                    <span style="color: #4caf50;">🟢 Normal</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Incident Timeline -->
+{% if incident_timeline %}
+<div class="security-info">
+    <h3 class="security-title">
+        ⏰ Incident Timeline
+    </h3>
+    
+    {% for event in incident_timeline %}
+    <div class="timeline-item">
+        <div class="timeline-timestamp">{{ event.timestamp }}</div>
+        <p class="content-text mb-0">{{ event.description }}</p>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Recommended Actions -->
+<div class="alert alert-warning">
+    <h3 style="margin: 0 0 15px 0;">
+        🎯 Immediate Actions Required
+    </h3>
+    
+    <p class="content-text">
+        {% if severity == 'CRITICAL' %}
+        <strong>CRITICAL PRIORITY:</strong> This incident requires immediate attention.
+        {% elif severity == 'HIGH' %}
+        <strong>HIGH PRIORITY:</strong> Please address this incident within 15 minutes.
+        {% elif severity == 'MEDIUM' %}
+        <strong>MEDIUM PRIORITY:</strong> Please review and address within 1 hour.
+        {% else %}
+        <strong>LOW PRIORITY:</strong> Please review during business hours.
+        {% endif %}
+    </p>
+    
+    {% if recommended_actions %}
+    <p class="content-text">
+        <strong>Recommended Actions:</strong>
+    </p>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        {% for action in recommended_actions %}
+        <li>{{ action }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    
+    {% if next_steps %}
+    <p class="content-text">
+        <strong>Next Steps:</strong>
+    </p>
+    <ul style="margin: 10px 0; padding-left: 20px;">
+        {% for step in next_steps %}
+        <li>{{ step }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+
+<!-- Emergency Contacts -->
+<div class="contact-urgent">
+    <h3 style="margin: 0 0 15px 0; color: #d32f2f;">
+        📞 Emergency Security Contacts
+    </h3>
+    
+    <p class="content-text">
+        <strong>Security Operations Center:</strong><br>
+        Phone: {{ soc_phone|default('+1-555-SEC-HELP') }}<br>
+        Email: {{ soc_email|default('security@company.com') }}
+    </p>
+    
+    <p class="content-text">
+        <strong>Incident Response Team:</strong><br>
+        On-Call: {{ oncall_contact|default('+1-555-ONCALL-1') }}<br>
+        Escalation: {{ escalation_contact|default('+1-555-ESCALATE') }}
+    </p>
+    
+    {% if severity in ['CRITICAL', 'HIGH'] %}
+    <p class="content-text" style="color: #d32f2f; font-weight: 600;">
+        ⚠️ For {{ severity }} incidents, contact the Security Operations Center immediately.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Access Security Dashboard -->
+<div class="button-container">
+    <a href="{{ dashboard_url|default('#') }}" class="button">
+        🔍 View Security Dashboard
+    </a>
+    
+    {% if incident_details_url %}
+    <a href="{{ incident_details_url }}" class="button button-secondary">
+        📋 View Incident Details
+    </a>
+    {% endif %}
+</div>
+
+<!-- Additional Resources -->
+<div class="security-info">
+    <h3 class="security-title">
+        📚 Additional Resources
+    </h3>
+    
+    <p class="security-text">
+        • <a href="{{ runbook_url|default('#') }}">Security Incident Response Runbook</a><br>
+        • <a href="{{ escalation_procedures_url|default('#') }}">Escalation Procedures</a><br>
+        • <a href="{{ forensic_tools_url|default('#') }}">Forensic Analysis Tools</a><br>
+        • <a href="{{ compliance_docs_url|default('#') }}">Compliance Documentation</a>
+    </p>
+</div>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This security alert was generated automatically by the Flask Security Monitoring System.
+    Incident ID: {{ incident_id }}. Generated at {{ generation_time|default('N/A') }}.
+</p>
+
+<p class="footer-text">
+    <strong style="color: #d32f2f;">⚠️ SECURITY NOTICE:</strong> 
+    This email contains sensitive security information. Please handle according to your organization's security policies.
+    Do not forward without proper authorization.
+</p>
+
+<div class="footer-links">
+    <a href="{{ security_portal_url|default('#') }}" class="footer-link">Security Portal</a>
+    <a href="{{ incident_tracking_url|default('#') }}" class="footer-link">Incident Tracking</a>
+    <a href="{{ compliance_center_url|default('#') }}" class="footer-link">Compliance Center</a>
+</div>
+
+<p class="footer-copyright">
+    © {% if current_year %}{{ current_year }}{% else %}2024{% endif %} Security Operations Center. All rights reserved.
+    Confidential and Proprietary Information.
+</p>
+{% endblock %}

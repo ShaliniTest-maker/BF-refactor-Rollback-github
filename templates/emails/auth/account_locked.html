@@ -1,0 +1,443 @@
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}Account Security Alert - Account Temporarily Locked{% endblock %}
+
+{% block header_title %}Security Alert{% endblock %}
+{% block header_subtitle %}Account Protection Activated{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Account lockout specific styles */
+    .lockout-alert {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        color: #ffffff;
+        padding: 25px;
+        border-radius: 8px;
+        margin: 30px 0;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(238, 90, 36, 0.3);
+    }
+
+    .lockout-icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 20px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+    }
+
+    .lockout-title {
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0 0 10px 0;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .lockout-subtitle {
+        font-size: 16px;
+        margin: 0;
+        opacity: 0.9;
+    }
+
+    .incident-details {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .incident-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #495057;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .incident-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        fill: #6c757d;
+    }
+
+    .incident-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+    }
+
+    .incident-table td {
+        padding: 10px 0;
+        border-bottom: 1px solid #e9ecef;
+        vertical-align: top;
+    }
+
+    .incident-table td:first-child {
+        font-weight: 600;
+        color: #495057;
+        width: 35%;
+    }
+
+    .incident-table td:last-child {
+        color: #6c757d;
+    }
+
+    .incident-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .recovery-steps {
+        background-color: #e7f3ff;
+        border: 1px solid #b8daff;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .recovery-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #0c5aa6;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .recovery-steps ol {
+        margin: 15px 0;
+        padding-left: 20px;
+        color: #495057;
+    }
+
+    .recovery-steps li {
+        margin-bottom: 12px;
+        line-height: 1.6;
+    }
+
+    .security-recommendations {
+        background-color: #f0f9ff;
+        border: 1px solid #b3d4fc;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .recommendation-item {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 15px;
+        padding: 15px;
+        background-color: #ffffff;
+        border-radius: 6px;
+        border-left: 4px solid #2196f3;
+    }
+
+    .recommendation-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 15px;
+        margin-top: 2px;
+        fill: #2196f3;
+        flex-shrink: 0;
+    }
+
+    .recommendation-content {
+        flex: 1;
+    }
+
+    .recommendation-title {
+        font-weight: 600;
+        color: #1565c0;
+        margin: 0 0 5px 0;
+        font-size: 14px;
+    }
+
+    .recommendation-text {
+        color: #495057;
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    .urgent-action {
+        background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+        color: #ffffff;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 30px 0;
+        text-align: center;
+    }
+
+    .urgent-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 10px 0;
+    }
+
+    .urgent-text {
+        margin: 0;
+        opacity: 0.95;
+    }
+
+    /* Support contact section */
+    .support-contact {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+        text-align: center;
+    }
+
+    .support-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #495057;
+        margin: 0 0 15px 0;
+    }
+
+    .support-text {
+        color: #6c757d;
+        margin: 0 0 20px 0;
+        line-height: 1.6;
+    }
+
+    .support-button {
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #6c757d;
+        color: #ffffff !important;
+        text-decoration: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+
+    .support-button:hover {
+        background-color: #5a6268;
+        transform: translateY(-1px);
+    }
+
+    /* Responsive adjustments */
+    @media only screen and (max-width: 600px) {
+        .lockout-alert {
+            padding: 20px 15px;
+        }
+
+        .lockout-title {
+            font-size: 20px;
+        }
+
+        .incident-details,
+        .recovery-steps,
+        .security-recommendations,
+        .support-contact {
+            padding: 20px 15px;
+        }
+
+        .incident-table td:first-child {
+            width: 40%;
+            font-size: 14px;
+        }
+
+        .incident-table td:last-child {
+            font-size: 14px;
+        }
+
+        .recommendation-item {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .recommendation-icon {
+            margin: 0 auto 10px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Account Lockout Alert -->
+<div class="lockout-alert">
+    <div class="lockout-icon">🔒</div>
+    <h2 class="lockout-title">Account Temporarily Locked</h2>
+    <p class="lockout-subtitle">Your account has been secured due to suspicious activity</p>
+</div>
+
+<!-- Main Content -->
+<h1 class="content-title">Security Protection Activated</h1>
+
+<p class="content-text">
+    Your account has been temporarily locked as a security precaution. This action was taken to protect your account from unauthorized access attempts and ensure the safety of your personal information.
+</p>
+
+<!-- Incident Details -->
+<div class="incident-details">
+    <h3 class="incident-title">
+        <svg class="incident-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,7C13.4,7 14.8,8.6 14.8,10V11.5C15.4,11.5 16,12.4 16,13V16C16,17.4 15.4,18 14.8,18H9.2C8.6,18 8,17.4 8,16V13C8,12.4 8.6,11.5 9.2,11.5V10C9.2,8.6 10.6,7 12,7M12,8.2C11.2,8.2 10.5,8.7 10.5,10V11.5H13.5V10C13.5,8.7 12.8,8.2 12,8.2Z"/>
+        </svg>
+        Incident Information
+    </h3>
+    <table class="incident-table">
+        <tr>
+            <td>Account:</td>
+            <td>{{ user_email if user_email else 'Your Account' }}</td>
+        </tr>
+        <tr>
+            <td>Date & Time:</td>
+            <td>{{ lockout_timestamp if lockout_timestamp else 'Recent' }}</td>
+        </tr>
+        <tr>
+            <td>Reason:</td>
+            <td>{{ lockout_reason if lockout_reason else 'Multiple failed login attempts detected' }}</td>
+        </tr>
+        <tr>
+            <td>Location:</td>
+            <td>{{ attempt_location if attempt_location else 'Location data unavailable' }}</td>
+        </tr>
+        {% if lockout_duration %}
+        <tr>
+            <td>Lockout Duration:</td>
+            <td>{{ lockout_duration }}</td>
+        </tr>
+        {% endif %}
+    </table>
+</div>
+
+<!-- Account Recovery Steps -->
+<div class="recovery-steps">
+    <h3 class="recovery-title">
+        <svg class="incident-icon" viewBox="0 0 24 24">
+            <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+        </svg>
+        Account Recovery Instructions
+    </h3>
+    <p class="content-text mb-15">To regain access to your account, please follow these steps:</p>
+    <ol>
+        <li><strong>Wait for the lockout period to expire</strong> - Your account will automatically unlock {% if auto_unlock_time %}at {{ auto_unlock_time }}{% else %}after the security wait period{% endif %}.</li>
+        <li><strong>Use the account recovery option</strong> - Click the "Reset Password" link on the login page to initiate account recovery.</li>
+        <li><strong>Check your email</strong> - Follow the instructions in the password reset email we'll send you.</li>
+        <li><strong>Create a strong, unique password</strong> - Use a combination of letters, numbers, and special characters.</li>
+        <li><strong>Enable two-factor authentication</strong> - Add an extra layer of security to your account.</li>
+    </ol>
+</div>
+
+{% if immediate_unlock_available %}
+<!-- Immediate Unlock Option -->
+<div class="urgent-action">
+    <h3 class="urgent-title">Need Immediate Access?</h3>
+    <p class="urgent-text">If this lockout was triggered in error, you can verify your identity to unlock your account immediately.</p>
+</div>
+
+<div class="button-container">
+    <a href="{{ unlock_url if unlock_url else '#' }}" class="button">Unlock My Account</a>
+</div>
+{% endif %}
+
+<!-- Security Recommendations -->
+<div class="security-recommendations">
+    <h3 class="recovery-title">
+        <svg class="incident-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M10,17L6,13L7.41,11.59L10,14.17L16.59,7.58L18,9L10,17Z"/>
+        </svg>
+        Security Recommendations
+    </h3>
+
+    <div class="recommendation-item">
+        <svg class="recommendation-icon" viewBox="0 0 24 24">
+            <path d="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"/>
+        </svg>
+        <div class="recommendation-content">
+            <h4 class="recommendation-title">Use Strong, Unique Passwords</h4>
+            <p class="recommendation-text">Create a password that's at least 12 characters long with a mix of uppercase, lowercase, numbers, and symbols. Avoid using the same password for multiple accounts.</p>
+        </div>
+    </div>
+
+    <div class="recommendation-item">
+        <svg class="recommendation-icon" viewBox="0 0 24 24">
+            <path d="M7,14C5.89,14 5,13.1 5,12C5,10.89 5.89,10 7,10C8.1,10 9,10.89 9,12C9,13.1 8.1,14 7,14M12.6,10C11.8,7.7 9.6,6 7,6A6,6 0 0,0 1,12A6,6 0 0,0 7,18C9.6,18 11.8,16.3 12.6,14H16V18H20V14H23V10H12.6Z"/>
+        </svg>
+        <div class="recommendation-content">
+            <h4 class="recommendation-title">Enable Two-Factor Authentication</h4>
+            <p class="recommendation-text">Add an extra layer of security by enabling 2FA. This requires a second form of verification, making it much harder for unauthorized users to access your account.</p>
+        </div>
+    </div>
+
+    <div class="recommendation-item">
+        <svg class="recommendation-icon" viewBox="0 0 24 24">
+            <path d="M12,15C12.81,15 13.5,14.7 14.11,14.11C14.7,13.5 15,12.81 15,12C15,11.19 14.7,10.5 14.11,9.89C13.5,9.3 12.81,9 12,9C11.19,9 10.5,9.3 9.89,9.89C9.3,10.5 9,11.19 9,12C9,12.81 9.3,13.5 9.89,14.11C10.5,14.7 11.19,15 12,15M12,2C14.75,2 17.1,3 19.05,4.95C21,6.9 22,9.25 22,12C22,14.75 21,17.1 19.05,19.05C17.1,21 14.75,22 12,22C9.25,22 6.9,21 4.95,19.05C3,17.1 2,14.75 2,12C2,9.25 3,6.9 4.95,4.95C6.9,3 9.25,2 12,2M12,20C17,20 20,16.75 20,12C20,7.25 17,4 12,4C7,4 4,7.25 4,12C4,16.75 7,20 12,20Z"/>
+        </svg>
+        <div class="recommendation-content">
+            <h4 class="recommendation-title">Monitor Account Activity</h4>
+            <p class="recommendation-text">Regularly review your account activity and login history. Report any suspicious activity immediately to our support team.</p>
+        </div>
+    </div>
+
+    <div class="recommendation-item">
+        <svg class="recommendation-icon" viewBox="0 0 24 24">
+            <path d="M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L5,8.09V15.91L12,19.85L19,15.91V8.09L12,4.15Z"/>
+        </svg>
+        <div class="recommendation-content">
+            <h4 class="recommendation-title">Keep Software Updated</h4>
+            <p class="recommendation-text">Ensure your device's operating system, browser, and security software are always up to date with the latest security patches.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Support Contact -->
+<div class="support-contact">
+    <h3 class="support-title">Need Help?</h3>
+    <p class="support-text">
+        If you believe this lockout was triggered in error or if you need assistance accessing your account, our security team is here to help.
+    </p>
+    <a href="{{ support_url if support_url else '#' }}" class="support-button">Contact Security Support</a>
+</div>
+
+<!-- Additional Security Information -->
+<div class="alert alert-info">
+    <p class="mb-0">
+        <strong>Important:</strong> This security measure is in place to protect your account and personal information. 
+        Account lockouts are automatically triggered when multiple failed login attempts are detected from the same IP address or when other suspicious activity patterns are identified.
+    </p>
+</div>
+
+<!-- What Happens Next -->
+<div class="security-info">
+    <h3 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,17A1.5,1.5 0 0,1 10.5,15.5A1.5,1.5 0 0,1 12,14A1.5,1.5 0 0,1 13.5,15.5A1.5,1.5 0 0,1 12,17M12,10.5C12.8,10.5 13.5,9.8 13.5,9C13.5,8.2 12.8,7.5 12,7.5C11.2,7.5 10.5,8.2 10.5,9C10.5,9.8 11.2,10.5 12,10.5Z"/>
+        </svg>
+        What Happens Next
+    </h3>
+    <p class="security-text">
+        Your account will remain locked for the security period. During this time, our security systems will continue monitoring for any additional unauthorized access attempts. Once the lockout period expires, you'll be able to attempt to log in again. We recommend changing your password as a precautionary measure.
+    </p>
+</div>
+
+{% if is_suspected_breach %}
+<!-- Suspected Breach Warning -->
+<div class="urgent-action">
+    <h3 class="urgent-title">⚠️ Additional Security Notice</h3>
+    <p class="urgent-text">
+        Our security systems have detected patterns that suggest your account credentials may have been compromised. 
+        Please change your password immediately after regaining access and review your account for any unauthorized activity.
+    </p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ security_center_url if security_center_url else '#' }}" class="footer-link">Security Center</a>
+<a href="{{ privacy_policy_url if privacy_policy_url else '#' }}" class="footer-link">Privacy Policy</a>
+<a href="{{ support_url if support_url else '#' }}" class="footer-link">Contact Support</a>
+<a href="{{ account_recovery_url if account_recovery_url else '#' }}" class="footer-link">Account Recovery</a>
+{% endblock %}

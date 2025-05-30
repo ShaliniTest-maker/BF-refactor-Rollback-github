@@ -1,0 +1,566 @@
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}System Status Report - {{ report_date.strftime('%Y-%m-%d') if report_date else 'Unknown Date' }}{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Administrative Report Specific Styles */
+    .status-overview {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin: 25px 0;
+    }
+
+    .metric-card {
+        background: #ffffff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        transition: box-shadow 0.3s ease;
+    }
+
+    .metric-card:hover {
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .metric-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #f8f9fa;
+    }
+
+    .metric-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #495057;
+        margin: 0;
+    }
+
+    .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-left: 10px;
+    }
+
+    .status-healthy { background-color: #28a745; }
+    .status-warning { background-color: #ffc107; }
+    .status-critical { background-color: #dc3545; }
+    .status-unknown { background-color: #6c757d; }
+
+    .metric-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: #212529;
+        margin: 10px 0;
+    }
+
+    .metric-description {
+        font-size: 13px;
+        color: #6c757d;
+        margin: 0;
+        line-height: 1.4;
+    }
+
+    .metric-trend {
+        font-size: 12px;
+        margin-top: 8px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        display: inline-block;
+    }
+
+    .trend-up {
+        background-color: #d4edda;
+        color: #155724;
+    }
+
+    .trend-down {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+
+    .trend-stable {
+        background-color: #e2e3e5;
+        color: #383d41;
+    }
+
+    .service-status-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+        background: #ffffff;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #dee2e6;
+    }
+
+    .service-status-table th,
+    .service-status-table td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .service-status-table th {
+        background: linear-gradient(135deg, #495057 0%, #6c757d 100%);
+        color: #ffffff;
+        font-weight: 600;
+        font-size: 14px;
+    }
+
+    .service-status-table tr:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+
+    .service-status-table tr:hover {
+        background-color: #e9ecef;
+    }
+
+    .performance-chart {
+        background: #ffffff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: center;
+    }
+
+    .chart-placeholder {
+        height: 200px;
+        background: linear-gradient(45deg, #f8f9fa 25%, transparent 25%), 
+                    linear-gradient(-45deg, #f8f9fa 25%, transparent 25%), 
+                    linear-gradient(45deg, transparent 75%, #f8f9fa 75%), 
+                    linear-gradient(-45deg, transparent 75%, #f8f9fa 75%);
+        background-size: 20px 20px;
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        border: 2px dashed #dee2e6;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6c757d;
+        font-style: italic;
+    }
+
+    .dashboard-links {
+        background: #ffffff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .dashboard-links h3 {
+        color: #495057;
+        margin: 0 0 20px 0;
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .link-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+    }
+
+    .dashboard-link {
+        display: block;
+        padding: 12px 16px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #ffffff !important;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 500;
+        text-align: center;
+        transition: all 0.3s ease;
+        font-size: 14px;
+    }
+
+    .dashboard-link:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .summary-section {
+        background: #ffffff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .summary-section h3 {
+        color: #495057;
+        margin: 0 0 15px 0;
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .alert-item {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 10px 0;
+        border-left: 4px solid;
+    }
+
+    .alert-critical {
+        background-color: #f8d7da;
+        border-left-color: #dc3545;
+        color: #721c24;
+    }
+
+    .alert-warning {
+        background-color: #fff3cd;
+        border-left-color: #ffc107;
+        color: #856404;
+    }
+
+    .alert-info {
+        background-color: #d1ecf1;
+        border-left-color: #17a2b8;
+        color: #0c5460;
+    }
+
+    /* Responsive Design */
+    @media only screen and (max-width: 600px) {
+        .status-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .link-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .metric-card {
+            padding: 15px;
+        }
+        
+        .dashboard-links {
+            padding: 20px 15px;
+        }
+        
+        .summary-section {
+            padding: 20px 15px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}System Status Report{% endblock %}
+{% block header_subtitle %}Administrative Monitoring Dashboard{% endblock %}
+
+{% block content %}
+<!-- Executive Summary -->
+<div class="status-overview">
+    <h2 class="content-title mb-25">Executive Summary</h2>
+    <p class="content-text mb-15">
+        <strong>Report Generated:</strong> {{ report_date.strftime('%B %d, %Y at %I:%M %p UTC') if report_date else 'Unknown Date' }}
+    </p>
+    <p class="content-text mb-15">
+        <strong>System Status:</strong> 
+        <span class="status-indicator {{ 'status-healthy' if overall_status == 'healthy' else 'status-warning' if overall_status == 'warning' else 'status-critical' if overall_status == 'critical' else 'status-unknown' }}"></span>
+        {{ overall_status.title() if overall_status else 'Unknown' }}
+    </p>
+    <p class="content-text mb-0">
+        This report provides comprehensive monitoring data for the Flask application infrastructure, 
+        including database performance, authentication services, container orchestration status, 
+        and Service Layer pattern coordination metrics.
+    </p>
+</div>
+
+<!-- Core System Metrics -->
+<div class="status-grid">
+    <!-- Flask Application Health -->
+    <div class="metric-card">
+        <div class="metric-header">
+            <h4 class="metric-title">Flask Application</h4>
+            <span class="status-indicator {{ 'status-healthy' if app_metrics.status == 'healthy' else 'status-warning' if app_metrics.status == 'warning' else 'status-critical' }}"></span>
+        </div>
+        <div class="metric-value">{{ app_metrics.uptime_hours if app_metrics else 'N/A' }}h</div>
+        <p class="metric-description">Application uptime with {{ app_metrics.active_connections if app_metrics else 'unknown' }} active connections</p>
+        {% if app_metrics and app_metrics.response_time_trend %}
+        <span class="metric-trend {{ 'trend-up' if app_metrics.response_time_trend > 0 else 'trend-down' if app_metrics.response_time_trend < 0 else 'trend-stable' }}">
+            {{ "↑" if app_metrics.response_time_trend > 0 else "↓" if app_metrics.response_time_trend < 0 else "→" }} 
+            {{ abs(app_metrics.response_time_trend) }}ms avg response
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Database Performance -->
+    <div class="metric-card">
+        <div class="metric-header">
+            <h4 class="metric-title">Flask-SQLAlchemy</h4>
+            <span class="status-indicator {{ 'status-healthy' if db_metrics.status == 'healthy' else 'status-warning' if db_metrics.status == 'warning' else 'status-critical' }}"></span>
+        </div>
+        <div class="metric-value">{{ db_metrics.avg_query_time if db_metrics else 'N/A' }}ms</div>
+        <p class="metric-description">Average query time with {{ db_metrics.connection_pool_usage if db_metrics else 'unknown' }}% pool utilization</p>
+        {% if db_metrics and db_metrics.performance_trend %}
+        <span class="metric-trend {{ 'trend-down' if db_metrics.performance_trend > 0 else 'trend-up' if db_metrics.performance_trend < 0 else 'trend-stable' }}">
+            {{ "↑" if db_metrics.performance_trend < 0 else "↓" if db_metrics.performance_trend > 0 else "→" }} 
+            Performance {{ "improved" if db_metrics.performance_trend < 0 else "degraded" if db_metrics.performance_trend > 0 else "stable" }}
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Auth0 Integration -->
+    <div class="metric-card">
+        <div class="metric-header">
+            <h4 class="metric-title">Auth0 Service</h4>
+            <span class="status-indicator {{ 'status-healthy' if auth_metrics.status == 'healthy' else 'status-warning' if auth_metrics.status == 'warning' else 'status-critical' }}"></span>
+        </div>
+        <div class="metric-value">{{ auth_metrics.success_rate if auth_metrics else 'N/A' }}%</div>
+        <p class="metric-description">Authentication success rate with {{ auth_metrics.avg_response_time if auth_metrics else 'unknown' }}ms average response</p>
+        {% if auth_metrics and auth_metrics.auth_trend %}
+        <span class="metric-trend {{ 'trend-up' if auth_metrics.auth_trend > 0 else 'trend-down' if auth_metrics.auth_trend < 0 else 'trend-stable' }}">
+            {{ "↑" if auth_metrics.auth_trend > 0 else "↓" if auth_metrics.auth_trend < 0 else "→" }} 
+            {{ abs(auth_metrics.auth_trend) }}% from last period
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Service Layer Coordination -->
+    <div class="metric-card">
+        <div class="metric-header">
+            <h4 class="metric-title">Service Layer</h4>
+            <span class="status-indicator {{ 'status-healthy' if service_metrics.status == 'healthy' else 'status-warning' if service_metrics.status == 'warning' else 'status-critical' }}"></span>
+        </div>
+        <div class="metric-value">{{ service_metrics.coordination_score if service_metrics else 'N/A' }}/100</div>
+        <p class="metric-description">Business logic coordination with {{ service_metrics.active_workflows if service_metrics else 'unknown' }} active workflows</p>
+        {% if service_metrics and service_metrics.coordination_trend %}
+        <span class="metric-trend {{ 'trend-up' if service_metrics.coordination_trend > 0 else 'trend-down' if service_metrics.coordination_trend < 0 else 'trend-stable' }}">
+            {{ "↑" if service_metrics.coordination_trend > 0 else "↓" if service_metrics.coordination_trend < 0 else "→" }} 
+            Coordination {{ "improved" if service_metrics.coordination_trend > 0 else "degraded" if service_metrics.coordination_trend < 0 else "stable" }}
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Container Orchestration -->
+    <div class="metric-card">
+        <div class="metric-header">
+            <h4 class="metric-title">ECS/EKS Status</h4>
+            <span class="status-indicator {{ 'status-healthy' if container_metrics.status == 'healthy' else 'status-warning' if container_metrics.status == 'warning' else 'status-critical' }}"></span>
+        </div>
+        <div class="metric-value">{{ container_metrics.running_tasks if container_metrics else 'N/A' }}/{{ container_metrics.desired_tasks if container_metrics else 'N/A' }}</div>
+        <p class="metric-description">Running containers with {{ container_metrics.cpu_utilization if container_metrics else 'unknown' }}% CPU utilization</p>
+        {% if container_metrics and container_metrics.scaling_events %}
+        <span class="metric-trend trend-info">
+            {{ container_metrics.scaling_events }} scaling events today
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- WSGI Server Performance -->
+    <div class="metric-card">
+        <div class="metric-header">
+            <h4 class="metric-title">Gunicorn WSGI</h4>
+            <span class="status-indicator {{ 'status-healthy' if wsgi_metrics.status == 'healthy' else 'status-warning' if wsgi_metrics.status == 'warning' else 'status-critical' }}"></span>
+        </div>
+        <div class="metric-value">{{ wsgi_metrics.active_workers if wsgi_metrics else 'N/A' }}/{{ wsgi_metrics.total_workers if wsgi_metrics else 'N/A' }}</div>
+        <p class="metric-description">Active workers with {{ wsgi_metrics.request_throughput if wsgi_metrics else 'unknown' }} req/min throughput</p>
+        {% if wsgi_metrics and wsgi_metrics.worker_restarts %}
+        <span class="metric-trend {{ 'trend-warning' if wsgi_metrics.worker_restarts > 5 else 'trend-stable' }}">
+            {{ wsgi_metrics.worker_restarts }} worker restarts today
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Service Status Table -->
+<div class="summary-section">
+    <h3>Service Component Status</h3>
+    <table class="service-status-table">
+        <thead>
+            <tr>
+                <th>Service Component</th>
+                <th>Status</th>
+                <th>Last Check</th>
+                <th>Response Time</th>
+                <th>Error Rate</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if service_status %}
+                {% for service in service_status %}
+                <tr>
+                    <td><strong>{{ service.name }}</strong></td>
+                    <td>
+                        <span class="status-indicator {{ 'status-healthy' if service.status == 'healthy' else 'status-warning' if service.status == 'warning' else 'status-critical' }}"></span>
+                        {{ service.status.title() }}
+                    </td>
+                    <td>{{ service.last_check.strftime('%H:%M UTC') if service.last_check else 'Unknown' }}</td>
+                    <td>{{ service.response_time }}ms</td>
+                    <td>{{ service.error_rate }}%</td>
+                    <td>{{ service.notes or 'Operational' }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="6" style="text-align: center; color: #6c757d; font-style: italic;">No service status data available</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Performance Trends -->
+<div class="performance-chart">
+    <h3 style="color: #495057; margin: 0 0 20px 0;">24-Hour Performance Trends</h3>
+    {% if performance_chart_url %}
+    <img src="{{ performance_chart_url }}" alt="Performance Trends Chart" style="max-width: 100%; height: auto; border-radius: 6px;">
+    {% else %}
+    <div class="chart-placeholder">
+        Performance trend charts would be displayed here
+        <br><small>Integration with monitoring dashboard required</small>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Critical Alerts and Issues -->
+{% if alerts and alerts|length > 0 %}
+<div class="summary-section">
+    <h3>Active Alerts and Issues</h3>
+    {% for alert in alerts %}
+    <div class="alert-item {{ 'alert-critical' if alert.severity == 'critical' else 'alert-warning' if alert.severity == 'warning' else 'alert-info' }}">
+        <strong>{{ alert.title }}</strong> - {{ alert.description }}
+        <br><small>{{ alert.timestamp.strftime('%Y-%m-%d %H:%M UTC') if alert.timestamp else 'Unknown time' }}</small>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Administrative Dashboard Links -->
+<div class="dashboard-links">
+    <h3>Administrative Dashboard Access</h3>
+    <div class="link-grid">
+        <a href="{{ dashboard_urls.main_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Main Monitoring Dashboard
+        </a>
+        <a href="{{ dashboard_urls.flask_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Flask Performance Monitor
+        </a>
+        <a href="{{ dashboard_urls.database_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Database Health Dashboard
+        </a>
+        <a href="{{ dashboard_urls.auth_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Auth0 Integration Status
+        </a>
+        <a href="{{ dashboard_urls.container_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Container Orchestration
+        </a>
+        <a href="{{ dashboard_urls.security_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Security Monitoring
+        </a>
+        <a href="{{ dashboard_urls.logs_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            CloudWatch Logs
+        </a>
+        <a href="{{ dashboard_urls.alerts_dashboard if dashboard_urls else '#' }}" class="dashboard-link">
+            Alert Management
+        </a>
+    </div>
+</div>
+
+<!-- System Recommendations -->
+{% if recommendations and recommendations|length > 0 %}
+<div class="summary-section">
+    <h3>System Recommendations</h3>
+    {% for recommendation in recommendations %}
+    <div class="alert-item alert-info">
+        <strong>{{ recommendation.category }}</strong> - {{ recommendation.description }}
+        {% if recommendation.priority %}
+        <br><small>Priority: {{ recommendation.priority.title() }}</small>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Technical Summary -->
+<div class="summary-section">
+    <h3>Technical Infrastructure Summary</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+        <div>
+            <h4 style="color: #495057; margin: 0 0 10px 0; font-size: 16px;">Flask Application</h4>
+            <ul style="color: #6c757d; font-size: 14px; margin: 0; padding-left: 20px;">
+                <li>Flask 3.1.1 with Werkzeug 3.1+</li>
+                <li>Flask-SQLAlchemy 3.1.1 ORM</li>
+                <li>Flask-Migrate 4.1.0 schema management</li>
+                <li>Jinja2 3.1.2+ templating engine</li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="color: #495057; margin: 0 0 10px 0; font-size: 16px;">Authentication & Security</h4>
+            <ul style="color: #6c757d; font-size: 14px; margin: 0; padding-left: 20px;">
+                <li>Auth0 Python SDK 4.9.0</li>
+                <li>Flask-JWT-Extended token management</li>
+                <li>ItsDangerous 2.2+ session security</li>
+                <li>SQLAlchemy-Utils field encryption</li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="color: #495057; margin: 0 0 10px 0; font-size: 16px;">Infrastructure</h4>
+            <ul style="color: #6c757d; font-size: 14px; margin: 0; padding-left: 20px;">
+                <li>Gunicorn WSGI server</li>
+                <li>Docker containerization</li>
+                <li>ECS/EKS orchestration</li>
+                <li>AWS CloudWatch monitoring</li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="color: #495057; margin: 0 0 10px 0; font-size: 16px;">Monitoring & Observability</h4>
+            <ul style="color: #6c757d; font-size: 14px; margin: 0; padding-left: 20px;">
+                <li>CloudWatch Container Insights</li>
+                <li>Sentry SDK 2.29.1 error tracking</li>
+                <li>Flask-MonitoringDashboard</li>
+                <li>Prometheus metrics collection</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Report Footer Information -->
+<div class="summary-section">
+    <h3>Report Information</h3>
+    <p class="content-text mb-15">
+        <strong>Report Type:</strong> Automated System Status Report
+    </p>
+    <p class="content-text mb-15">
+        <strong>Coverage Period:</strong> {{ coverage_period if coverage_period else 'Last 24 hours' }}
+    </p>
+    <p class="content-text mb-15">
+        <strong>Next Report:</strong> {{ next_report_time.strftime('%Y-%m-%d %H:%M UTC') if next_report_time else 'Not scheduled' }}
+    </p>
+    <p class="content-text mb-0">
+        This report is automatically generated by the Flask application monitoring system. 
+        For immediate assistance with critical issues, please contact the system administrators 
+        or escalate through the appropriate incident response channels.
+    </p>
+</div>
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ dashboard_urls.main_dashboard if dashboard_urls else '#' }}" class="footer-link">Main Dashboard</a>
+<a href="{{ dashboard_urls.security_dashboard if dashboard_urls else '#' }}" class="footer-link">Security Monitor</a>
+<a href="{{ dashboard_urls.alerts_dashboard if dashboard_urls else '#' }}" class="footer-link">Alert Center</a>
+<a href="#" class="footer-link">Contact Support</a>
+{% endblock %}
+
+{% block copyright %}
+© {{ current_year if current_year else 2024 }} System Administration Team. All rights reserved.
+<br><small>Flask Application Monitoring System v{{ app_version if app_version else '1.0.0' }}</small>
+{% endblock %}

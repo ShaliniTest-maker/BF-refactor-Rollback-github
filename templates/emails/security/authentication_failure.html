@@ -1,0 +1,770 @@
+{% extends "emails/base/layout.html" %}
+
+{# Authentication failure notification email template for Flask-Login integration #}
+{# Provides detailed security context for incident response per Security Architecture Section 6.4 #}
+
+{% block title %}🚨 Security Alert: Authentication Failure Detected{% endblock %}
+
+{% block email_label %}Critical security notification from {{ application_name or 'Application' }} Security System{% endblock %}
+
+{% block email_styles %}
+    {{ super() }}
+    
+    /* Security Alert Specific Styles */
+    .security-alert-header {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        color: #ffffff;
+        padding: 25px 20px;
+        text-align: center;
+        border: none;
+    }
+    
+    .security-alert-header h1 {
+        color: #ffffff !important;
+        margin: 0;
+        font-size: 24px;
+        font-weight: 700;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+    
+    .security-alert-header .alert-icon {
+        font-size: 32px;
+        margin-bottom: 10px;
+        display: block;
+    }
+    
+    .security-alert-header .alert-subtitle {
+        color: #ffffff;
+        margin: 8px 0 0 0;
+        font-size: 16px;
+        font-weight: 400;
+        opacity: 0.9;
+    }
+    
+    /* Security incident details styling */
+    .incident-summary {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .incident-summary h3 {
+        color: #856404;
+        margin-top: 0;
+        margin-bottom: 15px;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    
+    .incident-details {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        margin: 20px 0;
+        overflow: hidden;
+    }
+    
+    .incident-details-header {
+        background-color: #e9ecef;
+        padding: 15px 20px;
+        border-bottom: 1px solid #dee2e6;
+        font-weight: 600;
+        color: #495057;
+    }
+    
+    .incident-details-content {
+        padding: 0;
+    }
+    
+    .detail-row {
+        padding: 12px 20px;
+        border-bottom: 1px solid #e9ecef;
+        display: table;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .detail-row:last-child {
+        border-bottom: none;
+    }
+    
+    .detail-label {
+        font-weight: 600;
+        color: #495057;
+        display: table-cell;
+        width: 140px;
+        vertical-align: top;
+        padding-right: 15px;
+    }
+    
+    .detail-value {
+        color: #212529;
+        display: table-cell;
+        vertical-align: top;
+        word-break: break-word;
+    }
+    
+    .detail-value.sensitive {
+        font-family: 'Courier New', monospace;
+        background-color: #f1f3f4;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 14px;
+    }
+    
+    /* Severity indicators */
+    .severity-high {
+        color: #dc3545;
+        font-weight: 700;
+        background-color: #f8d7da;
+        padding: 4px 8px;
+        border-radius: 4px;
+        display: inline-block;
+    }
+    
+    .severity-medium {
+        color: #fd7e14;
+        font-weight: 700;
+        background-color: #ffeaa7;
+        padding: 4px 8px;
+        border-radius: 4px;
+        display: inline-block;
+    }
+    
+    .severity-low {
+        color: #28a745;
+        font-weight: 700;
+        background-color: #d4edda;
+        padding: 4px 8px;
+        border-radius: 4px;
+        display: inline-block;
+    }
+    
+    /* Security recommendations */
+    .security-recommendations {
+        background-color: #d1ecf1;
+        border: 1px solid #bee5eb;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .security-recommendations h3 {
+        color: #0c5460;
+        margin-top: 0;
+        margin-bottom: 15px;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    
+    .security-recommendations ul {
+        margin: 0;
+        padding-left: 20px;
+        color: #0c5460;
+    }
+    
+    .security-recommendations li {
+        margin-bottom: 8px;
+        line-height: 1.5;
+    }
+    
+    /* Action buttons */
+    .security-actions {
+        text-align: center;
+        margin: 30px 0;
+    }
+    
+    .btn-security {
+        display: inline-block;
+        padding: 14px 28px;
+        margin: 0 8px 8px 0;
+        font-size: 16px;
+        font-weight: 600;
+        text-align: center;
+        text-decoration: none;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        line-height: 1.4;
+        transition: all 0.2s ease;
+    }
+    
+    .btn-security-primary {
+        background-color: #dc3545;
+        color: #ffffff;
+    }
+    
+    .btn-security-primary:hover {
+        background-color: #c82333;
+        text-decoration: none;
+        color: #ffffff;
+    }
+    
+    .btn-security-secondary {
+        background-color: #6c757d;
+        color: #ffffff;
+    }
+    
+    .btn-security-secondary:hover {
+        background-color: #5a6268;
+        text-decoration: none;
+        color: #ffffff;
+    }
+    
+    /* Geographic location styling */
+    .geo-location {
+        background-color: #e7f3ff;
+        border-left: 4px solid #007bff;
+        padding: 15px;
+        margin: 15px 0;
+        border-radius: 0 6px 6px 0;
+    }
+    
+    .geo-location h4 {
+        color: #004085;
+        margin: 0 0 10px 0;
+        font-size: 16px;
+        font-weight: 600;
+    }
+    
+    .geo-location p {
+        margin: 0;
+        color: #004085;
+    }
+    
+    /* Timeline styling */
+    .attempt-timeline {
+        margin: 20px 0;
+    }
+    
+    .timeline-item {
+        border-left: 3px solid #dee2e6;
+        padding-left: 20px;
+        margin-bottom: 15px;
+        position: relative;
+    }
+    
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        left: -6px;
+        top: 8px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background-color: #dc3545;
+    }
+    
+    .timeline-time {
+        font-weight: 600;
+        color: #495057;
+        font-size: 14px;
+        margin-bottom: 4px;
+    }
+    
+    .timeline-description {
+        color: #212529;
+        margin: 0;
+        line-height: 1.4;
+    }
+    
+    /* Responsive adjustments */
+    @media screen and (max-width: 600px) {
+        .incident-details-content {
+            padding: 0;
+        }
+        
+        .detail-row {
+            display: block;
+            padding: 15px;
+        }
+        
+        .detail-label {
+            display: block;
+            width: 100%;
+            margin-bottom: 5px;
+            padding-right: 0;
+        }
+        
+        .detail-value {
+            display: block;
+            width: 100%;
+        }
+        
+        .btn-security {
+            display: block;
+            width: 100%;
+            margin: 0 0 10px 0;
+        }
+        
+        .security-actions {
+            text-align: left;
+        }
+    }
+    
+    /* Dark mode specific adjustments */
+    @media (prefers-color-scheme: dark) {
+        .incident-summary {
+            background-color: #2d2d2d !important;
+            border-color: #404040 !important;
+        }
+        
+        .incident-summary h3 {
+            color: #ffc107 !important;
+        }
+        
+        .incident-details {
+            background-color: #2d2d2d !important;
+            border-color: #404040 !important;
+        }
+        
+        .incident-details-header {
+            background-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        
+        .detail-row {
+            border-color: #404040 !important;
+        }
+        
+        .detail-label {
+            color: #adb5bd !important;
+        }
+        
+        .detail-value {
+            color: #ffffff !important;
+        }
+        
+        .detail-value.sensitive {
+            background-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        
+        .security-recommendations {
+            background-color: #2d2d2d !important;
+            border-color: #404040 !important;
+        }
+        
+        .security-recommendations h3,
+        .security-recommendations ul,
+        .security-recommendations li {
+            color: #17a2b8 !important;
+        }
+        
+        .geo-location {
+            background-color: #2d2d2d !important;
+            border-color: #007bff !important;
+        }
+        
+        .geo-location h4,
+        .geo-location p {
+            color: #17a2b8 !important;
+        }
+        
+        .timeline-item {
+            border-color: #404040 !important;
+        }
+        
+        .timeline-time {
+            color: #adb5bd !important;
+        }
+        
+        .timeline-description {
+            color: #ffffff !important;
+        }
+    }
+{% endblock %}
+
+{% block email_header %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="security-alert-header">
+            <span class="alert-icon">🚨</span>
+            <h1>Security Alert: Authentication Failure</h1>
+            <p class="alert-subtitle">Suspicious authentication activity detected on your account</p>
+        </td>
+    </tr>
+</table>
+{% endblock %}
+
+{% block email_content %}
+    {# Incident Summary Section #}
+    <div class="incident-summary">
+        <h3>🛡️ Security Incident Summary</h3>
+        <p>
+            <strong>Incident Type:</strong> {{ incident_type or 'Authentication Failure' }}<br>
+            <strong>Severity:</strong> 
+            <span class="severity-{{ severity_level|lower }}">{{ severity_level|upper or 'HIGH' }}</span><br>
+            <strong>Detected At:</strong> {{ incident_timestamp or timestamp }}<br>
+            <strong>Incident ID:</strong> <code>{{ incident_id }}</code>
+        </p>
+        
+        {% if incident_description %}
+        <p><strong>Description:</strong> {{ incident_description }}</p>
+        {% endif %}
+    </div>
+
+    {# Main Alert Message #}
+    <h2>Authentication Failure Detected</h2>
+    <p>
+        We've detected {{ failure_count or 'multiple' }} failed authentication attempt{{ 's' if (failure_count|int) != 1 else '' }} 
+        on your account{% if username %} for username <strong>{{ username }}</strong>{% endif %}. 
+        This activity may indicate an unauthorized access attempt.
+    </p>
+
+    {# Authentication Attempt Details #}
+    <div class="incident-details">
+        <div class="incident-details-header">
+            📊 Authentication Attempt Details
+        </div>
+        <div class="incident-details-content">
+            <div class="detail-row">
+                <div class="detail-label">Username:</div>
+                <div class="detail-value">{{ username or 'Unknown' }}</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">Failure Reason:</div>
+                <div class="detail-value">{{ failure_reason or 'Invalid credentials' }}</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">Attempt Count:</div>
+                <div class="detail-value">{{ failure_count or 'Multiple' }} attempts in {{ time_window or '15 minutes' }}</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">Source IP:</div>
+                <div class="detail-value sensitive">{{ source_ip or 'Unknown' }}</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">User Agent:</div>
+                <div class="detail-value">{{ user_agent or 'Unknown' }}</div>
+            </div>
+            
+            {% if auth0_event_id %}
+            <div class="detail-row">
+                <div class="detail-label">Auth0 Event ID:</div>
+                <div class="detail-value sensitive">{{ auth0_event_id }}</div>
+            </div>
+            {% endif %}
+            
+            {% if session_id %}
+            <div class="detail-row">
+                <div class="detail-label">Session ID:</div>
+                <div class="detail-value sensitive">{{ session_id }}</div>
+            </div>
+            {% endif %}
+            
+            {% if flask_request_id %}
+            <div class="detail-row">
+                <div class="detail-label">Request ID:</div>
+                <div class="detail-value sensitive">{{ flask_request_id }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Geographic Location Information #}
+    {% if geo_location %}
+    <div class="geo-location">
+        <h4>🌍 Geographic Location Analysis</h4>
+        <p>
+            <strong>Location:</strong> {{ geo_location.city or 'Unknown' }}, {{ geo_location.region or 'Unknown' }}, {{ geo_location.country or 'Unknown' }}<br>
+            {% if geo_location.timezone %}
+            <strong>Timezone:</strong> {{ geo_location.timezone }}<br>
+            {% endif %}
+            {% if geo_location.isp %}
+            <strong>ISP:</strong> {{ geo_location.isp }}<br>
+            {% endif %}
+            {% if geo_location.is_vpn %}
+            <strong>VPN/Proxy:</strong> <span style="color: #dc3545; font-weight: 600;">{{ 'Detected' if geo_location.is_vpn else 'Not detected' }}</span>
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
+
+    {# Timeline of Authentication Attempts #}
+    {% if attempt_timeline %}
+    <h3>⏱️ Timeline of Authentication Attempts</h3>
+    <div class="attempt-timeline">
+        {% for attempt in attempt_timeline %}
+        <div class="timeline-item">
+            <div class="timeline-time">{{ attempt.timestamp }}</div>
+            <div class="timeline-description">
+                {{ attempt.description or 'Authentication attempt failed' }}
+                {% if attempt.source_ip %} from {{ attempt.source_ip }}{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Security Analysis and Risk Assessment #}
+    {% if security_analysis %}
+    <div class="incident-details">
+        <div class="incident-details-header">
+            🔍 Security Analysis
+        </div>
+        <div class="incident-details-content">
+            {% if security_analysis.risk_score %}
+            <div class="detail-row">
+                <div class="detail-label">Risk Score:</div>
+                <div class="detail-value">
+                    <span class="severity-{{ 'high' if security_analysis.risk_score >= 7 else 'medium' if security_analysis.risk_score >= 4 else 'low' }}">
+                        {{ security_analysis.risk_score }}/10
+                    </span>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if security_analysis.threat_indicators %}
+            <div class="detail-row">
+                <div class="detail-label">Threat Indicators:</div>
+                <div class="detail-value">{{ security_analysis.threat_indicators|join(', ') }}</div>
+            </div>
+            {% endif %}
+            
+            {% if security_analysis.pattern_match %}
+            <div class="detail-row">
+                <div class="detail-label">Pattern Analysis:</div>
+                <div class="detail-value">{{ security_analysis.pattern_match }}</div>
+            </div>
+            {% endif %}
+            
+            {% if security_analysis.similar_incidents %}
+            <div class="detail-row">
+                <div class="detail-label">Similar Incidents:</div>
+                <div class="detail-value">{{ security_analysis.similar_incidents }} in the last 24 hours</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# Flask-Login Integration Details #}
+    {% if flask_login_details %}
+    <div class="incident-details">
+        <div class="incident-details-header">
+            ⚙️ Flask-Login Session Details
+        </div>
+        <div class="incident-details-content">
+            {% if flask_login_details.session_protection %}
+            <div class="detail-row">
+                <div class="detail-label">Session Protection:</div>
+                <div class="detail-value">{{ flask_login_details.session_protection }}</div>
+            </div>
+            {% endif %}
+            
+            {% if flask_login_details.remember_me_attempt %}
+            <div class="detail-row">
+                <div class="detail-label">Remember Me:</div>
+                <div class="detail-value">{{ 'Attempted' if flask_login_details.remember_me_attempt else 'Not attempted' }}</div>
+            </div>
+            {% endif %}
+            
+            {% if flask_login_details.login_manager_config %}
+            <div class="detail-row">
+                <div class="detail-label">Login Manager:</div>
+                <div class="detail-value">{{ flask_login_details.login_manager_config }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# Security Recommendations #}
+    <div class="security-recommendations">
+        <h3>🔒 Immediate Security Recommendations</h3>
+        <ul>
+            <li><strong>Review Account Activity:</strong> Check your recent login history and account activity</li>
+            <li><strong>Change Password:</strong> Update your password immediately if you suspect unauthorized access</li>
+            <li><strong>Enable Two-Factor Authentication:</strong> Add an extra layer of security to your account</li>
+            <li><strong>Review Connected Devices:</strong> Verify all devices connected to your account</li>
+            <li><strong>Monitor for Suspicious Activity:</strong> Report any unusual account behavior immediately</li>
+            {% if geo_location and geo_location.is_vpn %}
+            <li><strong>VPN/Proxy Detected:</strong> The attempt originated from a VPN or proxy service, which may indicate sophisticated threat actors</li>
+            {% endif %}
+            {% if security_analysis and security_analysis.risk_score >= 7 %}
+            <li><strong>High Risk Alert:</strong> This incident has been flagged as high risk. Consider temporarily restricting account access</li>
+            {% endif %}
+        </ul>
+    </div>
+
+    {# Action Buttons #}
+    <div class="security-actions">
+        {% if secure_account_url %}
+        <a href="{{ secure_account_url }}" class="btn-security btn-security-primary">🔐 Secure My Account</a>
+        {% endif %}
+        
+        {% if account_settings_url %}
+        <a href="{{ account_settings_url }}" class="btn-security btn-security-secondary">⚙️ Account Settings</a>
+        {% endif %}
+        
+        {% if incident_report_url %}
+        <a href="{{ incident_report_url }}" class="btn-security btn-security-secondary">📋 View Full Report</a>
+        {% endif %}
+    </div>
+
+    {# Additional Context for Security Team #}
+    {% if security_team_context %}
+    <div class="incident-details">
+        <div class="incident-details-header">
+            👥 Security Team Context
+        </div>
+        <div class="incident-details-content">
+            {% if security_team_context.correlation_id %}
+            <div class="detail-row">
+                <div class="detail-label">Correlation ID:</div>
+                <div class="detail-value sensitive">{{ security_team_context.correlation_id }}</div>
+            </div>
+            {% endif %}
+            
+            {% if security_team_context.alert_rules_triggered %}
+            <div class="detail-row">
+                <div class="detail-label">Alert Rules:</div>
+                <div class="detail-value">{{ security_team_context.alert_rules_triggered|join(', ') }}</div>
+            </div>
+            {% endif %}
+            
+            {% if security_team_context.monitoring_system %}
+            <div class="detail-row">
+                <div class="detail-label">Monitoring System:</div>
+                <div class="detail-value">{{ security_team_context.monitoring_system }}</div>
+            </div>
+            {% endif %}
+            
+            {% if security_team_context.escalation_level %}
+            <div class="detail-row">
+                <div class="detail-label">Escalation Level:</div>
+                <div class="detail-value">
+                    <span class="severity-{{ security_team_context.escalation_level|lower }}">
+                        {{ security_team_context.escalation_level|upper }}
+                    </span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# ItsDangerous Security Token Information #}
+    {% if security_token %}
+    <div class="incident-details">
+        <div class="incident-details-header">
+            🔑 Security Token Information
+        </div>
+        <div class="incident-details-content">
+            <div class="detail-row">
+                <div class="detail-label">Token Type:</div>
+                <div class="detail-value">ItsDangerous Secure Token</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">Token ID:</div>
+                <div class="detail-value sensitive">{{ security_token.token_id }}</div>
+            </div>
+            
+            {% if security_token.expires_at %}
+            <div class="detail-row">
+                <div class="detail-label">Expires At:</div>
+                <div class="detail-value">{{ security_token.expires_at }}</div>
+            </div>
+            {% endif %}
+            
+            <div class="detail-row">
+                <div class="detail-label">Purpose:</div>
+                <div class="detail-value">{{ security_token.purpose or 'Authentication failure notification' }}</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# What to do if this wasn't you #}
+    <h3>❓ If This Wasn't You</h3>
+    <p>
+        If you did not attempt to log in, this could indicate that someone is trying to access your account. 
+        Please take the following immediate actions:
+    </p>
+    
+    <ol>
+        <li><strong>Secure your account immediately</strong> by clicking the "Secure My Account" button above</li>
+        <li><strong>Change your password</strong> from a secure device</li>
+        <li><strong>Review your account activity</strong> for any unauthorized changes</li>
+        <li><strong>Contact our security team</strong> if you notice any suspicious activity</li>
+        <li><strong>Consider enabling additional security measures</strong> such as two-factor authentication</li>
+    </ol>
+
+    {# Technical Details Footer #}
+    <div class="incident-details">
+        <div class="incident-details-header">
+            🔧 Technical Details
+        </div>
+        <div class="incident-details-content">
+            <div class="detail-row">
+                <div class="detail-label">Detection System:</div>
+                <div class="detail-value">Flask-Login with Auth0 Integration</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">Framework Version:</div>
+                <div class="detail-value">Flask 3.1.1 with ItsDangerous 2.2+</div>
+            </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">Auth0 SDK:</div>
+                <div class="detail-value">auth0-python 4.9.0</div>
+            </div>
+            
+            {% if python_version %}
+            <div class="detail-row">
+                <div class="detail-label">Python Version:</div>
+                <div class="detail-value">{{ python_version }}</div>
+            </div>
+            {% endif %}
+            
+            <div class="detail-row">
+                <div class="detail-label">Generated At:</div>
+                <div class="detail-value">{{ email_generated_at or timestamp }}</div>
+            </div>
+        </div>
+    </div>
+
+    <p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 14px; color: #6c757d;">
+        <strong>Security Note:</strong> This email contains sensitive security information. Please do not forward this email or share the incident details with unauthorized personnel. If you have questions about this security alert, please contact our security team directly.
+    </p>
+{% endblock %}
+
+{% block footer_content %}
+    <div class="footer-section">
+        <div class="footer-title">🛡️ Security Team</div>
+        <p>This security alert was generated automatically by our Flask application security monitoring system.</p>
+        <p>
+            <strong>Emergency Contact:</strong> {{ security_team_email or 'security@company.com' }}<br>
+            <strong>Security Hotline:</strong> {{ security_team_phone or '+1-555-SECURITY' }}
+        </p>
+    </div>
+    
+    <div class="footer-section">
+        <div class="footer-title">Important Security Information</div>
+        <ul class="footer-links">
+            <li><a href="{{ security_policy_url or '#' }}">Security Policy</a></li>
+            <li><a href="{{ incident_response_url or '#' }}">Incident Response</a></li>
+            <li><a href="{{ security_faq_url or '#' }}">Security FAQ</a></li>
+            <li><a href="{{ threat_intel_url or '#' }}">Threat Intelligence</a></li>
+        </ul>
+    </div>
+    
+    {{ super() }}
+    
+    <div class="footer-section">
+        <p style="font-size: 12px; color: #868e96; margin-top: 15px;">
+            <strong>Alert ID:</strong> {{ incident_id }}<br>
+            <strong>System:</strong> Flask 3.1.1 Security Monitor with Auth0 Integration<br>
+            <strong>Classification:</strong> {{ classification or 'Internal Use' }}
+        </p>
+    </div>
+{% endblock %}

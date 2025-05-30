@@ -1,0 +1,368 @@
+{
+  "error": {
+    "code": 429,
+    "type": "rate_limit_exceeded",
+    "message": "{{ error_message | default('Too many requests. Rate limit exceeded.') }}",
+    "timestamp": "{{ timestamp | default(moment().utc().isoformat()) }}",
+    "request_id": "{{ request_id | default(g.request_id if g.request_id else '') }}",
+    "path": "{{ request.path if request else '' }}",
+    "method": "{{ request.method if request else '' }}"
+  },
+  "rate_limit_info": {
+    {% if rate_limit_details %}
+    "current_usage": {
+      "requests_count": {{ rate_limit_details.get('requests_count', 0) }},
+      "time_window": "{{ rate_limit_details.get('time_window', '5 minutes') }}",
+      "window_start": "{{ rate_limit_details.get('window_start', '') }}",
+      "window_end": "{{ rate_limit_details.get('window_end', '') }}",
+      "limit_exceeded_at": "{{ rate_limit_details.get('exceeded_at', timestamp) }}"
+    },
+    "limits": {
+      "requests_per_window": {{ rate_limit_details.get('requests_per_window', 'unknown') }},
+      "burst_allowance": {{ rate_limit_details.get('burst_allowance', 0) }},
+      "rate_limit_type": "{{ rate_limit_details.get('rate_limit_type', 'sliding_window') }}",
+      {% if rate_limit_details.get('user_tier') %}
+      "user_tier": "{{ rate_limit_details.user_tier }}",
+      "tier_limits": {{ rate_limit_details.get('tier_limits', {}) | tojson }},
+      {% endif %}
+      {% if rate_limit_details.get('endpoint_specific_limit') %}
+      "endpoint_limit": {{ rate_limit_details.endpoint_specific_limit }},
+      {% endif %}
+      "global_limit": {{ rate_limit_details.get('global_limit', rate_limit_details.get('requests_per_window', 'unknown')) }}
+    },
+    {% else %}
+    "current_usage": {
+      "requests_count": "unknown",
+      "time_window": "5 minutes",
+      "limit_exceeded_at": "{{ timestamp }}"
+    },
+    "limits": {
+      "requests_per_window": "unknown",
+      "rate_limit_type": "sliding_window"
+    },
+    {% endif %}
+    "source": "{{ rate_limit_source | default('application') }}",
+    "enforcement_level": "{{ enforcement_level | default('strict') }}"
+  },
+  "aws_waf_context": {
+    {% if aws_waf_details %}
+    "rule_triggered": {
+      "rule_name": "{{ aws_waf_details.get('rule_name', 'RateLimitRule') }}",
+      "rule_id": "{{ aws_waf_details.get('rule_id', '') }}",
+      "web_acl_name": "{{ aws_waf_details.get('web_acl_name', 'flask-app-protection') }}",
+      "action": "{{ aws_waf_details.get('action', 'BLOCK') }}",
+      "priority": {{ aws_waf_details.get('priority', 1) }},
+      "rule_type": "{{ aws_waf_details.get('rule_type', 'RATE_BASED') }}"
+    },
+    {% if aws_waf_details.get('rate_limit_config') %}
+    "waf_rate_limits": {
+      "requests_per_5_minutes": {{ aws_waf_details.rate_limit_config.get('requests_per_5_minutes', 2000) }},
+      "aggregation_key": "{{ aws_waf_details.rate_limit_config.get('aggregation_key', 'IP') }}",
+      "scope": "{{ aws_waf_details.rate_limit_config.get('scope', 'CLOUDFRONT') }}",
+      "forwarded_ip_config": {{ aws_waf_details.rate_limit_config.get('forwarded_ip_config', {}) | tojson }}
+    },
+    {% endif %}
+    {% if aws_waf_details.get('geographic_info') %}
+    "geographic_context": {
+      "country": "{{ aws_waf_details.geographic_info.get('country', 'unknown') }}",
+      "region": "{{ aws_waf_details.geographic_info.get('region', 'unknown') }}",
+      "blocked_countries": {{ aws_waf_details.geographic_info.get('blocked_countries', []) | tojson }}
+    },
+    {% endif %}
+    {% else %}
+    "rule_triggered": {
+      "rule_name": "RateLimitRule",
+      "web_acl_name": "flask-app-protection",
+      "action": "BLOCK",
+      "rule_type": "RATE_BASED"
+    },
+    "waf_rate_limits": {
+      "requests_per_5_minutes": 2000,
+      "aggregation_key": "IP"
+    },
+    {% endif %}
+    "protection_level": "{{ protection_level | default('standard') }}",
+    "ddos_protection": {
+      "shield_status": "{{ shield_status | default('enabled') }}",
+      "advanced_protection": {{ advanced_ddos_protection | default(false) | tojson }},
+      {% if ddos_metrics %}
+      "current_threat_level": "{{ ddos_metrics.get('threat_level', 'normal') }}",
+      "attack_vector": "{{ ddos_metrics.get('attack_vector', 'none') }}",
+      {% endif %}
+      "mitigation_active": {{ mitigation_active | default(false) | tojson }}
+    }
+  },
+  "retry_guidance": {
+    "retry_after_seconds": {{ retry_after_seconds | default(60) }},
+    "retry_strategy": {
+      "type": "exponential_backoff",
+      "base_delay": {{ base_delay_seconds | default(60) }},
+      "max_delay": {{ max_delay_seconds | default(3600) }},
+      "multiplier": {{ backoff_multiplier | default(2.0) }},
+      "jitter": {{ jitter_enabled | default(true) | tojson }},
+      "max_retries": {{ max_retries | default(5) }}
+    },
+    "recommended_actions": [
+      {% if retry_recommendations %}
+      {% for recommendation in retry_recommendations %}
+      {
+        "action": "{{ recommendation.action }}",
+        "description": "{{ recommendation.description }}",
+        "priority": "{{ recommendation.priority | default('medium') }}",
+        {% if recommendation.wait_time %}
+        "wait_time": {{ recommendation.wait_time }},
+        {% endif %}
+        {% if recommendation.conditions %}
+        "conditions": {{ recommendation.conditions | tojson }},
+        {% endif %}
+        "effectiveness": "{{ recommendation.effectiveness | default('high') }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+      {% else %}
+      {
+        "action": "implement_exponential_backoff",
+        "description": "Use exponential backoff starting with {{ base_delay_seconds | default(60) }} seconds",
+        "priority": "high",
+        "effectiveness": "high"
+      },
+      {
+        "action": "reduce_request_frequency",
+        "description": "Reduce the frequency of API calls to stay within rate limits",
+        "priority": "high",
+        "effectiveness": "high"
+      },
+      {
+        "action": "implement_request_batching",
+        "description": "Batch multiple operations into single requests where possible",
+        "priority": "medium",
+        "effectiveness": "medium"
+      },
+      {
+        "action": "cache_responses",
+        "description": "Implement client-side caching to reduce duplicate requests",
+        "priority": "medium",
+        "effectiveness": "high"
+      }
+      {% endif %}
+    ],
+    "client_implementation": {
+      "libraries": {
+        "python": {
+          "requests_with_backoff": "import time; import random; time.sleep({{ base_delay_seconds | default(60) }} * ({{ backoff_multiplier | default(2.0) }} ** attempt) + random.uniform(0, 1))"
+        },
+        "javascript": {
+          "fetch_with_backoff": "await new Promise(resolve => setTimeout(resolve, {{ base_delay_seconds | default(60) }}000 * Math.pow({{ backoff_multiplier | default(2.0) }}, attempt) + Math.random() * 1000))"
+        },
+        "curl": {
+          "retry_command": "curl --retry {{ max_retries | default(5) }} --retry-delay {{ base_delay_seconds | default(60) }} --retry-max-time {{ max_delay_seconds | default(3600) }}"
+        }
+      },
+      "best_practices": [
+        "Always check the Retry-After header",
+        "Implement jitter to avoid thundering herd",
+        "Set maximum retry limits to prevent infinite loops",
+        "Log retry attempts for monitoring",
+        "Consider circuit breaker patterns for sustained errors"
+      ]
+    }
+  },
+  "throttling_details": {
+    {% if throttling_context %}
+    "throttling_reason": "{{ throttling_context.get('reason', 'rate_limit_exceeded') }}",
+    "throttling_scope": "{{ throttling_context.get('scope', 'ip_address') }}",
+    {% if throttling_context.get('client_info') %}
+    "client_context": {
+      "ip_address": "{{ throttling_context.client_info.get('ip_address', 'unknown') }}",
+      "user_agent_hash": "{{ throttling_context.client_info.get('user_agent_hash', '') }}",
+      {% if throttling_context.client_info.get('user_id') %}
+      "user_id": "{{ throttling_context.client_info.user_id }}",
+      {% endif %}
+      {% if throttling_context.client_info.get('api_key_id') %}
+      "api_key_id": "{{ throttling_context.client_info.api_key_id }}",
+      {% endif %}
+      "request_pattern": "{{ throttling_context.client_info.get('request_pattern', 'unknown') }}"
+    },
+    {% endif %}
+    {% if throttling_context.get('burst_detection') %}
+    "burst_detection": {
+      "burst_detected": {{ throttling_context.burst_detection.get('detected', false) | tojson }},
+      "burst_intensity": {{ throttling_context.burst_detection.get('intensity', 0) }},
+      "burst_duration": "{{ throttling_context.burst_detection.get('duration', '0 seconds') }}",
+      "burst_threshold": {{ throttling_context.burst_detection.get('threshold', 0) }}
+    },
+    {% endif %}
+    {% else %}
+    "throttling_reason": "rate_limit_exceeded",
+    "throttling_scope": "ip_address",
+    {% endif %}
+    "recovery_time": "{{ recovery_time | default('60 seconds') }}",
+    "quota_reset": {
+      "next_reset": "{{ quota_reset_time | default('') }}",
+      "reset_frequency": "{{ reset_frequency | default('every 5 minutes') }}",
+      "timezone": "{{ timezone | default('UTC') }}"
+    },
+    {% if adaptive_throttling %}
+    "adaptive_throttling": {
+      "enabled": {{ adaptive_throttling.get('enabled', false) | tojson }},
+      {% if adaptive_throttling.get('current_factor') %}
+      "throttling_factor": {{ adaptive_throttling.current_factor }},
+      {% endif %}
+      {% if adaptive_throttling.get('learning_period') %}
+      "learning_period": "{{ adaptive_throttling.learning_period }}",
+      {% endif %}
+      "algorithm": "{{ adaptive_throttling.get('algorithm', 'token_bucket') }}"
+    },
+    {% endif %}
+    "mitigation_strategies": [
+      {% if mitigation_strategies %}
+      {% for strategy in mitigation_strategies %}
+      {
+        "strategy": "{{ strategy.name }}",
+        "description": "{{ strategy.description }}",
+        "implementation": "{{ strategy.implementation }}",
+        "effectiveness": "{{ strategy.effectiveness | default('medium') }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+      {% else %}
+      {
+        "strategy": "request_spreading",
+        "description": "Spread requests evenly across time windows",
+        "implementation": "Implement random delays between requests",
+        "effectiveness": "high"
+      },
+      {
+        "strategy": "request_prioritization",
+        "description": "Prioritize critical operations over batch operations",
+        "implementation": "Use separate rate limit pools for different operation types",
+        "effectiveness": "medium"
+      }
+      {% endif %}
+    ]
+  },
+  {% if user_context and user_context.get('authenticated') %}
+  "user_specific_info": {
+    "user_tier": "{{ user_context.get('tier', 'standard') }}",
+    "quota_usage": {
+      "current_period_usage": {{ user_context.get('current_usage', 0) }},
+      "quota_limit": {{ user_context.get('quota_limit', 'unlimited') }},
+      "usage_percentage": {{ user_context.get('usage_percentage', 0) }},
+      "quota_period": "{{ user_context.get('quota_period', 'monthly') }}"
+    },
+    {% if user_context.get('upgrade_options') %}
+    "upgrade_options": {
+      "available_tiers": {{ user_context.upgrade_options.get('available_tiers', []) | tojson }},
+      "benefits": {{ user_context.upgrade_options.get('benefits', []) | tojson }},
+      "upgrade_url": "{{ user_context.upgrade_options.get('upgrade_url', '') }}"
+    },
+    {% endif %}
+    "recommendations": [
+      {% if user_context.get('usage_percentage', 0) > 80 %}
+      {
+        "type": "quota_management",
+        "message": "Consider upgrading your plan or optimizing request patterns",
+        "priority": "high"
+      },
+      {% endif %}
+      {
+        "type": "optimization",
+        "message": "Review API usage patterns to maximize efficiency",
+        "priority": "medium"
+      }
+    ]
+  },
+  {% endif %}
+  {% if monitoring_info %}
+  "monitoring": {
+    "incident_id": "{{ monitoring_info.get('incident_id', '') }}",
+    "alert_level": "{{ monitoring_info.get('alert_level', 'warning') }}",
+    {% if monitoring_info.get('metrics') %}
+    "current_metrics": {
+      "requests_per_second": {{ monitoring_info.metrics.get('rps', 0) }},
+      "error_rate": {{ monitoring_info.metrics.get('error_rate', 0) }},
+      "avg_response_time": {{ monitoring_info.metrics.get('avg_response_time', 0) }},
+      "active_connections": {{ monitoring_info.metrics.get('active_connections', 0) }}
+    },
+    {% endif %}
+    {% if monitoring_info.get('dashboard_url') %}
+    "dashboard": "{{ monitoring_info.dashboard_url }}",
+    {% endif %}
+    "status_page": "{{ status_page_url | default('/api/status') }}"
+  },
+  {% endif %}
+  {% if debug_info and (config.get('FLASK_ENV') == 'development' or config.get('DEBUG')) %}
+  "debug": {
+    "rate_limiter_type": "{{ debug_info.get('rate_limiter_type', 'unknown') }}",
+    {% if debug_info.get('rate_limiter_state') %}
+    "rate_limiter_state": {{ debug_info.rate_limiter_state | tojson }},
+    {% endif %}
+    {% if debug_info.get('aws_waf_logs') %}
+    "aws_waf_logs": {{ debug_info.aws_waf_logs | tojson }},
+    {% endif %}
+    {% if debug_info.get('request_fingerprint') %}
+    "request_fingerprint": "{{ debug_info.request_fingerprint }}",
+    {% endif %}
+    {% if debug_info.get('cache_keys') %}
+    "cache_keys": {{ debug_info.cache_keys | tojson }},
+    {% endif %}
+    "request_headers": {
+      {% if request and request.headers %}
+      {% for header, value in request.headers.items() %}
+      {% if header.lower() not in ['authorization', 'cookie', 'x-api-key'] %}
+      "{{ header }}": "{{ value }}"{% if not loop.last %},{% endif %}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+    },
+    "server_time": "{{ debug_info.get('server_time', timestamp) }}",
+    "rate_limit_algorithm": "{{ debug_info.get('algorithm', 'sliding_window') }}"
+  },
+  {% endif %}
+  "links": {
+    {% if api_documentation_url %}
+    "rate_limits_documentation": "{{ api_documentation_url }}/rate-limits",
+    "api_documentation": "{{ api_documentation_url }}",
+    {% endif %}
+    {% if upgrade_url %}
+    "upgrade_plan": "{{ upgrade_url }}",
+    {% endif %}
+    "status_page": "{{ status_page_url | default('/api/status') }}",
+    "support": "{{ support_url | default('/api/help') }}",
+    {% if contact_support_url %}
+    "contact_support": "{{ contact_support_url }}",
+    {% endif %}
+    "best_practices": "{{ best_practices_url | default('/api/docs/rate-limits') }}"
+  },
+  "meta": {
+    "api_version": "{{ api_version | default('v1') }}",
+    "service": "{{ service_name | default('flask-application') }}",
+    "environment": "{{ config.get('FLASK_ENV', 'production') }}",
+    {% if correlation_id %}
+    "correlation_id": "{{ correlation_id }}",
+    {% endif %}
+    {% if user_context and user_context.get('user_id') %}
+    "user_id": "{{ user_context.user_id }}",
+    {% endif %}
+    "response_time": "{{ response_time_ms | default(0) }}ms",
+    "rate_limit_implementation": {
+      "framework": "Flask",
+      "aws_waf_integration": true,
+      "ddos_protection": "{{ ddos_protection_level | default('standard') }}",
+      "adaptive_limits": {{ adaptive_limits_enabled | default(false) | tojson }}
+    },
+    {% if security_context %}
+    "security_context": {
+      "threat_level": "{{ security_context.get('threat_level', 'normal') }}",
+      "protection_mode": "{{ security_context.get('protection_mode', 'standard') }}",
+      {% if security_context.get('incident_response') %}
+      "incident_response_active": {{ security_context.incident_response | tojson }},
+      {% endif %}
+      "last_security_update": "{{ security_context.get('last_update', '') }}"
+    },
+    {% endif %}
+    "compliance": {
+      "gdpr_compliant": true,
+      "data_retention": "{{ data_retention_period | default('90 days') }}",
+      "privacy_policy": "{{ privacy_policy_url | default('/privacy') }}"
+    }
+  }
+}

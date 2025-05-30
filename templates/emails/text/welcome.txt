@@ -1,0 +1,155 @@
+Welcome to Our Platform!
+
+Dear {{ user.full_name or user.username }},
+
+Welcome to our community! We're excited to have you join us and begin exploring all the features and capabilities our platform has to offer.
+
+========================================
+YOUR ACCOUNT DETAILS
+========================================
+
+Username: {{ user.username }}
+Email: {{ user.email }}
+Account Status: Active
+Member Since: {{ user.created_at.strftime('%B %d, %Y') }}
+{% if user.profile and user.profile.preferred_language %}
+Preferred Language: {{ user.profile.preferred_language }}
+{% endif %}
+
+========================================
+GETTING STARTED
+========================================
+
+1. COMPLETE YOUR PROFILE
+   Visit your profile page to add additional information and personalize your experience. A complete profile helps you get the most out of our platform and connects you with relevant features.
+
+2. EXPLORE KEY FEATURES
+   - Dashboard: Your central hub for accessing all platform features
+   - Account Settings: Manage your preferences and security settings
+   - User Management: Access and manage your account information
+   - Security Center: Review and update your security preferences
+
+3. SECURITY SETUP
+   Your account is protected with industry-standard security measures:
+   - Secure authentication powered by Auth0
+   - Encrypted data storage and transmission
+   - Session management with automatic timeout
+   
+   For enhanced security, consider:
+   - Enabling two-factor authentication (if available)
+   - Using a strong, unique password
+   - Reviewing your login activity regularly
+
+========================================
+WHAT'S NEXT?
+========================================
+
+Here are some recommended first steps to help you get the most out of your account:
+
+• LOG IN TO YOUR DASHBOARD
+  Access your account dashboard to explore available features and customize your experience.
+
+• UPDATE YOUR PREFERENCES
+  Set your notification preferences, timezone, and other personal settings to match your needs.
+
+• EXPLORE DOCUMENTATION
+  Visit our help center and documentation to learn about advanced features and best practices.
+
+• CONNECT WITH SUPPORT
+  If you have questions or need assistance, our support team is here to help.
+
+========================================
+IMPORTANT INFORMATION
+========================================
+
+Platform Features:
+- Modern Flask-based architecture for reliable performance
+- Secure database management with comprehensive data protection
+- Real-time monitoring and health checks for optimal uptime
+- Mobile-friendly interface that works across all devices
+
+Account Security:
+- Your session will automatically timeout for security
+- We use advanced encryption to protect your data
+- Regular security updates ensure your information stays safe
+- Multi-layered authentication protects your account access
+
+System Requirements:
+- Compatible with all modern web browsers
+- No additional software installation required
+- Accessible from desktop, tablet, and mobile devices
+- Optimized for both high-speed and slower internet connections
+
+========================================
+SUPPORT AND RESOURCES
+========================================
+
+Need Help?
+If you have questions or encounter any issues, we're here to assist you:
+
+• Documentation: Access our comprehensive user guides and tutorials
+• Support Team: Contact our support team for personalized assistance
+• Community Forums: Connect with other users and share experiences
+• FAQ Section: Find quick answers to common questions
+
+Contact Information:
+For technical support or account-related questions, please don't hesitate to reach out to our support team.
+
+========================================
+PRIVACY AND SECURITY
+========================================
+
+Your Privacy Matters:
+We take your privacy seriously and are committed to protecting your personal information:
+
+- Your data is encrypted both in transit and at rest
+- We follow industry best practices for data security
+- Your information is never shared without your explicit consent
+- You have full control over your data and privacy settings
+
+Data Protection:
+Our platform includes comprehensive security measures:
+- Regular security audits and monitoring
+- Automated backup and recovery systems
+- Compliance with data protection regulations
+- Secure authentication and session management
+
+========================================
+WELCOME TO THE COMMUNITY
+========================================
+
+You're now part of a growing community of users who rely on our platform for their daily operations. We're committed to providing you with:
+
+✓ Reliable and secure service
+✓ Regular feature updates and improvements
+✓ Responsive customer support
+✓ Comprehensive documentation and resources
+
+We believe you'll find our platform intuitive, powerful, and perfectly suited to your needs. Whether you're just getting started or you're an experienced user, we're here to support your journey.
+
+========================================
+FEEDBACK AND SUGGESTIONS
+========================================
+
+We Value Your Input:
+Your feedback helps us improve and grow. We'd love to hear about:
+- Your experience using the platform
+- Features you'd like to see added
+- Any suggestions for improvements
+- Questions or concerns you might have
+
+Thank you for choosing our platform. We look forward to being part of your success!
+
+Best regards,
+The Platform Team
+
+========================================
+
+This email was sent to {{ user.email }}. If you did not create this account or received this email in error, please contact our support team immediately.
+
+For your security, this welcome email contains account information that should be kept confidential. Please do not forward this email to others.
+
+© {{ current_year }} Our Platform. All rights reserved.
+
+--
+You're receiving this email because you recently created an account with us. This is a one-time welcome message to help you get started with your new account.

@@ -1,0 +1,390 @@
+================================================================
+SYSTEM MAINTENANCE NOTIFICATION
+================================================================
+
+Subject: {{ maintenance_type | upper }} MAINTENANCE SCHEDULED - {{ system_name }}
+Date: {{ notification_date }}
+Maintenance ID: {{ maintenance_id }}
+
+================================================================
+MAINTENANCE SUMMARY
+================================================================
+
+Maintenance Type: {{ maintenance_type }}
+Scheduled Start: {{ start_time }} ({{ timezone }})
+Scheduled End: {{ end_time }} ({{ timezone }})
+Duration: {{ duration }}
+Priority Level: {{ priority_level }}
+
+System: {{ system_name }}
+Environment: {{ environment }}
+Maintenance Window: {{ maintenance_window }}
+
+================================================================
+IMPACT ASSESSMENT
+================================================================
+
+Affected Services:
+{% for service in affected_services %}
+- {{ service.name }}: {{ service.impact_level }}
+  Status: {{ service.expected_status }}
+  {% if service.alternate_access %}
+  Alternative Access: {{ service.alternate_access }}
+  {% endif %}
+{% endfor %}
+
+Expected User Impact:
+{{ user_impact_description }}
+
+Availability Status:
+- API Endpoints: {{ api_availability }}
+- Web Interface: {{ web_availability }}
+- Database Access: {{ database_availability }}
+- Authentication: {{ auth_availability }}
+
+================================================================
+MAINTENANCE DETAILS
+================================================================
+
+Maintenance Scope:
+{{ maintenance_description }}
+
+Technical Components:
+{% for component in technical_components %}
+- {{ component.name }}: {{ component.action }}
+  {% if component.details %}
+  Details: {{ component.details }}
+  {% endif %}
+{% endfor %}
+
+{% if security_updates %}
+Security Updates:
+{% for update in security_updates %}
+- {{ update.component }}: {{ update.vulnerability_type }}
+  Severity: {{ update.severity }}
+  CVE ID: {{ update.cve_id | default('N/A') }}
+{% endfor %}
+{% endif %}
+
+{% if database_changes %}
+Database Changes:
+{% for change in database_changes %}
+- Migration: {{ change.migration_id }}
+  Type: {{ change.change_type }}
+  Impact: {{ change.impact_description }}
+{% endfor %}
+{% endif %}
+
+{% if container_updates %}
+Container Updates:
+{% for container in container_updates %}
+- Image: {{ container.image_name }}
+  Current Version: {{ container.current_version }}
+  New Version: {{ container.new_version }}
+  Update Type: {{ container.update_type }}
+{% endfor %}
+{% endif %}
+
+================================================================
+TIMELINE AND COORDINATION
+================================================================
+
+Pre-Maintenance ({{ pre_maintenance_start }}):
+{% for task in pre_maintenance_tasks %}
+- {{ task.time }}: {{ task.description }}
+  Responsible: {{ task.owner }}
+{% endfor %}
+
+Maintenance Execution:
+{% for phase in maintenance_phases %}
+- {{ phase.time }}: {{ phase.description }}
+  Duration: {{ phase.estimated_duration }}
+  Risk Level: {{ phase.risk_level }}
+  {% if phase.rollback_point %}
+  Rollback Point: Available
+  {% endif %}
+{% endfor %}
+
+Post-Maintenance Validation:
+{% for validation in post_maintenance_validations %}
+- {{ validation.time }}: {{ validation.description }}
+  Success Criteria: {{ validation.criteria }}
+{% endfor %}
+
+================================================================
+STAKEHOLDER COORDINATION
+================================================================
+
+Maintenance Team:
+{% for member in maintenance_team %}
+- {{ member.role }}: {{ member.name }}
+  Contact: {{ member.contact }}
+  {% if member.backup %}
+  Backup: {{ member.backup }}
+  {% endif %}
+{% endfor %}
+
+Communication Channels:
+- Primary: {{ primary_communication_channel }}
+- Emergency: {{ emergency_contact }}
+- Status Updates: {{ status_update_channel }}
+- Incident Response: {{ incident_response_contact }}
+
+Approval Chain:
+{% for approver in approval_chain %}
+- {{ approver.level }}: {{ approver.name }}
+  Status: {{ approver.approval_status }}
+  {% if approver.approval_time %}
+  Approved: {{ approver.approval_time }}
+  {% endif %}
+{% endfor %}
+
+================================================================
+RISK MANAGEMENT AND CONTINGENCY
+================================================================
+
+Risk Assessment:
+Overall Risk Level: {{ overall_risk_level }}
+
+Identified Risks:
+{% for risk in identified_risks %}
+- Risk: {{ risk.description }}
+  Probability: {{ risk.probability }}
+  Impact: {{ risk.impact }}
+  Mitigation: {{ risk.mitigation_strategy }}
+{% endfor %}
+
+Rollback Procedures:
+{% if rollback_available %}
+Rollback Available: YES
+Rollback Window: {{ rollback_window }}
+Rollback Triggers:
+{% for trigger in rollback_triggers %}
+- {{ trigger.condition }}: {{ trigger.action }}
+{% endfor %}
+
+Emergency Rollback Contact: {{ emergency_rollback_contact }}
+{% else %}
+Rollback Available: NO
+Reason: {{ rollback_unavailable_reason }}
+{% endif %}
+
+Testing and Validation:
+Pre-Production Testing: {{ pre_prod_testing_status }}
+Staging Environment: {{ staging_validation_status }}
+{% if automated_tests %}
+Automated Test Suite: {{ automated_test_coverage }}
+{% endif %}
+
+================================================================
+BUSINESS CONTINUITY
+================================================================
+
+Critical Business Functions:
+{% for function in critical_functions %}
+- {{ function.name }}: {{ function.continuity_status }}
+  {% if function.workaround %}
+  Workaround: {{ function.workaround }}
+  {% endif %}
+  SLA Impact: {{ function.sla_impact }}
+{% endfor %}
+
+Alternative Procedures:
+{% if alternative_procedures %}
+{% for procedure in alternative_procedures %}
+- {{ procedure.scenario }}: {{ procedure.procedure }}
+  Contact: {{ procedure.contact }}
+{% endfor %}
+{% else %}
+No alternative procedures available during maintenance window.
+{% endif %}
+
+Data Backup Status:
+- Last Full Backup: {{ last_full_backup }}
+- Backup Verification: {{ backup_verification_status }}
+- Recovery Time Objective: {{ rto }}
+- Recovery Point Objective: {{ rpo }}
+
+================================================================
+STAKEHOLDER ACTIONS REQUIRED
+================================================================
+
+Before Maintenance:
+{% for action in pre_maintenance_actions %}
+- {{ action.deadline }}: {{ action.description }}
+  Responsible: {{ action.responsible_party }}
+  Priority: {{ action.priority }}
+{% endfor %}
+
+During Maintenance:
+{% for action in during_maintenance_actions %}
+- {{ action.description }}
+  Responsible: {{ action.responsible_party }}
+  {% if action.contact_method %}
+  Contact Method: {{ action.contact_method }}
+  {% endif %}
+{% endfor %}
+
+After Maintenance:
+{% for action in post_maintenance_actions %}
+- {{ action.description }}
+  Deadline: {{ action.deadline }}
+  Responsible: {{ action.responsible_party }}
+{% endfor %}
+
+================================================================
+MONITORING AND STATUS UPDATES
+================================================================
+
+Real-Time Status Monitoring:
+- Status Page: {{ status_page_url }}
+- Monitoring Dashboard: {{ monitoring_dashboard_url }}
+- Health Check Endpoint: {{ health_check_url }}
+
+Automated Notifications:
+- Start Notification: {{ start_notification_method }}
+- Progress Updates: {{ progress_update_frequency }}
+- Completion Notification: {{ completion_notification_method }}
+- Issue Alerts: {{ issue_alert_method }}
+
+Manual Status Updates:
+{% for update in manual_status_updates %}
+- {{ update.time }}: {{ update.channel }}
+  Content: {{ update.content_type }}
+{% endfor %}
+
+Performance Metrics Monitoring:
+- API Response Time: Target < {{ api_response_target }}ms
+- Database Query Time: Target < {{ db_query_target }}ms
+- System Availability: Target {{ availability_target }}%
+- Error Rate: Target < {{ error_rate_target }}%
+
+================================================================
+COMPLIANCE AND DOCUMENTATION
+================================================================
+
+Regulatory Compliance:
+{% if compliance_requirements %}
+{% for requirement in compliance_requirements %}
+- {{ requirement.regulation }}: {{ requirement.compliance_action }}
+  Documentation: {{ requirement.documentation_required }}
+{% endfor %}
+{% else %}
+No specific regulatory compliance requirements for this maintenance.
+{% endif %}
+
+Change Management:
+Change Request ID: {{ change_request_id }}
+Approval Date: {{ approval_date }}
+Change Category: {{ change_category }}
+Business Justification: {{ business_justification }}
+
+Documentation Updates:
+{% for doc in documentation_updates %}
+- {{ doc.document_name }}: {{ doc.update_type }}
+  Owner: {{ doc.owner }}
+  Due Date: {{ doc.due_date }}
+{% endfor %}
+
+================================================================
+POST-MAINTENANCE REPORTING
+================================================================
+
+Success Criteria:
+{% for criteria in success_criteria %}
+- {{ criteria.metric }}: {{ criteria.target_value }}
+  Measurement Method: {{ criteria.measurement_method }}
+{% endfor %}
+
+Post-Maintenance Review:
+Scheduled Review Date: {{ review_date }}
+Review Participants: {{ review_participants }}
+Review Scope: {{ review_scope }}
+
+Lessons Learned Documentation:
+Template: {{ lessons_learned_template }}
+Deadline: {{ lessons_learned_deadline }}
+Distribution: {{ lessons_learned_distribution }}
+
+================================================================
+CONTACT INFORMATION
+================================================================
+
+24/7 Emergency Contacts:
+- On-Call Engineer: {{ oncall_engineer_contact }}
+- Technical Lead: {{ technical_lead_contact }}
+- Incident Commander: {{ incident_commander_contact }}
+
+Business Contacts:
+- Business Owner: {{ business_owner_contact }}
+- Stakeholder Representative: {{ stakeholder_rep_contact }}
+- Communications Lead: {{ communications_lead_contact }}
+
+Support Channels:
+- Technical Support: {{ technical_support_contact }}
+- Help Desk: {{ help_desk_contact }}
+- Emergency Escalation: {{ emergency_escalation_contact }}
+
+================================================================
+ADDITIONAL INFORMATION
+================================================================
+
+Related Maintenance Activities:
+{% if related_maintenance %}
+{% for related in related_maintenance %}
+- {{ related.date }}: {{ related.description }}
+  Impact: {{ related.impact }}
+{% endfor %}
+{% else %}
+No related maintenance activities scheduled.
+{% endif %}
+
+Reference Documentation:
+{% for doc in reference_docs %}
+- {{ doc.title }}: {{ doc.location }}
+  Purpose: {{ doc.purpose }}
+{% endfor %}
+
+Historical Context:
+{% if maintenance_history %}
+Last Similar Maintenance: {{ last_similar_maintenance_date }}
+Previous Duration: {{ previous_duration }}
+Previous Issues: {{ previous_issues }}
+Improvements Made: {{ improvements_made }}
+{% endif %}
+
+================================================================
+ACKNOWLEDGMENT AND CONFIRMATION
+================================================================
+
+This maintenance notification requires acknowledgment from:
+{% for recipient in acknowledgment_required %}
+- {{ recipient.role }}: {{ recipient.name }}
+  Deadline: {{ recipient.acknowledgment_deadline }}
+  Method: {{ recipient.acknowledgment_method }}
+{% endfor %}
+
+To acknowledge receipt and understanding of this maintenance notice:
+{{ acknowledgment_instructions }}
+
+Questions or Concerns:
+Direct all questions to: {{ questions_contact }}
+Response SLA: {{ question_response_sla }}
+
+================================================================
+MAINTENANCE NOTIFICATION FOOTER
+================================================================
+
+This is an automated maintenance notification generated by the
+{{ system_name }} monitoring and maintenance management system.
+
+Notification Generated: {{ notification_timestamp }}
+Notification Version: {{ notification_version }}
+Next Update Scheduled: {{ next_update_time }}
+
+For the most current information, please check:
+{{ status_page_url }}
+
+================================================================
+END OF MAINTENANCE NOTIFICATION
+================================================================

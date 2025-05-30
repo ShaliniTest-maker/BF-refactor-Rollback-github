@@ -1,0 +1,391 @@
+=======================================================================
+SECURITY ALERT: Authorization Violation Detected
+=======================================================================
+
+INCIDENT DETAILS
+-----------------------------------------------------------------------
+Timestamp:           {{ incident_timestamp }}
+Incident ID:         {{ incident_id }}
+Severity Level:      {{ severity_level }}
+User Account:        {{ username if username else 'Anonymous' }}
+User ID:             {{ user_id if user_id else 'N/A' }}
+Source IP Address:   {{ source_ip_address }}
+Geographic Location: {{ geographic_location if geographic_location else 'Unknown' }}
+User Agent:          {{ user_agent if user_agent else 'N/A' }}
+
+VIOLATION DETAILS
+-----------------------------------------------------------------------
+Resource Attempted:  {{ attempted_resource }}
+Action Attempted:    {{ attempted_action }}
+Required Permission: {{ required_permission }}
+Access Level:        {{ access_level if access_level else 'Insufficient' }}
+Request Path:        {{ request_path }}
+HTTP Method:         {{ http_method }}
+Session ID:          {{ session_id if session_id else 'N/A' }}
+Request Parameters:  {{ request_parameters if request_parameters else 'None' }}
+
+USER AUTHORIZATION CONTEXT
+-----------------------------------------------------------------------
+Current User Roles:  
+{% if user_roles %}
+{% for role in user_roles %}
+- {{ role }}
+{% endfor %}
+{% else %}
+- No roles assigned
+{% endif %}
+
+Current Permissions:
+{% if user_permissions %}
+{% for permission in user_permissions %}
+- {{ permission }}
+{% endfor %}
+{% else %}
+- No permissions granted
+{% endif %}
+
+Authorization Status: {{ auth_status if auth_status else 'DENIED' }}
+Account Status:       {{ account_status if account_status else 'Active' }}
+Session Validity:     {{ session_validity if session_validity else 'Valid' }}
+{% if ownership_context %}
+Resource Ownership:   {{ ownership_context }}
+{% endif %}
+
+FLASK-SQLALCHEMY RBAC ANALYSIS
+-----------------------------------------------------------------------
+Database Query Time:  {{ db_query_time if db_query_time else 'N/A' }}
+Permission Cache:     {{ permission_cache_status if permission_cache_status else 'Hit' }}
+Role Lookup Result:   {{ role_lookup_result if role_lookup_result else 'No matching roles' }}
+Policy Engine Result: {{ policy_engine_result if policy_engine_result else 'DENY' }}
+
+{% if rbac_debug_info %}
+RBAC Debug Information:
+- SQLAlchemy User Model ID: {{ rbac_debug_info.user_model_id if rbac_debug_info.user_model_id else 'N/A' }}
+- Role Association Count:   {{ rbac_debug_info.role_count if rbac_debug_info.role_count else 0 }}
+- Permission Association:   {{ rbac_debug_info.permission_count if rbac_debug_info.permission_count else 0 }}
+- Dynamic Rule Evaluation:  {{ rbac_debug_info.dynamic_rule_result if rbac_debug_info.dynamic_rule_result else 'N/A' }}
+- Context-Based Access:     {{ rbac_debug_info.context_access if rbac_debug_info.context_access else 'Denied' }}
+{% endif %}
+
+SECURITY RISK ASSESSMENT
+-----------------------------------------------------------------------
+{% if risk_indicators %}
+** ELEVATED RISK INDICATORS DETECTED **
+{% for indicator in risk_indicators %}
+- {{ indicator }}
+{% endfor %}
+{% endif %}
+
+Risk Score:          {{ risk_score if risk_score else 'Medium' }}/10
+Threat Level:        {{ threat_level if threat_level else 'Medium' }}
+IP Reputation:       {{ ip_reputation if ip_reputation else 'Checking...' }}
+Attack Pattern:      {{ attack_pattern if attack_pattern else 'Privilege Escalation Attempt' }}
+
+{% if suspicious_patterns %}
+** SUSPICIOUS ACTIVITY PATTERNS **
+{% for pattern in suspicious_patterns %}
+- {{ pattern }}
+{% endfor %}
+{% endif %}
+
+{% if repeated_violations %}
+** REPEATED VIOLATION PATTERN **
+Previous violations: {{ violation_count }} in last {{ time_window }}
+First violation:     {{ first_violation_time }}
+Escalation trigger:  {{ escalation_reason if escalation_reason else 'Multiple authorization violations' }}
+{% endif %}
+
+IMMEDIATE SECURITY ACTIONS TAKEN
+-----------------------------------------------------------------------
+{% if actions_taken %}
+{% for action in actions_taken %}
+- {{ action }}
+{% endfor %}
+{% else %}
+- Authorization violation logged for security analysis
+- User access pattern monitoring activated
+- Security team notification initiated
+- RBAC system integrity verification triggered
+{% endif %}
+
+{% if access_restricted %}
+** ACCESS RESTRICTION APPLIED **
+Temporary access restrictions have been applied to prevent potential
+unauthorized access. This is a protective measure following the
+authorization violation detection.
+
+Restriction Details:
+- Scope: {{ restriction_scope if restriction_scope else 'Elevated permissions' }}
+- Duration: {{ restriction_duration if restriction_duration else 'Until security review' }}
+- Review Process: {{ review_process if review_process else 'Security team evaluation' }}
+{% endif %}
+
+VIOLATION INVESTIGATION GUIDANCE
+-----------------------------------------------------------------------
+FOR LEGITIMATE USERS:
+
+If you believe this violation was triggered incorrectly:
+
+1. VERIFY ACCESS REQUIREMENTS:
+   - Confirm you have the necessary role assignments
+   - Check if your permissions have recently changed
+   - Verify you are accessing the correct resource
+   - Ensure your session has not expired
+
+2. PERMISSION VERIFICATION:
+   - Review your current role assignments in your profile
+   - Check with your administrator about recent permission changes
+   - Verify resource ownership if applicable
+   - Confirm business justification for access requirement
+
+3. CONTACT YOUR ADMINISTRATOR:
+   System Admin:    {{ admin_email if admin_email else 'admin@company.com' }}
+   IT Support:      {{ support_email if support_email else 'support@company.com' }}
+   Phone Support:   {{ support_phone if support_phone else 'Available via email' }}
+   
+   When contacting support, please provide:
+   - This incident ID: {{ incident_id }}
+   - Your username: {{ username if username else 'Provide your username' }}
+   - Business justification for access
+   - Description of your intended action
+
+4. ROLE REQUEST PROCESS:
+   - Submit formal access request if additional permissions needed
+   - Provide business justification for elevated access
+   - Obtain manager approval for role changes
+   - Follow established change management procedures
+
+FOR SECURITY TEAMS
+-----------------------------------------------------------------------
+** IMMEDIATE INVESTIGATION REQUIRED **
+
+This authorization violation requires security team review for:
+
+1. THREAT ASSESSMENT:
+   - Evaluate if this represents privilege escalation attempt
+   - Assess pattern correlation with other security events
+   - Determine if user account may be compromised
+   - Review attack vector and potential impact
+
+2. USER ACCOUNT ANALYSIS:
+   - Verify user identity and account legitimacy
+   - Review recent login patterns and locations
+   - Check for account compromise indicators
+   - Validate role assignments and permission grants
+
+3. SYSTEM INTEGRITY VERIFICATION:
+   - Confirm RBAC system is functioning correctly
+   - Validate permission cache integrity
+   - Review recent role and permission changes
+   - Verify SQLAlchemy model consistency
+
+4. INCIDENT CORRELATION:
+   - Check for related security events
+   - Review GuardDuty findings for this IP/user
+   - Correlate with authentication failure patterns
+   - Assess broader attack campaign indicators
+
+SECURITY TEAM CONTACT INFORMATION
+-----------------------------------------------------------------------
+For immediate security incident response:
+
+Security Operations: {{ security_email if security_email else 'security@company.com' }}
+Security Hotline:    {{ security_phone if security_phone else '24/7 Security Response' }}
+SIEM Integration:    {{ siem_contact if siem_contact else 'Via security email' }}
+Incident Commander:  {{ incident_commander if incident_commander else 'On-call rotation' }}
+
+Emergency Escalation: {{ emergency_contact if emergency_contact else 'Via security hotline' }}
+
+When reporting, include:
+- This incident ID: {{ incident_id }}
+- Complete violation context from this notification
+- Any related suspicious activity observed
+- Recommended investigation priority level
+
+TECHNICAL INFORMATION FOR SECURITY ANALYSIS
+-----------------------------------------------------------------------
+Application Context:
+- Flask Application: {{ app_name if app_name else 'Flask Security System' }}
+- App Version:       {{ app_version if app_version else '1.0' }}
+- Environment:       {{ environment if environment else 'Production' }}
+- Container ID:      {{ container_id if container_id else 'N/A' }}
+- WSGI Worker:       {{ wsgi_worker_id if wsgi_worker_id else 'N/A' }}
+
+Monitoring Integration:
+- CloudWatch Log:    {{ cloudwatch_log_id if cloudwatch_log_id else 'N/A' }}
+- Sentry Event:      {{ sentry_event_id if sentry_event_id else 'N/A' }}
+- GuardDuty Finding: {{ guardduty_finding_id if guardduty_finding_id else 'N/A' }}
+- Auth0 Event:       {{ auth0_event_id if auth0_event_id else 'N/A' }}
+
+Database Context:
+- Database Pool:     {{ db_pool_status if db_pool_status else 'Normal' }}
+- Query Performance: {{ db_query_performance if db_query_performance else 'Normal' }}
+- Migration Status:  {{ migration_status if migration_status else 'Current' }}
+- Connection Health: {{ db_connection_health if db_connection_health else 'Healthy' }}
+
+Flask-SQLAlchemy RBAC Technical Details:
+- User Model Table:  users (ID: {{ user_id if user_id else 'N/A' }})
+- Role Model Query:  {{ role_query_result if role_query_result else 'No matching roles' }}
+- Permission Query:  {{ permission_query_result if permission_query_result else 'Insufficient permissions' }}
+- Policy Engine:     {{ policy_engine_version if policy_engine_version else 'v1.0' }}
+- Cache Status:      {{ rbac_cache_status if rbac_cache_status else 'Active' }}
+
+Network Context:
+- Load Balancer:     {{ load_balancer_id if load_balancer_id else 'N/A' }}
+- CDN Edge:          {{ cdn_edge if cdn_edge else 'N/A' }}
+- Geographic Region: {{ aws_region if aws_region else 'us-east-1' }}
+- Availability Zone: {{ availability_zone if availability_zone else 'N/A' }}
+
+ESCALATION PROCEDURES
+-----------------------------------------------------------------------
+PRIORITY LEVELS:
+
+P1 - CRITICAL (Immediate Response Required):
+- Multiple authorization violations from same user/IP
+- Privileged account attempting unauthorized access
+- Signs of automated attack or credential stuffing
+- Potential data exfiltration attempt
+
+P2 - HIGH (Response within 1 hour):
+- Repeated violations from legitimate user account
+- Suspicious access patterns detected
+- Cross-resource access violations
+- Anomalous behavior correlation
+
+P3 - MEDIUM (Response within 4 hours):
+- Single violation from known user
+- Potential misconfiguration or training issue
+- Standard privilege escalation attempt
+- Routine security policy enforcement
+
+P4 - LOW (Response within 24 hours):
+- Accidental access violations
+- Training or documentation issues
+- Minor permission misalignment
+- Standard operational review
+
+{% if auto_escalation %}
+AUTOMATIC ESCALATION TRIGGERED:
+Current Priority: {{ escalation_priority if escalation_priority else 'P2 - HIGH' }}
+Escalation Reason: {{ auto_escalation_reason if auto_escalation_reason else 'Repeated violations detected' }}
+Next Escalation: {{ next_escalation_time if next_escalation_time else 'In 30 minutes if unresolved' }}
+{% endif %}
+
+INVESTIGATION CHECKLIST FOR SECURITY TEAMS
+-----------------------------------------------------------------------
+IMMEDIATE ACTIONS (0-15 minutes):
+[ ] Acknowledge incident receipt
+[ ] Assess threat level and user context
+[ ] Verify user account status and legitimacy
+[ ] Check for related security events
+[ ] Determine if immediate containment needed
+
+USER VERIFICATION (15-30 minutes):
+[ ] Validate user identity and role assignments
+[ ] Review business justification for access attempt
+[ ] Check with user's manager/team lead if appropriate
+[ ] Verify no recent role changes or access modifications
+[ ] Assess if legitimate business need exists
+
+TECHNICAL ANALYSIS (30-60 minutes):
+[ ] Review RBAC system logs and queries
+[ ] Validate permission cache integrity
+[ ] Check SQLAlchemy model consistency
+[ ] Verify Flask-Migrate schema alignment
+[ ] Analyze database performance impact
+
+THREAT CORRELATION (60-120 minutes):
+[ ] Cross-reference with GuardDuty findings
+[ ] Check authentication failure patterns
+[ ] Review CloudWatch security metrics
+[ ] Correlate with Sentry error patterns
+[ ] Assess broader attack campaign indicators
+
+RESOLUTION AND DOCUMENTATION:
+[ ] Document investigation findings
+[ ] Update user permissions if legitimate need
+[ ] Implement additional monitoring if required
+[ ] Update security policies if needed
+[ ] Provide feedback to user/administrator
+
+SYSTEM SECURITY MEASURES
+-----------------------------------------------------------------------
+Our authorization system implements multiple security layers:
+
+- Real-time permission evaluation using Flask-SQLAlchemy RBAC
+- Dynamic policy engine with context-aware access control
+- Comprehensive audit logging for all access attempts
+- Redis-cached permission lookup for performance optimization
+- Integration with Auth0 for identity verification
+- Automated threat detection and response capabilities
+- SQL injection protection through parameterized queries
+- Row-level security policies for sensitive data access
+
+ONGOING SECURITY MONITORING:
+- Continuous authorization pattern analysis
+- Machine learning-based anomaly detection
+- Automated correlation with external threat intelligence
+- Real-time security metrics and alerting
+- Compliance validation and reporting
+
+DATA PROTECTION AND PRIVACY NOTICE
+-----------------------------------------------------------------------
+This security notification contains sensitive information about system
+access attempts and user authorization context. Please:
+
+- Treat this information as confidential
+- Do not share with unauthorized personnel
+- Follow established incident response procedures
+- Report any suspicious communications
+- Delete after appropriate action is taken
+
+COMPLIANCE AND AUDIT INFORMATION:
+- All authorization decisions are logged for audit compliance
+- Security incident data is retained per data retention policy
+- Investigation records maintained for regulatory requirements
+- Privacy controls applied throughout investigation process
+
+AUTOMATED MONITORING CONTEXT
+-----------------------------------------------------------------------
+This notification was automatically generated by our Flask-SQLAlchemy
+RBAC security monitoring system. The system continuously monitors for:
+
+- Unauthorized resource access attempts
+- Privilege escalation patterns
+- Anomalous user behavior
+- Cross-resource access violations
+- Performance anomalies in authorization system
+- SQL injection and other database attack patterns
+
+{% if monitoring_details %}
+Monitoring Configuration:
+- Detection Rule:     {{ detection_rule if detection_rule else 'Authorization Violation' }}
+- Alert Threshold:    {{ alert_threshold if alert_threshold else 'Single violation for sensitive resources' }}
+- Monitoring Status:  {{ monitoring_status if monitoring_status else 'Active' }}
+- Next System Review: {{ next_system_review if next_system_review else 'Continuous monitoring' }}
+- RBAC Cache TTL:     {{ rbac_cache_ttl if rbac_cache_ttl else '30 minutes' }}
+{% endif %}
+
+ADDITIONAL RESOURCES
+-----------------------------------------------------------------------
+Security Documentation: {{ security_docs_url if security_docs_url else 'Available via security team' }}
+RBAC Administration:    {{ rbac_admin_url if rbac_admin_url else 'Contact system administrator' }}
+Permission Request:     {{ permission_request_url if permission_request_url else 'Via IT support' }}
+Security Training:      {{ security_training_url if security_training_url else 'Contact HR for resources' }}
+
+Best Practices Guide:   {{ best_practices_url if best_practices_url else 'Available via security team' }}
+Incident Response:      {{ incident_response_url if incident_response_url else 'Contact security team' }}
+
+=======================================================================
+DISCLAIMER: This is an automated security notification generated by the
+Flask-SQLAlchemy RBAC monitoring system. If you believe you received
+this notification in error, please contact the security team immediately
+at {{ security_email if security_email else 'security@company.com' }}.
+
+© {{ current_year if current_year else '2024' }} {{ company_name if company_name else 'Company Name' }}. All rights reserved.
+
+This email was sent from an automated authorization monitoring system.
+Please do not reply directly to this email address.
+
+For immediate security assistance: {{ emergency_contact if emergency_contact else 'security@company.com' }}
+=======================================================================

@@ -1,0 +1,199 @@
+Security Alert: New Login to Your Account
+
+Hello {{ user.first_name or user.name or "User" }},
+
+We detected a new login to your {{ config.COMPANY_NAME or "Application" }} account. This email is sent as a security measure to keep you informed about account access activity.
+
+LOGIN DETAILS
+=============
+
+Account: {{ user.email }}
+Login Time: {{ login_time.strftime('%B %d, %Y at %I:%M %p %Z') if login_time else 'Just now' }}
+Login Status: {{ login_status or 'Successful' }}
+Session ID: {{ session_id or 'Not available' }}
+
+DEVICE INFORMATION
+==================
+
+Device Type: {{ device_info.device_type or 'Unknown device' }}
+Operating System: {{ device_info.os or 'Unknown OS' }}
+Browser: {{ device_info.browser or 'Unknown browser' }} {{ device_info.browser_version or '' }}
+User Agent: {{ device_info.user_agent or 'Not available' }}
+
+LOCATION INFORMATION
+====================
+
+IP Address: {{ location_info.ip_address or 'Not available' }}
+Country: {{ location_info.country or 'Unknown' }}
+Region: {{ location_info.region or 'Unknown' }}
+City: {{ location_info.city or 'Unknown' }}
+ISP: {{ location_info.isp or 'Unknown' }}
+
+{% if is_suspicious_login %}
+⚠️  SECURITY WARNING
+====================
+
+This login appears suspicious based on our security analysis:
+
+{% if suspicious_reasons %}
+Suspicious Activity Indicators:
+{% for reason in suspicious_reasons %}
+• {{ reason }}
+{% endfor %}
+{% endif %}
+
+IMMEDIATE ACTION REQUIRED:
+
+1. If this was you, no action is needed
+2. If this was NOT you, immediately:
+   • Change your password: {{ config.BASE_URL or request.host_url }}reset-password
+   • Enable two-factor authentication: {{ config.BASE_URL or request.host_url }}security/2fa
+   • Review recent account activity: {{ config.BASE_URL or request.host_url }}security/activity
+   • Contact our security team: {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}
+
+{% endif %}
+
+WAS THIS YOU?
+=============
+
+✓ If this login was authorized by you:
+  No action is required. You can safely ignore this email.
+
+✗ If you did not authorize this login:
+  Your account may be compromised. Take immediate action by following the security steps below.
+
+SECURITY ACTIONS TO TAKE
+=========================
+
+{% if not is_suspicious_login %}
+Even for normal logins, we recommend these security best practices:
+
+{% endif %}
+1. VERIFY YOUR ACCOUNT
+   • Review recent login activity: {{ config.BASE_URL or request.host_url }}security/activity
+   • Check for any unauthorized changes: {{ config.BASE_URL or request.host_url }}account/activity
+
+2. STRENGTHEN YOUR SECURITY
+   • Enable two-factor authentication: {{ config.BASE_URL or request.host_url }}security/2fa
+   • Use a strong, unique password
+   • Keep your recovery information up to date
+
+3. MONITOR YOUR ACCOUNT
+   • Enable login notifications (currently enabled)
+   • Set up security alerts: {{ config.BASE_URL or request.host_url }}security/alerts
+   • Regularly review account activity
+
+4. SECURE YOUR DEVICES
+   • Log out of unused sessions: {{ config.BASE_URL or request.host_url }}security/sessions
+   • Use secure networks for accessing your account
+   • Keep your devices and browsers updated
+
+NEED HELP?
+==========
+
+If you have any security concerns or need assistance:
+
+• Security Team: {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}
+• Emergency Security Hotline: {{ config.SECURITY_PHONE or "Available via email" }}
+• Support Center: {{ config.BASE_URL or request.host_url }}support
+• Live Chat: {{ config.BASE_URL or request.host_url }}chat (24/7 available)
+
+QUICK SECURITY LINKS
+=====================
+
+• Account Security Settings: {{ config.BASE_URL or request.host_url }}security
+• Active Sessions: {{ config.BASE_URL or request.host_url }}security/sessions
+• Login History: {{ config.BASE_URL or request.host_url }}security/activity
+• Two-Factor Authentication: {{ config.BASE_URL or request.host_url }}security/2fa
+• Change Password: {{ config.BASE_URL or request.host_url }}reset-password
+• Report Suspicious Activity: {{ config.BASE_URL or request.host_url }}security/report
+
+SECURITY TIPS
+=============
+
+Keep your account secure by following these guidelines:
+
+• Use a unique, strong password for your account
+• Enable two-factor authentication for an extra layer of security
+• Never share your login credentials with anyone
+• Always log out when using shared or public computers
+• Be cautious of phishing emails asking for your credentials
+• Regularly review your account activity and security settings
+
+If you notice any unusual activity, report it immediately to our security team.
+
+AUTHENTICATION DETAILS
+=======================
+
+Authentication Method: {{ auth_method or 'Password' }}
+{% if mfa_used %}
+Multi-Factor Authentication: Enabled ({{ mfa_method or 'Unknown method' }})
+{% else %}
+Multi-Factor Authentication: Not used for this login
+{% endif %}
+Auth0 User ID: {{ auth0_user_id or 'Not available' }}
+Login Attempt Number: {{ login_attempt_number or '1' }}
+
+{% if failed_attempts_count and failed_attempts_count > 0 %}
+Recent Failed Attempts: {{ failed_attempts_count }} in the last {{ failed_attempts_timeframe or '24 hours' }}
+{% endif %}
+
+STAY PROTECTED
+==============
+
+Your security is our top priority. We continuously monitor your account for suspicious activity and will notify you of any security-related events.
+
+For the latest security updates and best practices:
+• Security Blog: {{ config.BASE_URL or request.host_url }}blog/security
+• Security Documentation: {{ config.BASE_URL or request.host_url }}docs/security
+• Security Status Page: {{ config.BASE_URL or request.host_url }}status/security
+
+Thank you for using {{ config.COMPANY_NAME or "our platform" }} securely.
+
+Best regards,
+The {{ config.COMPANY_NAME or "Application" }} Security Team
+
+---
+
+TECHNICAL INFORMATION
+======================
+
+This security notification was automatically generated by the Flask Application Authentication System.
+Please do not reply directly to this email address.
+
+Notification ID: {{ notification_id or "LGN-" + session_id[:8] if session_id else "LGN-" + current_timestamp|string }}
+Account Reference: {{ user.id or "Not assigned" }}
+Login Event ID: {{ login_event_id or "Not available" }}
+Sent: {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') if current_timestamp else 'Just now' }}
+Authentication Provider: Auth0 ({{ config.AUTH0_DOMAIN or "Not configured" }})
+
+Risk Assessment: {{ risk_score or 'Low' }} ({{ risk_details or 'Normal login pattern' }})
+
+If you received this email by mistake or have security concerns, please contact our security team immediately at {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}.
+
+---
+
+{{ config.COMPANY_NAME or "Company Name" }}
+{{ config.COMPANY_ADDRESS or "Company Address" }}
+{{ config.COMPANY_WEBSITE or "www.example.com" }}
+
+Security Center: {{ config.BASE_URL or request.host_url }}security
+Incident Reporting: {{ config.BASE_URL or request.host_url }}security/report
+Privacy Policy: {{ config.BASE_URL or request.host_url }}privacy
+Terms of Service: {{ config.BASE_URL or request.host_url }}terms
+
+© {{ current_year|default(2024) }} {{ config.COMPANY_NAME or "Company Name" }}. All rights reserved.
+
+This security notification was sent to {{ user.email }}. Login notifications cannot be disabled for security reasons, but you can manage other notification preferences in your account settings.
+
+---
+
+SECURITY CONTACT INFORMATION
+=============================
+
+For immediate security assistance:
+• Email: {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}
+• Emergency Hotline: {{ config.SECURITY_PHONE or "Available via email" }}
+• Report Incidents: {{ config.BASE_URL or request.host_url }}security/report
+
+Available 24/7 for critical security issues.

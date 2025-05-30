@@ -1,0 +1,740 @@
+{% extends "templates/emails/base/email_base.html" %}
+
+{% block title %}🚨 Performance Alert - {{ alert_type }} Threshold Exceeded{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Performance Alert Specific Styles */
+    .alert-critical {
+        background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%);
+        color: #ffffff;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+        box-shadow: 0 4px 15px rgba(211, 47, 47, 0.3);
+    }
+
+    .alert-high {
+        background: linear-gradient(135deg, #f57c00 0%, #ef6c00 100%);
+        color: #ffffff;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+        box-shadow: 0 4px 15px rgba(245, 124, 0, 0.3);
+    }
+
+    .alert-medium {
+        background: linear-gradient(135deg, #fbc02d 0%, #f9a825 100%);
+        color: #333333;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+        box-shadow: 0 4px 15px rgba(251, 192, 45, 0.3);
+    }
+
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin: 30px 0;
+    }
+
+    .metric-card {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .metric-card.critical {
+        border-left: 4px solid #d32f2f;
+        background: #ffebee;
+    }
+
+    .metric-card.warning {
+        border-left: 4px solid #f57c00;
+        background: #fff3e0;
+    }
+
+    .metric-card.normal {
+        border-left: 4px solid #4caf50;
+        background: #e8f5e8;
+    }
+
+    .metric-value {
+        font-size: 32px;
+        font-weight: 700;
+        margin: 10px 0;
+        line-height: 1.2;
+    }
+
+    .metric-value.critical {
+        color: #d32f2f;
+    }
+
+    .metric-value.warning {
+        color: #f57c00;
+    }
+
+    .metric-value.normal {
+        color: #4caf50;
+    }
+
+    .metric-label {
+        font-size: 14px;
+        font-weight: 600;
+        color: #666666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+    }
+
+    .metric-description {
+        font-size: 12px;
+        color: #888888;
+        margin-top: 8px;
+        line-height: 1.4;
+    }
+
+    .threshold-info {
+        background: #e3f2fd;
+        border: 1px solid #2196f3;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .threshold-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1565c0;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .threshold-details {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+    }
+
+    .threshold-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #bbdefb;
+    }
+
+    .threshold-item:last-child {
+        border-bottom: none;
+    }
+
+    .threshold-label {
+        font-weight: 500;
+        color: #1976d2;
+    }
+
+    .threshold-value {
+        font-weight: 600;
+        color: #0d47a1;
+    }
+
+    .impact-analysis {
+        background: #fff3e0;
+        border-left: 4px solid #ff9800;
+        border-radius: 0 6px 6px 0;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .impact-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #e65100;
+        margin: 0 0 15px 0;
+    }
+
+    .impact-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .impact-item {
+        padding: 8px 0;
+        display: flex;
+        align-items: flex-start;
+    }
+
+    .impact-icon {
+        width: 6px;
+        height: 6px;
+        background: #ff9800;
+        border-radius: 50%;
+        margin: 8px 12px 0 0;
+        flex-shrink: 0;
+    }
+
+    .remediation-steps {
+        background: #e8f5e8;
+        border-left: 4px solid #4caf50;
+        border-radius: 0 6px 6px 0;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .remediation-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #2e7d2e;
+        margin: 0 0 15px 0;
+    }
+
+    .remediation-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .remediation-step {
+        padding: 10px 0;
+        display: flex;
+        align-items: flex-start;
+    }
+
+    .step-number {
+        background: #4caf50;
+        color: white;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 600;
+        margin-right: 12px;
+        flex-shrink: 0;
+    }
+
+    .step-description {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #2e7d2e;
+    }
+
+    .cloudwatch-info {
+        background: #f3e5f5;
+        border: 1px solid #9c27b0;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .cloudwatch-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #6a1b9a;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .cloudwatch-links {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .cloudwatch-link {
+        display: inline-block;
+        padding: 12px 20px;
+        background: #9c27b0;
+        color: #ffffff !important;
+        text-decoration: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .cloudwatch-link:hover {
+        background: #7b1fa2;
+        transform: translateY(-1px);
+    }
+
+    .escalation-info {
+        background: #ffebee;
+        border: 1px solid #e57373;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .escalation-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #c62828;
+        margin: 0 0 15px 0;
+    }
+
+    .escalation-flow {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+    }
+
+    .escalation-step {
+        text-align: center;
+        padding: 15px;
+        background: #ffffff;
+        border-radius: 6px;
+        border: 1px solid #ffcdd2;
+    }
+
+    .escalation-time {
+        font-size: 14px;
+        font-weight: 600;
+        color: #d32f2f;
+        margin-bottom: 8px;
+    }
+
+    .escalation-team {
+        font-size: 13px;
+        color: #666666;
+    }
+
+    /* Mobile Optimizations */
+    @media only screen and (max-width: 600px) {
+        .metrics-grid {
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+
+        .metric-card {
+            padding: 15px;
+        }
+
+        .metric-value {
+            font-size: 28px;
+        }
+
+        .threshold-details {
+            grid-template-columns: 1fr;
+        }
+
+        .cloudwatch-links {
+            grid-template-columns: 1fr;
+        }
+
+        .escalation-flow {
+            grid-template-columns: 1fr;
+        }
+
+        .alert-critical,
+        .alert-high,
+        .alert-medium {
+            padding: 20px 15px;
+        }
+
+        .impact-analysis,
+        .remediation-steps,
+        .threshold-info,
+        .cloudwatch-info,
+        .escalation-info {
+            padding: 15px;
+            margin: 20px 0;
+        }
+    }
+
+    /* Dark Mode Adaptations */
+    @media (prefers-color-scheme: dark) {
+        .metric-card {
+            background-color: #4a5568 !important;
+            border-color: #718096 !important;
+            color: #e2e8f0 !important;
+        }
+
+        .metric-card.critical {
+            background-color: #742a2a !important;
+        }
+
+        .metric-card.warning {
+            background-color: #744210 !important;
+        }
+
+        .metric-card.normal {
+            background-color: #276749 !important;
+        }
+
+        .threshold-info {
+            background-color: #2d3748 !important;
+            border-color: #4299e1 !important;
+        }
+
+        .impact-analysis {
+            background-color: #2d3748 !important;
+        }
+
+        .remediation-steps {
+            background-color: #2d3748 !important;
+        }
+
+        .cloudwatch-info {
+            background-color: #2d3748 !important;
+        }
+
+        .escalation-info {
+            background-color: #2d3748 !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}🚨 Performance Alert{% endblock %}
+{% block header_subtitle %}{{ alert_type }} Threshold Exceeded - Immediate Action Required{% endblock %}
+
+{% block content %}
+<!-- Alert Severity Banner -->
+<div class="{% if severity == 'critical' %}alert-critical{% elif severity == 'high' %}alert-high{% else %}alert-medium{% endif %}">
+    <h2 style="margin: 0 0 15px 0; font-size: 24px;">
+        {% if severity == 'critical' %}🔴 CRITICAL ALERT{% elif severity == 'high' %}🟠 HIGH PRIORITY ALERT{% else %}🟡 MEDIUM PRIORITY ALERT{% endif %}
+    </h2>
+    <p style="margin: 0; font-size: 16px; line-height: 1.5;">
+        <strong>{{ alert_type }}</strong> performance threshold has been exceeded.<br>
+        <strong>Detected at:</strong> {{ alert_timestamp }}<br>
+        <strong>Duration:</strong> {{ alert_duration }}<br>
+        <strong>Environment:</strong> {{ environment | default('Production') }}
+    </p>
+</div>
+
+<!-- Performance Metrics Grid -->
+<div class="metrics-grid">
+    <!-- API Response Time Metric -->
+    <div class="metric-card {% if api_response_time > 200 %}critical{% elif api_response_time > 150 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">API Response Time</div>
+        <div class="metric-value {% if api_response_time > 200 %}critical{% elif api_response_time > 150 %}warning{% else %}normal{% endif %}">
+            {{ api_response_time }}ms
+        </div>
+        <div class="metric-description">
+            SLA Threshold: &lt; 200ms<br>
+            Current Status: {% if api_response_time > 200 %}VIOLATION{% elif api_response_time > 150 %}WARNING{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- Database Query Performance -->
+    <div class="metric-card {% if db_query_time > 100 %}critical{% elif db_query_time > 80 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">Database Query Time</div>
+        <div class="metric-value {% if db_query_time > 100 %}critical{% elif db_query_time > 80 %}warning{% else %}normal{% endif %}">
+            {{ db_query_time }}ms
+        </div>
+        <div class="metric-description">
+            SLA Threshold: &lt; 100ms<br>
+            Current Status: {% if db_query_time > 100 %}VIOLATION{% elif db_query_time > 80 %}WARNING{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- Authentication Response Time -->
+    <div class="metric-card {% if auth_response_time > 150 %}critical{% elif auth_response_time > 120 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">Authentication Response</div>
+        <div class="metric-value {% if auth_response_time > 150 %}critical{% elif auth_response_time > 120 %}warning{% else %}normal{% endif %}">
+            {{ auth_response_time }}ms
+        </div>
+        <div class="metric-description">
+            SLA Threshold: &lt; 150ms<br>
+            Current Status: {% if auth_response_time > 150 %}VIOLATION{% elif auth_response_time > 120 %}WARNING{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- System Throughput -->
+    <div class="metric-card {% if throughput < 100 %}critical{% elif throughput < 150 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">System Throughput</div>
+        <div class="metric-value {% if throughput < 100 %}critical{% elif throughput < 150 %}warning{% else %}normal{% endif %}">
+            {{ throughput }}/sec
+        </div>
+        <div class="metric-description">
+            Expected: &gt; 200 req/sec<br>
+            Current Status: {% if throughput < 100 %}CRITICAL{% elif throughput < 150 %}DEGRADED{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- Error Rate -->
+    <div class="metric-card {% if error_rate > 1 %}critical{% elif error_rate > 0.5 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">Error Rate</div>
+        <div class="metric-value {% if error_rate > 1 %}critical{% elif error_rate > 0.5 %}warning{% else %}normal{% endif %}">
+            {{ error_rate }}%
+        </div>
+        <div class="metric-description">
+            SLA Threshold: &lt; 1%<br>
+            Current Status: {% if error_rate > 1 %}VIOLATION{% elif error_rate > 0.5 %}WARNING{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- Container CPU Usage -->
+    <div class="metric-card {% if container_cpu > 80 %}critical{% elif container_cpu > 70 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">Container CPU Usage</div>
+        <div class="metric-value {% if container_cpu > 80 %}critical{% elif container_cpu > 70 %}warning{% else %}normal{% endif %}">
+            {{ container_cpu }}%
+        </div>
+        <div class="metric-description">
+            Alert Threshold: &gt; 80%<br>
+            Current Status: {% if container_cpu > 80 %}HIGH{% elif container_cpu > 70 %}ELEVATED{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- Container Memory Usage -->
+    <div class="metric-card {% if container_memory > 80 %}critical{% elif container_memory > 70 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">Container Memory Usage</div>
+        <div class="metric-value {% if container_memory > 80 %}critical{% elif container_memory > 70 %}warning{% else %}normal{% endif %}">
+            {{ container_memory }}%
+        </div>
+        <div class="metric-description">
+            Alert Threshold: &gt; 80%<br>
+            Current Status: {% if container_memory > 80 %}HIGH{% elif container_memory > 70 %}ELEVATED{% else %}NORMAL{% endif %}
+        </div>
+    </div>
+
+    <!-- WSGI Worker Performance -->
+    <div class="metric-card {% if wsgi_worker_usage > 90 %}critical{% elif wsgi_worker_usage > 75 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">WSGI Worker Usage</div>
+        <div class="metric-value {% if wsgi_worker_usage > 90 %}critical{% elif wsgi_worker_usage > 75 %}warning{% else %}normal{% endif %}">
+            {{ wsgi_worker_usage }}%
+        </div>
+        <div class="metric-description">
+            Workers: {{ active_workers }}/{{ total_workers }}<br>
+            Current Status: {% if wsgi_worker_usage > 90 %}OVERLOADED{% elif wsgi_worker_usage > 75 %}BUSY{% else %}HEALTHY{% endif %}
+        </div>
+    </div>
+
+    <!-- Database Connection Pool -->
+    <div class="metric-card {% if db_pool_usage > 90 %}critical{% elif db_pool_usage > 75 %}warning{% else %}normal{% endif %}">
+        <div class="metric-label">DB Connection Pool</div>
+        <div class="metric-value {% if db_pool_usage > 90 %}critical{% elif db_pool_usage > 75 %}warning{% else %}normal{% endif %}">
+            {{ db_pool_usage }}%
+        </div>
+        <div class="metric-description">
+            Connections: {{ active_connections }}/{{ max_connections }}<br>
+            Current Status: {% if db_pool_usage > 90 %}EXHAUSTION RISK{% elif db_pool_usage > 75 %}HIGH USAGE{% else %}HEALTHY{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- SLA Threshold Information -->
+<div class="threshold-info">
+    <div class="threshold-title">
+        📊 SLA Thresholds & Current Performance
+    </div>
+    <div class="threshold-details">
+        <div class="threshold-item">
+            <span class="threshold-label">API Response Time</span>
+            <span class="threshold-value">{{ api_response_time }}ms / 200ms limit</span>
+        </div>
+        <div class="threshold-item">
+            <span class="threshold-label">Database Query Time</span>
+            <span class="threshold-value">{{ db_query_time }}ms / 100ms limit</span>
+        </div>
+        <div class="threshold-item">
+            <span class="threshold-label">Authentication Response</span>
+            <span class="threshold-value">{{ auth_response_time }}ms / 150ms limit</span>
+        </div>
+        <div class="threshold-item">
+            <span class="threshold-label">System Availability</span>
+            <span class="threshold-value">{{ availability }}% / 99.9% target</span>
+        </div>
+        <div class="threshold-item">
+            <span class="threshold-label">Error Rate</span>
+            <span class="threshold-value">{{ error_rate }}% / 1% limit</span>
+        </div>
+        <div class="threshold-item">
+            <span class="threshold-label">Container Resources</span>
+            <span class="threshold-value">CPU: {{ container_cpu }}%, Memory: {{ container_memory }}%</span>
+        </div>
+    </div>
+</div>
+
+<!-- Impact Analysis -->
+<div class="impact-analysis">
+    <div class="impact-title">⚠️ Performance Impact Analysis</div>
+    <ul class="impact-list">
+        {% if api_response_time > 200 %}
+        <li class="impact-item">
+            <div class="impact-icon"></div>
+            <div>API response times exceeding SLA may result in user experience degradation and potential client timeout errors</div>
+        </li>
+        {% endif %}
+        {% if db_query_time > 100 %}
+        <li class="impact-item">
+            <div class="impact-icon"></div>
+            <div>Database query performance issues may cause request queuing and increased application response times</div>
+        </li>
+        {% endif %}
+        {% if wsgi_worker_usage > 90 %}
+        <li class="impact-item">
+            <div class="impact-icon"></div>
+            <div>WSGI worker overload may lead to request rejections and service degradation under high load</div>
+        </li>
+        {% endif %}
+        {% if container_cpu > 80 or container_memory > 80 %}
+        <li class="impact-item">
+            <div class="impact-icon"></div>
+            <div>High container resource utilization may trigger auto-scaling events or container restarts</div>
+        </li>
+        {% endif %}
+        {% if db_pool_usage > 90 %}
+        <li class="impact-item">
+            <div class="impact-icon"></div>
+            <div>Database connection pool exhaustion risk may cause new request failures and application instability</div>
+        </li>
+        {% endif %}
+        {% if error_rate > 1 %}
+        <li class="impact-item">
+            <div class="impact-icon"></div>
+            <div>Elevated error rates indicate systemic issues requiring immediate investigation and resolution</div>
+        </li>
+        {% endif %}
+    </ul>
+</div>
+
+<!-- Immediate Remediation Steps -->
+<div class="remediation-steps">
+    <div class="remediation-title">🔧 Immediate Remediation Actions</div>
+    <ol class="remediation-list">
+        <li class="remediation-step">
+            <div class="step-number">1</div>
+            <div class="step-description">
+                <strong>Verify Alert Accuracy:</strong> Confirm metrics in CloudWatch dashboard and validate current system status
+            </div>
+        </li>
+        <li class="remediation-step">
+            <div class="step-number">2</div>
+            <div class="step-description">
+                <strong>Check System Logs:</strong> Review application logs, WSGI server logs, and container metrics for error patterns
+            </div>
+        </li>
+        <li class="remediation-step">
+            <div class="step-number">3</div>
+            <div class="step-description">
+                <strong>Resource Assessment:</strong> Monitor container CPU/memory usage and evaluate need for horizontal scaling
+            </div>
+        </li>
+        <li class="remediation-step">
+            <div class="step-number">4</div>
+            <div class="step-description">
+                <strong>Database Optimization:</strong> Review slow query logs and optimize database connection pool settings if needed
+            </div>
+        </li>
+        <li class="remediation-step">
+            <div class="step-number">5</div>
+            <div class="step-description">
+                <strong>WSGI Configuration:</strong> Evaluate Gunicorn worker configuration and adjust worker count if overloaded
+            </div>
+        </li>
+        <li class="remediation-step">
+            <div class="step-number">6</div>
+            <div class="step-description">
+                <strong>Escalate if Persistent:</strong> Contact next tier support if issues persist beyond 15 minutes
+            </div>
+        </li>
+    </ol>
+</div>
+
+<!-- CloudWatch Integration Links -->
+<div class="cloudwatch-info">
+    <div class="cloudwatch-title">
+        ☁️ CloudWatch Monitoring & Dashboards
+    </div>
+    <p style="margin: 0 0 15px 0; font-size: 14px; color: #6a1b9a;">
+        Access detailed metrics and troubleshooting information through these CloudWatch resources:
+    </p>
+    <div class="cloudwatch-links">
+        <a href="{{ cloudwatch_dashboard_url | default('#') }}" class="cloudwatch-link">Performance Dashboard</a>
+        <a href="{{ cloudwatch_alarms_url | default('#') }}" class="cloudwatch-link">Active Alarms</a>
+        <a href="{{ cloudwatch_logs_url | default('#') }}" class="cloudwatch-link">Application Logs</a>
+        <a href="{{ cloudwatch_container_insights_url | default('#') }}" class="cloudwatch-link">Container Insights</a>
+        <a href="{{ cloudwatch_api_metrics_url | default('#') }}" class="cloudwatch-link">API Metrics</a>
+        <a href="{{ cloudwatch_database_metrics_url | default('#') }}" class="cloudwatch-link">Database Metrics</a>
+    </div>
+</div>
+
+<!-- Escalation Information -->
+<div class="escalation-info">
+    <div class="escalation-title">📞 Escalation Procedures</div>
+    <p style="margin: 0 0 15px 0; font-size: 14px; color: #c62828;">
+        If this alert is not acknowledged or resolved within the specified timeframes, automatic escalation will occur:
+    </p>
+    <div class="escalation-flow">
+        <div class="escalation-step">
+            <div class="escalation-time">0-15 minutes</div>
+            <div class="escalation-team">{{ primary_team | default('Development Team') }}</div>
+        </div>
+        <div class="escalation-step">
+            <div class="escalation-time">15-30 minutes</div>
+            <div class="escalation-team">{{ secondary_team | default('Team Lead') }}</div>
+        </div>
+        <div class="escalation-step">
+            <div class="escalation-time">30+ minutes</div>
+            <div class="escalation-team">{{ escalation_team | default('Engineering Manager') }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Action Buttons -->
+<div class="button-container">
+    <a href="{{ acknowledge_url | default('#') }}" class="button">
+        ✅ Acknowledge Alert
+    </a>
+    <a href="{{ runbook_url | default('#') }}" class="button button-secondary">
+        📖 View Runbook
+    </a>
+</div>
+
+<!-- Alert Details -->
+<div class="security-info">
+    <div class="security-title">
+        🔍 Alert Details & Metadata
+    </div>
+    <div class="security-text">
+        <strong>Alert ID:</strong> {{ alert_id | default('N/A') }}<br>
+        <strong>Environment:</strong> {{ environment | default('Production') }}<br>
+        <strong>Monitoring Source:</strong> {{ monitoring_source | default('CloudWatch') }}<br>
+        <strong>Alert Generation Time:</strong> {{ alert_timestamp }}<br>
+        <strong>Affected Services:</strong> {{ affected_services | default('Flask Application, Database, WSGI Workers') }}<br>
+        <strong>Expected Resolution Time:</strong> {{ expected_resolution | default('< 30 minutes') }}<br>
+        <strong>Last Known Good State:</strong> {{ last_good_state | default('N/A') }}
+    </div>
+</div>
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ status_page_url | default('#') }}" class="footer-link">System Status</a>
+<a href="{{ monitoring_dashboard_url | default('#') }}" class="footer-link">Monitoring Dashboard</a>
+<a href="{{ escalation_procedures_url | default('#') }}" class="footer-link">Escalation Procedures</a>
+<a href="{{ runbook_library_url | default('#') }}" class="footer-link">Runbook Library</a>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This performance alert was generated automatically by the Flask monitoring system. 
+    Immediate attention is required to maintain SLA compliance.
+</p>
+
+<div class="footer-links">
+    {{ super() }}
+</div>
+
+<p class="footer-copyright">
+    Performance Alert System - Flask Migration Monitoring Platform<br>
+    {{ super() }}
+</p>
+{% endblock %}

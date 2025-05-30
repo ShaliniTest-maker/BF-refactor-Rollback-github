@@ -1,0 +1,104 @@
+SECURITY ALERT: Account Temporarily Locked
+
+Dear {{ user.full_name or user.username }},
+
+Your account has been temporarily locked for security reasons.
+
+ACCOUNT DETAILS:
+- Username: {{ user.username }}
+- Email: {{ user.email }}
+- Lock Date: {{ lockout_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') }}
+- Lock Reason: {{ lockout_reason }}
+
+SECURITY INFORMATION:
+{% if lockout_reason == 'Multiple Failed Login Attempts' -%}
+We detected {{ failed_attempts }} consecutive failed login attempts on your account. To protect your account from unauthorized access, we have temporarily locked it.
+{% elif lockout_reason == 'Suspicious Activity Detected' -%}
+Our security systems detected suspicious activity on your account, including unusual login patterns or access from unrecognized locations.
+{% elif lockout_reason == 'Security Policy Violation' -%}
+Your account has been locked due to a violation of our security policies or terms of service.
+{% else -%}
+Your account has been locked as a security precaution. Our security team is investigating potential unauthorized access attempts.
+{% endif %}
+
+UNLOCK PROCEDURES:
+{% if unlock_method == 'automatic' -%}
+Your account will be automatically unlocked on {{ unlock_time.strftime('%B %d, %Y at %I:%M %p UTC') }}.
+
+After automatic unlock, you may:
+1. Visit {{ app_url }}/login to sign in normally
+2. Use the "Forgot Password?" link if you need to reset your password
+3. Contact support if you continue experiencing issues
+{% elif unlock_method == 'manual_verification' -%}
+To unlock your account immediately, please verify your identity:
+
+1. Visit {{ app_url }}/account/unlock
+2. Enter your username: {{ user.username }}
+3. Complete the identity verification process
+4. Check your email for further instructions
+
+You may also wait for automatic unlock on {{ unlock_time.strftime('%B %d, %Y at %I:%M %p UTC') }}.
+{% else -%}
+To unlock your account, please contact our security team immediately.
+
+Contact Information:
+- Security Email: {{ security_contact.email }}
+- Support Phone: {{ security_contact.phone }}
+- Support Hours: {{ security_contact.hours }}
+
+Please provide your username ({{ user.username }}) when contacting support.
+{% endif %}
+
+SECURITY RECOMMENDATIONS:
+- Always use strong, unique passwords
+- Enable two-factor authentication if available
+- Keep your contact information updated
+- Report suspicious activity immediately
+- Never share your login credentials
+
+IMMEDIATE ACTIONS:
+If you did not attempt to access your account:
+1. Do not ignore this notification
+2. Contact our security team immediately
+3. Consider changing passwords for other accounts using similar credentials
+4. Review recent account activity when access is restored
+
+If this was your legitimate login attempt:
+1. Wait for the automatic unlock period to expire
+2. Ensure you are using the correct login credentials
+3. Clear your browser cache and cookies
+4. Try accessing from a different device or network
+
+IMPORTANT SECURITY NOTES:
+- This lockout helps protect your personal information and data
+- Multiple security layers are in place to safeguard your account
+- All lockout events are logged for security monitoring
+- Unauthorized access attempts are reported to relevant authorities when appropriate
+
+NEED ASSISTANCE?
+Security Team: {{ security_contact.email }}
+General Support: {{ support_contact.email }}
+Phone Support: {{ support_contact.phone }}
+Available: {{ support_contact.hours }}
+
+Online Help:
+- Account Security: {{ app_url }}/help/security
+- Password Reset: {{ app_url }}/help/password
+- Two-Factor Authentication: {{ app_url }}/help/2fa
+
+Do not reply to this email as it is sent from an automated system.
+
+For your security, please do not share this notification with others.
+
+---
+{{ company_name }} Security Team
+{{ company_address }}
+
+This is an automated security notification. 
+Time sent: {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') }}
+Reference ID: {{ notification_id }}
+
+If you did not request this action or believe this is an error, please contact our security team immediately.
+
+---
+PRIVACY NOTICE: This email contains sensitive account information. Please handle accordingly and delete after reading.

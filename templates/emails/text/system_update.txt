@@ -1,0 +1,203 @@
+===============================================================================
+SYSTEM UPDATE NOTIFICATION
+===============================================================================
+
+Dear {{ user_name or 'Valued User' }},
+
+We are pleased to inform you about important updates to our Flask-based 
+application platform. These improvements enhance your experience and provide 
+new capabilities for better service delivery.
+
+===============================================================================
+UPDATE SUMMARY
+===============================================================================
+
+Update ID: {{ update_id or 'SYS-UPDATE-' + timestamp[:8] }}
+Release Date: {{ release_date or timestamp[:10] }}
+Effective Date: {{ effective_date or (timestamp[:10] if immediate else 'To be announced') }}
+Update Type: {{ update_type or 'Feature Enhancement & Policy Update' }}
+
+===============================================================================
+NEW FEATURES AND IMPROVEMENTS
+===============================================================================
+
+{% for feature in new_features -%}
+• {{ feature.title }}
+  {{ feature.description }}
+  {% if feature.documentation_link -%}
+  Learn more: {{ feature.documentation_link }}
+  {% endif %}
+
+{% endfor -%}
+{% if not new_features -%}
+• Enhanced system performance and stability
+• Improved user interface responsiveness  
+• Strengthened security measures and data protection
+• Updated API endpoints for better integration capabilities
+• Optimized database performance for faster response times
+
+{% endif -%}
+===============================================================================
+POLICY UPDATES AND CHANGES
+===============================================================================
+
+{% for policy in policy_changes -%}
+{{ loop.index }}. {{ policy.title }}
+   {{ policy.description }}
+   {% if policy.effective_date -%}
+   Effective: {{ policy.effective_date }}
+   {% endif %}
+   {% if policy.impact -%}
+   Impact: {{ policy.impact }}
+   {% endif %}
+
+{% endfor -%}
+{% if not policy_changes -%}
+1. Data Retention Policy Updates
+   We have updated our data retention policies to provide better control
+   over your personal information and comply with latest privacy regulations.
+   Effective: {{ effective_date or 'Immediately' }}
+
+2. Enhanced Security Requirements
+   New authentication measures have been implemented to strengthen account
+   security and protect against unauthorized access.
+   Impact: Users may be prompted for additional verification steps
+
+3. API Usage Guidelines
+   Updated guidelines for API integration partners to ensure optimal
+   system performance and reliability.
+   Impact: Existing integrations will continue to function normally
+
+{% endif -%}
+===============================================================================
+ACTION ITEMS FOR USERS
+===============================================================================
+
+{% for action in user_actions -%}
+{{ loop.index }}. {{ action.title }}
+   {{ action.description }}
+   {% if action.deadline -%}
+   Deadline: {{ action.deadline }}
+   {% endif %}
+   {% if action.priority -%}
+   Priority: {{ action.priority }}
+   {% endif %}
+
+{% endfor -%}
+{% if not user_actions -%}
+1. Review Updated Terms of Service
+   Please review our updated terms of service and privacy policy to 
+   understand the changes that may affect your account.
+   Priority: Medium
+   Deadline: {{ review_deadline or '30 days from notification' }}
+
+2. Update Account Security Settings
+   Consider updating your password and reviewing security settings to
+   take advantage of new protection features.
+   Priority: Recommended
+   Action: Log in to your account settings page
+
+3. Test New Features
+   Explore the new features and improvements to maximize your platform
+   experience and productivity.
+   Priority: Optional
+   Access: Available immediately in your dashboard
+
+{% endif -%}
+===============================================================================
+IMPORTANT LINKS AND RESOURCES
+===============================================================================
+
+Documentation and Support:
+• Full Release Notes: {{ documentation_base_url or 'https://docs.company.com' }}/releases/{{ update_id or 'latest' }}
+• User Guide Updates: {{ documentation_base_url or 'https://docs.company.com' }}/user-guide
+• API Documentation: {{ documentation_base_url or 'https://docs.company.com' }}/api
+• Privacy Policy: {{ privacy_policy_url or 'https://company.com/privacy' }}
+• Terms of Service: {{ terms_url or 'https://company.com/terms' }}
+
+Support Resources:
+• Help Center: {{ support_base_url or 'https://support.company.com' }}
+• Community Forum: {{ forum_url or 'https://community.company.com' }}
+• Video Tutorials: {{ tutorials_url or 'https://tutorials.company.com' }}
+• Contact Support: {{ support_email or 'support@company.com' }}
+
+===============================================================================
+TECHNICAL DETAILS FOR DEVELOPERS
+===============================================================================
+
+{% if technical_details -%}
+For developers and integration partners:
+
+{% for detail in technical_details -%}
+• {{ detail.category }}: {{ detail.description }}
+  {% if detail.migration_guide -%}
+  Migration Guide: {{ detail.migration_guide }}
+  {% endif %}
+
+{% endfor -%}
+{% else -%}
+For developers and integration partners:
+
+• API Version: Enhanced Flask-based API with improved performance
+• Authentication: Continued support for all existing auth methods
+• Rate Limits: No changes to current rate limiting policies
+• Deprecations: None at this time - all endpoints remain supported
+• Migration: No action required for existing integrations
+
+{% endif -%}
+Need technical assistance? Contact our developer support team:
+Email: {{ developer_support_email or 'developers@company.com' }}
+Documentation: {{ api_docs_url or 'https://developers.company.com' }}
+
+===============================================================================
+QUESTIONS AND SUPPORT
+===============================================================================
+
+If you have questions about these updates or need assistance:
+
+Primary Support Channels:
+• Email Support: {{ support_email or 'support@company.com' }}
+• Phone Support: {{ support_phone or '1-800-SUPPORT' }}
+• Live Chat: Available through your account dashboard
+• Support Tickets: {{ support_portal_url or 'https://support.company.com' }}
+
+Business Hours: {{ business_hours or 'Monday-Friday, 9:00 AM - 6:00 PM EST' }}
+Emergency Support: {{ emergency_contact or '24/7 for critical issues' }}
+
+We appreciate your patience as we implement these improvements to better
+serve you. Our team is standing by to assist with any questions or concerns.
+
+===============================================================================
+ADDITIONAL INFORMATION
+===============================================================================
+
+Update Frequency: {{ update_frequency or 'We typically release updates quarterly' }}
+Next Scheduled Update: {{ next_update_date or 'Q2 2024 (tentative)' }}
+Maintenance Windows: {{ maintenance_schedule or 'Sundays 2:00-4:00 AM EST' }}
+
+Stay Informed:
+• Subscribe to updates: {{ newsletter_signup_url or 'https://company.com/updates' }}
+• Follow us on social media for real-time announcements
+• Enable notification preferences in your account settings
+
+===============================================================================
+
+Thank you for being a valued member of our community. We are committed to
+continuously improving our platform to meet your evolving needs.
+
+Best regards,
+
+{{ sender_name or 'The Development Team' }}
+{{ company_name or 'Flask Application Platform' }}
+
+---
+This email was sent to {{ user_email or 'your registered email address' }}
+Update your email preferences: {{ preferences_url or 'https://company.com/preferences' }}
+Unsubscribe from system updates: {{ unsubscribe_url or 'https://company.com/unsubscribe' }}
+
+For questions about this email, reply to {{ reply_email or 'no-reply@company.com' }}
+
+{{ company_name or 'Company Name' }} | {{ company_address or 'Address' }}
+Privacy Policy: {{ privacy_policy_url or 'https://company.com/privacy' }}
+
+===============================================================================

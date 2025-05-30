@@ -1,0 +1,394 @@
+{% extends "templates/emails/base/email_base.html" %}
+
+{% block title %}Two-Factor Authentication Code{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Two-Factor Authentication Specific Styles */
+    .auth-code-container {
+        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        color: #ffffff;
+        text-align: center;
+        padding: 40px 30px;
+        border-radius: 12px;
+        margin: 30px 0;
+        box-shadow: 0 8px 32px rgba(79, 70, 229, 0.3);
+    }
+
+    .auth-code {
+        font-size: 48px;
+        font-weight: 700;
+        letter-spacing: 8px;
+        font-family: 'Courier New', Courier, monospace;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 20px 30px;
+        border-radius: 8px;
+        margin: 20px 0;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        display: inline-block;
+        min-width: 280px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .auth-code-label {
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+        opacity: 0.9;
+    }
+
+    .expiration-info {
+        background-color: #fef3c7;
+        border-left: 4px solid #f59e0b;
+        color: #92400e;
+        padding: 20px;
+        border-radius: 6px;
+        margin: 25px 0;
+        font-weight: 500;
+    }
+
+    .security-warning {
+        background-color: #fee2e2;
+        border-left: 4px solid #ef4444;
+        color: #991b1b;
+        padding: 20px;
+        border-radius: 6px;
+        margin: 25px 0;
+    }
+
+    .auth-instructions {
+        background-color: #f0f9ff;
+        border: 1px solid #0ea5e9;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .instruction-step {
+        display: flex;
+        align-items: flex-start;
+        margin: 15px 0;
+        padding: 10px 0;
+    }
+
+    .step-number {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #ffffff;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 14px;
+        margin-right: 15px;
+        flex-shrink: 0;
+    }
+
+    .step-content {
+        flex: 1;
+        font-size: 15px;
+        line-height: 1.5;
+        color: #374151;
+    }
+
+    .security-tips {
+        background-color: #f3f4f6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .security-tip {
+        display: flex;
+        align-items: flex-start;
+        margin: 12px 0;
+    }
+
+    .security-icon {
+        color: #059669;
+        margin-right: 12px;
+        font-size: 18px;
+        flex-shrink: 0;
+        margin-top: 2px;
+    }
+
+    .auth-branding {
+        text-align: center;
+        margin: 25px 0;
+        padding: 20px;
+        background-color: #f8fafc;
+        border-radius: 8px;
+    }
+
+    .auth-logo {
+        max-width: 120px;
+        height: auto;
+        margin-bottom: 10px;
+    }
+
+    .auth-provider {
+        font-size: 12px;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 500;
+    }
+
+    /* Mobile Optimization */
+    @media only screen and (max-width: 600px) {
+        .auth-code {
+            font-size: 36px;
+            letter-spacing: 6px;
+            padding: 15px 20px;
+            min-width: 240px;
+        }
+
+        .auth-code-container {
+            padding: 30px 20px;
+        }
+
+        .instruction-step {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .step-number {
+            margin-bottom: 10px;
+            margin-right: 0;
+        }
+
+        .auth-instructions,
+        .security-tips {
+            padding: 20px 15px;
+        }
+    }
+
+    /* High Contrast Mode Support */
+    @media (prefers-contrast: high) {
+        .auth-code {
+            background: #000000;
+            color: #ffffff;
+            border: 3px solid #ffffff;
+        }
+
+        .auth-code-container {
+            background: #1a1a1a;
+            border: 2px solid #ffffff;
+        }
+    }
+
+    /* Dark Mode Support */
+    @media (prefers-color-scheme: dark) {
+        .auth-instructions {
+            background-color: #374151;
+            border-color: #6b7280;
+        }
+
+        .step-content {
+            color: #d1d5db;
+        }
+
+        .security-tips {
+            background-color: #374151;
+        }
+
+        .expiration-info {
+            background-color: #451a03;
+            color: #fcd34d;
+        }
+
+        .security-warning {
+            background-color: #450a0a;
+            color: #fca5a5;
+        }
+
+        .auth-branding {
+            background-color: #374151;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}Secure Access{% endblock %}
+{% block header_subtitle %}Two-Factor Authentication{% endblock %}
+
+{% block content %}
+<div class="content-title">
+    🔐 Your Authentication Code
+</div>
+
+<p class="content-text">
+    We've generated a secure authentication code for your account. Enter this code to complete your login process.
+</p>
+
+<!-- Authentication Code Display -->
+<div class="auth-code-container">
+    <div class="auth-code-label">Your Authentication Code</div>
+    <div class="auth-code">{{ code | default('123456') }}</div>
+    <div style="font-size: 14px; margin-top: 15px; opacity: 0.9;">
+        Valid for {{ expiration_minutes | default('10') }} minutes
+    </div>
+</div>
+
+<!-- Expiration Warning -->
+<div class="expiration-info">
+    <strong>⏰ Time Sensitive:</strong> This authentication code expires in 
+    <strong>{{ expiration_minutes | default('10') }} minutes</strong> 
+    (at {{ expiration_time | default('00:00 UTC') }}). 
+    If you don't use it within this time, you'll need to request a new code.
+</div>
+
+<!-- Usage Instructions -->
+<div class="auth-instructions">
+    <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 18px;">
+        📋 How to Use This Code
+    </h3>
+    
+    <div class="instruction-step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+            Return to the login page where you were prompted for the authentication code
+        </div>
+    </div>
+    
+    <div class="instruction-step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+            Enter the 6-digit code exactly as shown above (without spaces)
+        </div>
+    </div>
+    
+    <div class="instruction-step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+            Click "Verify" or "Continue" to complete your secure login
+        </div>
+    </div>
+    
+    <div class="instruction-step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+            Delete this email immediately after use for security
+        </div>
+    </div>
+</div>
+
+<!-- Security Warning -->
+<div class="security-warning">
+    <strong>🚨 Security Alert:</strong> This code provides access to your account. 
+    Never share it with anyone, including our support team. We will never ask for 
+    your authentication codes via email, phone, or any other method.
+</div>
+
+<!-- Security Best Practices -->
+<div class="security-tips">
+    <h3 style="color: #374151; margin: 0 0 20px 0; font-size: 18px;">
+        🛡️ Security Best Practices
+    </h3>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Only enter this code on our official website or application</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Verify the website URL matches our official domain before entering the code</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>If you didn't request this code, secure your account immediately</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Use a secure, private device and network connection</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Log out completely when finished using shared or public devices</span>
+    </div>
+</div>
+
+<!-- Didn't Request This? -->
+<div class="alert alert-warning">
+    <strong>Didn't request this code?</strong><br>
+    If you didn't try to log in to your account, someone else might have your password. 
+    Please <a href="{{ secure_account_url | default('#') }}" style="color: #d97706; text-decoration: underline;">
+    secure your account immediately</a> and change your password.
+</div>
+
+<!-- Auth0 Integration Branding -->
+{% if auth0_enabled %}
+<div class="auth-branding">
+    <div class="auth-provider">Secured by Auth0</div>
+    <div style="font-size: 12px; color: #9ca3af; margin-top: 5px;">
+        Enterprise-grade authentication and security
+    </div>
+</div>
+{% endif %}
+
+<!-- Alternative Access Methods -->
+<div class="alert alert-info">
+    <strong>Having trouble?</strong><br>
+    If you're not receiving codes or experiencing issues:
+    <ul style="margin: 10px 0 0 20px; padding: 0;">
+        <li>Check your spam/junk folder</li>
+        <li>Try requesting a new code</li>
+        {% if backup_codes_enabled %}
+        <li>Use one of your backup recovery codes</li>
+        {% endif %}
+        {% if support_url %}
+        <li>Contact our support team at <a href="{{ support_url }}" style="color: #2563eb;">{{ support_url }}</a></li>
+        {% endif %}
+    </ul>
+</div>
+
+<!-- Session Information -->
+{% if session_info %}
+<div style="background-color: #f8fafc; padding: 20px; border-radius: 6px; margin: 25px 0; font-size: 14px; color: #6b7280;">
+    <strong style="color: #374151;">Login Attempt Details:</strong><br>
+    <strong>Time:</strong> {{ session_info.timestamp | default('N/A') }}<br>
+    <strong>Location:</strong> {{ session_info.location | default('Unknown') }}<br>
+    <strong>Device:</strong> {{ session_info.device | default('Unknown device') }}<br>
+    <strong>IP Address:</strong> {{ session_info.ip_address | default('Hidden for security') }}
+</div>
+{% endif %}
+
+<p class="content-text">
+    Thank you for using two-factor authentication to keep your account secure. 
+    This additional security step helps protect your data and ensures only you can access your account.
+</p>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This authentication code was generated by our secure system for account: 
+    <strong>{{ user_email | default('[Protected]') }}</strong>
+</p>
+
+<p class="footer-text">
+    For your security, this email contains sensitive information and should be deleted after use.
+</p>
+
+<div class="footer-links">
+    {% block footer_links %}
+    <a href="{{ privacy_policy_url | default('#') }}" class="footer-link">Privacy Policy</a>
+    <a href="{{ security_center_url | default('#') }}" class="footer-link">Security Center</a>
+    <a href="{{ help_url | default('#') }}" class="footer-link">Help & Support</a>
+    {% endblock %}
+</div>
+
+<p class="footer-copyright">
+    {% block copyright %}
+    © {{ current_year | default('2024') }} {{ company_name | default('Your Company') }}. All rights reserved.<br>
+    Secured with enterprise-grade encryption and authentication technology.
+    {% endblock %}
+</p>
+{% endblock %}

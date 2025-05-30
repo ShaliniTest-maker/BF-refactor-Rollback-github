@@ -1,0 +1,267 @@
+{
+  "meta": {
+    "timestamp": "{{ timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', generate_uuid())) }}",
+    "request_id": "{{ request_id | default(request.headers.get('X-Request-ID', generate_uuid())) }}",
+    "api_version": "{{ api_version | default('v1') }}",
+    "server_timestamp": "{{ server_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "environment": "{{ environment | default(config.ENV) }}",
+    "trace_id": "{{ trace_id | default(request.headers.get('X-Trace-ID')) }}"
+  },
+  "error": {
+    "code": 422,
+    "type": "validation_error",
+    "message": "{{ error_message | default('The request was well-formed but was unable to be followed due to validation errors.') }}",
+    "title": "{{ error_title | default('Unprocessable Entity') }}",
+    "detail": "{{ error_detail | default('One or more validation errors occurred. Please review the field errors and correct the invalid data.') }}",
+    "timestamp": "{{ error_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "instance": "{{ error_instance | default(request.url) }}"
+  },
+  "validation": {
+    "framework": "{{ validation_framework | default('marshmallow' if marshmallow_errors else 'flask-inputs' if flask_inputs_errors else 'unknown') }}",
+    "schema_name": "{{ schema_name | default('unknown') }}",
+    "validation_context": "{{ validation_context | default({}) | tojson }}",
+    {% if marshmallow_errors %}
+    "marshmallow_integration": {
+      "schema_version": "{{ marshmallow_schema_version | default('latest') }}",
+      "validation_mode": "{{ marshmallow_validation_mode | default('strict') }}",
+      "schema_class": "{{ marshmallow_schema_class | default('') }}",
+      "unknown_fields_policy": "{{ marshmallow_unknown_policy | default('exclude') }}",
+      "load_options": {{ marshmallow_load_options | default({}) | tojson }},
+      "schema_metadata": {{ marshmallow_schema_metadata | default({}) | tojson }}
+    },
+    {% endif %}
+    {% if flask_inputs_errors %}
+    "flask_inputs_integration": {
+      "validation_rules": {{ flask_inputs_rules | default({}) | tojson }},
+      "rule_engine": "{{ flask_inputs_engine | default('default') }}",
+      "custom_validators": {{ flask_inputs_custom_validators | default([]) | tojson }},
+      "validation_order": {{ flask_inputs_validation_order | default([]) | tojson }}
+    },
+    {% endif %}
+    "total_errors": {{ field_errors | length if field_errors else (marshmallow_errors | length if marshmallow_errors else (flask_inputs_errors | length if flask_inputs_errors else 0)) }},
+    "error_categories": {
+      "field_errors": {{ field_errors | length if field_errors else 0 }},
+      "schema_errors": {{ schema_errors | length if schema_errors else 0 }},
+      "constraint_violations": {{ constraint_violations | length if constraint_violations else 0 }},
+      "format_errors": {{ format_errors | length if format_errors else 0 }},
+      "business_rule_violations": {{ business_rule_violations | length if business_rule_violations else 0 }}
+    }
+  },
+  "field_errors": {% if field_errors %}{{ field_errors | tojson }}{% elif marshmallow_errors %}{
+    {% for field, errors in marshmallow_errors.items() %}
+    "{{ field }}": {
+      "messages": {% if errors is sequence and errors is not string %}{{ errors | tojson }}{% else %}["{{ errors }}"]{% endif %},
+      "field_type": "{{ marshmallow_field_types.get(field, 'unknown') if marshmallow_field_types else 'unknown' }}",
+      "required": {{ marshmallow_required_fields.get(field, false) | tojson if marshmallow_required_fields else false }},
+      "validation_rules": {{ marshmallow_field_rules.get(field, []) | tojson if marshmallow_field_rules else [] }},
+      "input_value": {{ input_values.get(field, null) | tojson if input_values else null }},
+      "expected_format": "{{ expected_formats.get(field, '') if expected_formats else '' }}",
+      "allowed_values": {{ allowed_values.get(field, []) | tojson if allowed_values else [] }},
+      "constraints": {
+        "min_length": {{ field_constraints.get(field, {}).get('min_length', null) if field_constraints else null }},
+        "max_length": {{ field_constraints.get(field, {}).get('max_length', null) if field_constraints else null }},
+        "min_value": {{ field_constraints.get(field, {}).get('min_value', null) if field_constraints else null }},
+        "max_value": {{ field_constraints.get(field, {}).get('max_value', null) if field_constraints else null }},
+        "pattern": "{{ field_constraints.get(field, {}).get('pattern', '') if field_constraints else '' }}",
+        "enum_values": {{ field_constraints.get(field, {}).get('enum_values', []) | tojson if field_constraints else [] }}
+      },
+      "severity": "{{ field_severities.get(field, 'error') if field_severities else 'error' }}",
+      "error_code": "{{ field_error_codes.get(field, 'VALIDATION_ERROR') if field_error_codes else 'VALIDATION_ERROR' }}"
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  }{% elif flask_inputs_errors %}{
+    {% for field, error_data in flask_inputs_errors.items() %}
+    "{{ field }}": {
+      "messages": {% if error_data.messages %}{{ error_data.messages | tojson }}{% else %}["{{ error_data.message | default('Validation failed') }}"]{% endif %},
+      "field_type": "{{ error_data.field_type | default('unknown') }}",
+      "required": {{ error_data.required | default(false) | tojson }},
+      "validation_rules": {{ error_data.validation_rules | default([]) | tojson }},
+      "input_value": {{ error_data.input_value | default(null) | tojson }},
+      "expected_format": "{{ error_data.expected_format | default('') }}",
+      "allowed_values": {{ error_data.allowed_values | default([]) | tojson }},
+      "constraints": {{ error_data.constraints | default({}) | tojson }},
+      "severity": "{{ error_data.severity | default('error') }}",
+      "error_code": "{{ error_data.error_code | default('VALIDATION_ERROR') }}"
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  }{% else %}{}{% endif %},
+  "schema_compliance": {
+    "schema_valid": {{ schema_valid | default(false) | tojson }},
+    "schema_version": "{{ schema_version | default('1.0') }}",
+    "required_fields": {{ required_fields | default([]) | tojson }},
+    "optional_fields": {{ optional_fields | default([]) | tojson }},
+    "missing_required_fields": {{ missing_required_fields | default([]) | tojson }},
+    "unexpected_fields": {{ unexpected_fields | default([]) | tojson }},
+    "field_count": {
+      "total_submitted": {{ total_submitted_fields | default(0) }},
+      "valid_fields": {{ valid_fields_count | default(0) }},
+      "invalid_fields": {{ invalid_fields_count | default(0) }},
+      "missing_required": {{ missing_required_fields | length if missing_required_fields else 0 }},
+      "unexpected": {{ unexpected_fields | length if unexpected_fields else 0 }}
+    },
+    "data_types": {
+      "type_mismatches": {{ type_mismatches | default([]) | tojson }},
+      "format_violations": {{ format_violations | default([]) | tojson }},
+      "constraint_violations": {{ constraint_violations | default([]) | tojson }}
+    },
+    "schema_metadata": {
+      "title": "{{ schema_title | default('') }}",
+      "description": "{{ schema_description | default('') }}",
+      "tags": {{ schema_tags | default([]) | tojson }},
+      "version": "{{ schema_version | default('1.0') }}",
+      "last_updated": "{{ schema_last_updated | default('') }}"
+    }
+  },
+  "request": {
+    "method": "{{ request_method | default(request.method) }}",
+    "path": "{{ request_path | default(request.path) }}",
+    "endpoint": "{{ request_endpoint | default(request.endpoint) }}",
+    "user_agent": "{{ user_agent | default(request.headers.get('User-Agent', 'Unknown')) | truncate(100) }}",
+    "ip_address": "{{ client_ip | default(request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)) }}",
+    "content_type": "{{ content_type | default(request.content_type) }}",
+    "content_length": {{ content_length | default(request.content_length) }},
+    "query_params": {{ query_params | default(request.args.to_dict()) | tojson }},
+    "form_data_present": {{ form_data_present | default((request.form | length > 0) if request.form else false) | tojson }},
+    "json_data_present": {{ json_data_present | default(request.is_json) | tojson }},
+    "files_present": {{ files_present | default((request.files | length > 0) if request.files else false) | tojson }}
+  },
+  "response": {
+    "content_type": "application/json",
+    "encoding": "utf-8",
+    "cache_control": "no-cache, no-store, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0"
+  },
+  "remediation": {
+    "suggestions": {% if remediation_suggestions %}{{ remediation_suggestions | tojson }}{% else %}[
+      {% if missing_required_fields %}
+      {
+        "type": "missing_required_fields",
+        "description": "Please provide values for all required fields",
+        "fields": {{ missing_required_fields | tojson }},
+        "action": "Add the missing required fields to your request"
+      },
+      {% endif %}
+      {% if type_mismatches %}
+      {
+        "type": "type_corrections",
+        "description": "Please ensure field values match the expected data types",
+        "fields": {{ type_mismatches | tojson }},
+        "action": "Correct the data types for the specified fields"
+      },
+      {% endif %}
+      {% if unexpected_fields %}
+      {
+        "type": "unexpected_fields",
+        "description": "Remove fields that are not allowed in this request",
+        "fields": {{ unexpected_fields | tojson }},
+        "action": "Remove the unexpected fields from your request"
+      },
+      {% endif %}
+      {
+        "type": "general_validation",
+        "description": "Review and correct all validation errors listed in field_errors",
+        "action": "Ensure all field values meet the specified validation requirements"
+      }
+    ]{% endif %},
+    "documentation_links": {
+      "api_documentation": "{{ api_docs_url | default(url_for('api.docs', _external=True) if url_for else '/api/docs') }}",
+      "schema_documentation": "{{ schema_docs_url | default('') }}",
+      "validation_guide": "{{ validation_guide_url | default('/api/docs/validation') }}",
+      "field_reference": "{{ field_reference_url | default('/api/docs/fields') }}"
+    },
+    "examples": {
+      "valid_request_example": {{ valid_request_example | default({}) | tojson }},
+      "corrected_fields_example": {{ corrected_fields_example | default({}) | tojson }}
+    },
+    "contact_support": {
+      "support_url": "{{ support_url | default('/api/support') }}",
+      "documentation_url": "{{ documentation_url | default('/api/docs') }}",
+      "help_center": "{{ help_center_url | default('/help') }}"
+    }
+  },
+  "security": {
+    "authenticated": {{ authenticated | default(false) | tojson }},
+    "user_id": "{{ user_id | default(null) }}",
+    "permissions": {{ permissions | default([]) | tojson }},
+    "session_id": "{{ session_id | default(session.get('session_id', null)) }}",
+    "csrf_token": "{{ csrf_token | default(null) }}",
+    "rate_limit": {
+      "remaining": {{ rate_limit_remaining | default(null) }},
+      "limit": {{ rate_limit_limit | default(null) }},
+      "reset_time": "{{ rate_limit_reset | default(null) }}"
+    },
+    "validation_context": {
+      "authorization_checked": {{ authorization_checked | default(true) | tojson }},
+      "data_access_validated": {{ data_access_validated | default(true) | tojson }},
+      "field_permissions": {{ field_permissions | default({}) | tojson }}
+    }
+  },
+  "audit": {
+    "logged_at": "{{ audit_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "operation": "{{ operation | default(request.endpoint) }}",
+    "resource": "{{ resource | default('validation') }}",
+    "action": "{{ action | default('validate') }}",
+    "result": "validation_failed",
+    "validation_errors_count": {{ field_errors | length if field_errors else (marshmallow_errors | length if marshmallow_errors else (flask_inputs_errors | length if flask_inputs_errors else 0)) }},
+    "duration_ms": {{ duration_ms | default(null) }},
+    "response_size": {{ response_size | default(null) }},
+    "error_severity": "{{ error_severity | default('medium') }}",
+    "retry_recommended": {{ retry_recommended | default(true) | tojson }}
+  },
+  "performance": {
+    "request_start": "{{ request_start_time | default(null) }}",
+    "request_end": "{{ request_end_time | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "processing_time_ms": {{ processing_time_ms | default(null) }},
+    "validation_time_ms": {{ validation_time_ms | default(null) }},
+    "schema_load_time_ms": {{ schema_load_time_ms | default(null) }},
+    "database_queries": {{ database_queries | default(0) }},
+    "cache_hits": {{ cache_hits | default(null) }},
+    "memory_usage": {{ memory_usage | default(null) }}
+  },
+  "links": {
+    "self": "{{ self_link | default(request.url) }}",
+    "api_root": "{{ api_root | default(url_for('api.root', _external=True) if url_for else '/api') }}",
+    "documentation": "{{ documentation_link | default(url_for('api.docs', _external=True) if url_for else '/api/docs') }}",
+    "validation_help": "{{ validation_help_link | default('/api/docs/validation') }}",
+    "schema_reference": "{{ schema_reference_link | default('/api/docs/schemas') }}"
+  },
+  {% if config.DEBUG %}
+  "debug": {
+    "flask_version": "{{ flask_version | default('3.1.1') }}",
+    "python_version": "{{ python_version | default('3.13.3') }}",
+    "marshmallow_version": "{{ marshmallow_version | default('') }}",
+    "validation_stack_trace": {{ validation_stack_trace | default(null) | tojson }},
+    "request_data": {
+      "raw_json": {{ debug_raw_json | default(null) | tojson }},
+      "form_data": {{ debug_form_data | default(dict(request.form)) | tojson }},
+      "files": {{ debug_files | default([]) | tojson }}
+    },
+    "validation_debug": {
+      "schema_dump": {{ debug_schema_dump | default({}) | tojson }},
+      "validation_steps": {{ debug_validation_steps | default([]) | tojson }},
+      "field_processors": {{ debug_field_processors | default({}) | tojson }}
+    },
+    "request_headers": {{ debug_headers | default(dict(request.headers)) | tojson }},
+    "session_data": {{ debug_session | default(dict(session)) | tojson }},
+    "template_name": "422.json",
+    "blueprint": "{{ blueprint | default(request.blueprint) }}",
+    "view_function": "{{ view_function | default(request.endpoint) }}"
+  },
+  {% else %}
+  "debug": null,
+  {% endif %}
+  "warnings": {{ warnings | default([]) | tojson }},
+  "notifications": {{ notifications | default([]) | tojson }},
+  "compliance": {
+    "gdpr_compliant": true,
+    "data_retention": "{{ data_retention_period | default('90 days') }}",
+    "privacy_policy": "{{ privacy_policy_url | default('/privacy') }}",
+    "error_logging": {
+      "log_level": "{{ error_log_level | default('warning') }}",
+      "retention_period": "{{ error_retention_period | default('30 days') }}",
+      "anonymization": {{ error_anonymization | default(true) | tojson }}
+    }
+  }
+}

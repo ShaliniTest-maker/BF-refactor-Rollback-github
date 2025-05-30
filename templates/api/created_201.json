@@ -1,0 +1,151 @@
+{
+  "meta": {
+    "timestamp": "{{ timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', generate_uuid())) }}",
+    "request_id": "{{ request_id | default(request.headers.get('X-Request-ID', generate_uuid())) }}",
+    "api_version": "{{ api_version | default('v1') }}",
+    "server_timestamp": "{{ server_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "environment": "{{ environment | default(config.ENV) }}",
+    "trace_id": "{{ trace_id | default(request.headers.get('X-Trace-ID')) }}"
+  },
+  "status": {
+    "code": {{ status_code | default(201) }},
+    "message": "{{ status_message | default('Created') }}",
+    "success": {{ success | default('true') }},
+    "error": {{ error | default('null') }}
+  },
+  "request": {
+    "method": "{{ request_method | default(request.method) }}",
+    "path": "{{ request_path | default(request.path) }}",
+    "endpoint": "{{ request_endpoint | default(request.endpoint) }}",
+    "user_agent": "{{ user_agent | default(request.headers.get('User-Agent', 'Unknown')) | truncate(100) }}",
+    "ip_address": "{{ client_ip | default(request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)) }}",
+    "query_params": {{ query_params | default(request.args.to_dict()) | tojson }},
+    "content_type": "{{ content_type | default(request.content_type) }}"
+  },
+  "response": {
+    "content_type": "application/json",
+    "encoding": "utf-8",
+    "cache_control": "{{ cache_control | default('no-cache, no-store, must-revalidate') }}",
+    "etag": "{{ etag | default(null) }}",
+    "last_modified": "{{ last_modified | default(null) }}"
+  },
+  "resource": {
+    "id": "{{ resource_id | default(created_resource.id if created_resource else null) }}",
+    "type": "{{ resource_type | default('resource') }}",
+    "attributes": {% block resource_data %}{{ created_resource | default(data) | tojson }}{% endblock %},
+    "location": "{{ location | default(url_for(request.endpoint + '_get', id=resource_id, _external=True) if resource_id else null) }}",
+    "self_link": "{{ self_link | default(url_for(request.endpoint, _external=True)) }}",
+    "created_at": "{{ created_at | default(created_resource.created_at.isoformat() if created_resource and created_resource.created_at else moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "relationships": {% block relationships %}{
+      "owner": {
+        "links": {
+          "related": "{{ owner_link | default(url_for('api.users_get', id=created_resource.owner_id, _external=True) if created_resource and hasattr(created_resource, 'owner_id') else null) }}"
+        },
+        "data": {
+          "type": "user",
+          "id": "{{ owner_id | default(created_resource.owner_id if created_resource and hasattr(created_resource, 'owner_id') else null) }}"
+        }
+      }
+    }{% endblock %},
+    "meta": {
+      "created_by": "{{ created_by | default(session.get('user_id', 'system')) }}",
+      "version": "{{ resource_version | default(1) }}",
+      "schema_version": "{{ schema_version | default('1.0') }}",
+      "validation_status": "{{ validation_status | default('validated') }}"
+    }
+  },
+  "security": {
+    "authenticated": {{ authenticated | default('false') }},
+    "user_id": "{{ user_id | default(session.get('user_id', null)) }}",
+    "permissions": {{ permissions | default([]) | tojson }},
+    "session_id": "{{ session_id | default(session.get('session_id', null)) }}",
+    "csrf_token": "{{ csrf_token | default(null) }}",
+    "rate_limit": {
+      "remaining": {{ rate_limit_remaining | default(null) }},
+      "limit": {{ rate_limit_limit | default(null) }},
+      "reset_time": "{{ rate_limit_reset | default(null) }}"
+    }
+  },
+  "data": {% block data %}{{ created_resource | default(data) | tojson }}{% endblock %},
+  "pagination": {% block pagination %}{{ pagination | default(null) | tojson }}{% endblock %},
+  "links": {% block links %}{
+    "self": "{{ self_link | default(request.url) }}",
+    "resource": "{{ resource_link | default(location) }}",
+    "collection": "{{ collection_link | default(url_for(request.endpoint.replace('_create', '').replace('_post', ''), _external=True) if request.endpoint else null) }}",
+    "api_root": "{{ api_root | default(url_for('api.root', _external=True)) }}",
+    "documentation": "{{ documentation_link | default(url_for('api.docs', _external=True)) }}",
+    "related": {% block related_links %}{
+      "edit": "{{ edit_link | default(url_for(request.endpoint.replace('_create', '_update').replace('_post', '_put'), id=resource_id, _external=True) if resource_id else null) }}",
+      "delete": "{{ delete_link | default(url_for(request.endpoint.replace('_create', '_delete').replace('_post', '_delete'), id=resource_id, _external=True) if resource_id else null) }}"
+    }{% endblock %}
+  }{% endblock %},
+  "audit": {
+    "logged_at": "{{ audit_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "operation": "{{ operation | default('create') }}",
+    "resource": "{{ audit_resource | default(resource_type) }}",
+    "action": "{{ action | default('POST') }}",
+    "result": "{{ audit_result | default('success' if success else 'failure') }}",
+    "duration_ms": {{ duration_ms | default(null) }},
+    "response_size": {{ response_size | default(null) }},
+    "resource_id": "{{ audit_resource_id | default(resource_id) }}",
+    "previous_state": {{ previous_state | default(null) | tojson }},
+    "changes": {% block audit_changes %}{{ audit_changes | default({}) | tojson }}{% endblock %},
+    "security_context": {
+      "user_id": "{{ audit_user_id | default(user_id) }}",
+      "source_ip": "{{ audit_source_ip | default(client_ip) }}",
+      "user_agent": "{{ audit_user_agent | default(user_agent) }}",
+      "authentication_method": "{{ auth_method | default('session') }}",
+      "authorization_level": "{{ auth_level | default('user') }}"
+    }
+  },
+  "performance": {
+    "request_start": "{{ request_start_time | default(null) }}",
+    "request_end": "{{ request_end_time | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "processing_time_ms": {{ processing_time_ms | default(null) }},
+    "database_queries": {{ database_queries | default(null) }},
+    "cache_hits": {{ cache_hits | default(null) }},
+    "memory_usage": {{ memory_usage | default(null) }},
+    "creation_metrics": {
+      "validation_time_ms": {{ validation_time_ms | default(null) }},
+      "database_insert_time_ms": {{ db_insert_time_ms | default(null) }},
+      "index_update_time_ms": {{ index_update_time_ms | default(null) }}
+    }
+  },
+  "debug": {% if config.DEBUG %}{
+    "flask_version": "{{ flask_version | default('3.1.1') }}",
+    "python_version": "{{ python_version | default('3.13.3') }}",
+    "request_headers": {{ debug_headers | default(dict(request.headers)) | tojson }},
+    "session_data": {{ debug_session | default(dict(session)) | tojson }},
+    "template_name": "{{ template_name | default('created_201.json') }}",
+    "blueprint": "{{ blueprint | default(request.blueprint) }}",
+    "view_function": "{{ view_function | default(request.endpoint) }}",
+    "route_params": {{ route_params | default(request.view_args) | tojson }},
+    "sqlalchemy_queries": {{ sqlalchemy_queries | default([]) | tojson }},
+    "creation_context": {
+      "resource_class": "{{ resource_class | default(created_resource.__class__.__name__ if created_resource else null) }}",
+      "validation_errors": {{ validation_errors | default([]) | tojson }},
+      "business_rules_applied": {{ business_rules | default([]) | tojson }}
+    }
+  }{% else %}null{% endif %},
+  "warnings": {% block warnings %}{{ warnings | default([]) | tojson }}{% endblock %},
+  "notifications": {% block notifications %}{{ notifications | default([]) | tojson }}{% endblock %},
+  "creation": {
+    "status": "{{ creation_status | default('completed') }}",
+    "validation": {
+      "passed": {{ validation_passed | default('true') }},
+      "rules_applied": {{ validation_rules | default([]) | tojson }},
+      "warnings": {{ validation_warnings | default([]) | tojson }}
+    },
+    "business_logic": {
+      "rules_executed": {{ business_logic_rules | default([]) | tojson }},
+      "side_effects": {{ side_effects | default([]) | tojson }},
+      "cascade_operations": {{ cascade_operations | default([]) | tojson }}
+    },
+    "location_headers": {
+      "Location": "{{ location | default(null) }}",
+      "Content-Location": "{{ content_location | default(location) }}"
+    },
+    "next_actions": {% block next_actions %}{{ next_actions | default([]) | tojson }}{% endblock %}
+  }
+}

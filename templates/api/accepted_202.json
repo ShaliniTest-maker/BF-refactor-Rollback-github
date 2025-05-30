@@ -1,0 +1,147 @@
+{
+  "meta": {
+    "timestamp": "{{ timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', generate_uuid())) }}",
+    "request_id": "{{ request_id | default(request.headers.get('X-Request-ID', generate_uuid())) }}",
+    "api_version": "{{ api_version | default('v1') }}",
+    "server_timestamp": "{{ server_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "environment": "{{ environment | default(config.ENV) }}",
+    "trace_id": "{{ trace_id | default(request.headers.get('X-Trace-ID')) }}"
+  },
+  "status": {
+    "code": 202,
+    "message": "{{ status_message | default('Accepted - Request received and processing initiated') }}",
+    "success": true,
+    "error": null
+  },
+  "request": {
+    "method": "{{ request_method | default(request.method) }}",
+    "path": "{{ request_path | default(request.path) }}",
+    "endpoint": "{{ request_endpoint | default(request.endpoint) }}",
+    "user_agent": "{{ user_agent | default(request.headers.get('User-Agent', 'Unknown')) | truncate(100) }}",
+    "ip_address": "{{ client_ip | default(request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)) }}",
+    "query_params": {{ query_params | default(request.args.to_dict()) | tojson }},
+    "content_type": "{{ content_type | default(request.content_type) }}"
+  },
+  "response": {
+    "content_type": "application/json",
+    "encoding": "utf-8",
+    "cache_control": "no-cache, no-store, must-revalidate",
+    "etag": "{{ etag | default(null) }}",
+    "last_modified": "{{ last_modified | default(null) }}"
+  },
+  "async": {
+    "task_id": "{{ task_id | default(generate_uuid()) }}",
+    "status": "{{ async_status | default('processing') }}",
+    "created_at": "{{ task_created_at | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "estimated_completion": "{{ estimated_completion | default(null) }}",
+    "progress": {
+      "percentage": {{ progress_percentage | default(0) }},
+      "current_step": "{{ current_step | default('initializing') }}",
+      "total_steps": {{ total_steps | default(null) }},
+      "step_description": "{{ step_description | default('Processing request asynchronously') }}"
+    },
+    "polling": {
+      "status_url": "{{ status_url | default(url_for('api.task_status', task_id=(task_id or generate_uuid()), _external=True)) }}",
+      "interval_seconds": {{ polling_interval | default(5) }},
+      "max_attempts": {{ max_polling_attempts | default(120) }},
+      "timeout_seconds": {{ timeout_seconds | default(600) }},
+      "retry_strategy": "{{ retry_strategy | default('exponential_backoff') }}"
+    },
+    "callback": {
+      "webhook_url": "{{ webhook_url | default(null) }}",
+      "notification_email": "{{ notification_email | default(null) }}",
+      "callback_enabled": {{ callback_enabled | default('false') }}
+    }
+  },
+  "security": {
+    "authenticated": {{ authenticated | default('false') }},
+    "user_id": "{{ user_id | default(null) }}",
+    "permissions": {{ permissions | default([]) | tojson }},
+    "session_id": "{{ session_id | default(session.get('session_id', null)) }}",
+    "csrf_token": "{{ csrf_token | default(null) }}",
+    "rate_limit": {
+      "remaining": {{ rate_limit_remaining | default(null) }},
+      "limit": {{ rate_limit_limit | default(null) }},
+      "reset_time": "{{ rate_limit_reset | default(null) }}"
+    }
+  },
+  "data": {
+    "task_reference": "{{ task_reference | default(task_id or generate_uuid()) }}",
+    "operation": "{{ operation | default(request.endpoint) }}",
+    "resource_type": "{{ resource_type | default('async_task') }}",
+    "input_summary": {{ input_summary | default(null) | tojson }},
+    "expected_output": "{{ expected_output | default('Processing results will be available via status URL') }}",
+    "priority": "{{ priority | default('normal') }}",
+    "queue_position": {{ queue_position | default(null) }}
+  },
+  "links": {
+    "self": "{{ self_link | default(request.url) }}",
+    "status": "{{ status_url | default(url_for('api.task_status', task_id=(task_id or generate_uuid()), _external=True)) }}",
+    "cancel": "{{ cancel_url | default(url_for('api.task_cancel', task_id=(task_id or generate_uuid()), _external=True)) }}",
+    "api_root": "{{ api_root | default(url_for('api.root', _external=True)) }}",
+    "documentation": "{{ documentation_link | default(url_for('api.docs', _external=True)) }}",
+    "async_guide": "{{ async_guide_link | default(url_for('api.async_guide', _external=True)) }}"
+  },
+  "audit": {
+    "logged_at": "{{ audit_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "operation": "{{ operation | default(request.endpoint) }}",
+    "resource": "{{ resource | default(task_id or generate_uuid()) }}",
+    "action": "async_initiate",
+    "result": "accepted",
+    "duration_ms": {{ duration_ms | default(null) }},
+    "response_size": {{ response_size | default(null) }},
+    "async_initiated": true,
+    "task_queue": "{{ task_queue | default('default') }}"
+  },
+  "performance": {
+    "request_start": "{{ request_start_time | default(null) }}",
+    "request_end": "{{ request_end_time | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "processing_time_ms": {{ processing_time_ms | default(null) }},
+    "database_queries": {{ database_queries | default(null) }},
+    "cache_hits": {{ cache_hits | default(null) }},
+    "memory_usage": {{ memory_usage | default(null) }},
+    "queue_wait_time_ms": {{ queue_wait_time_ms | default(null) }},
+    "task_priority_score": {{ task_priority_score | default(null) }}
+  },
+  "debug": {% if config.DEBUG %}{
+    "flask_version": "{{ flask_version | default('3.1.1') }}",
+    "python_version": "{{ python_version | default('3.13.3') }}",
+    "request_headers": {{ debug_headers | default(dict(request.headers)) | tojson }},
+    "session_data": {{ debug_session | default(dict(session)) | tojson }},
+    "template_name": "accepted_202.json",
+    "blueprint": "{{ blueprint | default(request.blueprint) }}",
+    "async_worker": "{{ async_worker | default(null) }}",
+    "task_queue_info": {{ task_queue_info | default(null) | tojson }},
+    "background_job_id": "{{ background_job_id | default(null) }}"
+  }{% else %}null{% endif %},
+  "instructions": {
+    "polling_guide": {
+      "description": "Monitor task progress by polling the status URL at regular intervals",
+      "recommended_interval": "{{ polling_interval | default(5) }} seconds",
+      "status_codes": {
+        "200": "Task completed successfully - final results available",
+        "202": "Task still processing - continue polling",
+        "404": "Task not found or expired",
+        "410": "Task failed or was cancelled",
+        "429": "Rate limit exceeded - increase polling interval"
+      },
+      "best_practices": [
+        "Implement exponential backoff to avoid overwhelming the server",
+        "Set reasonable timeout limits based on expected processing time",
+        "Handle network errors gracefully with retry logic",
+        "Cache intermediate results when available"
+      ]
+    },
+    "completion_notification": {
+      "webhook_support": {{ webhook_support | default('true') }},
+      "email_support": {{ email_support | default('true') }},
+      "websocket_support": {{ websocket_support | default('false') }},
+      "push_notification": {{ push_notification_support | default('false') }}
+    }
+  },
+  "warnings": {% if warnings %}{{ warnings | tojson }}{% else %}[
+    {% if not webhook_url and not notification_email %}"No completion notification configured - only polling available"{% endif %}
+  ]{% endif %},
+  "notifications": {{ notifications | default([]) | tojson }}
+}

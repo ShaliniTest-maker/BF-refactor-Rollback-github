@@ -1,0 +1,220 @@
+{% extends "api/base_response.json" %}
+
+{# 
+Data Collection Response Template
+Provides standardized formatting for array/list responses with item metadata, 
+collection statistics, and sorting information per Flask blueprint architecture.
+Ensures consistent collection response handling across all Flask blueprints 
+supporting data listing operations with Flask-SQLAlchemy model integration.
+#}
+
+{% block data %}{
+  "items": [
+    {%- for item in items -%}
+    {
+      "id": {{ item.id | tojson }},
+      "attributes": {{ item.to_dict() | tojson }},
+      {%- if item.__class__.__name__ is defined %}
+      "type": "{{ item.__class__.__name__.lower() }}",
+      {%- endif %}
+      {%- if item.created_at is defined %}
+      "created_at": "{{ item.created_at.isoformat() }}",
+      {%- endif %}
+      {%- if item.updated_at is defined %}
+      "updated_at": "{{ item.updated_at.isoformat() }}",
+      {%- endif %}
+      {%- if item.get_relationships is defined %}
+      "relationships": {{ item.get_relationships() | tojson }},
+      {%- endif %}
+      "links": {
+        "self": "{{ url_for(request.endpoint, id=item.id, _external=True) if item.id else '#' }}",
+        {%- if item.__class__.__name__ is defined and item.id is defined %}
+        "resource": "{{ url_for('api.' + item.__class__.__name__.lower() + '_detail', id=item.id, _external=True) }}"
+        {%- endif %}
+      },
+      "meta": {
+        "model_class": "{{ item.__class__.__name__ if item.__class__.__name__ is defined else 'Unknown' }}",
+        "primary_key": {{ item.id | tojson }},
+        {%- if item.get_display_name is defined %}
+        "display_name": {{ item.get_display_name() | tojson }},
+        {%- elif item.name is defined %}
+        "display_name": {{ item.name | tojson }},
+        {%- elif item.title is defined %}
+        "display_name": {{ item.title | tojson }},
+        {%- endif %}
+        {%- if hasattr(item, '__table__') and item.__table__.columns %}
+        "fields": {{ item.__table__.columns.keys() | list | tojson }},
+        {%- endif %}
+        "serialization_version": "{{ serialization_version | default('1.0') }}"
+      }
+    }{%- if not loop.last %},{% endif -%}
+    {%- endfor -%}
+  ],
+  "collection": {
+    "total_count": {{ total_count | default(items | length if items else 0) }},
+    "current_count": {{ items | length if items else 0 }},
+    "current_page": {{ current_page | default(pagination.page if pagination else 1) }},
+    "total_pages": {{ total_pages | default(pagination.pages if pagination else 1) }},
+    "items_per_page": {{ items_per_page | default(pagination.per_page if pagination else (items | length if items else 0)) }},
+    "has_next": {{ has_next | default(pagination.has_next if pagination else false) }},
+    "has_prev": {{ has_prev | default(pagination.has_prev if pagination else false) }},
+    "is_empty": {{ (items | length == 0) }},
+    "resource_type": "{{ resource_type | default(items[0].__class__.__name__.lower() if items and items[0].__class__.__name__ is defined else 'resource') }}",
+    "collection_id": "{{ collection_id | default(generate_uuid()) }}",
+    "generated_at": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}"
+  },
+  "filtering": {
+    "applied_filters": {{ applied_filters | default({}) | tojson }},
+    "available_filters": {{ available_filters | default([]) | tojson }},
+    "filter_count": {{ applied_filters.keys() | list | length if applied_filters else 0 }},
+    "search_query": {{ search_query | default(null) | tojson }},
+    "search_fields": {{ search_fields | default([]) | tojson }}
+  },
+  "sorting": {
+    "sort_field": "{{ sort_field | default('id') }}",
+    "sort_direction": "{{ sort_direction | default('asc') }}",
+    "available_sort_fields": {{ available_sort_fields | default(['id', 'created_at', 'updated_at']) | tojson }},
+    "sort_applied": {{ sort_field is defined and sort_field != null }}
+  },
+  "aggregation": {
+    "statistics": {{ statistics | default({}) | tojson }},
+    "grouping": {{ grouping | default({}) | tojson }},
+    "counts_by_field": {{ counts_by_field | default({}) | tojson }},
+    "date_range": {
+      "earliest": "{{ earliest_date | default(null) }}",
+      "latest": "{{ latest_date | default(null) }}",
+      "span_days": {{ date_span_days | default(null) }}
+    }
+  }
+}{% endblock %}
+
+{% block pagination %}{
+  "current_page": {{ current_page | default(pagination.page if pagination else 1) }},
+  "total_pages": {{ total_pages | default(pagination.pages if pagination else 1) }},
+  "items_per_page": {{ items_per_page | default(pagination.per_page if pagination else 20) }},
+  "total_items": {{ total_count | default(pagination.total if pagination else (items | length if items else 0)) }},
+  "has_next": {{ has_next | default(pagination.has_next if pagination else false) }},
+  "has_prev": {{ has_prev | default(pagination.has_prev if pagination else false) }},
+  "next_page": {{ pagination.next_num if pagination and pagination.has_next else null }},
+  "prev_page": {{ pagination.prev_num if pagination and pagination.has_prev else null }},
+  "page_size_options": {{ page_size_options | default([10, 20, 50, 100]) | tojson }},
+  "offset": {{ ((current_page | default(1)) - 1) * (items_per_page | default(20)) }},
+  "limit": {{ items_per_page | default(20) }}
+}{% endblock %}
+
+{% block links %}{
+  "self": "{{ request.url }}",
+  "first": "{{ first_page_url | default(url_for(request.endpoint, page=1, **request.args.to_dict(flat=False) | reject('equalto', 'page') | list | dictsort, _external=True)) }}",
+  "last": "{{ last_page_url | default(url_for(request.endpoint, page=total_pages | default(1), **request.args.to_dict(flat=False) | reject('equalto', 'page') | list | dictsort, _external=True)) }}",
+  {%- if pagination and pagination.has_next %}
+  "next": "{{ next_page_url | default(url_for(request.endpoint, page=pagination.next_num, **request.args.to_dict(flat=False) | reject('equalto', 'page') | list | dictsort, _external=True)) }}",
+  {%- else %}
+  "next": null,
+  {%- endif %}
+  {%- if pagination and pagination.has_prev %}
+  "prev": "{{ prev_page_url | default(url_for(request.endpoint, page=pagination.prev_num, **request.args.to_dict(flat=False) | reject('equalto', 'page') | list | dictsort, _external=True)) }}",
+  {%- else %}
+  "prev": null,
+  {%- endif %}
+  "api_root": "{{ url_for('api.root', _external=True) }}",
+  "documentation": "{{ url_for('api.docs', _external=True) }}",
+  {%- if resource_type is defined %}
+  "resource_create": "{{ url_for('api.' + resource_type + '_create', _external=True) if resource_type else null }}",
+  "resource_list": "{{ url_for('api.' + resource_type + '_list', _external=True) if resource_type else null }}",
+  {%- endif %}
+  "export": {
+    "csv": "{{ export_csv_url | default(url_for(request.endpoint, format='csv', **request.args.to_dict(), _external=True)) }}",
+    "json": "{{ export_json_url | default(url_for(request.endpoint, format='json', **request.args.to_dict(), _external=True)) }}",
+    "xml": "{{ export_xml_url | default(url_for(request.endpoint, format='xml', **request.args.to_dict(), _external=True)) }}"
+  }
+}{% endblock %}
+
+{% block warnings %}[
+  {%- if items | length == 0 -%}
+  {
+    "code": "EMPTY_COLLECTION",
+    "message": "No items found matching the specified criteria",
+    "severity": "info",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}"
+  },
+  {%- endif -%}
+  {%- if total_count | default(0) > 1000 -%}
+  {
+    "code": "LARGE_DATASET",
+    "message": "Large dataset detected. Consider using filtering or pagination for better performance",
+    "severity": "warning",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "metadata": {
+      "total_items": {{ total_count | default(0) }},
+      "recommendation": "Use filtering parameters to reduce dataset size"
+    }
+  },
+  {%- endif -%}
+  {%- if applied_filters and applied_filters.keys() | list | length > 5 -%}
+  {
+    "code": "COMPLEX_FILTERING",
+    "message": "Multiple filters applied. Verify results meet expectations",
+    "severity": "info",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "metadata": {
+      "filter_count": {{ applied_filters.keys() | list | length }},
+      "applied_filters": {{ applied_filters.keys() | list | tojson }}
+    }
+  }
+  {%- endif -%}
+  {%- for warning in custom_warnings | default([]) -%}
+  {%- if not loop.first or items | length == 0 or total_count | default(0) > 1000 or (applied_filters and applied_filters.keys() | list | length > 5) -%},{%- endif -%}
+  {
+    "code": "{{ warning.code | default('CUSTOM_WARNING') }}",
+    "message": "{{ warning.message | default('Custom warning') }}",
+    "severity": "{{ warning.severity | default('info') }}",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    {%- if warning.metadata %}
+    "metadata": {{ warning.metadata | tojson }}
+    {%- endif %}
+  }
+  {%- endfor -%}
+]{% endblock %}
+
+{% block notifications %}[
+  {%- if performance_metrics and performance_metrics.slow_query -%}
+  {
+    "type": "performance",
+    "message": "Query execution time exceeded optimal threshold",
+    "severity": "warning",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "metadata": {
+      "execution_time_ms": {{ performance_metrics.execution_time_ms | default(null) }},
+      "threshold_ms": {{ performance_metrics.threshold_ms | default(1000) }},
+      "optimization_suggestion": "Consider adding database indexes or refining query parameters"
+    }
+  },
+  {%- endif -%}
+  {%- if cache_info -%}
+  {%- if performance_metrics and performance_metrics.slow_query -%},{%- endif -%}
+  {
+    "type": "cache",
+    "message": "{{ 'Cache hit - data served from cache' if cache_info.hit else 'Cache miss - data retrieved from database' }}",
+    "severity": "info",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "metadata": {
+      "cache_hit": {{ cache_info.hit | default(false) }},
+      "cache_key": "{{ cache_info.key | default('unknown') }}",
+      "cache_ttl": {{ cache_info.ttl | default(null) }},
+      "cache_age": {{ cache_info.age | default(null) }}
+    }
+  }
+  {%- endif -%}
+  {%- for notification in custom_notifications | default([]) -%}
+  {%- if not loop.first or (performance_metrics and performance_metrics.slow_query) or cache_info -%},{%- endif -%}
+  {
+    "type": "{{ notification.type | default('custom') }}",
+    "message": "{{ notification.message | default('Custom notification') }}",
+    "severity": "{{ notification.severity | default('info') }}",
+    "timestamp": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    {%- if notification.metadata %}
+    "metadata": {{ notification.metadata | tojson }}
+    {%- endif %}
+  }
+  {%- endfor -%}
+]{% endblock %}

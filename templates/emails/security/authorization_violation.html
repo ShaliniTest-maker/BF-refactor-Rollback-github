@@ -1,0 +1,718 @@
+{% extends "emails/base/layout.html" %}
+
+{# Authorization Violation Email Template #}
+{# Comprehensive security notification for authorization violations with RBAC context #}
+
+{% block title %}🚨 Authorization Violation Alert - {{ violation.severity|upper }} Risk{% endblock %}
+
+{% block email_label %}Critical Security Alert: Unauthorized Access Attempt{% endblock %}
+
+{# Enhanced styling for security alerts #}
+{% block email_styles %}
+    {{ super() }}
+    
+    /* Security Alert Specific Styles */
+    .security-alert {
+        background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+        border: 2px solid #f56565;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .alert-header {
+        background-color: #f56565;
+        color: white;
+        padding: 15px 20px;
+        margin: -20px -20px 20px -20px;
+        border-radius: 6px 6px 0 0;
+        font-weight: 700;
+        font-size: 18px;
+        text-align: center;
+    }
+    
+    .violation-summary {
+        background-color: #ffffff;
+        border-left: 4px solid #f56565;
+        padding: 15px 20px;
+        margin: 15px 0;
+        border-radius: 0 4px 4px 0;
+    }
+    
+    .risk-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .risk-critical {
+        background-color: #fed7d7;
+        color: #c53030;
+        border: 1px solid #f56565;
+    }
+    
+    .risk-high {
+        background-color: #feebc8;
+        color: #dd6b20;
+        border: 1px solid #ed8936;
+    }
+    
+    .risk-medium {
+        background-color: #fefcbf;
+        color: #d69e2e;
+        border: 1px solid #ecc94b;
+    }
+    
+    .details-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+        background-color: #ffffff;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .details-table th {
+        background-color: #edf2f7;
+        color: #2d3748;
+        padding: 12px 15px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 2px solid #e2e8f0;
+    }
+    
+    .details-table td {
+        padding: 12px 15px;
+        border-bottom: 1px solid #e2e8f0;
+        vertical-align: top;
+    }
+    
+    .details-table tr:last-child td {
+        border-bottom: none;
+    }
+    
+    .details-table tr:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+    
+    .permission-list {
+        background-color: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 12px;
+        margin: 8px 0;
+    }
+    
+    .permission-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    
+    .permission-item:last-child {
+        border-bottom: none;
+    }
+    
+    .role-hierarchy {
+        background-color: #f0fff4;
+        border: 1px solid #9ae6b4;
+        border-radius: 4px;
+        padding: 12px;
+        margin: 8px 0;
+    }
+    
+    .action-buttons {
+        text-align: center;
+        margin: 25px 0;
+    }
+    
+    .action-button {
+        display: inline-block;
+        padding: 12px 24px;
+        margin: 5px 10px;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        text-align: center;
+        transition: all 0.2s ease;
+    }
+    
+    .btn-primary {
+        background-color: #3182ce;
+        color: white;
+        border: 2px solid #3182ce;
+    }
+    
+    .btn-primary:hover {
+        background-color: #2c5aa0;
+        border-color: #2c5aa0;
+        text-decoration: none;
+        color: white;
+    }
+    
+    .btn-secondary {
+        background-color: #ffffff;
+        color: #4a5568;
+        border: 2px solid #e2e8f0;
+    }
+    
+    .btn-secondary:hover {
+        background-color: #f7fafc;
+        border-color: #cbd5e0;
+        text-decoration: none;
+        color: #4a5568;
+    }
+    
+    .recommendations {
+        background-color: #ebf8ff;
+        border: 1px solid #90cdf4;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    .cloudwatch-link {
+        background-color: #f0f7ff;
+        border: 1px solid #63b3ed;
+        border-radius: 4px;
+        padding: 10px;
+        margin: 10px 0;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+    }
+    
+    .incident-metadata {
+        background-color: #fffaf0;
+        border: 1px solid #fbd38d;
+        border-radius: 4px;
+        padding: 12px;
+        margin: 15px 0;
+        font-size: 14px;
+    }
+    
+    .context-info {
+        background-color: #f7fafc;
+        border-left: 3px solid #4299e1;
+        padding: 12px 15px;
+        margin: 10px 0;
+    }
+    
+    /* Responsive design for mobile */
+    @media screen and (max-width: 600px) {
+        .details-table {
+            font-size: 14px;
+        }
+        
+        .details-table th,
+        .details-table td {
+            padding: 8px 10px;
+        }
+        
+        .action-button {
+            display: block;
+            margin: 10px 0;
+            padding: 15px;
+        }
+        
+        .permission-item {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+    
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .security-alert {
+            background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+            border-color: #e53e3e;
+        }
+        
+        .violation-summary,
+        .permission-list,
+        .role-hierarchy,
+        .recommendations,
+        .cloudwatch-link,
+        .incident-metadata,
+        .context-info {
+            background-color: #2d2d2d !important;
+            color: #ffffff !important;
+        }
+        
+        .details-table {
+            background-color: #2d2d2d !important;
+        }
+        
+        .details-table th {
+            background-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        
+        .details-table td {
+            border-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        
+        .details-table tr:nth-child(even) {
+            background-color: #363636 !important;
+        }
+    }
+{% endblock %}
+
+{% block email_header %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="email-header">
+            <h1 class="brand-name" style="color: #f56565;">🛡️ Security Alert System</h1>
+            <p class="brand-tagline">Authorization Violation Detection & Response</p>
+        </td>
+    </tr>
+</table>
+{% endblock %}
+
+{% block email_navigation %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="email-navigation">
+            <ul class="email-nav-links">
+                <li><a href="{{ url_for('security.dashboard', _external=True) if url_for else '#' }}">Security Dashboard</a></li>
+                <li><a href="{{ url_for('security.incidents', _external=True) if url_for else '#' }}">Incident Log</a></li>
+                <li><a href="{{ url_for('admin.users', _external=True) if url_for else '#' }}">User Management</a></li>
+                <li><a href="{{ url_for('admin.roles', _external=True) if url_for else '#' }}">Role Management</a></li>
+            </ul>
+        </td>
+    </tr>
+</table>
+{% endblock %}
+
+{% block email_content %}
+<div class="security-alert">
+    <div class="alert-header">
+        🚨 AUTHORIZATION VIOLATION DETECTED
+        <br>
+        <span class="risk-badge risk-{{ violation.severity|lower }}">
+            {{ violation.severity|upper }} RISK
+        </span>
+    </div>
+    
+    <div class="violation-summary">
+        <h2 style="margin-top: 0; color: #c53030;">
+            Unauthorized Access Attempt to {{ violation.attempted_resource }}
+        </h2>
+        <p style="margin: 10px 0; font-size: 16px; line-height: 1.5;">
+            <strong>{{ violation.user.get_full_name() or violation.user.username }}</strong> 
+            attempted to access <strong>{{ violation.attempted_resource }}</strong> 
+            with action <strong>{{ violation.attempted_action }}</strong> 
+            at <strong>{{ violation.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</strong>.
+        </p>
+        <p style="margin: 10px 0; color: #e53e3e;">
+            <strong>Access Denied:</strong> {{ violation.denial_reason }}
+        </p>
+    </div>
+    
+    <!-- User Context Information -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">👤 User Context & Details</h3>
+    <table class="details-table">
+        <thead>
+            <tr>
+                <th>User Information</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>User ID</strong></td>
+                <td>{{ violation.user.id }}</td>
+            </tr>
+            <tr>
+                <td><strong>Username</strong></td>
+                <td>{{ violation.user.username }}</td>
+            </tr>
+            <tr>
+                <td><strong>Full Name</strong></td>
+                <td>{{ violation.user.get_full_name() or 'Not provided' }}</td>
+            </tr>
+            <tr>
+                <td><strong>Email</strong></td>
+                <td>{{ violation.user.email or 'Not available' }}</td>
+            </tr>
+            <tr>
+                <td><strong>Account Status</strong></td>
+                <td>
+                    <span style="color: {{ 'green' if violation.user.is_active else 'red' }};">
+                        {{ 'Active' if violation.user.is_active else 'Inactive' }}
+                    </span>
+                    {% if violation.user.is_verified %}
+                        | <span style="color: green;">Verified</span>
+                    {% else %}
+                        | <span style="color: orange;">Unverified</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Last Login</strong></td>
+                <td>{{ violation.user.last_login_at.strftime('%Y-%m-%d %H:%M:%S UTC') if violation.user.last_login_at else 'Never' }}</td>
+            </tr>
+            <tr>
+                <td><strong>Login Count</strong></td>
+                <td>{{ violation.user.login_count }}</td>
+            </tr>
+            <tr>
+                <td><strong>Auth0 Integration</strong></td>
+                <td>
+                    {% if violation.user.auth0_user_id %}
+                        <span style="color: green;">✓ Connected</span> ({{ violation.user.auth0_user_id }})
+                    {% else %}
+                        <span style="color: orange;">Local Account</span>
+                    {% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <!-- Attempted Access Details -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">🎯 Attempted Resource Access</h3>
+    <table class="details-table">
+        <thead>
+            <tr>
+                <th>Access Details</th>
+                <th>Information</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Resource</strong></td>
+                <td><code>{{ violation.attempted_resource }}</code></td>
+            </tr>
+            <tr>
+                <td><strong>Action</strong></td>
+                <td><code>{{ violation.attempted_action }}</code></td>
+            </tr>
+            <tr>
+                <td><strong>Full Permission</strong></td>
+                <td><code>{{ violation.attempted_resource }}.{{ violation.attempted_action }}</code></td>
+            </tr>
+            <tr>
+                <td><strong>Request Method</strong></td>
+                <td>{{ violation.request_method or 'Unknown' }}</td>
+            </tr>
+            <tr>
+                <td><strong>Request Path</strong></td>
+                <td><code>{{ violation.request_path or 'Unknown' }}</code></td>
+            </tr>
+            <tr>
+                <td><strong>Source IP Address</strong></td>
+                <td>{{ violation.source_ip or 'Unknown' }}</td>
+            </tr>
+            <tr>
+                <td><strong>User Agent</strong></td>
+                <td style="word-break: break-all; font-size: 12px;">{{ violation.user_agent or 'Unknown' }}</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <!-- Current User Permissions -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">🔐 Current Permission Levels</h3>
+    <div class="context-info">
+        <h4 style="margin-top: 0;">Active User Roles ({{ violation.user.roles|length }})</h4>
+        {% if violation.user.roles %}
+            <div class="role-hierarchy">
+                {% for role in violation.user.roles %}
+                    {% if role.is_active %}
+                        <div style="margin: 8px 0; padding: 8px; background-color: rgba(72, 187, 120, 0.1); border-radius: 4px;">
+                            <strong>{{ role.name }}</strong>
+                            {% if role.description %}
+                                <br><small style="color: #666;">{{ role.description }}</small>
+                            {% endif %}
+                            {% if role.parent_role %}
+                                <br><small style="color: #4299e1;">Inherited from: {{ role.parent_role.name }}</small>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% else %}
+            <p style="color: #e53e3e; font-weight: 600;">⚠️ No roles assigned to this user</p>
+        {% endif %}
+    </div>
+    
+    <!-- User Permissions List -->
+    <div class="context-info">
+        <h4 style="margin-top: 0;">Granted Permissions ({{ violation.user.get_permissions()|length }})</h4>
+        {% set user_permissions = violation.user.get_permissions() %}
+        {% if user_permissions %}
+            <div class="permission-list">
+                {% for permission in user_permissions|sort %}
+                    <div class="permission-item">
+                        <span><code>{{ permission }}</code></span>
+                        <span style="color: green; font-size: 12px;">✓ Granted</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p style="color: #e53e3e; font-weight: 600;">⚠️ No permissions granted to this user</p>
+        {% endif %}
+    </div>
+    
+    <!-- Permission Hierarchy Analysis -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">🏗️ Role Hierarchy & Permission Analysis</h3>
+    <div class="context-info">
+        <h4 style="margin-top: 0;">Permission Hierarchy Analysis</h4>
+        {% if violation.user.roles %}
+            {% for role in violation.user.roles %}
+                {% if role.is_active %}
+                    <div style="margin: 15px 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                        <h5 style="margin: 0 0 8px 0; color: #2d3748;">
+                            Role: {{ role.name }}
+                            {% if role.hierarchy_level > 0 %}
+                                <small style="color: #4299e1;">(Level {{ role.hierarchy_level }})</small>
+                            {% endif %}
+                        </h5>
+                        
+                        {% set role_permissions = role.get_effective_permissions() %}
+                        {% if role_permissions %}
+                            <p><strong>Permissions from this role ({{ role_permissions|length }}):</strong></p>
+                            <div style="max-height: 100px; overflow-y: auto; font-size: 12px; background-color: #f8f9fa; padding: 8px; border-radius: 4px;">
+                                {% for perm in role_permissions|sort %}
+                                    <div>• {{ perm }}</div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p style="color: #e53e3e;">No permissions granted by this role</p>
+                        {% endif %}
+                        
+                        {% if role.parent_role %}
+                            <p style="margin-top: 8px; color: #4299e1; font-size: 12px;">
+                                ↳ Inherits from: {{ role.parent_role.name }}
+                            </p>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+        {% else %}
+            <p style="color: #e53e3e; font-weight: 600;">No role hierarchy available - user has no assigned roles</p>
+        {% endif %}
+    </div>
+    
+    <!-- Risk Assessment -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">⚠️ Risk Assessment & Analysis</h3>
+    <div class="recommendations">
+        <h4 style="margin-top: 0; color: #1a365d;">Security Risk Level: 
+            <span class="risk-badge risk-{{ violation.severity|lower }}">
+                {{ violation.severity|upper }}
+            </span>
+        </h4>
+        
+        <table class="details-table" style="margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th>Risk Factor</th>
+                    <th>Assessment</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Access Pattern</strong></td>
+                    <td>{{ violation.access_pattern or 'Normal user attempt' }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Resource Sensitivity</strong></td>
+                    <td>{{ violation.resource_sensitivity or 'Standard' }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Time of Access</strong></td>
+                    <td>{{ violation.timestamp.strftime('%A, %Y-%m-%d at %H:%M:%S UTC') }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Geographic Location</strong></td>
+                    <td>{{ violation.geographic_location or 'Unknown' }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Session Validity</strong></td>
+                    <td>
+                        {% if violation.session_valid %}
+                            <span style="color: green;">Valid authenticated session</span>
+                        {% else %}
+                            <span style="color: red;">⚠️ Invalid or expired session</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <td><strong>Previous Violations</strong></td>
+                    <td>{{ violation.previous_violations_count or 0 }} in the last 24 hours</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Recommended Security Actions -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">🛠️ Recommended Security Response Actions</h3>
+    <div class="recommendations">
+        <h4 style="margin-top: 0; color: #1a365d;">Immediate Actions Required</h4>
+        
+        {% if violation.severity|lower == 'critical' %}
+            <ul style="color: #c53030; font-weight: 600;">
+                <li>🚨 <strong>Immediate user account review required</strong></li>
+                <li>🔒 Consider temporary account suspension pending investigation</li>
+                <li>🔍 Investigate all recent user activities and access patterns</li>
+                <li>📧 Contact user immediately to verify legitimate access attempt</li>
+                <li>🛡️ Review and strengthen access controls for affected resource</li>
+            </ul>
+        {% elif violation.severity|lower == 'high' %}
+            <ul style="color: #dd6b20; font-weight: 600;">
+                <li>⚡ Review user permissions and role assignments</li>
+                <li>🔍 Investigate recent access patterns for anomalies</li>
+                <li>📋 Document incident for security audit trail</li>
+                <li>🛡️ Consider additional MFA requirements for sensitive resources</li>
+            </ul>
+        {% else %}
+            <ul style="color: #d69e2e;">
+                <li>📝 Log incident for monitoring trends</li>
+                <li>🎓 Provide user training on proper access procedures</li>
+                <li>📊 Review resource access documentation</li>
+                <li>⚙️ Consider updating user interface for better guidance</li>
+            </ul>
+        {% endif %}
+        
+        <h4 style="color: #1a365d; margin-top: 20px;">Long-term Security Improvements</h4>
+        <ul>
+            <li>🔄 Regular review of user permissions and role assignments</li>
+            <li>📚 Enhanced security awareness training for users</li>
+            <li>🔧 Implement principle of least privilege access controls</li>
+            <li>📈 Enhanced monitoring and alerting for authorization violations</li>
+            <li>🔍 Periodic access audits and permission cleanup</li>
+        </ul>
+    </div>
+    
+    <!-- CloudWatch Integration -->
+    <h3 style="color: #2d3748; margin: 25px 0 15px 0;">☁️ AWS CloudWatch Integration</h3>
+    <div class="cloudwatch-link">
+        <h4 style="margin-top: 0;">Centralized Security Event Correlation</h4>
+        <p><strong>CloudWatch Log Group:</strong> <code>{{ violation.cloudwatch_log_group or '/aws/lambda/flask-security' }}</code></p>
+        <p><strong>Event Correlation ID:</strong> <code>{{ violation.correlation_id or violation.id }}</code></p>
+        <p><strong>Log Stream:</strong> <code>{{ violation.log_stream or 'authorization-violations' }}</code></p>
+        
+        {% if violation.cloudwatch_dashboard_url %}
+            <p style="margin-top: 15px;">
+                <a href="{{ violation.cloudwatch_dashboard_url }}" class="action-button btn-secondary" target="_blank">
+                    📊 View in CloudWatch Dashboard
+                </a>
+            </p>
+        {% endif %}
+        
+        <div style="margin-top: 15px; padding: 10px; background-color: #f0f7ff; border-radius: 4px;">
+            <p style="margin: 0; font-size: 12px; color: #2c5aa0;">
+                <strong>CloudWatch Query:</strong> Use the correlation ID above to search for related security events 
+                and system activities in CloudWatch Logs for comprehensive incident tracking and analysis.
+            </p>
+        </div>
+    </div>
+    
+    <!-- Incident Metadata -->
+    <div class="incident-metadata">
+        <h4 style="margin-top: 0;">Incident Tracking Information</h4>
+        <table style="width: 100%; font-size: 12px;">
+            <tr>
+                <td><strong>Incident ID:</strong></td>
+                <td>{{ violation.id }}</td>
+                <td><strong>Detection System:</strong></td>
+                <td>Flask-SQLAlchemy RBAC Monitor</td>
+            </tr>
+            <tr>
+                <td><strong>Alert Generated:</strong></td>
+                <td>{{ violation.alert_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if violation.alert_timestamp else 'Now' }}</td>
+                <td><strong>System Version:</strong></td>
+                <td>Flask {{ flask_version or '3.1.1' }} / Python {{ python_version or '3.13.3' }}</td>
+            </tr>
+            <tr>
+                <td><strong>Environment:</strong></td>
+                <td>{{ violation.environment or 'Production' }}</td>
+                <td><strong>Server Instance:</strong></td>
+                <td>{{ violation.server_instance or 'Unknown' }}</td>
+            </tr>
+        </table>
+    </div>
+    
+    <!-- Action Buttons -->
+    <div class="action-buttons">
+        <a href="{{ url_for('security.incident_detail', incident_id=violation.id, _external=True) if url_for else '#' }}" 
+           class="action-button btn-primary">
+            🔍 View Full Incident Details
+        </a>
+        
+        <a href="{{ url_for('admin.user_detail', user_id=violation.user.id, _external=True) if url_for else '#' }}" 
+           class="action-button btn-secondary">
+            👤 Review User Account
+        </a>
+        
+        <a href="{{ url_for('admin.roles', _external=True) if url_for else '#' }}" 
+           class="action-button btn-secondary">
+            🛡️ Manage Roles & Permissions
+        </a>
+        
+        {% if violation.cloudwatch_dashboard_url %}
+            <a href="{{ violation.cloudwatch_dashboard_url }}" 
+               class="action-button btn-secondary" target="_blank">
+                📊 CloudWatch Analytics
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Additional Context Information -->
+<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 6px; font-size: 14px;">
+    <h4 style="margin-top: 0; color: #2d3748;">📋 Security Team Guidelines</h4>
+    <p>This automated security alert was generated by the Flask-SQLAlchemy RBAC authorization system. 
+       All authorization violation attempts are logged and correlated with AWS CloudWatch for comprehensive 
+       security monitoring and incident response.</p>
+    
+    <p><strong>Next Steps:</strong></p>
+    <ol>
+        <li>Review the incident details and user context above</li>
+        <li>Assess the risk level and determine appropriate response</li>
+        <li>Take recommended security actions based on severity level</li>
+        <li>Update incident status in the security dashboard</li>
+        <li>Document lessons learned for future prevention</li>
+    </ol>
+    
+    <p style="margin-bottom: 0;"><strong>Questions?</strong> 
+       Contact the Security Team at 
+       <a href="mailto:{{ security_email or 'security@company.com' }}">{{ security_email or 'security@company.com' }}</a>
+       or review our <a href="{{ security_documentation_url or '#' }}">Security Incident Response Documentation</a>.
+    </p>
+</div>
+{% endblock %}
+
+{% block footer_content %}
+    {{ super() }}
+    
+    <div class="footer-section">
+        <div class="footer-title">Security Alert System</div>
+        <p>This is an automated security notification from the Flask-SQLAlchemy RBAC monitoring system. 
+           Authorization violations are automatically detected and reported for immediate security team review.</p>
+    </div>
+    
+    <div class="footer-section">
+        <div class="footer-title">Security Resources</div>
+        <ul class="footer-links">
+            <li><a href="{{ security_dashboard_url or '#' }}">Security Dashboard</a></li>
+            <li><a href="{{ incident_response_url or '#' }}">Incident Response Guide</a></li>
+            <li><a href="{{ security_policies_url or '#' }}">Security Policies</a></li>
+            <li><a href="{{ user_training_url or '#' }}">Security Training</a></li>
+        </ul>
+    </div>
+{% endblock %}
+
+{% block unsubscribe_text %}
+This is a mandatory security alert that cannot be unsubscribed from as it relates to critical authorization 
+violations and security incidents. All security team members must receive these notifications as part of 
+our incident response procedures.
+<br><br>
+For questions about security alert delivery, contact the Security Team at 
+<a href="mailto:{{ security_email or 'security@company.com' }}">{{ security_email or 'security@company.com' }}</a>.
+{% endblock %}

@@ -1,0 +1,87 @@
+================================================================================
+ACCOUNT VERIFICATION REQUIRED
+================================================================================
+
+Hello {{ user.name or user.username }},
+
+Thank you for registering with {{ app_name }}! To complete your account setup and 
+ensure the security of your account, please verify your email address.
+
+VERIFICATION DETAILS
+================================================================================
+Email Address: {{ user.email }}
+Account Created: {{ user.created_at.strftime('%B %d, %Y at %I:%M %p %Z') }}
+Verification Token Expires: {{ verification_token.expires_at.strftime('%B %d, %Y at %I:%M %p %Z') }}
+
+VERIFICATION INSTRUCTIONS
+================================================================================
+To verify your account, please follow these steps:
+
+1. Click on the verification link below, OR
+2. Copy and paste the entire URL into your web browser's address bar
+
+Verification Link:
+{{ verification_url }}
+
+IMPORTANT SECURITY INFORMATION
+================================================================================
+- This verification link is valid for {{ verification_token.expires_in_hours }} hours only
+- For your security, this link can only be used once
+- If you did not create this account, please ignore this email and contact support
+- Do not share this verification link with anyone
+
+MANUAL VERIFICATION OPTION
+================================================================================
+If the link above doesn't work, you can manually verify your account by:
+
+1. Visit: {{ base_url }}/verify-account
+2. Enter your email address: {{ user.email }}
+3. Enter verification code: {{ verification_token.code }}
+
+NEED HELP?
+================================================================================
+If you're having trouble with account verification:
+
+- Check your spam/junk folder for this email
+- Ensure you're using the same browser and device
+- Try clearing your browser cache and cookies
+- Contact our support team if the link has expired
+
+Support Contact: {{ support_email }}
+Help Center: {{ base_url }}/help
+
+ACCOUNT SECURITY TIPS
+================================================================================
+To keep your account secure:
+- Use a strong, unique password
+- Enable two-factor authentication once your account is verified
+- Keep your account information up to date
+- Report any suspicious activity immediately
+
+================================================================================
+IMPORTANT: If you did not register for this account, please ignore this email 
+and contact our security team immediately at {{ security_email }}.
+================================================================================
+
+Thank you,
+The {{ app_name }} Security Team
+
+This email was sent to {{ user.email }} because a new account was registered 
+with this email address on {{ user.created_at.strftime('%B %d, %Y') }}.
+
+For questions about this email, please contact: {{ support_email }}
+
+================================================================================
+© {{ current_year }} {{ company_name }}. All rights reserved.
+{{ company_address }}
+================================================================================
+
+TECHNICAL INFORMATION (for troubleshooting)
+================================================================================
+User ID: {{ user.id }}
+Verification Token ID: {{ verification_token.token_id }}
+Email Template: account_verification.txt
+Sent: {{ sent_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') }}
+Client IP: {{ request_ip }}
+User Agent: {{ user_agent }}
+================================================================================

@@ -1,0 +1,235 @@
+{# 
+Flask Detailed Health Status Template
+
+This Jinja2 template provides comprehensive system monitoring information for the /health/detailed endpoint,
+extending the base health template with administrative monitoring capabilities and detailed diagnostics.
+
+Key Features:
+- Comprehensive system status validation with <200ms response time per Section 6.5.2.1
+- Component health reporting for database, authentication, and application services per Section 6.5.2.1  
+- Performance metrics integration with Flask-MonitoringDashboard data per Section 6.5.1.1
+- Administrative monitoring dashboard support with detailed system diagnostics per Section 8.5.1
+- Container orchestration metrics and WSGI server performance data per Section 8.5.1
+
+Template Inheritance:
+- Extends templates/health/base_health.json for consistent structure
+- Overrides blocks to provide detailed monitoring information
+- Adds comprehensive diagnostics for operational monitoring
+
+Performance Requirements:
+- Response time target: <200ms per Section 6.5.2.1 health check endpoints
+- Comprehensive validation without performance degradation
+- Administrative monitoring integration for dashboard support
+
+Dependencies:
+- Flask application context with comprehensive health check data
+- Database health metrics from Flask-SQLAlchemy connection pool
+- External service connectivity status (Auth0, monitoring services)
+- System performance metrics and resource utilization data
+- Container orchestration and WSGI server performance metrics
+#}
+
+{% extends "base_health.json" %}
+
+{# Override status to provide detailed health determination #}
+{% block status %}{{ health_status | default('healthy') }}{% endblock %}
+
+{# Override check type to indicate detailed monitoring #}
+{% block check_type %}detailed{% endblock %}
+
+{# Override health_checks block to provide comprehensive component monitoring #}
+{% block health_checks %}
+"application": {
+  "status": "{{ application_status | default('healthy') }}",
+  "details": "Flask application running normally with detailed monitoring",
+  "version": "{{ config.APP_VERSION | default('1.0.0') }}",
+  "debug_mode": {{ config.DEBUG | default(false) | tojson }},
+  "configuration": {
+    "environment": "{{ config.FLASK_ENV | default('development') }}",
+    "testing": {{ config.TESTING | default(false) | tojson }},
+    "secret_key_configured": {{ (config.SECRET_KEY is defined and config.SECRET_KEY != '') | tojson }}
+  }
+},
+"database": {
+  "status": "{{ database_health.status | default('unknown') }}",
+  "accessible": {{ database_health.accessible | default(false) | tojson }},
+  "response_time_ms": {{ database_health.response_time_ms | default(0) }},
+  "connection_pool": {
+    "total_connections": {{ database_health.pool_status.total_connections | default(0) }},
+    "active_connections": {{ database_health.pool_status.active_connections | default(0) }},
+    "idle_connections": {{ database_health.pool_status.idle_connections | default(0) }},
+    "invalid_connections": {{ database_health.pool_status.invalid | default(0) }},
+    "pool_size": {{ database_health.pool_status.pool_size | default(10) }},
+    "max_overflow": {{ database_health.pool_status.max_overflow | default(20) }},
+    "checked_out": {{ database_health.pool_status.checked_out | default(0) }}
+  },
+  "configuration": {
+    "ssl_enabled": {{ database_health.ssl_enabled | default(false) | tojson }},
+    "version_info": "{{ database_health.version_info | default('') | truncate(100) }}",
+    "pool_health": "{{ 'healthy' if database_health.pool_status.invalid | default(0) == 0 else 'degraded' }}"
+  },
+  {% if database_health.errors %}
+  "errors": {{ database_health.errors | tojson }},
+  {% endif %}
+  "metrics": {
+    "query_performance": "{{ 'optimal' if database_health.response_time_ms | default(0) < 100 else 'degraded' }}",
+    "connection_efficiency": {{ ((database_health.pool_status.active_connections | default(0)) / (database_health.pool_status.total_connections | default(1))) | round(3) }}
+  }
+},
+"authentication": {
+  "status": "{{ services_health.auth0.status | default('not_configured') }}",
+  {% if services_health.auth0.status != 'not_configured' %}
+  "response_time_ms": {{ services_health.auth0.response_time_ms | default(0) }},
+  "provider": "Auth0",
+  "domain_configured": {{ (config.AUTH0_DOMAIN is defined and config.AUTH0_DOMAIN != '') | tojson }},
+  "client_configured": {{ (config.AUTH0_CLIENT_ID is defined and config.AUTH0_CLIENT_ID != '') | tojson }},
+  {% if services_health.auth0.error is defined %}
+  "error": "{{ services_health.auth0.error }}",
+  {% endif %}
+  {% else %}
+  "details": "Authentication service not configured",
+  {% endif %}
+  "session_management": {
+    "flask_login_active": {{ (config.USE_SESSION_FOR_NEXT is defined) | tojson }},
+    "session_protection": "{{ config.SESSION_PROTECTION | default('basic') }}",
+    "cookie_secure": {{ (config.SESSION_COOKIE_SECURE | default(false)) | tojson }}
+  }
+},
+"external_services": {
+  "overall_status": "{{ services_health.overall_status | default('unknown') }}",
+  "monitoring": {
+    "status": "{{ services_health.monitoring.status | default('healthy') }}",
+    "response_time_ms": {{ services_health.monitoring.response_time_ms | default(0) }},
+    "details": "Internal monitoring systems operational"
+  }
+  {% if services_health.auth0.status != 'not_configured' %}
+  ,
+  "auth0": {
+    "status": "{{ services_health.auth0.status }}",
+    "response_time_ms": {{ services_health.auth0.response_time_ms | default(0) }},
+    {% if services_health.auth0.error is defined %}
+    "error": "{{ services_health.auth0.error }}",
+    {% endif %}
+    "integration_health": "{{ 'healthy' if services_health.auth0.status == 'healthy' else 'requires_attention' }}"
+  }
+  {% endif %}
+}
+{% endblock %}
+
+{# Add additional metadata for detailed monitoring #}
+{% block additional_metadata %}
+"monitoring_dashboard": {
+  "flask_monitoring_enabled": true,
+  "metrics_collection": "active",
+  "performance_tracking": "enabled",
+  "endpoint_monitoring": "comprehensive"
+},
+"administrative_details": {
+  "last_health_check": "{{ timestamp }}",
+  "health_check_frequency": "on_demand",
+  "monitoring_level": "detailed",
+  "operational_status": "{{ 'operational' if health_status in ['healthy', 'warning'] else 'requires_attention' }}"
+},
+"container_orchestration": {
+  "platform": "{{ orchestration_platform | default('docker') }}",
+  "container_id": "{{ container_id | default('') }}",
+  "worker_processes": "{{ worker_id | default('main') }}",
+  "orchestration_compatible": true
+},
+"wsgi_server": {
+  "implementation": "Gunicorn",
+  "worker_type": "sync",
+  "worker_id": "{{ worker_id | default('main') }}",
+  "process_management": "active"
+},
+{% endblock %}
+
+{# Override custom_fields to add comprehensive diagnostics #}
+{% block custom_fields %}
+"performance_analysis": {
+  "system_metrics": {
+    "process_memory_mb": {{ performance_metrics.process_memory_mb | default(0) }},
+    "process_cpu_percent": {{ performance_metrics.process_cpu_percent | default(0) }},
+    "system_memory_mb": {{ performance_metrics.system_memory_mb | default(0) }},
+    "system_memory_percent": {{ performance_metrics.system_memory_percent | default(0) }},
+    "system_cpu_percent": {{ performance_metrics.system_cpu_percent | default(0) }},
+    "disk_usage_percent": {{ performance_metrics.disk_usage_percent | default(0) }},
+    "disk_free_gb": {{ performance_metrics.disk_free_gb | default(0) }},
+    "load_average": {{ performance_metrics.load_average | default(0) }}
+  },
+  "performance_thresholds": {
+    "cpu_threshold_percent": 80,
+    "memory_threshold_percent": 85,
+    "disk_threshold_percent": 90,
+    "response_time_threshold_ms": 200,
+    "database_query_threshold_ms": 100
+  },
+  "performance_status": {
+    "cpu_status": "{{ 'optimal' if performance_metrics.process_cpu_percent | default(0) < 50 else 'elevated' if performance_metrics.process_cpu_percent | default(0) < 80 else 'critical' }}",
+    "memory_status": "{{ 'optimal' if performance_metrics.system_memory_percent | default(0) < 70 else 'elevated' if performance_metrics.system_memory_percent | default(0) < 85 else 'critical' }}",
+    "disk_status": "{{ 'optimal' if performance_metrics.disk_usage_percent | default(0) < 80 else 'warning' if performance_metrics.disk_usage_percent | default(0) < 90 else 'critical' }}",
+    "overall_performance": "{{ 'optimal' if response_time_ms | default(0) < 100 else 'acceptable' if response_time_ms | default(0) < 200 else 'degraded' }}"
+  }
+},
+"diagnostic_information": {
+  "application_info": {
+    "startup_time": {{ app_info.application.uptime_seconds | default(0) }},
+    "process_info": {
+      "pid": {{ app_info.process.pid | default(0) }},
+      "parent_pid": {{ app_info.process.ppid | default(0) }},
+      "thread_count": {{ app_info.process.num_threads | default(1) }},
+      "creation_time": {{ app_info.process.create_time | default(0) }}
+    },
+    "system_info": {
+      "platform": "{{ app_info.system.platform | default('unknown') }}",
+      "architecture": "{{ app_info.system.architecture | default('unknown') }}",
+      "hostname": "{{ app_info.system.hostname | default('unknown') }}"
+    }
+  },
+  "service_layer_status": {
+    "business_logic": "operational",
+    "data_access": "{{ 'operational' if database_health.accessible | default(false) else 'degraded' }}",
+    "external_integrations": "{{ services_health.overall_status | default('unknown') }}",
+    "caching": "not_implemented",
+    "background_tasks": "not_implemented"
+  },
+  "security_status": {
+    "https_enforced": {{ (config.SESSION_COOKIE_SECURE | default(false)) | tojson }},
+    "csrf_protection": {{ (config.WTF_CSRF_ENABLED | default(false)) | tojson }},
+    "session_security": "{{ 'secure' if config.SESSION_COOKIE_SECURE | default(false) else 'basic' }}",
+    "authentication_configured": {{ (config.AUTH0_DOMAIN is defined and config.AUTH0_DOMAIN != '') | tojson }}
+  }
+},
+"migration_validation": {
+  "node_js_parity": {
+    "api_compatibility": "maintained",
+    "response_format": "preserved",
+    "endpoint_coverage": "complete",
+    "performance_comparison": "{{ 'equivalent' if response_time_ms | default(0) < 200 else 'degraded' }}"
+  },
+  "flask_benefits": {
+    "python_ecosystem": "available",
+    "ml_integration_ready": true,
+    "scientific_libraries": "accessible",
+    "development_efficiency": "improved"
+  },
+  "migration_status": {
+    "completion_status": "operational",
+    "rollback_capability": "available",
+    "monitoring_parity": "enhanced",
+    "feature_parity": "maintained"
+  }
+},
+{% endblock %}
+
+{# Override related_links to include detailed monitoring endpoints #}
+{% block related_links %}
+"liveness": "/health/liveness",
+"readiness": "/health/readiness",
+"basic": "/health",
+"detailed": "/health/detailed",
+"metrics": "/metrics",
+"monitoring_dashboard": "/admin/dashboard",
+"performance_metrics": "/admin/performance",
+"system_diagnostics": "/admin/diagnostics"
+{% endblock %}

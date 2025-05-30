@@ -1,0 +1,421 @@
+{% extends "emails/base/base.txt" %}
+
+{% block subject -%}
+PERFORMANCE ALERT - {{alert_severity|default('HIGH')|upper}} - Flask Application SLA Violation
+{%- endblock %}
+
+{% block content -%}
+============================================================
+PERFORMANCE ALERT - {{alert_severity|default('HIGH')|upper}}
+============================================================
+
+Alert ID: {{alert_id|default('flask-perf-' + timestamp|default('20240115143025'))}}
+Timestamp: {{alert_timestamp|default(timestamp)|strftime('%Y-%m-%d %H:%M:%S UTC')}}
+Environment: {{environment|default('Production')|upper}}
+Alert Type: PERFORMANCE MONITORING
+Severity: {{alert_severity|default('HIGH')|upper}}
+
+{% if alert_severity == 'CRITICAL' %}
+!!! IMMEDIATE ACTION REQUIRED !!!
+{% elif alert_severity == 'HIGH' %}
+*** URGENT ATTENTION NEEDED ***
+{% endif %}
+
+============================================================
+ALERT SUMMARY
+============================================================
+
+Issue: {{alert_title|default('Performance SLA Violation Detected')}}
+Description: {{alert_description|default('Multiple performance thresholds have been exceeded in your Flask application. Immediate attention is required to prevent service degradation.')}}
+
+{% if alert_severity in ['CRITICAL', 'HIGH'] %}
+Response Required: {{response_time_requirement|default('15 minutes')}}
+Escalation Path: {{escalation_path|default('Development Team -> Team Lead -> Engineering Manager')}}
+{% endif %}
+
+============================================================
+PERFORMANCE METRICS OVERVIEW
+============================================================
+
+CRITICAL SLA VIOLATIONS:
+{% if api_response_time|default(245) > 200 %}
+- API Response Time: {{api_response_time|default('245')}}ms (SLA: <200ms) - EXCEEDED
+{% endif %}
+{% if db_query_time|default(127) > 100 %}
+- Database Query Time: {{db_query_time|default('127')}}ms (SLA: <100ms) - EXCEEDED
+{% endif %}
+{% if error_rate|default(2.3) > 1 %}
+- Error Rate: {{error_rate|default('2.3')}}% (SLA: <1%) - EXCEEDED
+{% endif %}
+
+CURRENT PERFORMANCE METRICS:
+- API Response Time: {{api_response_time|default('245')}}ms (SLA: <200ms)
+- Database Query Performance: {{db_query_time|default('127')}}ms (SLA: <100ms)
+- System Throughput: {{system_throughput|default('85')}} req/sec
+- Error Rate: {{error_rate|default('2.3')}}% (SLA: <1%)
+- Authentication Response: {{auth_response_time|default('165')}}ms (SLA: <150ms)
+- System Availability: {{system_availability|default('99.7')}}% (SLA: 99.9%)
+
+============================================================
+DETAILED SLA VIOLATION BREAKDOWN
+============================================================
+
+API ENDPOINT PERFORMANCE:
+{% for endpoint in api_endpoints|default([
+    {'name': '/api/users', 'response_time': '312ms', 'threshold': '200ms', 'status': 'EXCEEDED'},
+    {'name': '/api/auth/login', 'response_time': '198ms', 'threshold': '200ms', 'status': 'OK'},
+    {'name': '/api/data/reports', 'response_time': '445ms', 'threshold': '200ms', 'status': 'EXCEEDED'}
+]) %}
+{{endpoint.name}}: {{endpoint.response_time}} (Threshold: {{endpoint.threshold}}) - {{endpoint.status}}
+{% endfor %}
+
+DATABASE PERFORMANCE VIOLATIONS:
+- Connection Pool Utilization: {{db_pool_utilization|default('92')}}% (Alert: >90%)
+- Active Connections: {{postgres_connections|default('18/20')}} (Max: 20)
+- Long Running Queries: {{long_running_queries|default('3')}} queries >5 seconds
+- Query Lock Contention: {{lock_contention|default('High')|upper}}
+- Average Query Time: {{avg_query_time|default('127')}}ms (SLA: <100ms)
+
+WSGI SERVER PERFORMANCE:
+- Worker Response Time: {{wsgi_response_time|default('189')}}ms
+- Active Workers: {{gunicorn_workers|default('3/4')}} (Optimal: 4/4)
+- Worker Memory Usage: {{wsgi_memory_avg|default('245')}}MB per worker
+- Request Queue Depth: {{request_queue_depth|default('12')}} pending
+- Worker Timeout Rate: {{worker_timeout_rate|default('5.2')}}%
+
+============================================================
+CONTAINER AND INFRASTRUCTURE STATUS
+============================================================
+
+FLASK APPLICATION CONTAINERS:
+{% for container in containers|default([
+    {'name': 'flask-app-1', 'cpu': '87%', 'memory': '88%', 'status': 'CRITICAL'},
+    {'name': 'flask-app-2', 'cpu': '82%', 'memory': '85%', 'status': 'WARNING'},
+    {'name': 'flask-app-3', 'cpu': '78%', 'memory': '82%', 'status': 'WARNING'}
+]) %}
+Container {{container.name}}:
+  - CPU Usage: {{container.cpu}} (Threshold: 80%)
+  - Memory Usage: {{container.memory}} (Threshold: 85%)
+  - Status: {{container.status}}
+  - Restart Count: {{container.restart_count|default('0')}} in last hour
+{% endfor %}
+
+DOCKER/ECS ORCHESTRATION STATUS:
+- Container Platform: {{container_platform|default('Amazon ECS')}}
+- Total Containers: {{container_count_total|default('3')}}
+- Healthy Containers: {{container_count_healthy|default('2')}}
+- CPU Constrained: {{cpu_constrained_containers|default('2')}} containers
+- Memory Pressure: {{memory_pressure_containers|default('3')}} containers
+- Auto-scaling Status: {{autoscaling_status|default('Triggered - Scaling up')}}
+
+GUNICORN WSGI SERVER METRICS:
+- Active Workers: {{wsgi_workers_active|default('3')}}/{{wsgi_workers_total|default('4')}}
+- Request Latency: {{wsgi_request_latency|default('189')}}ms average
+- Worker CPU Usage: {{wsgi_cpu_avg|default('72')}}% average
+- Worker Memory Usage: {{wsgi_memory_avg|default('245')}}MB average
+- Failed Worker Restarts: {{wsgi_failed_restarts|default('2')}} in last hour
+- Request Processing Rate: {{wsgi_request_rate|default('89')}} req/sec per worker
+
+DATABASE CONNECTION HEALTH:
+- PostgreSQL Status: {{database_status|default('DEGRADED')|upper}}
+- Connection Pool: {{db_connections_active|default('18')}}/{{db_connections_max|default('20')}} active
+- Pool Utilization: {{db_pool_utilization|default('92')}}% (Critical: >90%)
+- Connection Acquisition Time: {{db_connection_time|default('45')}}ms
+- Failed Connections: {{db_failed_connections|default('3')}} in last hour
+- Connection Leaks: {{db_connection_leaks|default('1')}} detected
+
+CACHE PERFORMANCE:
+- Redis Status: {{redis_status|default('HEALTHY')|upper}}
+- Cache Hit Rate: {{redis_hit_rate|default('94.2')}}% (Target: >90%)
+- Memory Usage: {{redis_memory|default('67')}}% of allocated
+- Response Time: {{redis_response_time|default('2.1')}}ms average
+- Connection Errors: {{redis_connection_errors|default('0')}} in last hour
+
+============================================================
+AWS CLOUDWATCH MONITORING DETAILS
+============================================================
+
+CLOUDWATCH ALARM TRIGGERS:
+{% for alarm in cloudwatch_alarms|default([
+    {'source': 'ECS Container Insights', 'trigger': 'CPU > 80% for 5 minutes', 'datapoints': '2/2', 'status': 'ALARM'},
+    {'source': 'Custom API Metrics', 'trigger': 'Response time > 200ms', 'datapoints': '3/3', 'status': 'ALARM'},
+    {'source': 'RDS Performance Insights', 'trigger': 'Query time > 100ms average', 'datapoints': '2/3', 'status': 'ALARM'},
+    {'source': 'Application Load Balancer', 'trigger': 'Target response > 150ms', 'datapoints': '2/2', 'status': 'ALARM'}
+]) %}
+{{alarm.source}}:
+  - Trigger: {{alarm.trigger}}
+  - Evaluation: {{alarm.datapoints}} datapoints
+  - Status: {{alarm.status}}
+{% endfor %}
+
+PERFORMANCE BASELINE COMPARISON:
+- Current vs Baseline API Response: {{api_vs_baseline|default('+22')}}% deviation
+- Current vs Baseline CPU Usage: {{cpu_vs_baseline|default('+15')}}% deviation
+- Current vs Baseline Memory Usage: {{memory_vs_baseline|default('+18')}}% deviation
+- Current vs Baseline Throughput: {{throughput_vs_baseline|default('-12')}}% deviation
+- Current vs Baseline Error Rate: {{error_vs_baseline|default('+130')}}% deviation
+
+LOAD BALANCER METRICS:
+- ALB Status: {{alb_status|default('HEALTHY')|upper}}
+- Target Health: {{alb_healthy_targets|default('2')}}/{{alb_total_targets|default('3')}} healthy targets
+- Request Count: {{alb_request_count|default('450')}} req/minute
+- Response Time: {{lb_latency|default('45')}}ms (Target: <30ms)
+- HTTP 5xx Errors: {{alb_5xx_errors|default('12')}} in last hour
+
+============================================================
+AFFECTED SYSTEMS AND IMPACT ASSESSMENT
+============================================================
+
+PRIMARY IMPACT:
+{{primary_impact|default('API response times degraded, affecting user experience and third-party integrations. Database connection pool near capacity causing query queuing.')}}
+
+BUSINESS FUNCTION IMPACT:
+- User Authentication: {{auth_impact|default('Delayed login processing')}}
+- API Integrations: {{api_impact|default('Partner integrations experiencing timeouts')}}
+- Data Processing: {{data_impact|default('Report generation delayed')}}
+- User Experience: {{ux_impact|default('Page load times increased by 25%')}}
+
+ESTIMATED AFFECTED METRICS:
+- Affected Users: {{affected_users_count|default('approximately 1,200')}} concurrent users
+- Service Degradation: {{service_degradation_level|default('Moderate - 25% performance impact')}}
+- API Call Success Rate: {{api_success_rate|default('97.7')}}% (Normal: 99.5%+)
+- Transaction Processing: {{transaction_impact|default('15% slower than baseline')}}
+
+============================================================
+DIAGNOSTIC INFORMATION
+============================================================
+
+RECENT PERFORMANCE EVENTS:
+{% for event in recent_events|default([
+    {'time': '14:25:30', 'event': 'Database connection pool utilization exceeded 90%'},
+    {'time': '14:27:15', 'event': 'API response time threshold breached on /api/users endpoint'},
+    {'time': '14:28:45', 'event': 'Container CPU utilization spike detected on flask-app-1'},
+    {'time': '14:30:00', 'event': 'WSGI worker timeout rate increased to 5.2%'}
+]) %}
+{{event.time}} - {{event.event}}
+{% endfor %}
+
+PERFORMANCE THRESHOLD VIOLATIONS:
+{% for threshold in exceeded_thresholds|default([
+    {'metric': 'API Response Time', 'current': '245ms', 'limit': '200ms', 'duration': '8 minutes'},
+    {'metric': 'Database Query Time', 'current': '127ms', 'limit': '100ms', 'duration': '6 minutes'},
+    {'metric': 'Container CPU Usage', 'current': '87%', 'limit': '80%', 'duration': '5 minutes'},
+    {'metric': 'Connection Pool Utilization', 'current': '92%', 'limit': '90%', 'duration': '4 minutes'}
+]) %}
+- {{threshold.metric}}: {{threshold.current}} (Limit: {{threshold.limit}}) for {{threshold.duration}}
+{% endfor %}
+
+ERROR ANALYSIS:
+- HTTP 5xx Errors: {{http_5xx_count|default('23')}} in last hour (Normal: <5)
+- Database Timeout Errors: {{db_timeout_errors|default('7')}} in last hour
+- Authentication Failures: {{auth_failures|default('12')}} in last hour
+- WSGI Worker Crashes: {{wsgi_crashes|default('2')}} in last hour
+
+SLOW QUERY ANALYSIS:
+{% for query in slow_queries|default([
+    {'query': 'SELECT * FROM users WHERE...', 'time': '2.3s', 'count': '12'},
+    {'query': 'INSERT INTO audit_logs...', 'time': '1.8s', 'count': '8'},
+    {'query': 'UPDATE session_data SET...', 'time': '1.2s', 'count': '15'}
+]) %}
+- Query: {{query.query[:50]}}... ({{query.time}}, {{query.count}} occurrences)
+{% endfor %}
+
+============================================================
+RECOMMENDED IMMEDIATE ACTIONS
+============================================================
+
+CRITICAL ACTIONS (Next 15 minutes):
+{% for action in critical_actions|default([
+    'Scale ECS service to increase container count from 3 to 5 instances',
+    'Increase database connection pool max_connections from 20 to 30',
+    'Restart Gunicorn workers to clear potential memory leaks',
+    'Enable database query plan caching for slow queries',
+    'Check for any deployment or configuration changes in last 2 hours'
+]) %}
+{{loop.index}}. {{action}}
+{% endfor %}
+
+PERFORMANCE OPTIMIZATION ACTIONS:
+{% for action in optimization_actions|default([
+    'Review and optimize database indexes for slow-running queries',
+    'Implement Redis caching for frequently accessed API endpoints',
+    'Tune Gunicorn worker configuration (consider async workers)',
+    'Increase container CPU/memory allocation if resources allow',
+    'Review and optimize SQLAlchemy query patterns and N+1 issues',
+    'Configure auto-scaling policies for proactive scaling'
+]) %}
+{{loop.index}}. {{action}}
+{% endfor %}
+
+MONITORING AND VALIDATION:
+{% for action in monitoring_actions|default([
+    'Monitor CloudWatch Container Insights for scaling effectiveness',
+    'Watch database connection pool metrics for improvement',
+    'Track API response time improvements over next 30 minutes',
+    'Verify error rate reduction after implementing fixes',
+    'Document any configuration changes for future reference'
+]) %}
+{{loop.index}}. {{action}}
+{% endfor %}
+
+{% if alert_severity == 'CRITICAL' %}
+EMERGENCY ESCALATION PROCEDURES:
+{% for procedure in emergency_procedures|default([
+    'Contact on-call engineer immediately via PagerDuty',
+    'Consider database read replica failover if primary DB overloaded',
+    'Prepare for potential service degradation notifications to users',
+    'Review rollback options for recent deployments if applicable'
+]) %}
+- {{procedure}}
+{% endfor %}
+{% endif %}
+
+============================================================
+ESCALATION AND CONTACT INFORMATION
+============================================================
+
+{% if alert_severity == 'CRITICAL' %}
+PRIMARY CONTACT: On-Call Engineer ({{oncall_engineer_contact|default('pagerduty: +1-555-0199')}})
+ESCALATION PATH:
+  15 min -> Team Lead ({{team_lead_contact|default('slack: @team-lead')}})
+  30 min -> Engineering Manager ({{engineering_manager_contact|default('phone: +1-555-0155')}})
+  45 min -> CTO ({{cto_contact|default('phone: +1-555-0100')}})
+{% elif alert_severity == 'HIGH' %}
+PRIMARY CONTACT: Development Team Lead ({{team_lead_contact|default('slack: @dev-team-lead')}})
+ESCALATION PATH:
+  1 hour -> Engineering Manager ({{engineering_manager_contact|default('phone: +1-555-0155')}})
+  2 hours -> CTO ({{cto_contact|default('phone: +1-555-0100')}})
+{% else %}
+PRIMARY CONTACT: Development Team ({{dev_team_contact|default('slack: #dev-alerts')}})
+{% endif %}
+
+EMERGENCY CONTACTS:
+- On-Call Engineer: {{oncall_engineer_contact|default('PagerDuty: flask-app-oncall')}}
+- Development Team: {{dev_team_contact|default('Slack: #dev-alerts')}}
+- Operations Team: {{ops_team_contact|default('Slack: #ops-alerts')}}
+- Database Administrator: {{dba_contact|default('Email: dba@company.com')}}
+
+INCIDENT RESPONSE RESOURCES:
+- Performance Runbook: {{performance_runbook_url|default('https://wiki.company.com/runbooks/performance')}}
+- Escalation Procedures: {{escalation_procedures_url|default('https://wiki.company.com/incident-response')}}
+- Emergency Rollback Guide: {{rollback_guide_url|default('https://wiki.company.com/rollback-procedures')}}
+
+============================================================
+MONITORING DASHBOARD LINKS (Text Only)
+============================================================
+
+CloudWatch Dashboard:
+{{cloudwatch_dashboard_url|default('https://console.aws.amazon.com/cloudwatch/home#dashboards:name=Flask-Performance')}}
+
+Grafana Performance Dashboard:
+{{grafana_dashboard_url|default('https://grafana.company.com/d/flask-performance/flask-app-performance')}}
+
+Application Performance Monitoring:
+{{apm_dashboard_url|default('https://apm.company.com/flask-application')}}
+
+Container Metrics (ECS):
+{{container_metrics_url|default('https://console.aws.amazon.com/ecs/home#/clusters/flask-cluster/services')}}
+
+Database Performance Insights:
+{{database_performance_url|default('https://console.aws.amazon.com/rds/home#performance-insights-v20206:')}}
+
+Application Logs (CloudWatch):
+{{logs_url|default('https://console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/flask-application')}}
+
+Load Balancer Metrics:
+{{alb_metrics_url|default('https://console.aws.amazon.com/ec2/home#LoadBalancer:')}}
+
+Real-time Status Page:
+{{status_page_url|default('https://status.company.com')}}
+
+============================================================
+HISTORICAL CONTEXT AND TRENDS
+============================================================
+
+PERFORMANCE TREND ANALYSIS:
+- Similar alerts in last 24h: {{similar_alerts_24h|default('2')}}
+- Last performance incident: {{last_incident|default('3 days ago')|timesince}}
+- Average resolution time: {{avg_resolution_time|default('23 minutes')}}
+- Performance degradation frequency: {{degradation_frequency|default('Weekly')}}
+
+CAPACITY PLANNING INSIGHTS:
+- Peak traffic time correlation: {{peak_traffic_correlation|default('Incident occurred during normal business hours')}}
+- Resource utilization trend: {{resource_trend|default('Increasing 15% week-over-week')}}
+- Growth impact assessment: {{growth_impact|default('User base growth affecting performance')}}
+
+RECENT CHANGES ANALYSIS:
+- Last deployment: {{last_deployment|default('2 hours ago')}} ({{deployment_version|default('v2.1.3')}})
+- Configuration changes: {{config_changes|default('Database pool size modified yesterday')}}
+- Infrastructure updates: {{infra_updates|default('ECS service updated last week')}}
+
+============================================================
+AUTO-RECOVERY STATUS
+============================================================
+
+AUTOMATIC REMEDIATION ATTEMPTS:
+{% for recovery in auto_recovery|default([
+    {'action': 'ECS Service Auto-scaling', 'status': 'IN_PROGRESS', 'time': '14:31:00'},
+    {'action': 'Database Connection Pool Expansion', 'status': 'COMPLETED', 'time': '14:30:45'},
+    {'action': 'WSGI Worker Health Check', 'status': 'COMPLETED', 'time': '14:30:30'},
+    {'action': 'Load Balancer Health Check', 'status': 'COMPLETED', 'time': '14:30:15'}
+]) %}
+- {{recovery.action}}: {{recovery.status}} ({{recovery.time}})
+{% endfor %}
+
+CONTAINER ORCHESTRATION RESPONSE:
+- Auto-scaling Triggered: {{autoscaling_triggered|default('Yes - scaling from 3 to 5 instances')|yesno}}
+- New Containers Spawning: {{new_containers_spawning|default('2 containers launching')}}
+- Health Check Status: {{health_check_status|default('2/3 targets healthy')}}
+- Load Balancer Adjustment: {{lb_adjustment|default('Traffic distribution rebalancing')}}
+
+============================================================
+ALERT TECHNICAL DETAILS
+============================================================
+
+Alert Configuration:
+- Alert Rule: {{alert_rule_name|default('Flask-Performance-SLA-Violations')}}
+- Metric Source: {{metric_source|default('CloudWatch Custom Metrics + ECS Container Insights')}}
+- Evaluation Period: {{evaluation_period|default('5 minutes')}}
+- Data Points to Alarm: {{data_points|default('2 out of 3')}}
+- Threshold Operator: {{threshold_operator|default('GreaterThanThreshold')}}
+
+Notification Details:
+- SNS Topic: {{sns_topic|default('arn:aws:sns:us-east-1:123456789012:flask-performance-alerts')}}
+- Alert Generated By: {{alert_generator|default('CloudWatch Alarms')}}
+- Monitoring Region: {{aws_region|default('us-east-1')}}
+- Service: {{service_name|default('Flask Application Performance Monitor')}}
+
+============================================================
+
+This performance alert was generated by the Flask Application Monitoring System.
+For urgent performance issues, contact the on-call engineer immediately.
+Do not reply to this email - use the contact information provided above.
+
+System Time: {{system_timestamp|default(timestamp)|strftime('%Y-%m-%d %H:%M:%S UTC')}}
+Alert Generator Version: {{alert_generator_version|default('v2.1.0')}}
+Monitoring Node: {{monitoring_node_id|default('flask-monitor-01')}}
+
+============================================================
+{%- endblock %}
+
+{% block contact_info -%}
+Performance Monitoring Support:
+- Emergency Hotline: +1-555-FLASK1 (+1-555-352-7521)
+- Email: performance-alerts@company.com
+- Slack: #flask-performance-alerts
+- PagerDuty: flask-performance-oncall
+
+Business Hours: 24/7 monitoring with escalation procedures
+Response Time SLA: <15 minutes for CRITICAL, <1 hour for HIGH priority alerts
+{%- endblock %}
+
+{% block additional_info -%}
+PERFORMANCE MONITORING COMPLIANCE:
+- SLA Response Time Requirement: API <200ms, Database <100ms, Auth <150ms
+- Availability Target: 99.9% uptime
+- Error Rate Threshold: <1% of total requests
+- Monitoring Coverage: 100% of critical API endpoints
+
+For performance optimization best practices and troubleshooting guides,
+visit our documentation: {{documentation_url|default('https://docs.company.com/performance')}}
+{%- endblock %}

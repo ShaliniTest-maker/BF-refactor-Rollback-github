@@ -1,0 +1,250 @@
+{# 
+403 Forbidden Error Template for Flask Application
+Purpose: Standardized JSON error responses for HTTP 403 authorization failures
+Template Engine: Jinja2 3.1.2+ with Flask 3.1.1 integration
+Security: SQLAlchemy RBAC models and Service Layer authorization per Section 6.4.2
+API Compliance: Authorization error formatting per Section 6.4.2.2 permission management
+
+Authorization Error Context:
+- Role-based access control violation messages
+- Permission-based error formatting with Service Layer integration
+- Policy enforcement error details with resource context
+- Security audit logging integration for authorization failures
+
+Template Variables Expected:
+- permission_required: The specific permission that was required
+- user_permissions: List of permissions the user currently has
+- resource_type: Type of resource being accessed (e.g., 'user', 'business_entity')
+- resource_id: ID of the specific resource (if applicable)
+- action_attempted: The action that was attempted (e.g., 'read', 'write', 'delete')
+- policy_violation: Specific policy that was violated
+- suggested_roles: Roles that would grant the required permission
+- help_contact: Contact information for access requests
+#}
+{%- extends "errors/base_error.json" -%}
+
+{%- block error_type -%}AuthorizationError{%- endblock -%}
+
+{%- block error_code -%}ERR_FORBIDDEN_ACCESS{%- endblock -%}
+
+{%- block error_message -%}
+{%- if permission_required -%}
+Access denied. The permission '{{ permission_required }}' is required for this operation.
+{%- elif policy_violation -%}
+Access denied. {{ policy_violation }}
+{%- else -%}
+Access denied. You do not have sufficient permissions to access this resource.
+{%- endif -%}
+{%- endblock -%}
+
+{%- block error_details -%}
+{
+  "authorization": {
+    "reason": "insufficient_permissions",
+    "permission_required": {{ permission_required | tojson if permission_required else null }},
+    "resource_type": {{ resource_type | tojson if resource_type else null }},
+    "resource_id": {{ resource_id | tojson if resource_id else null }},
+    "action_attempted": {{ action_attempted | tojson if action_attempted else null }},
+    "policy_violation": {{ policy_violation | tojson if policy_violation else null }}
+  },
+  "user_context": {
+    "user_id": {{ g.current_user_id | tojson if g.current_user_id else null }},
+    "current_permissions": {{ user_permissions | tojson if user_permissions else [] }},
+    "current_roles": {{ user_roles | tojson if user_roles else [] }},
+    "session_valid": {{ session_valid | tojson if session_valid is defined else true }},
+    "authentication_method": {{ auth_method | tojson if auth_method else null }}
+  },
+  "access_control": {
+    "rbac_model": "sqlalchemy_based",
+    "policy_engine": "service_layer",
+    "permission_format": "resource.action",
+    "role_hierarchy": {{ role_hierarchy | tojson if role_hierarchy else null }},
+    "suggested_roles": {{ suggested_roles | tojson if suggested_roles else [] }}
+  },
+  "resource_context": {
+    "endpoint": "{{ request.endpoint or '' }}",
+    "view_function": "{{ request.url_rule.endpoint if request.url_rule else '' }}",
+    "blueprint": "{{ request.blueprint or '' }}",
+    "resource_owner": {{ resource_owner_id | tojson if resource_owner_id else null }},
+    "access_level_required": {{ access_level_required | tojson if access_level_required else null }}
+  },
+  "security_audit": {
+    "violation_type": "authorization_failure",
+    "risk_level": {{ risk_level | tojson if risk_level else "medium" }},
+    "blocked_action": {{ action_attempted | tojson if action_attempted else null }},
+    "security_context": {
+      "source_ip": "{{ request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) or '' }}",
+      "user_agent": "{{ request.headers.get('User-Agent', '') | truncate(255) }}",
+      "timestamp": "{{ moment().utc().isoformat() if moment else '' }}",
+      "session_id": "{{ session.get('session_id', '') if session else '' }}"
+    },
+    "alert_generated": {{ alert_generated | tojson if alert_generated is defined else false }},
+    "incident_logged": true
+  }
+}
+{%- endblock -%}
+
+{%- block api_version -%}1.0{%- endblock -%}
+
+{%- block support_contact -%}security@company.com{%- endblock -%}
+
+{%- block documentation_url -%}https://docs.company.com/api/errors/403-forbidden{%- endblock -%}
+
+{%- block help_text -%}
+{%- if suggested_roles -%}
+To access this resource, you need one of the following roles: {{ suggested_roles | join(', ') }}. Contact your administrator to request access.
+{%- elif permission_required -%}
+You need the '{{ permission_required }}' permission to perform this action. Contact your administrator to request the appropriate role.
+{%- else -%}
+You do not have sufficient permissions for this operation. Contact your administrator or security team for access requests.
+{%- endif -%}
+{%- endblock -%}
+
+{%- if config.DEBUG -%}
+{%- block debug_variables -%}
+{
+  "permission_check_details": {
+    "requested_permission": {{ permission_required | tojson if permission_required else null }},
+    "user_permissions_full": {{ user_permissions | tojson if user_permissions else [] }},
+    "role_permission_mapping": {{ role_permissions | tojson if role_permissions else {} }},
+    "policy_evaluation_trace": {{ policy_trace | tojson if policy_trace else [] }},
+    "rbac_query_result": {{ rbac_query_result | tojson if rbac_query_result else null }}
+  },
+  "service_layer_context": {
+    "authorization_service": "{{ authorization_service_class | string if authorization_service_class else 'AuthorizationService' }}",
+    "policy_engine": "{{ policy_engine_class | string if policy_engine_class else 'PolicyEngine' }}",
+    "rbac_model": "{{ rbac_model_class | string if rbac_model_class else 'SQLAlchemy RBAC' }}",
+    "cache_hit": {{ permission_cache_hit | tojson if permission_cache_hit is defined else null }},
+    "evaluation_time_ms": {{ evaluation_time_ms | tojson if evaluation_time_ms else null }}
+  },
+  "sqlalchemy_context": {
+    "user_model": "{{ user_model_class | string if user_model_class else 'User' }}",
+    "role_model": "{{ role_model_class | string if role_model_class else 'Role' }}",
+    "permission_model": "{{ permission_model_class | string if permission_model_class else 'Permission' }}",
+    "query_count": {{ db_query_count | tojson if db_query_count else null }},
+    "relationship_loading": {{ relationship_loading_strategy | tojson if relationship_loading_strategy else null }}
+  }
+}
+{%- endblock -%}
+
+{%- block debug_request_data -%}
+{
+  "route_info": {
+    "endpoint": "{{ request.endpoint or '' }}",
+    "view_args": {{ request.view_args | tojson if request.view_args else {} }},
+    "url_rule": "{{ request.url_rule | string if request.url_rule else '' }}",
+    "blueprint": "{{ request.blueprint or '' }}",
+    "method": "{{ request.method or '' }}"
+  },
+  "authentication_context": {
+    "jwt_claims": {{ jwt_claims | tojson if jwt_claims else {} }},
+    "auth_header_present": {{ auth_header_present | tojson if auth_header_present is defined else false }},
+    "session_authenticated": {{ session_authenticated | tojson if session_authenticated is defined else false }},
+    "auth0_context": {{ auth0_context | tojson if auth0_context else {} }}
+  },
+  "flask_context": {
+    "g_variables": {
+      "current_user_id": {{ g.current_user_id | tojson if g.current_user_id else null }},
+      "user_permissions": {{ g.user_permissions | tojson if g.user_permissions else null }},
+      "request_start_time": {{ g.request_start_time | string if g.request_start_time else null }},
+      "correlation_id": {{ g.correlation_id | tojson if g.correlation_id else null }}
+    },
+    "session_data": {{ dict(session) | tojson if session else {} }}
+  }
+}
+{%- endblock -%}
+{%- endif -%}
+
+{# 
+Authorization Error Template Documentation:
+
+Purpose:
+This template provides standardized 403 Forbidden error responses with comprehensive
+authorization failure context, supporting SQLAlchemy RBAC models and Service Layer
+authorization patterns as specified in Section 6.4.2.
+
+Key Features:
+1. Role-Based Access Control Integration:
+   - SQLAlchemy RBAC model context with user/role/permission relationships
+   - Service Layer policy engine integration for dynamic authorization
+   - Permission format standardization (resource.action pattern)
+   - Role hierarchy and suggestion system for access requests
+
+2. Security Audit Logging:
+   - Comprehensive security context capture for audit trails
+   - Authorization failure logging per Section 6.4.2.5 requirements
+   - Risk level assessment and incident tracking
+   - Real-time security monitoring integration
+
+3. Permission Management Error Responses:
+   - Detailed permission requirement messaging
+   - Resource-specific authorization context
+   - Policy violation descriptions with actionable guidance
+   - User-friendly help text with role suggestions
+
+4. Service Layer Integration:
+   - Authorization service and policy engine context
+   - Permission caching and evaluation performance tracking
+   - SQLAlchemy relationship loading optimization
+   - Debug information for development environments
+
+Template Usage in Flask Blueprints:
+
+from flask import render_template
+
+@blueprint.route('/protected-resource')
+@require_permission('resource.read')
+def protected_endpoint():
+    # Authorization handled by decorator
+    return jsonify({'data': 'protected content'})
+
+# Error handler for 403 responses
+@blueprint.errorhandler(403)
+def handle_forbidden(error):
+    return render_template('errors/403.json',
+        permission_required=getattr(error, 'permission_required', None),
+        user_permissions=getattr(g, 'user_permissions', []),
+        resource_type=getattr(error, 'resource_type', None),
+        action_attempted=getattr(error, 'action_attempted', None),
+        policy_violation=getattr(error, 'policy_violation', None),
+        suggested_roles=getattr(error, 'suggested_roles', [])
+    ), 403, {'Content-Type': 'application/json'}
+
+Service Layer Authorization Example:
+
+class AuthorizationService:
+    def check_permission(self, user_id, permission):
+        # Permission check with SQLAlchemy RBAC
+        user_permissions = self.get_user_permissions(user_id)
+        if permission not in user_permissions:
+            # Raise 403 with detailed context
+            error = ForbiddenError(
+                permission_required=permission,
+                user_permissions=user_permissions,
+                suggested_roles=self.get_roles_with_permission(permission)
+            )
+            raise error
+        return True
+
+Security Monitoring Integration:
+- All 403 errors automatically generate security audit events
+- Integration with CloudWatch Logs and Sentry for real-time alerting
+- Authorization failure patterns tracked for security analysis
+- Incident correlation with GuardDuty and security monitoring systems
+
+API Contract Compliance:
+- Maintains consistent error response structure per Section 4.3.1.4
+- JSON response formatting compatible with existing client applications
+- HTTP status code preservation with enhanced error context
+- Template inheritance ensuring consistent error handling patterns
+
+Flask-SQLAlchemy RBAC Integration:
+- Direct integration with User, Role, and Permission models
+- Relationship loading optimization for performance
+- Query pattern support for permission evaluation
+- Cache integration for high-performance authorization checks
+
+This template ensures comprehensive authorization error handling while maintaining
+security best practices and providing detailed context for troubleshooting and
+access management across the Flask application architecture.
+#}

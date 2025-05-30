@@ -1,0 +1,168 @@
+SYSTEM HEALTH CHECK FAILURE ALERT
+==================================
+
+INCIDENT DETAILS:
+-----------------
+Alert Type: Health Check Failure
+Timestamp: {{ timestamp }}
+Incident ID: {{ incident_id }}
+Severity: {{ severity }}
+System: Flask Application Health Monitor
+Environment: {{ environment }}
+
+HEALTH CHECK FAILURE SUMMARY:
+-----------------------------
+Check Type: {{ check_type }}
+Endpoint: {{ endpoint_url }}
+Failure Reason: {{ failure_reason }}
+Response Code: {{ response_code }}
+Response Time: {{ response_time }}ms
+Consecutive Failures: {{ consecutive_failures }}
+Threshold Exceeded: {{ threshold_exceeded }}
+
+AFFECTED SERVICES:
+------------------
+{% for service in affected_services %}
+- {{ service.name }}: {{ service.status }}
+  Component: {{ service.component }}
+  Impact Level: {{ service.impact_level }}
+{% endfor %}
+
+SYSTEM STATUS:
+--------------
+Application Status: {{ application_status }}
+Database Connectivity: {{ database_status }}
+Authentication Service: {{ auth_service_status }}
+External Dependencies: {{ external_dependencies_status }}
+Load Balancer Health: {{ load_balancer_status }}
+Container Health: {{ container_health_status }}
+
+DIAGNOSTIC INFORMATION:
+----------------------
+Error Message: {{ error_message }}
+Stack Trace: {{ stack_trace }}
+System Resources:
+  - CPU Usage: {{ cpu_usage }}%
+  - Memory Usage: {{ memory_usage }}%
+  - Disk Usage: {{ disk_usage }}%
+  - Active Connections: {{ active_connections }}
+
+Recent System Events:
+{% for event in recent_events %}
+- {{ event.timestamp }}: {{ event.description }}
+{% endfor %}
+
+IMMEDIATE RECOVERY PROCEDURES:
+------------------------------
+1. VERIFY SYSTEM STATUS
+   - Check application logs: kubectl logs deployment/flask-app
+   - Verify database connectivity: flask db-health-check
+   - Test authentication endpoints: curl -f {{ auth_test_endpoint }}
+
+2. BASIC TROUBLESHOOTING
+   - Restart unhealthy containers: kubectl rollout restart deployment/flask-app
+   - Check service mesh connectivity: istioctl proxy-status
+   - Verify load balancer configuration: aws elbv2 describe-target-health
+
+3. DATABASE HEALTH VALIDATION
+   - Check connection pool: SELECT * FROM pg_stat_activity;
+   - Verify database locks: SELECT * FROM pg_locks WHERE NOT granted;
+   - Test query performance: EXPLAIN ANALYZE SELECT 1;
+
+4. AUTHENTICATION SERVICE CHECKS
+   - Verify Auth0 service status: {{ auth0_status_url }}
+   - Test JWT token validation: curl -H "Authorization: Bearer test" {{ jwt_test_endpoint }}
+   - Check rate limiting status: redis-cli INFO stats
+
+ESCALATION PROCEDURES:
+----------------------
+Primary Contact: {{ primary_contact_email }}
+Secondary Contact: {{ secondary_contact_email }}
+On-Call Engineer: {{ on_call_engineer }}
+Escalation Timeline:
+  - 5 minutes: Alert primary on-call engineer
+  - 15 minutes: Escalate to team lead if unresolved
+  - 30 minutes: Escalate to engineering manager
+
+EMERGENCY CONTACTS:
+-------------------
+Operations Team: {{ ops_team_phone }}
+Database Admin: {{ dba_contact }}
+Security Team: {{ security_team_contact }}
+AWS Support: {{ aws_support_case_url }}
+
+MONITORING LINKS:
+-----------------
+CloudWatch Dashboard: {{ cloudwatch_dashboard_url }}
+Grafana Metrics: {{ grafana_dashboard_url }}
+Application Logs: {{ application_logs_url }}
+Infrastructure Status: {{ infrastructure_status_url }}
+Health Check History: {{ health_check_history_url }}
+
+AUTOMATED ACTIONS TAKEN:
+------------------------
+{% for action in automated_actions %}
+- {{ action.timestamp }}: {{ action.description }}
+  Status: {{ action.status }}
+  Result: {{ action.result }}
+{% endfor %}
+
+ADDITIONAL CONTEXT:
+-------------------
+Business Impact: {{ business_impact }}
+User Impact Level: {{ user_impact_level }}
+Service SLA Status: {{ sla_status }}
+Estimated Recovery Time: {{ estimated_recovery_time }}
+
+Recent Deployments:
+{% for deployment in recent_deployments %}
+- {{ deployment.timestamp }}: {{ deployment.version }}
+  By: {{ deployment.deployed_by }}
+  Status: {{ deployment.status }}
+{% endfor %}
+
+RUNBOOK REFERENCES:
+-------------------
+Health Check Troubleshooting: {{ runbook_health_check_url }}
+Service Recovery Procedures: {{ runbook_service_recovery_url }}
+Database Issues Guide: {{ runbook_database_url }}
+Authentication Problems: {{ runbook_auth_url }}
+Container Issues Guide: {{ runbook_container_url }}
+
+SYSTEM RECOVERY VALIDATION:
+---------------------------
+Once recovery actions are completed, validate system health:
+
+1. Health Check Validation:
+   curl -f {{ health_check_endpoint }}/health/liveness
+   curl -f {{ health_check_endpoint }}/health/readiness
+   curl -f {{ health_check_endpoint }}/health/detailed
+
+2. Functional Testing:
+   - Test user authentication flow
+   - Verify database read/write operations  
+   - Check API endpoint responsiveness
+   - Validate external service integrations
+
+3. Performance Validation:
+   - Response times < 200ms
+   - Error rates < 1%
+   - Database query times < 100ms
+   - Memory usage within normal ranges
+
+POST-INCIDENT ACTIONS:
+----------------------
+1. Document incident timeline and resolution steps
+2. Update monitoring thresholds if necessary
+3. Review and update recovery procedures
+4. Schedule post-mortem meeting within 24 hours
+5. Create improvement tickets for identified issues
+
+---
+This alert was generated by the Flask Application Health Monitoring System.
+For technical support, contact: {{ technical_support_email }}
+For escalation procedures, refer to: {{ escalation_procedures_url }}
+
+Alert System: Flask Health Monitor v{{ monitor_version }}
+Generated: {{ generation_timestamp }}
+Alert ID: {{ alert_id }}

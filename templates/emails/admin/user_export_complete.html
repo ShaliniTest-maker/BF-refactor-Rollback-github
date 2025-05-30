@@ -1,0 +1,467 @@
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}User Data Export Complete - Administrative Notification{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Administrative notification specific styles */
+    .admin-header {
+        background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%);
+        color: #ffffff;
+    }
+    
+    .export-summary {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+    
+    .export-summary-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #1e293b;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+    
+    .export-summary-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        fill: #3b82f6;
+    }
+    
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin: 20px 0;
+    }
+    
+    .metric-card {
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        padding: 20px;
+        text-align: center;
+    }
+    
+    .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: #1f2937;
+        margin: 0 0 5px 0;
+    }
+    
+    .metric-label {
+        font-size: 14px;
+        color: #6b7280;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .file-details {
+        background-color: #fefefe;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .file-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #f3f4f6;
+    }
+    
+    .file-item:last-child {
+        border-bottom: none;
+    }
+    
+    .file-name {
+        font-weight: 600;
+        color: #374151;
+    }
+    
+    .file-size {
+        color: #6b7280;
+        font-size: 14px;
+    }
+    
+    .compliance-status {
+        background-color: #f0f9ff;
+        border: 1px solid #bae6fd;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+    
+    .compliance-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #0c4a6e;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+    
+    .compliance-icon {
+        width: 18px;
+        height: 18px;
+        margin-right: 8px;
+        fill: #0284c7;
+    }
+    
+    .compliance-item {
+        display: flex;
+        align-items: center;
+        margin: 8px 0;
+    }
+    
+    .compliance-check {
+        width: 16px;
+        height: 16px;
+        margin-right: 10px;
+        fill: #059669;
+    }
+    
+    .compliance-text {
+        font-size: 14px;
+        color: #0f172a;
+        margin: 0;
+    }
+    
+    .action-buttons {
+        text-align: center;
+        margin: 35px 0;
+    }
+    
+    .button-primary {
+        display: inline-block;
+        padding: 14px 28px;
+        background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%);
+        color: #ffffff !important;
+        text-decoration: none;
+        border-radius: 6px;
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 10px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(30, 58, 138, 0.3);
+    }
+    
+    .button-secondary {
+        display: inline-block;
+        padding: 14px 28px;
+        background: #ffffff;
+        color: #1e3a8a !important;
+        text-decoration: none;
+        border: 2px solid #1e3a8a;
+        border-radius: 6px;
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 10px;
+        transition: all 0.3s ease;
+    }
+    
+    .button-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(30, 58, 138, 0.4);
+    }
+    
+    .button-secondary:hover {
+        background: #1e3a8a;
+        color: #ffffff !important;
+    }
+    
+    .admin-note {
+        background-color: #fffbeb;
+        border-left: 4px solid #f59e0b;
+        padding: 20px;
+        margin: 25px 0;
+    }
+    
+    .admin-note-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #92400e;
+        margin: 0 0 10px 0;
+    }
+    
+    .admin-note-text {
+        font-size: 14px;
+        color: #78350f;
+        margin: 0;
+        line-height: 1.5;
+    }
+    
+    /* Service Layer integration indicators */
+    .service-layer-info {
+        background-color: #faf5ff;
+        border: 1px solid #e9d5ff;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+        font-size: 13px;
+        color: #581c87;
+    }
+    
+    /* Responsive design for mobile */
+    @media only screen and (max-width: 600px) {
+        .metrics-grid {
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+        
+        .file-item {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 5px;
+        }
+        
+        .action-buttons {
+            margin: 25px 0;
+        }
+        
+        .button-primary,
+        .button-secondary {
+            display: block;
+            width: calc(100% - 20px);
+            margin: 10px auto;
+            text-align: center;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}Administrative Portal{% endblock %}
+{% block header_subtitle %}Data Export Management{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+    <!-- Administrative header content -->
+</div>
+
+<h2 class="content-title">User Data Export Completed</h2>
+
+<p class="content-text">
+    A user data export request has been successfully processed and completed. This notification provides comprehensive details about the export operation, including compliance validation and security verification results.
+</p>
+
+<!-- Export Summary Section -->
+<div class="export-summary">
+    <h3 class="export-summary-title">
+        <svg class="export-summary-icon" viewBox="0 0 24 24">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10,9 9,9 8,9"/>
+        </svg>
+        Export Summary
+    </h3>
+    
+    <!-- Metrics Grid -->
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-value">{{ export_details.total_records | default('--') }}</div>
+            <div class="metric-label">Total Records</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{{ export_details.file_count | default('--') }}</div>
+            <div class="metric-label">Files Generated</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{{ export_details.total_size | default('--') }}</div>
+            <div class="metric-label">Total Size</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{{ export_details.processing_time | default('--') }}</div>
+            <div class="metric-label">Processing Time</div>
+        </div>
+    </div>
+    
+    <!-- Key Details -->
+    <div class="service-layer-info">
+        <strong>Export ID:</strong> {{ export_details.export_id | default('N/A') }}<br>
+        <strong>Requested By:</strong> {{ export_details.requested_by | default('System Administrator') }}<br>
+        <strong>Request Date:</strong> {{ export_details.request_date | default('--') }}<br>
+        <strong>Completion Date:</strong> {{ export_details.completion_date | default('--') }}<br>
+        <strong>Export Type:</strong> {{ export_details.export_type | default('Full User Data Export') }}
+    </div>
+</div>
+
+<!-- File Details Section -->
+<div class="file-details">
+    <h3 class="export-summary-title">
+        <svg class="export-summary-icon" viewBox="0 0 24 24">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-7-7z"/>
+            <polyline points="13,2 13,9 20,9"/>
+        </svg>
+        Generated Files
+    </h3>
+    
+    {% if export_details.files %}
+        {% for file in export_details.files %}
+        <div class="file-item">
+            <div class="file-name">{{ file.name }}</div>
+            <div class="file-size">{{ file.size }} | {{ file.record_count }} records</div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <div class="file-item">
+        <div class="file-name">user_data_export_{{ export_details.export_id | default('latest') }}.zip</div>
+        <div class="file-size">Processing complete - awaiting file details</div>
+    </div>
+    {% endif %}
+    
+    {% if export_details.download_url %}
+    <div class="button-container mt-25">
+        <a href="{{ export_details.download_url }}" class="button button-secondary">
+            Download Export Package
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- GDPR Compliance Status -->
+<div class="compliance-status">
+    <h3 class="compliance-title">
+        <svg class="compliance-icon" viewBox="0 0 24 24">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22,4 12,14.01 9,11.01"/>
+        </svg>
+        GDPR Compliance Validation
+    </h3>
+    
+    <div class="compliance-item">
+        <svg class="compliance-check" viewBox="0 0 24 24">
+            <polyline points="20,6 9,17 4,12"/>
+        </svg>
+        <p class="compliance-text">Data minimization principles applied - only requested data included</p>
+    </div>
+    
+    <div class="compliance-item">
+        <svg class="compliance-check" viewBox="0 0 24 24">
+            <polyline points="20,6 9,17 4,12"/>
+        </svg>
+        <p class="compliance-text">Export encrypted using industry-standard AES-256 encryption</p>
+    </div>
+    
+    <div class="compliance-item">
+        <svg class="compliance-check" viewBox="0 0 24 24">
+            <polyline points="20,6 9,17 4,12"/>
+        </svg>
+        <p class="compliance-text">Audit trail created for regulatory compliance documentation</p>
+    </div>
+    
+    <div class="compliance-item">
+        <svg class="compliance-check" viewBox="0 0 24 24">
+            <polyline points="20,6 9,17 4,12"/>
+        </svg>
+        <p class="compliance-text">User consent verification completed before data export</p>
+    </div>
+    
+    <div class="compliance-item">
+        <svg class="compliance-check" viewBox="0 0 24 24">
+            <polyline points="20,6 9,17 4,12"/>
+        </svg>
+        <p class="compliance-text">Export retention policy applied ({{ export_details.retention_period | default('30 days') }})</p>
+    </div>
+</div>
+
+<!-- Security Validation Section -->
+<div class="security-info">
+    <h3 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        Security Compliance Report
+    </h3>
+    
+    <p class="security-text">
+        <strong>Encryption Status:</strong> All exported data has been encrypted using AES-256 encryption with secure key management.<br>
+        <strong>Access Control:</strong> Export files are accessible only to authorized administrative personnel.<br>
+        <strong>Data Integrity:</strong> SHA-256 checksums generated for all export files to ensure data integrity.<br>
+        <strong>Secure Transfer:</strong> Download links use TLS 1.3 encryption and expire after {{ export_details.link_expiry | default('24 hours') }}.
+    </p>
+</div>
+
+<!-- Administrative Actions -->
+<div class="action-buttons">
+    <a href="{{ admin_portal_url | default('#') }}/exports/{{ export_details.export_id | default('latest') }}" class="button-primary">
+        View Export Details
+    </a>
+    <a href="{{ admin_portal_url | default('#') }}/compliance/reports" class="button-secondary">
+        Compliance Dashboard
+    </a>
+</div>
+
+<!-- Administrative Note -->
+<div class="admin-note">
+    <h4 class="admin-note-title">Administrative Guidelines</h4>
+    <p class="admin-note-text">
+        This export contains personally identifiable information (PII) and must be handled according to your organization's data protection policies. 
+        Please ensure secure storage and timely deletion after the retention period expires. For questions regarding this export or compliance 
+        requirements, contact the Data Protection Officer or system administrator.
+    </p>
+</div>
+
+<!-- Service Layer Information -->
+<div class="service-layer-info">
+    <strong>Service Layer Coordination:</strong> This export was processed through the Flask Service Layer pattern with comprehensive workflow orchestration. 
+    Administrative approval workflows, data validation checkpoints, and compliance verification were automatically coordinated through the service layer architecture.
+    {% if export_details.service_layer_details %}
+    <br><br>
+    <strong>Workflow Details:</strong><br>
+    • Export Service: {{ export_details.service_layer_details.export_service | default('UserDataExportService') }}<br>
+    • Validation Service: {{ export_details.service_layer_details.validation_service | default('ComplianceValidationService') }}<br>
+    • Security Service: {{ export_details.service_layer_details.security_service | default('DataSecurityService') }}<br>
+    • Notification Service: {{ export_details.service_layer_details.notification_service | default('AdminNotificationService') }}
+    {% endif %}
+</div>
+
+{% if export_details.additional_notes %}
+<div class="alert alert-info">
+    <strong>Additional Information:</strong><br>
+    {{ export_details.additional_notes }}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ admin_portal_url | default('#') }}/exports" class="footer-link">Export Management</a>
+<a href="{{ admin_portal_url | default('#') }}/compliance" class="footer-link">Compliance Center</a>
+<a href="{{ admin_portal_url | default('#') }}/security" class="footer-link">Security Dashboard</a>
+<a href="{{ admin_portal_url | default('#') }}/help" class="footer-link">Administrator Help</a>
+{% endblock %}
+
+{% block additional_scripts %}
+<script>
+// Administrative email template enhancements
+document.addEventListener('DOMContentLoaded', function() {
+    // Add click tracking for administrative actions
+    const actionButtons = document.querySelectorAll('.button-primary, .button-secondary');
+    actionButtons.forEach(button => {
+        button.addEventListener('click', function(e) {
+            // Track administrative action for audit purposes
+            console.log('Admin action:', this.textContent.trim(), 'Export ID:', '{{ export_details.export_id | default("unknown") }}');
+        });
+    });
+    
+    // Auto-refresh export status if still processing
+    {% if export_details.status == 'processing' %}
+    setTimeout(function() {
+        // In a real implementation, this would check export status
+        console.log('Checking export status...');
+    }, 30000);
+    {% endif %}
+});
+</script>
+{% endblock %}

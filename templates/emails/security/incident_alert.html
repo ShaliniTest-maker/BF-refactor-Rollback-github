@@ -1,0 +1,636 @@
+{% extends "emails/base/layout.html" %}
+
+{# Security Incident Alert Email Template #}
+{# High-severity security incident notifications with automated response integration #}
+
+{% block title %}🚨 SECURITY INCIDENT ALERT - {{ incident.severity }} | {{ incident.incident_id }}{% endblock %}
+
+{% block email_label %}Critical Security Incident Notification - Immediate Action Required{% endblock %}
+
+{% block email_styles %}
+{{ super() }}
+
+/* Security Alert Specific Styles */
+.security-alert-header {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    padding: 25px 20px;
+    text-align: center;
+    border-radius: 8px 8px 0 0;
+    margin-bottom: 0;
+}
+
+.security-alert-header.severity-critical {
+    background: linear-gradient(135deg, #dc3545 0%, #a71e2a 100%);
+    animation: criticalPulse 2s infinite;
+}
+
+.security-alert-header.severity-high {
+    background: linear-gradient(135deg, #fd7e14 0%, #e8590c 100%);
+}
+
+.security-alert-header.severity-medium {
+    background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+    color: #000;
+}
+
+@keyframes criticalPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
+.incident-id {
+    font-family: 'Courier New', monospace;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    display: inline-block;
+    margin-top: 10px;
+}
+
+.severity-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 15px;
+}
+
+.severity-badge.critical {
+    background: #dc3545;
+    color: white;
+}
+
+.severity-badge.high {
+    background: #fd7e14;
+    color: white;
+}
+
+.severity-badge.medium {
+    background: #ffc107;
+    color: #000;
+}
+
+.severity-badge.low {
+    background: #6c757d;
+    color: white;
+}
+
+.incident-summary-card {
+    background: #f8f9fa;
+    border-left: 4px solid #dc3545;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.incident-details-grid {
+    display: table;
+    width: 100%;
+    margin: 20px 0;
+}
+
+.incident-detail-row {
+    display: table-row;
+}
+
+.incident-detail-label {
+    display: table-cell;
+    font-weight: 600;
+    color: #495057;
+    padding: 8px 15px 8px 0;
+    vertical-align: top;
+    width: 30%;
+    min-width: 120px;
+}
+
+.incident-detail-value {
+    display: table-cell;
+    padding: 8px 0;
+    vertical-align: top;
+    word-break: break-word;
+}
+
+.action-section {
+    background: #e7f3ff;
+    border: 1px solid #b8daff;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.action-section.automated {
+    background: #d1ecf1;
+    border-color: #bee5eb;
+}
+
+.action-section.manual {
+    background: #fff3cd;
+    border-color: #ffeaa7;
+}
+
+.action-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #155724;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+}
+
+.action-title.automated {
+    color: #0c5460;
+}
+
+.action-title.manual {
+    color: #856404;
+}
+
+.action-icon {
+    margin-right: 8px;
+    font-size: 18px;
+}
+
+.action-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.action-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.action-list li:last-child {
+    border-bottom: none;
+}
+
+.action-status {
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.action-status.completed {
+    background: #d4edda;
+    color: #155724;
+}
+
+.action-status.in-progress {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.action-status.pending {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.guardduty-section {
+    background: #ffeaa7;
+    border: 1px solid #fdcb6e;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 15px 0;
+}
+
+.guardduty-title {
+    font-weight: 600;
+    color: #e17055;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.threat-level {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.threat-level.high {
+    background: #dc3545;
+    color: white;
+}
+
+.threat-level.medium {
+    background: #fd7e14;
+    color: white;
+}
+
+.threat-level.low {
+    background: #28a745;
+    color: white;
+}
+
+.escalation-chain {
+    background: #e2e3e5;
+    border: 1px solid #ced4da;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 20px 0;
+}
+
+.escalation-step {
+    display: flex;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px dashed #adb5bd;
+}
+
+.escalation-step:last-child {
+    border-bottom: none;
+}
+
+.escalation-step-number {
+    background: #6c757d;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+.escalation-step.active .escalation-step-number {
+    background: #dc3545;
+}
+
+.container-info {
+    background: #f1f3f4;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 10px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.btn-security-action {
+    background: #dc3545;
+    color: white;
+    text-decoration: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-weight: 600;
+    display: inline-block;
+    margin: 10px 10px 10px 0;
+    text-align: center;
+}
+
+.btn-security-action:hover {
+    background: #c82333;
+    text-decoration: none;
+    color: white;
+}
+
+.btn-secondary-action {
+    background: #6c757d;
+    color: white;
+    text-decoration: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-weight: 600;
+    display: inline-block;
+    margin: 10px 10px 10px 0;
+    text-align: center;
+}
+
+.btn-secondary-action:hover {
+    background: #5a6268;
+    text-decoration: none;
+    color: white;
+}
+
+.mobile-friendly {
+    word-wrap: break-word;
+    max-width: 100%;
+}
+
+/* Mobile Responsive Styles */
+@media screen and (max-width: 600px) {
+    .incident-details-grid {
+        display: block;
+    }
+    
+    .incident-detail-row {
+        display: block;
+        margin-bottom: 10px;
+    }
+    
+    .incident-detail-label,
+    .incident-detail-value {
+        display: block;
+        width: 100%;
+        padding: 4px 0;
+    }
+    
+    .incident-detail-label {
+        font-weight: 700;
+        color: #343a40;
+    }
+    
+    .escalation-step {
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+    }
+    
+    .escalation-step-number {
+        margin-bottom: 8px;
+        margin-right: 0;
+    }
+    
+    .btn-security-action,
+    .btn-secondary-action {
+        display: block;
+        width: 100%;
+        margin: 10px 0;
+        text-align: center;
+    }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .incident-summary-card {
+        background: #2d3436 !important;
+        color: #ddd !important;
+    }
+    
+    .incident-detail-label {
+        color: #b2bec3 !important;
+    }
+    
+    .action-section {
+        background: #2d3436 !important;
+        border-color: #636e72 !important;
+        color: #ddd !important;
+    }
+    
+    .container-info {
+        background: #2d3436 !important;
+        border-color: #636e72 !important;
+        color: #ddd !important;
+    }
+}
+{% endblock %}
+
+{% block header_content %}
+<div class="security-alert-header severity-{{ incident.severity|lower }}">
+    <h1 style="margin: 0; font-size: 24px;">🚨 SECURITY INCIDENT ALERT</h1>
+    <div class="incident-id">{{ incident.incident_id }}</div>
+</div>
+{% endblock %}
+
+{% block email_content %}
+<div class="mobile-friendly">
+    <!-- Severity Badge -->
+    <div style="text-align: center; margin: 20px 0;">
+        <span class="severity-badge {{ incident.severity|lower }}">
+            {{ incident.severity }} SEVERITY
+        </span>
+    </div>
+
+    <!-- Incident Summary -->
+    <div class="incident-summary-card">
+        <h2 style="margin: 0 0 10px 0; color: #dc3545; font-size: 18px;">{{ incident.title }}</h2>
+        <p style="margin: 0; font-size: 14px; line-height: 1.6;">{{ incident.description }}</p>
+    </div>
+
+    <!-- Incident Details -->
+    <div class="incident-details-grid">
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Incident ID:</div>
+            <div class="incident-detail-value">{{ incident.incident_id }}</div>
+        </div>
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Detection Time:</div>
+            <div class="incident-detail-value">{{ incident.detected_at|strftime('%Y-%m-%d %H:%M:%S UTC') }}</div>
+        </div>
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Incident Type:</div>
+            <div class="incident-detail-value">{{ incident.incident_type }}</div>
+        </div>
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Affected System:</div>
+            <div class="incident-detail-value">{{ incident.affected_system or 'Flask Application Infrastructure' }}</div>
+        </div>
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Source IP:</div>
+            <div class="incident-detail-value">{{ incident.source_ip or 'Unknown' }}</div>
+        </div>
+        {% if incident.user_id %}
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Affected User:</div>
+            <div class="incident-detail-value">{{ incident.user_id }}</div>
+        </div>
+        {% endif %}
+        {% if incident.container_info %}
+        <div class="incident-detail-row">
+            <div class="incident-detail-label">Container Details:</div>
+            <div class="incident-detail-value">
+                <div class="container-info">
+                    {% if incident.container_info.cluster_name %}Cluster: {{ incident.container_info.cluster_name }}<br>{% endif %}
+                    {% if incident.container_info.service_name %}Service: {{ incident.container_info.service_name }}<br>{% endif %}
+                    {% if incident.container_info.task_arn %}Task: {{ incident.container_info.task_arn|truncate(50) }}<br>{% endif %}
+                    {% if incident.container_info.instance_id %}Instance: {{ incident.container_info.instance_id }}{% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- AWS GuardDuty Integration -->
+    {% if incident.guardduty_findings %}
+    <div class="guardduty-section">
+        <div class="guardduty-title">🛡️ AWS GuardDuty Findings</div>
+        {% for finding in incident.guardduty_findings %}
+        <div style="margin-bottom: 10px;">
+            <strong>{{ finding.title }}</strong>
+            <span class="threat-level {{ finding.severity|lower }}">{{ finding.severity }}</span>
+            <br>
+            <small style="color: #6c757d;">{{ finding.description|truncate(120) }}</small>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Automated Response Actions -->
+    {% if incident.automated_actions %}
+    <div class="action-section automated">
+        <div class="action-title automated">
+            <span class="action-icon">🤖</span>
+            Automated Response Actions
+        </div>
+        <ul class="action-list">
+            {% for action in incident.automated_actions %}
+            <li>
+                <span class="action-status {{ action.status }}">{{ action.status|upper }}</span>
+                {{ action.description }}
+                {% if action.timestamp %}
+                <br><small style="color: #6c757d;">{{ action.timestamp|strftime('%H:%M:%S UTC') }}</small>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <!-- Manual Response Required -->
+    <div class="action-section manual">
+        <div class="action-title manual">
+            <span class="action-icon">⚠️</span>
+            Immediate Manual Actions Required
+        </div>
+        <ul class="action-list">
+            <li><strong>Security Team Response:</strong> Investigate incident details and validate automated containment</li>
+            <li><strong>System Review:</strong> Examine affected systems for additional compromise indicators</li>
+            <li><strong>User Communication:</strong> Notify affected users if personal data may be involved</li>
+            {% if incident.severity in ['CRITICAL', 'HIGH'] %}
+            <li><strong>Executive Notification:</strong> Escalate to management per incident response procedures</li>
+            {% endif %}
+            {% if incident.container_info %}
+            <li><strong>Container Isolation Verification:</strong> Confirm automated container quarantine effectiveness</li>
+            <li><strong>Service Health Check:</strong> Validate application service continuity and performance</li>
+            {% endif %}
+        </ul>
+    </div>
+
+    <!-- OWASP ZAP Integration -->
+    {% if incident.security_scan_results %}
+    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin: 15px 0;">
+        <h3 style="margin: 0 0 10px 0; color: #495057; font-size: 16px;">🔍 Security Scan Results</h3>
+        {% for result in incident.security_scan_results %}
+        <div style="margin-bottom: 8px;">
+            <strong>{{ result.scan_type }}:</strong> {{ result.findings_count }} findings
+            {% if result.critical_count > 0 %}
+            <span style="color: #dc3545; font-weight: 600;">({{ result.critical_count }} critical)</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Escalation Procedures -->
+    <div class="escalation-chain">
+        <h3 style="margin: 0 0 15px 0; color: #495057; font-size: 16px;">📞 Escalation Procedures</h3>
+        
+        <div class="escalation-step {% if incident.current_escalation_level >= 1 %}active{% endif %}">
+            <div class="escalation-step-number">1</div>
+            <div>
+                <strong>Immediate Response (0-15 minutes)</strong><br>
+                Security team acknowledges and begins investigation
+            </div>
+        </div>
+        
+        <div class="escalation-step {% if incident.current_escalation_level >= 2 %}active{% endif %}">
+            <div class="escalation-step-number">2</div>
+            <div>
+                <strong>Team Lead Notification (15-30 minutes)</strong><br>
+                Engineering team lead engaged for technical coordination
+            </div>
+        </div>
+        
+        {% if incident.severity in ['CRITICAL', 'HIGH'] %}
+        <div class="escalation-step {% if incident.current_escalation_level >= 3 %}active{% endif %}">
+            <div class="escalation-step-number">3</div>
+            <div>
+                <strong>Management Escalation (30-60 minutes)</strong><br>
+                Engineering manager and security lead coordination
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if incident.severity == 'CRITICAL' %}
+        <div class="escalation-step {% if incident.current_escalation_level >= 4 %}active{% endif %}">
+            <div class="escalation-step-number">4</div>
+            <div>
+                <strong>Executive Notification (1-2 hours)</strong><br>
+                CTO and executive team briefing for business impact assessment
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Action Buttons -->
+    <div style="text-align: center; margin: 30px 0;">
+        <a href="{{ incident_dashboard_url }}?incident={{ incident.incident_id }}" class="btn-security-action">
+            View Incident Dashboard
+        </a>
+        <a href="{{ security_runbook_url }}" class="btn-secondary-action">
+            Security Runbook
+        </a>
+        {% if incident.container_info %}
+        <a href="{{ container_monitoring_url }}" class="btn-secondary-action">
+            Container Status
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- GitHub Actions Integration -->
+    {% if incident.github_actions %}
+    <div style="background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 15px; margin: 15px 0;">
+        <h3 style="margin: 0 0 10px 0; color: #24292f; font-size: 14px;">
+            <span style="margin-right: 8px;">⚙️</span>GitHub Actions Security Response
+        </h3>
+        {% for action in incident.github_actions %}
+        <div style="margin-bottom: 8px; font-family: 'Courier New', monospace; font-size: 12px;">
+            <strong>{{ action.workflow_name }}:</strong> 
+            <span style="color: {% if action.status == 'success' %}#28a745{% elif action.status == 'failure' %}#dc3545{% else %}#ffc107{% endif %};">
+                {{ action.status|upper }}
+            </span>
+            {% if action.run_url %}
+            <br><a href="{{ action.run_url }}" style="color: #0969da; font-size: 11px;">View Workflow Run</a>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Additional Context -->
+    {% if incident.additional_context %}
+    <div style="background: #f8f9fa; border-left: 4px solid #6c757d; padding: 15px; margin: 20px 0;">
+        <h3 style="margin: 0 0 10px 0; color: #495057; font-size: 14px;">Additional Context</h3>
+        <p style="margin: 0; font-size: 13px; line-height: 1.5;">{{ incident.additional_context }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Footer Information -->
+    <div style="background: #e9ecef; border-radius: 6px; padding: 15px; margin: 25px 0; font-size: 12px; color: #6c757d;">
+        <p style="margin: 0 0 8px 0;"><strong>This is an automated security alert from the Flask Application Security System.</strong></p>
+        <p style="margin: 0 0 8px 0;">
+            Generated at: {{ current_timestamp|strftime('%Y-%m-%d %H:%M:%S UTC') }} | 
+            Alert ID: {{ alert_id or incident.incident_id }}
+        </p>
+        <p style="margin: 0;">
+            For immediate assistance, contact the security team at 
+            <a href="mailto:{{ security_email or 'security@company.com' }}" style="color: #dc3545;">
+                {{ security_email or 'security@company.com' }}
+            </a>
+            or call the emergency security hotline.
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block navigation_links %}
+<li><a href="{{ incident_dashboard_url }}">Security Dashboard</a></li>
+<li><a href="{{ security_runbook_url }}">Response Procedures</a></li>
+<li><a href="{{ monitoring_url }}">System Monitoring</a></li>
+<li><a href="{{ contact_security_url }}">Contact Security Team</a></li>
+{% endblock %}

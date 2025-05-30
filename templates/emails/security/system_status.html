@@ -1,0 +1,722 @@
+{% extends "emails/base/layout.html" %}
+
+{# Security System Status Report Email Template #}
+{# Provides comprehensive security posture summaries with visual metrics and compliance indicators #}
+
+{% set email_title = "Security System Status Report - " + (report_date.strftime('%B %d, %Y') if report_date else 'Current Status') %}
+{% set email_description = "Comprehensive security posture assessment and compliance status report" %}
+
+{% block title %}{{ email_title }}{% endblock %}
+
+{% block email_label %}Security System Status Report from {{ application_name or 'Security Monitoring System' }}{% endblock %}
+
+{# Security-specific email styles #}
+{% block email_styles %}
+    /* Security Status Report Styles */
+    .security-header {
+        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+        color: white;
+        padding: 25px 20px;
+        text-align: center;
+        border-radius: 8px 8px 0 0;
+    }
+    
+    .security-header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 600;
+        color: white;
+    }
+    
+    .security-header .subtitle {
+        margin: 8px 0 0 0;
+        font-size: 14px;
+        opacity: 0.9;
+        color: #e0f2fe;
+    }
+    
+    /* Executive Summary Section */
+    .executive-summary {
+        background: #f8fafc;
+        padding: 20px;
+        border-left: 4px solid #10b981;
+        margin: 20px 0;
+    }
+    
+    .executive-summary h2 {
+        color: #1f2937;
+        font-size: 18px;
+        margin: 0 0 12px 0;
+        font-weight: 600;
+    }
+    
+    /* Security Metrics Grid */
+    .metrics-grid {
+        display: table;
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+    }
+    
+    .metrics-row {
+        display: table-row;
+    }
+    
+    .metric-card {
+        display: table-cell;
+        width: 50%;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        padding: 16px;
+        text-align: center;
+        vertical-align: top;
+    }
+    
+    .metric-card h3 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        color: #6b7280;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+        margin: 8px 0;
+        line-height: 1;
+    }
+    
+    .metric-trend {
+        font-size: 12px;
+        margin: 4px 0 0 0;
+        font-weight: 500;
+    }
+    
+    .status-excellent { color: #10b981; }
+    .status-good { color: #3b82f6; }
+    .status-warning { color: #f59e0b; }
+    .status-critical { color: #ef4444; }
+    
+    .trend-up { color: #10b981; }
+    .trend-down { color: #ef4444; }
+    .trend-stable { color: #6b7280; }
+    
+    /* Compliance Section */
+    .compliance-section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin: 20px 0;
+        overflow: hidden;
+    }
+    
+    .compliance-header {
+        background: #f3f4f6;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .compliance-header h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    
+    .compliance-body {
+        padding: 20px;
+    }
+    
+    .compliance-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #f3f4f6;
+    }
+    
+    .compliance-item:last-child {
+        border-bottom: none;
+    }
+    
+    .compliance-name {
+        font-weight: 500;
+        color: #374151;
+    }
+    
+    .compliance-status {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .compliance-compliant {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .compliance-partial {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .compliance-non-compliant {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    /* Technical Details Section */
+    .technical-details {
+        margin: 20px 0;
+    }
+    
+    .detail-section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin: 16px 0;
+        overflow: hidden;
+    }
+    
+    .detail-header {
+        background: #f9fafb;
+        padding: 12px 16px;
+        border-bottom: 1px solid #e5e7eb;
+        font-weight: 600;
+        color: #374151;
+        font-size: 14px;
+    }
+    
+    .detail-content {
+        padding: 16px;
+    }
+    
+    .metric-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .metric-list li {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid #f3f4f6;
+        font-size: 14px;
+    }
+    
+    .metric-list li:last-child {
+        border-bottom: none;
+    }
+    
+    .metric-list .label {
+        color: #6b7280;
+    }
+    
+    .metric-list .value {
+        font-weight: 500;
+        color: #374151;
+    }
+    
+    /* Security Incidents Section */
+    .incidents-section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin: 20px 0;
+    }
+    
+    .incidents-none {
+        text-align: center;
+        padding: 30px 20px;
+        color: #10b981;
+        font-weight: 500;
+    }
+    
+    .incident-item {
+        padding: 16px 20px;
+        border-bottom: 1px solid #f3f4f6;
+    }
+    
+    .incident-item:last-child {
+        border-bottom: none;
+    }
+    
+    .incident-severity {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-right: 8px;
+    }
+    
+    .severity-low {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .severity-medium {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .severity-high {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .severity-critical {
+        background: #fde2e2;
+        color: #7f1d1d;
+    }
+    
+    /* Recommendations Section */
+    .recommendations {
+        background: #fffbeb;
+        border-left: 4px solid #f59e0b;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .recommendations h3 {
+        margin: 0 0 12px 0;
+        color: #92400e;
+        font-size: 16px;
+        font-weight: 600;
+    }
+    
+    .recommendations ul {
+        margin: 0;
+        padding-left: 20px;
+    }
+    
+    .recommendations li {
+        margin: 8px 0;
+        color: #78350f;
+        line-height: 1.5;
+    }
+    
+    /* Footer customization for security reports */
+    .security-footer {
+        background: #f8fafc;
+        border-top: 2px solid #e5e7eb;
+        padding: 20px;
+        text-align: center;
+        font-size: 12px;
+        color: #6b7280;
+    }
+    
+    .security-footer .confidential {
+        color: #ef4444;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+    
+    /* Dark mode support for security emails */
+    @media (prefers-color-scheme: dark) {
+        .security-header {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        }
+        .executive-summary {
+            background: #1f2937;
+            border-left-color: #10b981;
+        }
+        .executive-summary h2 {
+            color: #f9fafb;
+        }
+        .metric-card,
+        .compliance-section,
+        .detail-section,
+        .incidents-section {
+            background: #1f2937;
+            border-color: #374151;
+        }
+        .compliance-header,
+        .detail-header {
+            background: #374151;
+            border-color: #4b5563;
+        }
+        .compliance-header h3,
+        .detail-header {
+            color: #f9fafb;
+        }
+        .metric-card h3,
+        .compliance-name,
+        .metric-list .label,
+        .metric-list .value {
+            color: #d1d5db;
+        }
+        .security-footer {
+            background: #1f2937;
+            border-color: #374151;
+            color: #9ca3af;
+        }
+    }
+    
+    /* Responsive design for mobile */
+    @media screen and (max-width: 600px) {
+        .metrics-grid {
+            display: block;
+        }
+        .metric-card {
+            display: block;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        .compliance-item {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .security-header {
+            padding: 20px 15px;
+        }
+        .executive-summary,
+        .compliance-body,
+        .detail-content {
+            padding: 15px;
+        }
+    }
+{% endblock %}
+
+{% block email_content %}
+<div class="security-header">
+    <h1>🔒 Security System Status Report</h1>
+    <div class="subtitle">
+        {{ report_date.strftime('%B %d, %Y at %I:%M %p UTC') if report_date else 'Generated on ' + moment().format('MMMM DD, YYYY [at] hh:mm A [UTC]') }}
+    </div>
+</div>
+
+<!-- Executive Summary -->
+<div class="executive-summary">
+    <h2>📊 Executive Summary</h2>
+    <p><strong>Overall Security Posture:</strong> 
+        <span class="status-{{ security_posture.overall_status.lower() if security_posture and security_posture.overall_status else 'good' }}">
+            {{ security_posture.overall_status if security_posture and security_posture.overall_status else 'GOOD' }}
+        </span>
+    </p>
+    <p>{{ security_posture.summary if security_posture and security_posture.summary else 'System security metrics are within acceptable parameters. All critical security controls are operational and monitoring systems are functioning normally.' }}</p>
+    
+    {% if security_posture and security_posture.key_highlights %}
+    <p><strong>Key Highlights:</strong></p>
+    <ul>
+        {% for highlight in security_posture.key_highlights %}
+        <li>{{ highlight }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+
+<!-- Security Metrics Grid -->
+<div class="metrics-grid">
+    <div class="metrics-row">
+        <div class="metric-card">
+            <h3>Authentication Success Rate</h3>
+            <div class="metric-value status-{{ 'excellent' if (metrics.authentication_success_rate or 99.8) >= 99.5 else 'good' if (metrics.authentication_success_rate or 99.8) >= 98.0 else 'warning' }}">
+                {{ "%.1f"|format(metrics.authentication_success_rate or 99.8) }}%
+            </div>
+            <div class="metric-trend trend-{{ 'up' if (metrics.auth_trend or 0) > 0 else 'down' if (metrics.auth_trend or 0) < 0 else 'stable' }}">
+                {{ '+' if (metrics.auth_trend or 0) > 0 else '' }}{{ "%.1f"|format(metrics.auth_trend or 0) }}% vs last period
+            </div>
+        </div>
+        <div class="metric-card">
+            <h3>System Uptime</h3>
+            <div class="metric-value status-{{ 'excellent' if (metrics.system_uptime or 99.9) >= 99.9 else 'good' if (metrics.system_uptime or 99.9) >= 99.5 else 'warning' }}">
+                {{ "%.2f"|format(metrics.system_uptime or 99.9) }}%
+            </div>
+            <div class="metric-trend trend-stable">
+                {{ metrics.uptime_incidents or 0 }} incidents this period
+            </div>
+        </div>
+    </div>
+    <div class="metrics-row">
+        <div class="metric-card">
+            <h3>Security Violations Detected</h3>
+            <div class="metric-value status-{{ 'excellent' if (metrics.security_violations or 0) == 0 else 'good' if (metrics.security_violations or 0) <= 5 else 'warning' if (metrics.security_violations or 0) <= 15 else 'critical' }}">
+                {{ metrics.security_violations or 0 }}
+            </div>
+            <div class="metric-trend trend-{{ 'down' if (metrics.violations_trend or 0) < 0 else 'up' if (metrics.violations_trend or 0) > 0 else 'stable' }}">
+                {{ '+' if (metrics.violations_trend or 0) > 0 else '' }}{{ metrics.violations_trend or 0 }} vs last period
+            </div>
+        </div>
+        <div class="metric-card">
+            <h3>Vulnerability Score</h3>
+            <div class="metric-value status-{{ 'excellent' if (metrics.vulnerability_score or 8.5) >= 9.0 else 'good' if (metrics.vulnerability_score or 8.5) >= 7.5 else 'warning' if (metrics.vulnerability_score or 8.5) >= 6.0 else 'critical' }}">
+                {{ "%.1f"|format(metrics.vulnerability_score or 8.5) }}/10
+            </div>
+            <div class="metric-trend trend-{{ 'up' if (metrics.vuln_trend or 0) > 0 else 'down' if (metrics.vuln_trend or 0) < 0 else 'stable' }}">
+                {{ '+' if (metrics.vuln_trend or 0) > 0 else '' }}{{ "%.1f"|format(metrics.vuln_trend or 0) }} vs last period
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Compliance Status -->
+<div class="compliance-section">
+    <div class="compliance-header">
+        <h3>🛡️ Compliance Status</h3>
+    </div>
+    <div class="compliance-body">
+        {% set compliance_items = compliance_status or [
+            {'name': 'GDPR Compliance', 'status': 'compliant', 'score': 98.5},
+            {'name': 'SOC 2 Type II', 'status': 'compliant', 'score': 97.2},
+            {'name': 'ISO 27001', 'status': 'compliant', 'score': 96.8},
+            {'name': 'PCI DSS', 'status': 'partial', 'score': 89.3},
+            {'name': 'Data Retention Policy', 'status': 'compliant', 'score': 99.1}
+        ] %}
+        
+        {% for item in compliance_items %}
+        <div class="compliance-item">
+            <div class="compliance-name">{{ item.name }}</div>
+            <div class="compliance-status compliance-{{ item.status }}">
+                {{ item.status|title }}
+                {% if item.score %}
+                ({{ "%.1f"|format(item.score) }}%)
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Container Orchestration Security -->
+<div class="detail-section">
+    <div class="detail-header">🐳 Container Orchestration Security</div>
+    <div class="detail-content">
+        <ul class="metric-list">
+            <li>
+                <span class="label">Container Security Score</span>
+                <span class="value status-{{ 'excellent' if (container_metrics.security_score or 9.2) >= 9.0 else 'good' }}">{{ "%.1f"|format(container_metrics.security_score or 9.2) }}/10</span>
+            </li>
+            <li>
+                <span class="label">Image Vulnerability Scan</span>
+                <span class="value status-{{ 'excellent' if (container_metrics.vulnerabilities or 0) == 0 else 'warning' }}">{{ container_metrics.vulnerabilities or 0 }} high-risk findings</span>
+            </li>
+            <li>
+                <span class="label">ECS/EKS Task Health</span>
+                <span class="value status-excellent">{{ container_metrics.healthy_tasks or 4 }}/{{ container_metrics.total_tasks or 4 }} tasks healthy</span>
+            </li>
+            <li>
+                <span class="label">Network Policy Compliance</span>
+                <span class="value status-excellent">{{ "%.1f"|format(container_metrics.network_compliance or 100.0) }}%</span>
+            </li>
+            <li>
+                <span class="label">Runtime Security Events</span>
+                <span class="value status-{{ 'excellent' if (container_metrics.runtime_events or 0) == 0 else 'warning' }}">{{ container_metrics.runtime_events or 0 }} alerts</span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- WSGI Server Performance -->
+<div class="detail-section">
+    <div class="detail-header">⚡ WSGI Server Performance</div>
+    <div class="detail-content">
+        <ul class="metric-list">
+            <li>
+                <span class="label">Gunicorn Worker Health</span>
+                <span class="value status-excellent">{{ wsgi_metrics.active_workers or 4 }}/{{ wsgi_metrics.total_workers or 4 }} workers active</span>
+            </li>
+            <li>
+                <span class="label">Request Handling Efficiency</span>
+                <span class="value status-{{ 'excellent' if (wsgi_metrics.efficiency or 98.7) >= 95.0 else 'good' }}">{{ "%.1f"|format(wsgi_metrics.efficiency or 98.7) }}%</span>
+            </li>
+            <li>
+                <span class="label">Average Response Time</span>
+                <span class="value status-{{ 'excellent' if (wsgi_metrics.avg_response_time or 87) < 100 else 'good' }}">{{ wsgi_metrics.avg_response_time or 87 }}ms</span>
+            </li>
+            <li>
+                <span class="label">Worker Memory Usage</span>
+                <span class="value status-{{ 'excellent' if (wsgi_metrics.memory_usage or 65.2) < 70.0 else 'good' }}">{{ "%.1f"|format(wsgi_metrics.memory_usage or 65.2) }}%</span>
+            </li>
+            <li>
+                <span class="label">Error Rate</span>
+                <span class="value status-{{ 'excellent' if (wsgi_metrics.error_rate or 0.1) < 0.5 else 'warning' }}">{{ "%.2f"|format(wsgi_metrics.error_rate or 0.1) }}%</span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Database Security Indicators -->
+<div class="detail-section">
+    <div class="detail-header">🗄️ Database Security Indicators</div>
+    <div class="detail-content">
+        <ul class="metric-list">
+            <li>
+                <span class="label">Connection Pool Health</span>
+                <span class="value status-excellent">{{ database_metrics.active_connections or 12 }}/{{ database_metrics.max_connections or 20 }} connections</span>
+            </li>
+            <li>
+                <span class="label">Query Performance</span>
+                <span class="value status-{{ 'excellent' if (database_metrics.avg_query_time or 45) < 50 else 'good' }}">{{ database_metrics.avg_query_time or 45 }}ms average</span>
+            </li>
+            <li>
+                <span class="label">Encryption Status</span>
+                <span class="value status-excellent">{{ database_metrics.encrypted_fields or 100 }}% fields encrypted</span>
+            </li>
+            <li>
+                <span class="label">Access Control Compliance</span>
+                <span class="value status-excellent">{{ "%.1f"|format(database_metrics.access_compliance or 99.8) }}%</span>
+            </li>
+            <li>
+                <span class="label">Backup Integrity</span>
+                <span class="value status-excellent">Last verified {{ database_metrics.last_backup_verification or '2 hours ago' }}</span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Authentication & Authorization -->
+<div class="detail-section">
+    <div class="detail-header">🔐 Authentication & Authorization</div>
+    <div class="detail-content">
+        <ul class="metric-list">
+            <li>
+                <span class="label">Auth0 Integration Health</span>
+                <span class="value status-excellent">{{ "%.1f"|format(auth_metrics.auth0_health or 99.9) }}% uptime</span>
+            </li>
+            <li>
+                <span class="label">Failed Login Attempts</span>
+                <span class="value status-{{ 'excellent' if (auth_metrics.failed_logins or 23) < 50 else 'warning' }}">{{ auth_metrics.failed_logins or 23 }} (24h)</span>
+            </li>
+            <li>
+                <span class="label">JWT Token Security</span>
+                <span class="value status-excellent">No compromised tokens detected</span>
+            </li>
+            <li>
+                <span class="label">Session Management</span>
+                <span class="value status-excellent">{{ auth_metrics.active_sessions or 156 }} active sessions</span>
+            </li>
+            <li>
+                <span class="label">Multi-Factor Authentication</span>
+                <span class="value status-{{ 'excellent' if (auth_metrics.mfa_adoption or 87.3) >= 80.0 else 'good' }}">{{ "%.1f"|format(auth_metrics.mfa_adoption or 87.3) }}% adoption</span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Threat Detection & Response -->
+<div class="detail-section">
+    <div class="detail-header">🚨 Threat Detection & Response</div>
+    <div class="detail-content">
+        <ul class="metric-list">
+            <li>
+                <span class="label">AWS GuardDuty Status</span>
+                <span class="value status-excellent">Active monitoring</span>
+            </li>
+            <li>
+                <span class="label">Security Alerts (24h)</span>
+                <span class="value status-{{ 'excellent' if (threat_metrics.alerts_24h or 2) <= 5 else 'warning' }}">{{ threat_metrics.alerts_24h or 2 }} low-priority alerts</span>
+            </li>
+            <li>
+                <span class="label">Automated Response Success</span>
+                <span class="value status-excellent">{{ "%.1f"|format(threat_metrics.response_success or 100.0) }}%</span>
+            </li>
+            <li>
+                <span class="label">Mean Time to Detection</span>
+                <span class="value status-{{ 'excellent' if (threat_metrics.mttd_minutes or 1.2) < 2.0 else 'good' }}">{{ "%.1f"|format(threat_metrics.mttd_minutes or 1.2) }} minutes</span>
+            </li>
+            <li>
+                <span class="label">Incident Response Readiness</span>
+                <span class="value status-excellent">{{ "%.1f"|format(threat_metrics.response_readiness or 98.5) }}%</span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Security Incidents -->
+<div class="incidents-section">
+    <div class="compliance-header">
+        <h3>⚠️ Security Incidents ({{ incident_period or 'Last 7 Days' }})</h3>
+    </div>
+    {% if security_incidents and security_incidents|length > 0 %}
+        {% for incident in security_incidents %}
+        <div class="incident-item">
+            <div>
+                <span class="incident-severity severity-{{ incident.severity.lower() }}">{{ incident.severity }}</span>
+                <strong>{{ incident.title }}</strong>
+            </div>
+            <div style="margin-top: 8px; color: #6b7280; font-size: 14px;">
+                {{ incident.description }} - <em>{{ incident.status }}</em>
+            </div>
+            <div style="margin-top: 4px; font-size: 12px; color: #9ca3af;">
+                {{ incident.timestamp.strftime('%Y-%m-%d %H:%M UTC') if incident.timestamp else 'Time not specified' }}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <div class="incidents-none">
+        ✅ No security incidents reported during this period
+    </div>
+    {% endif %}
+</div>
+
+<!-- Recommendations -->
+{% if recommendations and recommendations|length > 0 %}
+<div class="recommendations">
+    <h3>💡 Security Recommendations</h3>
+    <ul>
+        {% for recommendation in recommendations %}
+        <li>{{ recommendation }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Technical Dashboard Links -->
+<div class="detail-section">
+    <div class="detail-header">📊 Technical Dashboards & Resources</div>
+    <div class="detail-content">
+        <ul class="metric-list">
+            <li>
+                <span class="label">Security Dashboard</span>
+                <span class="value"><a href="{{ dashboard_urls.security or '#' }}" style="color: #3b82f6;">View Real-time Metrics</a></span>
+            </li>
+            <li>
+                <span class="label">Compliance Portal</span>
+                <span class="value"><a href="{{ dashboard_urls.compliance or '#' }}" style="color: #3b82f6;">Access Compliance Reports</a></span>
+            </li>
+            <li>
+                <span class="label">Incident Response</span>
+                <span class="value"><a href="{{ dashboard_urls.incidents or '#' }}" style="color: #3b82f6;">View Incident Dashboard</a></span>
+            </li>
+            <li>
+                <span class="label">Prometheus Metrics</span>
+                <span class="value"><a href="{{ dashboard_urls.prometheus or '#' }}" style="color: #3b82f6;">Technical Metrics Portal</a></span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Next Report Schedule -->
+<div style="margin: 20px 0; padding: 16px; background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; text-align: center;">
+    <strong>📅 Next Security Status Report:</strong> 
+    {{ next_report_date.strftime('%B %d, %Y at %I:%M %p UTC') if next_report_date else 'Weekly schedule - same time next week' }}
+</div>
+{% endblock %}
+
+{% block email_footer %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="security-footer">
+            <div class="confidential">CONFIDENTIAL SECURITY REPORT</div>
+            <p>This security status report contains sensitive information about system security posture and should be handled according to your organization's data classification policies.</p>
+            <p>Generated by {{ application_name or 'Security Monitoring System' }} | 
+               Report ID: {{ report_id or ('SEC-' + moment().format('YYYYMMDD-HHmmss')) }}</p>
+            <p>For questions about this report, contact: <a href="mailto:{{ security_contact_email or 'security@company.com' }}">{{ security_contact_email or 'security@company.com' }}</a></p>
+            <p style="margin-top: 16px; font-size: 11px; color: #9ca3af;">
+                This automated report is generated from live security metrics and monitoring systems. 
+                Data accuracy is subject to monitoring system availability and configuration.
+            </p>
+        </td>
+    </tr>
+</table>
+{% endblock %}

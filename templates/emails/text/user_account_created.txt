@@ -1,0 +1,139 @@
+================================================================================
+NEW USER ACCOUNT CREATED - ADMINISTRATIVE NOTIFICATION
+================================================================================
+
+Date: {{ created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Account ID: {{ user.id }}
+System: Flask Application ({{ app_environment|default('Production') }})
+
+================================================================================
+USER ACCOUNT DETAILS
+================================================================================
+
+Username: {{ user.username }}
+Email: {{ user.email }}
+Full Name: {{ user.profile.full_name|default('Not provided') }}
+Registration Method: {{ registration_method|default('Direct Registration') }}
+{% if auth0_user_id %}Auth0 User ID: {{ auth0_user_id }}{% endif %}
+
+Account Status: {{ user.is_active|default(True)|ternary('ACTIVE', 'INACTIVE') }}
+Email Verified: {{ user.email_verified|default(False)|ternary('YES', 'NO') }}
+{% if user.phone_number %}Phone Number: {{ user.phone_number }}{% endif %}
+{% if user.profile.company %}Company: {{ user.profile.company }}{% endif %}
+{% if user.profile.job_title %}Job Title: {{ user.profile.job_title }}{% endif %}
+
+Registration IP Address: {{ registration_ip|default('Not recorded') }}
+User Agent: {{ user_agent|default('Not recorded') }}
+Preferred Language: {{ user.profile.preferred_language|default('en') }}
+Timezone: {{ user.profile.timezone|default('UTC') }}
+
+================================================================================
+ADMINISTRATIVE ACTION ITEMS
+================================================================================
+
+IMMEDIATE ACTIONS REQUIRED:
+[ ] Review user account details for compliance
+[ ] Verify email domain against approved organizations
+[ ] Validate registration source and authenticity
+{% if not user.email_verified %}[ ] PRIORITY: Email verification required{% endif %}
+{% if registration_method == 'Admin Created' %}[ ] Complete admin-created account setup{% endif %}
+
+SECURITY VERIFICATION:
+[ ] Check registration against security policies
+[ ] Verify user identity if required by policy
+[ ] Review account for potential duplicate registrations
+[ ] Validate Auth0 integration status
+{% if suspicious_activity_score is defined and suspicious_activity_score > 50 %}[ ] ALERT: Review suspicious activity indicators (Score: {{ suspicious_activity_score }}){% endif %}
+
+ACCOUNT MANAGEMENT:
+[ ] Assign appropriate user roles and permissions
+[ ] Configure access levels based on account type
+[ ] Add to relevant user groups or departments
+[ ] Set up account-specific integrations if needed
+{% if approval_required %}[ ] APPROVAL REQUIRED: Account pending administrative approval{% endif %}
+
+COMPLIANCE AND DOCUMENTATION:
+[ ] Document account creation in audit logs
+[ ] Verify GDPR/privacy compliance requirements
+[ ] Update user management records
+[ ] Notify relevant team members or departments
+
+================================================================================
+SYSTEM INTEGRATION STATUS
+================================================================================
+
+Flask-SQLAlchemy User Model: Created successfully
+Auth0 Integration: {{ auth0_status|default('Synchronized') }}
+Database Record: User ID {{ user.id }} in {{ database_name|default('production database') }}
+Session Management: Flask-Login integration ready
+{% if user.roles %}Assigned Roles: {{ user.roles|map(attribute='name')|join(', ') }}{% endif %}
+
+================================================================================
+NEXT STEPS FOR ADMINISTRATORS
+================================================================================
+
+1. ACCESS MANAGEMENT
+   - Login to admin dashboard: {{ admin_dashboard_url|default('[Admin Dashboard URL]') }}
+   - Navigate to User Management > Recent Registrations
+   - Locate User ID {{ user.id }} for detailed review
+
+2. ACCOUNT VERIFICATION
+   - Verify user information accuracy
+   - Check against organizational requirements
+   - Validate email domain and company affiliation
+   {% if manual_verification_required %}
+   - MANUAL VERIFICATION REQUIRED: Contact user directly
+   {% endif %}
+
+3. ROLE ASSIGNMENT
+   - Determine appropriate access levels
+   - Assign roles based on account type and requirements
+   - Configure permissions for system resources
+   - Update group memberships as needed
+
+4. NOTIFICATION WORKFLOW
+   {% if send_welcome_email %}
+   - Send welcome email to {{ user.email }}
+   {% endif %}
+   - Notify relevant team members of new account
+   - Update account status once verification complete
+   {% if approval_workflow_enabled %}
+   - Process approval workflow for account activation
+   {% endif %}
+
+================================================================================
+CONTACT INFORMATION
+================================================================================
+
+Support Team: {{ support_email|default('support@company.com') }}
+Admin Team: {{ admin_email|default('admin@company.com') }}
+Security Team: {{ security_email|default('security@company.com') }}
+
+For urgent security concerns regarding this account:
+- Email: {{ security_email|default('security@company.com') }}
+- Subject: "URGENT: User Account Security Review - ID {{ user.id }}"
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+* This notification is generated automatically by the Flask application
+* Account details are synchronized with Auth0 user management system
+* All administrative actions are logged for audit compliance
+* This account requires administrative review within 24 hours
+{% if data_retention_notice %}
+* User data is subject to data retention policies and GDPR compliance
+{% endif %}
+
+For technical support or questions about this notification:
+- Review Flask-SQLAlchemy User model documentation
+- Check Auth0 integration logs for synchronization status
+- Verify Flask-Login session management configuration
+
+================================================================================
+END OF ADMINISTRATIVE NOTIFICATION
+================================================================================
+
+Generated by: Flask User Management System
+Template Version: 1.0
+Notification ID: {{ notification_id|default('N/A') }}

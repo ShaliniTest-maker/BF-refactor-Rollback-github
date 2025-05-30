@@ -1,0 +1,399 @@
+===============================================================================
+SCHEDULED MAINTENANCE NOTIFICATION
+===============================================================================
+
+Dear {{ user_name or 'Valued User' }},
+
+We are writing to inform you of scheduled maintenance on our Flask-based 
+application platform. This maintenance is necessary to ensure optimal system 
+performance, apply critical security updates, and implement infrastructure 
+improvements for enhanced service reliability.
+
+===============================================================================
+MAINTENANCE WINDOW DETAILS
+===============================================================================
+
+Maintenance ID: {{ maintenance_id or 'MAINT-' + timestamp[:8] + '-' + timestamp[9:11] + timestamp[12:14] }}
+Scheduled Start: {{ start_time or 'Sunday, [Date] at 2:00 AM EST' }}
+Estimated End: {{ end_time or 'Sunday, [Date] at 4:00 AM EST' }}
+Duration: {{ duration or '2 hours' }}
+Time Zone: {{ timezone or 'Eastern Standard Time (EST)' }}
+Maintenance Type: {{ maintenance_type or 'Infrastructure Update & Security Patches' }}
+Environment: {{ environment or 'Production' }}
+
+{% if maintenance_reason -%}
+Reason for Maintenance:
+{{ maintenance_reason }}
+{% else -%}
+Reason for Maintenance:
+This scheduled maintenance includes critical security updates for our Python 
+dependencies, container image security patches, database optimization, and 
+Flask application performance enhancements to maintain system reliability.
+{% endif %}
+
+===============================================================================
+SERVICE IMPACT SUMMARY
+===============================================================================
+
+{% if service_impacts -%}
+{% for impact in service_impacts -%}
+• {{ impact.service_name }}
+  Status: {{ impact.status }}
+  Impact: {{ impact.description }}
+  {% if impact.alternative -%}
+  Alternative: {{ impact.alternative }}
+  {% endif %}
+
+{% endfor -%}
+{% else -%}
+• Web Application Platform
+  Status: Completely Unavailable
+  Impact: All application services will be temporarily inaccessible during 
+  the maintenance window including user authentication, data access, and 
+  API endpoints.
+
+• Database Services
+  Status: Read-Only Mode (partial availability)
+  Impact: Database will be in read-only mode for the first hour, then 
+  temporarily unavailable during schema updates and optimization.
+
+• Authentication Services (Auth0)
+  Status: Limited Availability
+  Impact: User login and authentication may experience intermittent delays
+  or temporary unavailability during the maintenance period.
+
+• API Endpoints
+  Status: Completely Unavailable
+  Impact: All REST API endpoints will return HTTP 503 Service Unavailable
+  responses during the maintenance window.
+
+• File Upload/Download Services
+  Status: Unavailable
+  Impact: File operations will be suspended to ensure data integrity
+  during system updates.
+
+{% endif -%}
+===============================================================================
+WHAT TO EXPECT DURING MAINTENANCE
+===============================================================================
+
+{% if maintenance_phases -%}
+{% for phase in maintenance_phases -%}
+Phase {{ loop.index }}: {{ phase.name }}
+Time: {{ phase.time_range }}
+Activities: {{ phase.activities }}
+Impact: {{ phase.impact }}
+
+{% endfor -%}
+{% else -%}
+Phase 1: Preparation and Backup (First 30 minutes)
+Time: 2:00 AM - 2:30 AM EST
+Activities: Database backup creation, traffic redirection, service graceful shutdown
+Impact: Service remains available with performance monitoring
+
+Phase 2: Security Updates and Patches (30 minutes)
+Time: 2:30 AM - 3:00 AM EST  
+Activities: Python dependency updates, container security patches, base image updates
+Impact: Complete service unavailability, HTTP 503 responses
+
+Phase 3: Database Maintenance (45 minutes)
+Time: 3:00 AM - 3:45 AM EST
+Activities: Schema updates via Flask-Migrate, index optimization, connection pool tuning
+Impact: Database unavailable, authentication services limited
+
+Phase 4: Validation and Restart (15 minutes)
+Time: 3:45 AM - 4:00 AM EST
+Activities: Health checks, service restart, performance validation, monitoring verification
+Impact: Gradual service restoration, possible brief interruptions
+
+{% endif -%}
+===============================================================================
+USER PREPARATION RECOMMENDATIONS
+===============================================================================
+
+To minimize disruption during the maintenance window:
+
+{% if preparation_steps -%}
+{% for step in preparation_steps -%}
+{{ loop.index }}. {{ step.title }}
+   {{ step.description }}
+   {% if step.deadline -%}
+   Complete by: {{ step.deadline }}
+   {% endif %}
+
+{% endfor -%}
+{% else -%}
+1. Save Your Work
+   Save any unsaved changes and close active sessions before the maintenance
+   window begins to prevent data loss.
+   Complete by: {{ start_time or '2:00 AM EST on maintenance date' }}
+
+2. Download Important Files
+   Download any critical files or reports you may need during the maintenance
+   period as file access will be unavailable.
+   Complete by: 1 hour before maintenance begins
+
+3. Plan Alternative Workflows
+   Prepare offline alternatives for critical tasks that cannot be delayed
+   until after maintenance completion.
+   Impact: {{ duration or '2-hour' }} window of service unavailability
+
+4. Clear Browser Cache
+   Clear your browser cache after maintenance completion to ensure you receive
+   the latest application updates and avoid potential display issues.
+   Action: Recommended after service restoration
+
+5. Verify Account Access
+   Ensure you remember your login credentials as authentication systems may
+   require re-login after maintenance completion.
+   Priority: High for critical business operations
+
+{% endif -%}
+===============================================================================
+EMERGENCY CONTACTS AND SUPPORT
+===============================================================================
+
+{% if emergency_contacts -%}
+{% for contact in emergency_contacts -%}
+{{ contact.title }}:
+{{ contact.method }}: {{ contact.details }}
+{% if contact.availability -%}
+Availability: {{ contact.availability }}
+{% endif %}
+{% if contact.scope -%}
+For: {{ contact.scope }}
+{% endif %}
+
+{% endfor -%}
+{% else -%}
+Primary Emergency Contact:
+Email: {{ emergency_email or 'emergency@company.com' }}
+Phone: {{ emergency_phone or '1-800-EMERGENCY' }}
+Availability: 24/7 for critical issues during maintenance
+
+On-Call Engineering Team:
+Email: {{ oncall_email or 'oncall@company.com' }}
+Slack: {{ slack_channel or '#infrastructure-alerts' }}
+For: Technical issues, unexpected outages, extended maintenance
+
+Operations Center:
+Phone: {{ operations_phone or '1-800-OPS-CENTER' }}
+Email: {{ operations_email or 'operations@company.com' }}
+Availability: Continuous monitoring during maintenance window
+For: Status updates, progress reports, escalation requests
+
+Business Continuity Support:
+Email: {{ business_support_email or 'business-continuity@company.com' }}
+For: Critical business process support, emergency approvals
+
+{% endif -%}
+===============================================================================
+ALTERNATIVE SERVICES AND WORKAROUNDS
+===============================================================================
+
+{% if alternative_services -%}
+{% for service in alternative_services -%}
+{{ service.name }}:
+{{ service.description }}
+{% if service.access_method -%}
+Access: {{ service.access_method }}
+{% endif %}
+{% if service.limitations -%}
+Limitations: {{ service.limitations }}
+{% endif %}
+
+{% endfor -%}
+{% else -%}
+Status Page and Updates:
+Access real-time maintenance progress and updates at our status page.
+URL: {{ status_page_url or 'https://status.company.com' }}
+Updates: Posted every 30 minutes during maintenance window
+
+Mobile Status Notifications:
+Sign up for SMS alerts about maintenance progress and completion.
+Subscribe: Text 'MAINTENANCE' to {{ sms_number or '12345' }}
+Frequency: Critical updates and completion notifications only
+
+Documentation Access:
+User documentation and help resources remain available during maintenance.
+URL: {{ docs_url or 'https://docs.company.com' }}
+Content: User guides, API documentation, troubleshooting resources
+
+Offline Support Resources:
+Download our offline user guide for reference during the maintenance window.
+Download: {{ offline_guide_url or 'https://company.com/offline-guide.pdf' }}
+Content: Essential procedures and contact information
+
+{% endif -%}
+===============================================================================
+POST-MAINTENANCE INFORMATION
+===============================================================================
+
+{% if post_maintenance_info -%}
+{% for info in post_maintenance_info -%}
+{{ info.title }}:
+{{ info.description }}
+{% if info.timeline -%}
+Expected Timeline: {{ info.timeline }}
+{% endif %}
+
+{% endfor -%}
+{% else -%}
+Service Restoration:
+Services will be restored gradually with full functionality expected by
+{{ end_time or '4:00 AM EST' }}. Authentication services will be restored first,
+followed by core application features and API endpoints.
+Expected Timeline: 15-30 minutes after maintenance completion
+
+Performance Validation:
+Our team will conduct comprehensive performance testing for 1 hour after
+maintenance completion to ensure all systems are operating optimally.
+Monitoring Period: {{ end_time or '4:00 AM' }} - {{ validation_end or '5:00 AM EST' }}
+
+New Features and Updates:
+This maintenance includes several performance improvements and security
+enhancements that will be immediately available after service restoration.
+Details: Posted to our release notes after maintenance completion
+
+Known Issues Resolution:
+Any issues identified during maintenance will be addressed immediately.
+Communication: Updates posted to status page and email notifications sent
+
+Post-Maintenance Support:
+Extended support coverage will be available for 24 hours after maintenance
+completion to address any issues or questions.
+Coverage: {{ end_time or '4:00 AM EST' }} on {{ maintenance_date or 'maintenance day' }} through {{ extended_support_end or '4:00 AM EST the following day' }}
+
+{% endif -%}
+===============================================================================
+MAINTENANCE PROGRESS UPDATES
+===============================================================================
+
+{% if progress_update_methods -%}
+Stay informed about maintenance progress through these channels:
+
+{% for method in progress_update_methods -%}
+{{ method.name }}:
+{{ method.description }}
+{% if method.frequency -%}
+Update Frequency: {{ method.frequency }}
+{% endif %}
+{% if method.access -%}
+Access: {{ method.access }}
+{% endif %}
+
+{% endfor -%}
+{% else -%}
+Stay informed about maintenance progress through these channels:
+
+Email Updates:
+Maintenance progress updates will be sent to this email address every hour
+during the maintenance window and immediately upon completion.
+Update Frequency: Hourly during maintenance, immediate completion notification
+
+Status Page:
+Real-time maintenance status and progress updates available on our status page.
+URL: {{ status_page_url or 'https://status.company.com' }}
+Update Frequency: Every 15 minutes during active maintenance phases
+
+Social Media:
+Follow our official accounts for brief maintenance updates and completion announcements.
+Twitter: {{ twitter_handle or '@CompanyUpdates' }}
+LinkedIn: {{ linkedin_page or 'Company Official Page' }}
+
+Support Portal:
+Maintenance-specific information and FAQ updates will be posted to our support portal.
+URL: {{ support_portal_url or 'https://support.company.com/maintenance' }}
+Content: FAQ updates, troubleshooting tips, estimated completion times
+
+{% endif -%}
+===============================================================================
+QUESTIONS AND ADDITIONAL SUPPORT
+===============================================================================
+
+If you have questions about this maintenance or require assistance:
+
+{% if support_contacts -%}
+{% for contact in support_contacts -%}
+{{ contact.type }}:
+{{ contact.method }}: {{ contact.details }}
+{% if contact.hours -%}
+Hours: {{ contact.hours }}
+{% endif %}
+{% if contact.best_for -%}
+Best for: {{ contact.best_for }}
+{% endif %}
+
+{% endfor -%}
+{% else -%}
+General Support:
+Email: {{ support_email or 'support@company.com' }}
+Phone: {{ support_phone or '1-800-SUPPORT' }}
+Hours: Monday-Friday, 9:00 AM - 6:00 PM EST
+Best for: General questions, account assistance, non-urgent issues
+
+Technical Support:
+Email: {{ technical_support_email or 'tech-support@company.com' }}
+Hours: 24/7 support available during maintenance window
+Best for: Technical issues, API integration questions, system problems
+
+Business Support:
+Email: {{ business_support_email or 'business@company.com' }}
+Phone: {{ business_phone or '1-800-BUSINESS' }}
+Hours: Business hours with emergency escalation available
+Best for: Business impact questions, SLA inquiries, service credits
+
+Account Management:
+Email: {{ account_management_email or 'accounts@company.com' }}
+Hours: Monday-Friday, 8:00 AM - 7:00 PM EST
+Best for: Billing questions, account changes, contract inquiries
+
+{% endif -%}
+We appreciate your patience and understanding as we work to improve our platform.
+Our team is committed to completing this maintenance efficiently and restoring
+full service as quickly as possible.
+
+===============================================================================
+IMPORTANT REMINDERS
+===============================================================================
+
+{% if important_reminders -%}
+{% for reminder in important_reminders -%}
+• {{ reminder }}
+
+{% endfor -%}
+{% else -%}
+• Save all work before the maintenance window begins
+• Maintenance will proceed as scheduled regardless of weather or other conditions
+• No action is required from users during the maintenance period
+• Services will be restored automatically - no user intervention needed
+• Contact emergency support only for critical business-impacting issues
+• Regular support requests should be submitted after maintenance completion
+• Password resets and account changes may be limited during maintenance
+• Multi-factor authentication may require re-verification after maintenance
+
+{% endif -%}
+Thank you for being a valued user of our platform. We are committed to 
+providing reliable, secure, and high-performance services, and this maintenance
+is an essential part of that commitment.
+
+Best regards,
+
+{{ sender_name or 'The Infrastructure Team' }}
+{{ company_name or 'Flask Application Platform' }}
+
+===============================================================================
+
+This maintenance notification was sent to {{ user_email or 'your registered email address' }}
+Maintenance ID: {{ maintenance_id or 'MAINT-' + timestamp[:8] + '-' + timestamp[9:11] + timestamp[12:14] }}
+
+Update your notification preferences: {{ preferences_url or 'https://company.com/preferences' }}
+Unsubscribe from maintenance notifications: {{ unsubscribe_url or 'https://company.com/unsubscribe' }}
+
+For questions about this notification, contact: {{ reply_email or 'maintenance@company.com' }}
+
+{{ company_name or 'Company Name' }} | Infrastructure Operations Team
+{{ company_address or 'Operations Center Address' }}
+Privacy Policy: {{ privacy_policy_url or 'https://company.com/privacy' }}
+
+===============================================================================

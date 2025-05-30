@@ -1,0 +1,571 @@
+{% extends "emails/base/layout.html" %}
+
+{% block title %}{{ anomaly_alert.severity|upper }} Security Alert: Access Pattern Anomaly Detected{% endblock %}
+
+{% block email_label %}Critical Security Notification - Immediate Attention Required{% endblock %}
+
+{% block email_styles %}
+    {{ super() }}
+    
+    /* Security Alert Specific Styles */
+    .security-alert-header {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        color: white;
+        padding: 25px 20px;
+        text-align: center;
+        border-radius: 8px 8px 0 0;
+        margin-bottom: 0;
+    }
+    
+    .severity-critical {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    }
+    
+    .severity-high {
+        background: linear-gradient(135deg, #fd7e14 0%, #e8590c 100%);
+    }
+    
+    .severity-medium {
+        background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+        color: #212529;
+    }
+    
+    .severity-low {
+        background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+    }
+    
+    .anomaly-summary {
+        background-color: #f8f9fa;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .risk-score {
+        display: inline-block;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .risk-critical {
+        background-color: #dc3545;
+        color: white;
+    }
+    
+    .risk-high {
+        background-color: #fd7e14;
+        color: white;
+    }
+    
+    .risk-medium {
+        background-color: #ffc107;
+        color: #212529;
+    }
+    
+    .risk-low {
+        background-color: #28a745;
+        color: white;
+    }
+    
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin: 20px 0;
+    }
+    
+    .metric-card {
+        background-color: white;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .metric-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: #dc3545;
+        display: block;
+        margin-bottom: 5px;
+    }
+    
+    .metric-label {
+        font-size: 12px;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .behavior-analysis {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .behavior-analysis h4 {
+        color: #856404;
+        margin-top: 0;
+        margin-bottom: 15px;
+    }
+    
+    .geographic-analysis {
+        background-color: #d1ecf1;
+        border: 1px solid #bee5eb;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .geographic-analysis h4 {
+        color: #0c5460;
+        margin-top: 0;
+        margin-bottom: 15px;
+    }
+    
+    .timeline-item {
+        display: flex;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .timeline-item:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+    
+    .timeline-time {
+        flex-shrink: 0;
+        width: 120px;
+        font-size: 12px;
+        color: #6c757d;
+        font-weight: 600;
+    }
+    
+    .timeline-content {
+        flex-grow: 1;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+    
+    .investigation-actions {
+        background-color: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .investigation-actions h4 {
+        color: #004085;
+        margin-top: 0;
+        margin-bottom: 15px;
+    }
+    
+    .action-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .action-list li {
+        margin-bottom: 10px;
+        padding-left: 25px;
+        position: relative;
+    }
+    
+    .action-list li:before {
+        content: "►";
+        position: absolute;
+        left: 0;
+        color: #004085;
+        font-weight: 700;
+    }
+    
+    .technical-details {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+    }
+    
+    .technical-details h4 {
+        font-family: inherit;
+        margin-top: 0;
+        margin-bottom: 15px;
+        color: #495057;
+    }
+    
+    .button-primary {
+        display: inline-block;
+        background-color: #dc3545;
+        color: white !important;
+        padding: 12px 24px;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 10px 10px 10px 0;
+        font-size: 14px;
+    }
+    
+    .button-secondary {
+        display: inline-block;
+        background-color: #6c757d;
+        color: white !important;
+        padding: 12px 24px;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 10px 10px 10px 0;
+        font-size: 14px;
+    }
+    
+    .sentry-integration {
+        background-color: #f3e5f5;
+        border: 1px solid #d1c4e9;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 15px 0;
+        font-size: 13px;
+    }
+    
+    .cloudwatch-metrics {
+        background-color: #e8f5e8;
+        border: 1px solid #c3e6c3;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 15px 0;
+        font-size: 13px;
+    }
+    
+    /* Responsive Design */
+    @media screen and (max-width: 600px) {
+        .metrics-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .timeline-item {
+            flex-direction: column;
+        }
+        
+        .timeline-time {
+            width: auto;
+            margin-bottom: 5px;
+        }
+        
+        .button-primary,
+        .button-secondary {
+            display: block;
+            text-align: center;
+            margin: 10px 0;
+        }
+    }
+    
+    /* Dark mode compatibility */
+    @media (prefers-color-scheme: dark) {
+        .anomaly-summary { 
+            background-color: #2d2d2d !important;
+            border-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        .metric-card {
+            background-color: #2d2d2d !important;
+            border-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        .behavior-analysis {
+            background-color: #3d3d2d !important;
+            border-color: #4d4d3d !important;
+        }
+        .geographic-analysis {
+            background-color: #2d3d3d !important;
+            border-color: #3d4d4d !important;
+        }
+        .investigation-actions {
+            background-color: #2d2d3d !important;
+            border-color: #3d3d4d !important;
+        }
+        .technical-details {
+            background-color: #2d2d2d !important;
+            border-color: #404040 !important;
+            color: #ffffff !important;
+        }
+    }
+{% endblock %}
+
+{% block content_title %}Security Alert: Access Pattern Anomaly Detected{% endblock %}
+
+{% block email_content %}
+<!-- Security Alert Header -->
+<div class="security-alert-header severity-{{ anomaly_alert.severity|lower }}">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 700;">
+        🚨 {{ anomaly_alert.severity|upper }} SECURITY ALERT
+    </h1>
+    <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">
+        Suspicious access pattern detected requiring immediate investigation
+    </p>
+    <div style="margin-top: 15px;">
+        <span class="risk-score risk-{{ anomaly_alert.risk_level|lower }}">
+            Risk Level: {{ anomaly_alert.risk_level|upper }}
+        </span>
+    </div>
+</div>
+
+<!-- Anomaly Summary -->
+<div class="anomaly-summary">
+    <h3 style="margin-top: 0; color: #dc3545;">📊 Anomaly Detection Summary</h3>
+    <p><strong>Alert ID:</strong> {{ anomaly_alert.alert_id }}</p>
+    <p><strong>Detection Time:</strong> {{ anomaly_alert.detection_time.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
+    <p><strong>Affected User:</strong> {{ anomaly_alert.user_info.username }} (ID: {{ anomaly_alert.user_info.user_id }})</p>
+    <p><strong>Anomaly Type:</strong> {{ anomaly_alert.anomaly_type }}</p>
+    <p><strong>Machine Learning Model:</strong> {{ anomaly_alert.ml_model_name }} (Confidence: {{ "%.1f"|format(anomaly_alert.ml_confidence * 100) }}%)</p>
+</div>
+
+<!-- Risk Metrics Grid -->
+<div class="metrics-grid">
+    <div class="metric-card">
+        <span class="metric-value">{{ anomaly_alert.risk_score }}</span>
+        <span class="metric-label">Risk Score</span>
+    </div>
+    <div class="metric-card">
+        <span class="metric-value">{{ anomaly_alert.session_count }}</span>
+        <span class="metric-label">Suspicious Sessions</span>
+    </div>
+    <div class="metric-card">
+        <span class="metric-value">{{ anomaly_alert.failed_attempts }}</span>
+        <span class="metric-label">Failed Attempts</span>
+    </div>
+    <div class="metric-card">
+        <span class="metric-value">{{ anomaly_alert.geographic_locations|length }}</span>
+        <span class="metric-label">Geographic Locations</span>
+    </div>
+</div>
+
+<!-- Behavioral Analysis -->
+<div class="behavior-analysis">
+    <h4>🧠 Behavioral Analysis Context</h4>
+    <p><strong>User Session Patterns:</strong></p>
+    <ul>
+        <li><strong>Typical Login Hours:</strong> {{ anomaly_alert.behavioral_context.typical_hours }}</li>
+        <li><strong>Average Session Duration:</strong> {{ anomaly_alert.behavioral_context.avg_session_duration }} minutes</li>
+        <li><strong>Usual Device Types:</strong> {{ anomaly_alert.behavioral_context.typical_devices|join(', ') }}</li>
+        <li><strong>Regular Geographic Regions:</strong> {{ anomaly_alert.behavioral_context.typical_regions|join(', ') }}</li>
+    </ul>
+    
+    <p><strong>Anomalous Behavior Detected:</strong></p>
+    <ul>
+        {% for anomaly in anomaly_alert.behavioral_context.detected_anomalies %}
+        <li>{{ anomaly.description }} (Severity: {{ anomaly.severity }})</li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- Geographic Analysis -->
+<div class="geographic-analysis">
+    <h4>🌍 Geographic Analysis</h4>
+    <p><strong>Suspicious Access Locations:</strong></p>
+    {% for location in anomaly_alert.geographic_locations %}
+    <div style="margin-bottom: 15px; padding: 10px; background-color: rgba(255,255,255,0.5); border-radius: 4px;">
+        <strong>{{ location.city }}, {{ location.country }}</strong><br>
+        <small>
+            IP: {{ location.ip_address }} | 
+            ISP: {{ location.isp }} | 
+            Risk Score: {{ location.risk_score }}/100 |
+            First Seen: {{ location.first_seen.strftime('%H:%M UTC') }}
+        </small>
+        {% if location.is_vpn or location.is_tor %}
+        <br><small style="color: #dc3545; font-weight: 600;">
+            ⚠️ {% if location.is_vpn %}VPN Detected{% endif %}{% if location.is_tor %}Tor Network{% endif %}
+        </small>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Session Timeline -->
+<div style="margin: 20px 0;">
+    <h4 style="color: #495057;">⏱️ Suspicious Activity Timeline</h4>
+    {% for event in anomaly_alert.timeline_events %}
+    <div class="timeline-item">
+        <div class="timeline-time">{{ event.timestamp.strftime('%H:%M:%S') }}</div>
+        <div class="timeline-content">
+            <strong>{{ event.event_type }}:</strong> {{ event.description }}
+            {% if event.location %}
+            <br><small style="color: #6c757d;">Location: {{ event.location }}</small>
+            {% endif %}
+            {% if event.user_agent %}
+            <br><small style="color: #6c757d;">User Agent: {{ event.user_agent[:80] }}...</small>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- CloudWatch Container Insights Integration -->
+<div class="cloudwatch-metrics">
+    <h4 style="color: #155724; margin-top: 0;">📈 AWS CloudWatch Container Insights Metrics</h4>
+    <p><strong>Application Performance During Anomaly Period:</strong></p>
+    <ul>
+        <li><strong>Container CPU Usage:</strong> {{ anomaly_alert.cloudwatch_metrics.cpu_usage }}% (Normal: {{ anomaly_alert.cloudwatch_metrics.normal_cpu }}%)</li>
+        <li><strong>Memory Utilization:</strong> {{ anomaly_alert.cloudwatch_metrics.memory_usage }}% (Normal: {{ anomaly_alert.cloudwatch_metrics.normal_memory }}%)</li>
+        <li><strong>Network Requests:</strong> {{ anomaly_alert.cloudwatch_metrics.request_count }} requests/min ({{ anomaly_alert.cloudwatch_metrics.request_increase }}% increase)</li>
+        <li><strong>Error Rate:</strong> {{ "%.2f"|format(anomaly_alert.cloudwatch_metrics.error_rate * 100) }}% (Normal: {{ "%.2f"|format(anomaly_alert.cloudwatch_metrics.normal_error_rate * 100) }}%)</li>
+    </ul>
+    <p><small><strong>Container Instance:</strong> {{ anomaly_alert.cloudwatch_metrics.container_id }}</small></p>
+</div>
+
+<!-- Sentry Integration -->
+<div class="sentry-integration">
+    <h4 style="color: #5d2e5d; margin-top: 0;">🔍 Sentry Error Tracking Context</h4>
+    <p><strong>Related Security Events:</strong></p>
+    {% if anomaly_alert.sentry_events %}
+    <ul>
+        {% for event in anomaly_alert.sentry_events %}
+        <li>
+            <strong>{{ event.event_type }}:</strong> {{ event.message }}
+            <br><small>Sentry Event ID: {{ event.event_id }} | Timestamp: {{ event.timestamp.strftime('%H:%M:%S UTC') }}</small>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p><em>No related Sentry events detected during anomaly period.</em></p>
+    {% endif %}
+    
+    {% if anomaly_alert.sentry_trace_id %}
+    <p><strong>Distributed Trace ID:</strong> <code>{{ anomaly_alert.sentry_trace_id }}</code></p>
+    {% endif %}
+</div>
+
+<!-- Investigation Actions -->
+<div class="investigation-actions">
+    <h4>🔬 Recommended Investigation Procedures</h4>
+    <ul class="action-list">
+        <li><strong>Immediate Actions:</strong>
+            <ul style="margin-top: 5px;">
+                <li>Review user account for unauthorized access</li>
+                <li>Verify recent password changes or account modifications</li>
+                <li>Check for concurrent sessions from multiple locations</li>
+                <li>Analyze authentication patterns for the past 24 hours</li>
+            </ul>
+        </li>
+        <li><strong>Security Team Investigation:</strong>
+            <ul style="margin-top: 5px;">
+                <li>Correlate with threat intelligence feeds for suspicious IPs</li>
+                <li>Review access logs for privilege escalation attempts</li>
+                <li>Analyze network traffic patterns during anomaly window</li>
+                <li>Validate user behavior against historical baselines</li>
+            </ul>
+        </li>
+        <li><strong>Risk Mitigation:</strong>
+            <ul style="margin-top: 5px;">
+                <li>Consider temporary account restriction if risk score > 80</li>
+                <li>Implement additional MFA requirements for high-risk sessions</li>
+                <li>Monitor for lateral movement or privilege abuse</li>
+                <li>Document findings for security audit trail</li>
+            </ul>
+        </li>
+    </ul>
+</div>
+
+<!-- Action Buttons -->
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ security_dashboard_url }}" class="button-primary">
+        View Security Dashboard
+    </a>
+    <a href="{{ investigation_link }}" class="button-secondary">
+        Start Investigation
+    </a>
+    <a href="{{ user_profile_link }}" class="button-secondary">
+        View User Profile
+    </a>
+</div>
+
+<!-- Technical Details -->
+<div class="technical-details">
+    <h4>⚙️ Technical Detection Details</h4>
+    <p><strong>ML Model Information:</strong></p>
+    <pre style="margin: 10px 0; white-space: pre-wrap;">
+Model: {{ anomaly_alert.ml_model_name }}
+Algorithm: {{ anomaly_alert.ml_algorithm }}
+Training Data: {{ anomaly_alert.ml_training_period }}
+Confidence Score: {{ "%.3f"|format(anomaly_alert.ml_confidence) }}
+Feature Vector: {{ anomaly_alert.ml_features|join(', ') }}
+Anomaly Score: {{ "%.3f"|format(anomaly_alert.anomaly_score) }}
+Threshold: {{ "%.3f"|format(anomaly_alert.anomaly_threshold) }}
+    </pre>
+    
+    <p><strong>Detection Parameters:</strong></p>
+    <pre style="margin: 10px 0; white-space: pre-wrap;">
+Time Window: {{ anomaly_alert.detection_window }} minutes
+Baseline Period: {{ anomaly_alert.baseline_period }} days
+Statistical Method: {{ anomaly_alert.statistical_method }}
+P-value: {{ "%.6f"|format(anomaly_alert.p_value) }}
+Z-score: {{ "%.3f"|format(anomaly_alert.z_score) }}
+    </pre>
+    
+    {% if anomaly_alert.flask_trace_info %}
+    <p><strong>Flask Application Trace:</strong></p>
+    <pre style="margin: 10px 0; white-space: pre-wrap;">
+Request ID: {{ anomaly_alert.flask_trace_info.request_id }}
+Route: {{ anomaly_alert.flask_trace_info.route }}
+Method: {{ anomaly_alert.flask_trace_info.method }}
+Response Time: {{ anomaly_alert.flask_trace_info.response_time }}ms
+User Agent: {{ anomaly_alert.flask_trace_info.user_agent }}
+    </pre>
+    {% endif %}
+</div>
+
+<!-- System Information -->
+<div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 20px 0; font-size: 12px; color: #6c757d;">
+    <p style="margin: 0; text-align: center;">
+        <strong>Flask Security Monitor</strong> | 
+        Alert generated at {{ anomaly_alert.generation_time.strftime('%Y-%m-%d %H:%M:%S UTC') }} | 
+        Container: {{ anomaly_alert.container_id }} | 
+        Version: {{ anomaly_alert.system_version }}
+    </p>
+</div>
+
+<!-- Emergency Contact Information -->
+<div style="border: 2px solid #dc3545; border-radius: 6px; padding: 20px; margin: 20px 0; background-color: #f8d7da;">
+    <h4 style="color: #721c24; margin-top: 0;">🚨 Emergency Response Contact</h4>
+    <p style="margin-bottom: 10px; color: #721c24;">
+        <strong>For immediate security incidents requiring urgent response:</strong>
+    </p>
+    <ul style="color: #721c24; margin: 0;">
+        <li><strong>Security Team:</strong> security@company.com | +1-555-SECURITY</li>
+        <li><strong>On-Call Engineer:</strong> oncall@company.com | Slack: #security-alerts</li>
+        <li><strong>Incident Commander:</strong> incidents@company.com | +1-555-INCIDENT</li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block footer_content %}
+{{ super() }}
+
+<!-- Security Alert Footer -->
+<div style="border-top: 2px solid #dc3545; padding-top: 20px; margin-top: 20px; text-align: center;">
+    <p style="margin: 0; font-size: 14px; color: #dc3545; font-weight: 600;">
+        🔒 This is a security-sensitive communication. Do not forward without authorization.
+    </p>
+    <p style="margin: 5px 0 0 0; font-size: 12px; color: #6c757d;">
+        Automated security alert generated by Flask Machine Learning Anomaly Detection System
+    </p>
+</div>
+{% endblock %}

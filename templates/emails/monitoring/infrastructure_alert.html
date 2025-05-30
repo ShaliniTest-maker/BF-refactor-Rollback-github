@@ -1,0 +1,581 @@
+{% extends "templates/emails/base/email_base.html" %}
+
+{% block title %}Infrastructure Alert - {{ alert_type | title }} - {{ environment | title }}{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Infrastructure Alert Specific Styles */
+    .alert-critical {
+        background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
+        color: #ffffff;
+    }
+
+    .alert-high {
+        background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+        color: #ffffff;
+    }
+
+    .alert-medium {
+        background: linear-gradient(135deg, #fbc02d 0%, #f57f17 100%);
+        color: #333333;
+    }
+
+    .alert-low {
+        background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+        color: #ffffff;
+    }
+
+    /* Metric Cards */
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin: 30px 0;
+    }
+
+    .metric-card {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .metric-card:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        transform: translateY(-2px);
+    }
+
+    .metric-card.critical {
+        border-left: 5px solid #d32f2f;
+        background: #ffebee;
+    }
+
+    .metric-card.warning {
+        border-left: 5px solid #ff9800;
+        background: #fff3e0;
+    }
+
+    .metric-card.healthy {
+        border-left: 5px solid #4caf50;
+        background: #e8f5e8;
+    }
+
+    .metric-value {
+        font-size: 32px;
+        font-weight: 700;
+        margin: 10px 0;
+        line-height: 1;
+    }
+
+    .metric-value.critical {
+        color: #d32f2f;
+    }
+
+    .metric-value.warning {
+        color: #f57c00;
+    }
+
+    .metric-value.healthy {
+        color: #4caf50;
+    }
+
+    .metric-label {
+        font-size: 14px;
+        font-weight: 600;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .metric-description {
+        font-size: 12px;
+        color: #999;
+        margin-top: 5px;
+    }
+
+    /* Container Status */
+    .container-status {
+        background: #ffffff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .container-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        border-bottom: 1px solid #e9ecef;
+        padding-bottom: 15px;
+    }
+
+    .container-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
+        margin: 0;
+    }
+
+    .status-badge {
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-badge.running {
+        background-color: #c8e6c9;
+        color: #2e7d2e;
+    }
+
+    .status-badge.degraded {
+        background-color: #fff3e0;
+        color: #e65100;
+    }
+
+    .status-badge.failed {
+        background-color: #ffcdd2;
+        color: #c62828;
+    }
+
+    .status-badge.unknown {
+        background-color: #f3e5f5;
+        color: #7b1fa2;
+    }
+
+    /* Timeline Styles */
+    .incident-timeline {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .timeline-item {
+        display: flex;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .timeline-item:last-child {
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+
+    .timeline-time {
+        font-size: 12px;
+        color: #6c757d;
+        font-weight: 600;
+        min-width: 100px;
+        margin-right: 15px;
+    }
+
+    .timeline-content {
+        flex: 1;
+        font-size: 14px;
+        color: #495057;
+    }
+
+    /* Action Items */
+    .action-items {
+        background: #e3f2fd;
+        border: 1px solid #2196f3;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .action-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1565c0;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .action-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        fill: #1565c0;
+    }
+
+    .action-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .action-item {
+        margin-bottom: 10px;
+        padding-left: 20px;
+        position: relative;
+        font-size: 14px;
+        color: #1565c0;
+    }
+
+    .action-item:before {
+        content: "→";
+        position: absolute;
+        left: 0;
+        font-weight: bold;
+        color: #1976d2;
+    }
+
+    /* Responsive adjustments */
+    @media only screen and (max-width: 600px) {
+        .metrics-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .container-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+        }
+    }
+
+    /* Dark mode adjustments */
+    @media (prefers-color-scheme: dark) {
+        .metric-card,
+        .container-status,
+        .incident-timeline {
+            background-color: #374151 !important;
+            border-color: #4b5563 !important;
+        }
+        
+        .metric-card.critical {
+            background-color: #4c1d1d !important;
+        }
+        
+        .metric-card.warning {
+            background-color: #4d2d00 !important;
+        }
+        
+        .metric-card.healthy {
+            background-color: #1e4a21 !important;
+        }
+        
+        .container-title,
+        .timeline-content {
+            color: #e5e7eb !important;
+        }
+        
+        .metric-label,
+        .timeline-time {
+            color: #9ca3af !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+<div class="logo">
+    {% block logo %}
+    <!-- Infrastructure monitoring logo/icon -->
+    {% endblock %}
+</div>
+<h1 class="header-title alert-{{ severity | lower }}">Infrastructure Alert</h1>
+<p class="header-subtitle">{{ alert_type | title }} - {{ environment | title }} Environment</p>
+{% endblock %}
+
+{% block content %}
+<!-- Alert Summary -->
+<div class="alert alert-{{ severity | lower if severity else 'warning' }}">
+    <h2 style="margin: 0 0 10px 0; font-size: 20px;">
+        🚨 {{ alert_title | default('Infrastructure Issue Detected') }}
+    </h2>
+    <p style="margin: 0; font-size: 16px;">
+        <strong>Service:</strong> {{ service_name | default('Flask Application') }}<br>
+        <strong>Environment:</strong> {{ environment | title }}<br>
+        <strong>Severity:</strong> {{ severity | title }}<br>
+        <strong>First Detected:</strong> {{ first_detected | default('Just now') }}<br>
+        <strong>Duration:</strong> {{ duration | default('Unknown') }}
+    </p>
+</div>
+
+<!-- Primary Infrastructure Metrics -->
+<div class="metrics-grid">
+    <!-- Container Health Metrics -->
+    <div class="metric-card {{ container_health_status | default('warning') }}">
+        <div class="metric-value {{ container_health_status | default('warning') }}">
+            {{ container_health_percentage | default('--') }}%
+        </div>
+        <div class="metric-label">Container Health</div>
+        <div class="metric-description">
+            {{ containers_running | default('--') }}/{{ total_containers | default('--') }} containers healthy
+        </div>
+    </div>
+
+    <!-- WSGI Server Performance -->
+    <div class="metric-card {{ wsgi_status | default('warning') }}">
+        <div class="metric-value {{ wsgi_status | default('warning') }}">
+            {{ wsgi_worker_utilization | default('--') }}%
+        </div>
+        <div class="metric-label">WSGI Worker Load</div>
+        <div class="metric-description">
+            {{ active_workers | default('--') }} active workers, {{ request_queue_depth | default('--') }} queued
+        </div>
+    </div>
+
+    <!-- Database Connectivity -->
+    <div class="metric-card {{ database_status | default('critical') }}">
+        <div class="metric-value {{ database_status | default('critical') }}">
+            {{ database_connection_utilization | default('--') }}%
+        </div>
+        <div class="metric-label">DB Pool Usage</div>
+        <div class="metric-description">
+            {{ active_connections | default('--') }}/{{ max_connections | default('--') }} connections active
+        </div>
+    </div>
+
+    <!-- AWS Service Health -->
+    <div class="metric-card {{ aws_services_status | default('warning') }}">
+        <div class="metric-value {{ aws_services_status | default('warning') }}">
+            {{ aws_services_healthy | default('--') }}/{{ total_aws_services | default('--') }}
+        </div>
+        <div class="metric-label">AWS Services</div>
+        <div class="metric-description">
+            CloudWatch, ECR, RDS status
+        </div>
+    </div>
+
+    <!-- Resource Utilization -->
+    <div class="metric-card {{ resource_status | default('warning') }}">
+        <div class="metric-value {{ resource_status | default('warning') }}">
+            {{ cpu_utilization | default('--') }}%
+        </div>
+        <div class="metric-label">CPU Utilization</div>
+        <div class="metric-description">
+            Memory: {{ memory_utilization | default('--') }}% | Disk: {{ disk_utilization | default('--') }}%
+        </div>
+    </div>
+
+    <!-- Network Performance -->
+    <div class="metric-card {{ network_status | default('healthy') }}">
+        <div class="metric-value {{ network_status | default('healthy') }}">
+            {{ network_latency | default('--') }}ms
+        </div>
+        <div class="metric-label">Network Latency</div>
+        <div class="metric-description">
+            {{ network_throughput | default('--') }} Mbps throughput
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Component Status -->
+{% if container_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">Container Orchestration Status</h3>
+        <span class="status-badge {{ container_overall_status | default('unknown') }}">
+            {{ container_overall_status | title | default('Unknown') }}
+        </span>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>ECS/EKS Cluster Health:</strong>
+    </div>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>Running Containers:</strong> {{ containers_running | default('--') }}<br>
+        • <strong>Failed Containers:</strong> {{ containers_failed | default('--') }}<br>
+        • <strong>Container Restarts (24h):</strong> {{ container_restarts_24h | default('--') }}<br>
+        • <strong>Average Container CPU:</strong> {{ avg_container_cpu | default('--') }}%<br>
+        • <strong>Average Container Memory:</strong> {{ avg_container_memory | default('--') }}%<br>
+        • <strong>Container Registry Status:</strong> {{ ecr_status | default('Unknown') }}<br>
+        {% if container_error_details %}
+        • <strong>Recent Errors:</strong> {{ container_error_details }}<br>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if wsgi_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">WSGI Server Performance</h3>
+        <span class="status-badge {{ wsgi_overall_status | default('unknown') }}">
+            {{ wsgi_overall_status | title | default('Unknown') }}
+        </span>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>Gunicorn Worker Metrics:</strong>
+    </div>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>Total Workers:</strong> {{ total_wsgi_workers | default('--') }}<br>
+        • <strong>Active Workers:</strong> {{ active_workers | default('--') }}<br>
+        • <strong>Worker Timeouts (1h):</strong> {{ worker_timeouts_1h | default('--') }}<br>
+        • <strong>Average Request Time:</strong> {{ avg_request_time | default('--') }}ms<br>
+        • <strong>Request Queue Depth:</strong> {{ request_queue_depth | default('--') }}<br>
+        • <strong>Worker Memory Usage:</strong> {{ worker_memory_avg | default('--') }}MB avg<br>
+        • <strong>Worker Restart Rate:</strong> {{ worker_restart_rate | default('--') }}/hour<br>
+        {% if wsgi_error_details %}
+        • <strong>Recent Issues:</strong> {{ wsgi_error_details }}<br>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if database_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">Database Connectivity</h3>
+        <span class="status-badge {{ database_overall_status | default('unknown') }}">
+            {{ database_overall_status | title | default('Unknown') }}
+        </span>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>SQLAlchemy Connection Pool Health:</strong>
+    </div>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>Active Connections:</strong> {{ active_connections | default('--') }}/{{ max_connections | default('--') }}<br>
+        • <strong>Pool Utilization:</strong> {{ pool_utilization | default('--') }}%<br>
+        • <strong>Connection Acquisition Time:</strong> {{ connection_acquisition_time | default('--') }}ms avg<br>
+        • <strong>Failed Connections (1h):</strong> {{ failed_connections_1h | default('--') }}<br>
+        • <strong>Connection Timeouts (1h):</strong> {{ connection_timeouts_1h | default('--') }}<br>
+        • <strong>Query Performance:</strong> {{ avg_query_time | default('--') }}ms avg<br>
+        • <strong>Database Latency:</strong> {{ database_latency | default('--') }}ms<br>
+        {% if database_error_details %}
+        • <strong>Connection Errors:</strong> {{ database_error_details }}<br>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if aws_service_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">AWS Service Health</h3>
+        <span class="status-badge {{ aws_overall_status | default('unknown') }}">
+            {{ aws_overall_status | title | default('Unknown') }}
+        </span>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>AWS Infrastructure Components:</strong>
+    </div>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>CloudWatch Status:</strong> {{ cloudwatch_status | default('Unknown') }}<br>
+        • <strong>Container Insights:</strong> {{ container_insights_status | default('Unknown') }}<br>
+        • <strong>ECR Registry:</strong> {{ ecr_status | default('Unknown') }}<br>
+        • <strong>RDS Database:</strong> {{ rds_status | default('Unknown') }}<br>
+        • <strong>Load Balancer:</strong> {{ alb_status | default('Unknown') }}<br>
+        • <strong>Auto Scaling:</strong> {{ autoscaling_status | default('Unknown') }}<br>
+        • <strong>Secrets Manager:</strong> {{ secrets_manager_status | default('Unknown') }}<br>
+        • <strong>Parameter Store:</strong> {{ parameter_store_status | default('Unknown') }}<br>
+        {% if aws_error_details %}
+        • <strong>Service Issues:</strong> {{ aws_error_details }}<br>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Incident Timeline -->
+{% if incident_timeline %}
+<div class="incident-timeline">
+    <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600; color: #333;">
+        📅 Incident Timeline
+    </h3>
+    
+    {% for event in incident_timeline %}
+    <div class="timeline-item">
+        <div class="timeline-time">{{ event.time }}</div>
+        <div class="timeline-content">{{ event.description }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Immediate Action Items -->
+<div class="action-items">
+    <h3 class="action-title">
+        <svg class="action-icon" viewBox="0 0 24 24">
+            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,14V16H13V14H11M11,8V12H13V8H11Z"/>
+        </svg>
+        Immediate Actions Required
+    </h3>
+    
+    <ul class="action-list">
+        {% if action_items %}
+            {% for action in action_items %}
+            <li class="action-item">{{ action }}</li>
+            {% endfor %}
+        {% else %}
+        <li class="action-item">Acknowledge this alert to prevent escalation</li>
+        <li class="action-item">Investigate {% if service_name %}{{ service_name }}{% else %}affected services{% endif %} for root cause</li>
+        <li class="action-item">Monitor system metrics for continued degradation</li>
+        <li class="action-item">Prepare rollback procedures if performance continues to decline</li>
+        <li class="action-item">Contact on-call engineer if issue persists beyond {{ escalation_time | default('15 minutes') }}</li>
+        {% endif %}
+    </ul>
+</div>
+
+<!-- Escalation Information -->
+<div class="security-info">
+    <h4 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,3.18L19,6.3V11C19,15.26 16.22,19.39 12,20.72C7.78,19.39 5,15.26 5,11V6.3L12,3.18M11,8V14H13V8H11M11,16V18H13V16H11Z"/>
+        </svg>
+        Escalation & Support Information
+    </h4>
+    
+    <p class="security-text">
+        <strong>Primary Contact:</strong> {{ primary_contact | default('On-call Engineer') }}<br>
+        <strong>Escalation Time:</strong> {{ escalation_time | default('15 minutes') }}<br>
+        <strong>Severity Level:</strong> {{ severity | title }} ({{ severity_description | default('See incident response playbook') }})<br>
+        <strong>Monitoring Dashboard:</strong> <a href="{{ dashboard_url | default('#') }}" style="color: #667eea;">Infrastructure Dashboard</a><br>
+        <strong>Runbook:</strong> <a href="{{ runbook_url | default('#') }}" style="color: #667eea;">{{ alert_type | title }} Response Procedures</a><br>
+        <strong>Alert ID:</strong> {{ alert_id | default('AUTO-' + timestamp) }}
+    </p>
+</div>
+
+<!-- System Information -->
+<div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0; font-size: 12px; color: #6c757d;">
+    <strong>System Information:</strong><br>
+    Environment: {{ environment | title }} | Region: {{ aws_region | default('us-east-1') }} | 
+    Application Version: {{ app_version | default('Unknown') }} | 
+    Container Image: {{ container_image | default('latest') }}<br>
+    Generated: {{ timestamp | default('now') }} | 
+    Monitoring Source: {{ monitoring_source | default('CloudWatch Container Insights') }}
+</div>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This infrastructure alert was generated automatically by the Flask application monitoring system.
+    Critical alerts require immediate attention from the operations team.
+</p>
+
+<div class="footer-links">
+    {% block footer_links %}
+    <a href="{{ dashboard_url | default('#') }}" class="footer-link">Infrastructure Dashboard</a>
+    <a href="{{ runbook_url | default('#') }}" class="footer-link">Response Runbook</a>
+    <a href="{{ support_url | default('#') }}" class="footer-link">Contact Support</a>
+    {% endblock %}
+</div>
+
+<p class="footer-copyright">
+    {% block copyright %}
+    © {{ current_year | default('2024') }} Infrastructure Monitoring System. Alert ID: {{ alert_id | default('AUTO-' + timestamp) }}
+    {% endblock %}
+</p>
+{% endblock %}
