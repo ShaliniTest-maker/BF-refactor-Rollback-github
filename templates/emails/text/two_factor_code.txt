@@ -1,65 +1,369 @@
-SECURITY VERIFICATION - TWO-FACTOR AUTHENTICATION CODE
-================================================================
+{#
+Two-Factor Authentication Code Text Email Template
+==================================================
 
-Your Verification Code: {{ verification_code }}
+This template provides a secure, accessible plain-text email format for delivering
+two-factor authentication codes and OTP tokens to users. Designed for text-only
+email clients and accessibility compliance, it ensures clear communication of
+authentication codes with appropriate security instructions and usage guidance.
 
-================================================================
+Template Features:
+- Clear, prominent display of authentication codes
+- Security instructions and best practices
+- Expiration time information and urgency indicators
+- Accessibility compliance for screen readers and text-only clients
+- Comprehensive usage instructions and troubleshooting guidance
+- Professional security messaging and branding consistency
 
-Hello {{ user_name or "User" }},
+Usage Context:
+- Two-factor authentication workflows
+- One-time password delivery for MFA
+- Account security verification processes
+- Login verification for enhanced security
+- Password reset confirmation codes
+- Account access validation requests
 
-You have requested to sign in to your account. To complete your authentication, please use the verification code above.
+Security Considerations:
+- Authentication codes displayed in accessible text format
+- Clear expiration timing to encourage prompt usage
+- Security warnings about code protection and sharing
+- Instructions for secure code entry and verification
+- Guidance on handling suspicious authentication requests
+#}
 
-VERIFICATION DETAILS:
-- Account: {{ user_email }}
-- Request Time: {{ timestamp or "Now" }}
-- IP Address: {{ ip_address or "Not available" }}
-- Browser: {{ user_agent or "Not available" }}
-- Expires: {{ expiration_time or "10 minutes from request time" }}
+{#- Extend the base text email template for consistent structure -#}
+{% extends "templates/emails/base/base.txt" %}
 
-IMPORTANT SECURITY INFORMATION:
-- This code is valid for {{ expiration_minutes or "10" }} minutes only
-- Use this code only on the website or application where you initiated the sign-in
-- Never share this code with anyone - legitimate services will never ask for it via email, phone, or text
-- If you did not request this code, your account may be compromised
+{#- Email Subject Configuration -#}
+{% block subject -%}
+Your Two-Factor Authentication Code
+{%- endblock %}
 
-HOW TO USE YOUR CODE:
-1. Return to the sign-in page where you were prompted for verification
-2. Enter the 6-digit code exactly as shown above: {{ verification_code }}
-3. Complete your sign-in process
-4. You will be securely logged into your account
+{#- Pre-header text for email preview -#}
+{% block preheader -%}
+Security code: {{ auth_code }} - Expires in {{ expiration_minutes }} minutes
+{%- endblock %}
 
-SECURITY BEST PRACTICES:
-- Always verify the website URL before entering your code
-- Ensure you are on a secure connection (https://)
-- Clear your browser cache after signing in on shared computers
-- Enable additional security features in your account settings
+{#- Main content area with authentication code and instructions -#}
+{% block content -%}
+Hello {{ user_name or 'Valued User' }},
 
-TROUBLESHOOTING:
-- Code not working? Make sure you're entering all 6 digits correctly
-- Code expired? Request a new verification code from the sign-in page
-- Still having issues? Contact our support team for assistance
+A two-factor authentication code has been requested for your account. Use this
+code to complete your secure login or verification process.
+
+===============================================================================
+                            AUTHENTICATION CODE
+===============================================================================
+
+                                {{ auth_code }}
+
+===============================================================================
+
+⏰ CODE EXPIRATION: This code expires in {{ expiration_minutes or '10' }} minutes
+   (at {{ expiration_time }})
+
+🔒 SECURITY: This code provides access to your account. Keep it confidential.
+
+📱 USAGE: Enter this code in your authentication app or login screen when prompted.
+
+{% if ip_address -%}
+This request originated from: {{ ip_address }}
+{% endif -%}
+{% if location -%}
+Approximate location: {{ location }}
+{% endif -%}
+{% if device_info -%}
+Device information: {{ device_info }}
+{% endif %}
+
+{%- endblock %}
+
+{#- Additional security information and instructions -#}
+{% block additional_info -%}
+IMPORTANT SECURITY INFORMATION
+{{ create_section_divider('=', 78) }}
+
+✓ VERIFY REQUEST: Only use this code if you initiated a login or authentication
+  request. If you did not request this code, your account may be at risk.
+
+✓ CODE PROTECTION: Never share this code with anyone. Legitimate support staff
+  will never ask for your authentication codes via email or phone.
+
+✓ ONE-TIME USE: This code can only be used once and will become invalid after
+  {{ expiration_minutes or '10' }} minutes or after successful use.
+
+✓ SECURE ENVIRONMENT: Enter this code only on official application websites
+  or trusted applications. Verify the URL before entering your code.
+
+AUTHENTICATION CODE DETAILS
+{{ create_section_divider('-', 78) }}
+{{ format_key_value('Code', auth_code) }}
+{{ format_key_value('Generated at', generated_time) }}
+{{ format_key_value('Expires at', expiration_time) }}
+{{ format_key_value('Valid for', expiration_minutes + ' minutes') }}
+{% if request_id -%}
+{{ format_key_value('Request ID', request_id) }}
+{% endif -%}
+{{ format_key_value('Code type', code_type or 'Two-Factor Authentication') }}
+
+REQUEST DETAILS
+{{ create_section_divider('-', 78) }}
+{% if ip_address -%}
+{{ format_key_value('IP Address', ip_address) }}
+{% endif -%}
+{% if location -%}
+{{ format_key_value('Location', location) }}
+{% endif -%}
+{% if device_info -%}
+{{ format_key_value('Device', device_info) }}
+{% endif -%}
+{% if browser_info -%}
+{{ format_key_value('Browser', browser_info) }}
+{% endif -%}
+{{ format_key_value('Request time', request_time or generated_time) }}
+{%- endblock %}
+
+{#- Step-by-step usage instructions -#}
+{% block action_items -%}
+HOW TO USE YOUR AUTHENTICATION CODE
+{{ create_section_divider('=', 78) }}
+
+STEP 1: VERIFY THE REQUEST
+{{ format_list_item('Confirm you initiated this authentication request') }}
+{{ format_list_item('Check the request details above for accuracy') }}
+{{ format_list_item('Verify the time and location match your activity') }}
+
+STEP 2: ENTER THE CODE
+{{ format_list_item('Return to your login screen or authentication prompt') }}
+{{ format_list_item('Enter the code exactly as shown: ' + auth_code) }}
+{{ format_list_item('Complete the entry within ' + (expiration_minutes or '10') + ' minutes') }}
+
+STEP 3: COMPLETE AUTHENTICATION
+{{ format_list_item('Submit the code to complete your login') }}
+{{ format_list_item('Wait for confirmation of successful authentication') }}
+{{ format_list_item('Begin using your account securely') }}
+
+IF YOU EXPERIENCE ISSUES:
+{{ format_list_item('Ensure you entered the code correctly (case-sensitive)') }}
+{{ format_list_item('Verify the code has not expired') }}
+{{ format_list_item('Try requesting a new code if this one fails') }}
+{{ format_list_item('Contact support if problems persist') }}
 
 IF YOU DID NOT REQUEST THIS CODE:
-1. Do not use this verification code
-2. Change your account password immediately
-3. Review your account activity for unauthorized access
-4. Contact our security team if you suspect unauthorized access
-5. Consider enabling additional security measures on your account
+{{ format_list_item('Do not use this authentication code') }}
+{{ format_list_item('Change your account password immediately') }}
+{{ format_list_item('Review recent account activity for unauthorized access') }}
+{{ format_list_item('Enable additional security features if available') }}
+{{ format_list_item('Contact our security team: security@company.com') }}
+{%- endblock %}
 
-ACCOUNT SECURITY REMINDER:
-Your account security is important to us. We use two-factor authentication to protect your information and ensure that only you can access your account. This additional verification step helps keep your data safe from unauthorized access.
+{#- Custom contact information for authentication support -#}
+{% block contact_info -%}
+AUTHENTICATION SUPPORT
+{{ create_section_divider('=', 78) }}
 
-================================================================
+Need help with two-factor authentication?
+- Email: security@company.com
+- Phone: 1-800-SECURITY (1-800-732-8748)
+- Help Center: https://help.company.com/two-factor-auth
+- Emergency Account Recovery: https://app.company.com/account-recovery
 
-This is an automated security message from {{ company_name or "our system" }}.
-For security reasons, please do not reply to this email.
+SECURITY TEAM AVAILABILITY
+- Critical Issues: 24/7 emergency support available
+- General Support: Monday - Friday, 9:00 AM - 6:00 PM EST
+- Response Time: Critical issues within 30 minutes
+- Account Recovery: Available 24/7 for locked accounts
 
-Support: {{ support_email or "Contact your system administrator" }}
-Security: {{ security_email or "Contact your system administrator" }}
+ADDITIONAL RESOURCES
+- Two-Factor Authentication Guide: https://help.company.com/2fa-guide
+- Account Security Best Practices: https://help.company.com/security-tips
+- Supported Authenticator Apps: https://help.company.com/authenticator-apps
+- Backup Code Management: https://help.company.com/backup-codes
+{%- endblock %}
 
-================================================================
+{#- Custom footer with security-specific information -#}
+{% block footer -%}
 
-TEXT-ONLY EMAIL NOTICE:
-This message has been formatted for text-only email clients to ensure accessibility compliance. All essential information for completing your two-factor authentication is included in this plain text format.
+===============================================================================
+ACCOUNT SECURITY - Two-Factor Authentication System
+===============================================================================
 
-{{ company_name or "Company" }} - Secure Authentication System
+This authentication code was generated in response to a security verification
+request for your account. Two-factor authentication provides an additional
+layer of security to protect your account from unauthorized access.
+
+{% block security_disclaimer -%}
+SECURITY REMINDER: This email contains sensitive authentication information.
+Delete this email after using the code to maintain account security.
+
+AUTOMATED MESSAGE: This email was automatically generated by our security
+system in response to an authentication request. Please do not reply to
+this email address.
+
+{% endblock -%}
+
+{% block unsubscribe_info -%}
+Email Preference Note: Authentication security emails cannot be disabled as
+they are essential for account security. You can manage other email preferences at:
+https://app.company.com/preferences
+
+{%- endblock %}
+
+{% block legal_info -%}
+© {% now 'Y' %} Company Name. All rights reserved.
+
+This message contains time-sensitive security information and is intended only
+for the account holder. If you have received this message in error or are not
+the intended recipient, please delete it immediately and notify our security
+team at security@company.com.
+
+Unauthorized use, distribution, or disclosure of this authentication code is
+strictly prohibited and may violate applicable laws.
+
+{%- endblock %}
+
+{% block compliance_info -%}
+Company Name - Security Department
+123 Business Street
+City, State 12345
+United States
+
+Security Incident Reporting: security@company.com
+Account Recovery Emergency Line: 1-800-SECURITY
+Privacy Policy: https://company.com/privacy
+Terms of Service: https://company.com/terms
+
+{%- endblock %}
+{%- endblock %}
+
+{#- Authentication-specific utility macros -#}
+{%- macro format_auth_code(code, spacing=true) -%}
+{% if spacing -%}
+{{ code[:3] }} {{ code[3:] if code|length > 3 else '' }}
+{% else -%}
+{{ code }}
+{% endif -%}
+{%- endmacro -%}
+
+{%- macro format_expiration_warning(minutes) -%}
+⚠️  URGENT: This code expires in {{ minutes }} minute{{ 's' if minutes != 1 else '' }}!
+{%- endmacro -%}
+
+{%- macro format_security_level(level) -%}
+{% if level == 'high' -%}
+🔴 HIGH SECURITY: Extra verification required
+{% elif level == 'medium' -%}
+🟡 MEDIUM SECURITY: Standard verification process
+{% else -%}
+🟢 STANDARD SECURITY: Routine authentication
+{% endif -%}
+{%- endmacro -%}
+
+{%- macro format_code_display(code, emphasis=true) -%}
+{% if emphasis -%}
+{{ create_section_divider('=', 78) }}
+{{ ' ' * ((78 - code|length) // 2) }}{{ code }}
+{{ create_section_divider('=', 78) }}
+{% else -%}
+Authentication Code: {{ code }}
+{% endif -%}
+{%- endmacro -%}
+
+{%- macro generate_security_checklist() -%}
+SECURITY CHECKLIST
+{{ create_section_divider('-', 40) }}
+{{ format_list_item('Verify you requested this code', '☐ ') }}
+{{ format_list_item('Check request location and time', '☐ ') }}
+{{ format_list_item('Enter code in secure environment', '☐ ') }}
+{{ format_list_item('Delete this email after use', '☐ ') }}
+{{ format_list_item('Monitor account for suspicious activity', '☐ ') }}
+{%- endmacro -%}
+
+{%- macro format_trouble_shooting_steps() -%}
+TROUBLESHOOTING STEPS
+{{ create_section_divider('-', 40) }}
+{{ format_list_item('Code not working? Check for typos and case sensitivity') }}
+{{ format_list_item('Code expired? Request a new authentication code') }}
+{{ format_list_item('Multiple attempts failed? Contact security support') }}
+{{ format_list_item('Suspicious activity? Change password immediately') }}
+{{ format_list_item('Account locked? Use emergency recovery options') }}
+{%- endmacro -%}
+
+{#-
+Template Usage Examples for Two-Factor Authentication:
+====================================================
+
+1. Standard 2FA Login Code:
+{% set auth_code = '123456' %}
+{% set user_name = 'John Doe' %}
+{% set expiration_minutes = '10' %}
+{% set expiration_time = '2024-01-15 15:45:00 UTC' %}
+{% set generated_time = '2024-01-15 15:35:00 UTC' %}
+{% set ip_address = '192.168.1.100' %}
+{% set location = 'New York, NY, United States' %}
+{% set device_info = 'Chrome on Windows 11' %}
+
+2. Emergency Access Code:
+{% set auth_code = '789012' %}
+{% set user_name = 'Jane Smith' %}
+{% set code_type = 'Emergency Access Code' %}
+{% set expiration_minutes = '5' %}
+{% set security_level = 'high' %}
+
+3. Password Reset Verification:
+{% set auth_code = '345678' %}
+{% set code_type = 'Password Reset Verification' %}
+{% set expiration_minutes = '15' %}
+{% set request_id = 'PWD-RST-20240115-001' %}
+
+4. Account Recovery Code:
+{% set auth_code = '901234' %}
+{% set code_type = 'Account Recovery Code' %}
+{% set expiration_minutes = '30' %}
+{% set security_level = 'high' %}
+
+Template Variables Reference:
+============================
+Required Variables:
+- auth_code: The authentication code (string, 6-8 digits)
+- expiration_time: When the code expires (formatted datetime string)
+
+Optional Variables:
+- user_name: Recipient name (defaults to 'Valued User')
+- expiration_minutes: Minutes until expiration (defaults to '10')
+- generated_time: When code was created (defaults to current time)
+- request_time: When authentication was requested
+- ip_address: Source IP address of the request
+- location: Approximate geographic location
+- device_info: Browser and device information
+- browser_info: Detailed browser information
+- request_id: Unique identifier for the auth request
+- code_type: Type of authentication (defaults to 'Two-Factor Authentication')
+- security_level: 'high', 'medium', or 'standard'
+
+Accessibility Features:
+======================
+- Clear, high-contrast text formatting
+- Logical reading order for screen readers
+- Descriptive headers and section dividers
+- Consistent spacing and indentation
+- Plain language instructions
+- Step-by-step guidance
+- Prominent code display
+- Time-sensitive information clearly marked
+- Security warnings emphasized
+- Contact information easily accessible
+
+Security Implementation:
+=======================
+- Code displayed prominently but securely
+- Clear expiration timing
+- Security warnings and best practices
+- Instructions for protecting codes
+- Guidance on suspicious activity
+- Emergency contact information
+- Secure usage instructions
+- Account protection guidance
+- Incident reporting procedures
+- Privacy and security compliance
+-#}
