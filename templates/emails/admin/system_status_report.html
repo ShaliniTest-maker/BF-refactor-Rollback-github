@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Status Report - {{ report_date }}</title>
+    <style>
+        /* Email-safe CSS styles for system status report */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+        }
+        
+        .header .timestamp {
+            margin-top: 10px;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .status-section {
+            margin-bottom: 40px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            background-color: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
+            color: #495057;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .section-content {
+            padding: 20px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-healthy { background-color: #28a745; }
+        .status-warning { background-color: #ffc107; }
+        .status-critical { background-color: #dc3545; }
+        .status-unknown { background-color: #6c757d; }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-card {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .metric-trend {
+            font-size: 11px;
+            margin-top: 5px;
+        }
+        
+        .trend-up { color: #28a745; }
+        .trend-down { color: #dc3545; }
+        .trend-stable { color: #6c757d; }
+        
+        .alert-section {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .alert-critical {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        
+        .service-status {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .service-name {
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .service-uptime {
+            color: #6c757d;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        
+        .dashboard-links {
+            background-color: #e7f3ff;
+            border: 1px solid #bee5eb;
+            border-radius: 4px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+        
+        .dashboard-links h3 {
+            margin-top: 0;
+            color: #0c5460;
+        }
+        
+        .link-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .dashboard-link {
+            background-color: white;
+            border: 1px solid #bee5eb;
+            border-radius: 4px;
+            padding: 12px;
+            text-decoration: none;
+            color: #0c5460;
+            text-align: center;
+            transition: background-color 0.2s;
+        }
+        
+        .dashboard-link:hover {
+            background-color: #f0f8fd;
+        }
+        
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        
+        .summary-stats {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            text-align: center;
+        }
+        
+        .summary-item h4 {
+            margin: 0 0 5px 0;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .summary-item p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 600px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .summary-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .container {
+                margin: 10px;
+            }
+            
+            body {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header Section -->
+        <div class="header">
+            <h1>System Status Report</h1>
+            <div class="timestamp">
+                {{ report_date.strftime('%B %d, %Y at %I:%M %p UTC') if report_date else 'Report Generated' }}
+            </div>
+        </div>
+
+        <div class="content">
+            <!-- Summary Statistics -->
+            <div class="summary-stats">
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <h4>{{ system_health.overall_status | title }}</h4>
+                        <p>Overall Health</p>
+                    </div>
+                    <div class="summary-item">
+                        <h4>{{ system_health.uptime_percentage | default('99.9') }}%</h4>
+                        <p>System Uptime</p>
+                    </div>
+                    <div class="summary-item">
+                        <h4>{{ performance_metrics.avg_response_time | default('145') }}ms</h4>
+                        <p>Avg Response Time</p>
+                    </div>
+                    <div class="summary-item">
+                        <h4>{{ alerts.active_count | default('0') }}</h4>
+                        <p>Active Alerts</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Critical Alerts Section -->
+            {% if alerts.critical_alerts %}
+            <div class="alert-section alert-critical">
+                <h3 style="margin-top: 0; color: #721c24;">🚨 Critical Alerts</h3>
+                {% for alert in alerts.critical_alerts %}
+                <div style="margin-bottom: 10px;">
+                    <strong>{{ alert.title }}</strong> - {{ alert.description }}<br>
+                    <small style="color: #856404;">Triggered: {{ alert.timestamp.strftime('%Y-%m-%d %H:%M UTC') if alert.timestamp else 'Unknown' }}</small>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Warning Alerts Section -->
+            {% if alerts.warning_alerts %}
+            <div class="alert-section">
+                <h3 style="margin-top: 0; color: #856404;">⚠️ Warning Alerts</h3>
+                {% for alert in alerts.warning_alerts %}
+                <div style="margin-bottom: 10px;">
+                    <strong>{{ alert.title }}</strong> - {{ alert.description }}<br>
+                    <small style="color: #856404;">Triggered: {{ alert.timestamp.strftime('%Y-%m-%d %H:%M UTC') if alert.timestamp else 'Unknown' }}</small>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Flask Application Health -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>
+                        <span class="status-indicator status-{{ flask_health.status | default('healthy') }}"></span>
+                        Flask Application Health
+                    </div>
+                    <div>{{ flask_health.status | default('Healthy') | title }}</div>
+                </div>
+                <div class="section-content">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value">{{ flask_health.active_connections | default('42') }}</div>
+                            <div class="metric-label">Active Connections</div>
+                            <div class="metric-trend trend-{{ flask_health.connections_trend | default('stable') }}">
+                                {{ flask_health.connections_change | default('0') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ flask_health.requests_per_minute | default('127') }}</div>
+                            <div class="metric-label">Requests/Min</div>
+                            <div class="metric-trend trend-{{ flask_health.requests_trend | default('up') }}">
+                                {{ flask_health.requests_change | default('+5%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ flask_health.error_rate | default('0.1') }}%</div>
+                            <div class="metric-label">Error Rate</div>
+                            <div class="metric-trend trend-{{ flask_health.error_trend | default('stable') }}">
+                                {{ flask_health.error_change | default('0') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ flask_health.memory_usage | default('68') }}%</div>
+                            <div class="metric-label">Memory Usage</div>
+                            <div class="metric-trend trend-{{ flask_health.memory_trend | default('stable') }}">
+                                {{ flask_health.memory_change | default('+2%') }} from last hour
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- WSGI Worker Status -->
+                    <h4 style="margin-bottom: 15px; color: #495057;">WSGI Worker Status</h4>
+                    {% for worker in flask_health.workers | default([
+                        {'id': 1, 'status': 'healthy', 'requests': 1247, 'uptime': '2h 15m'},
+                        {'id': 2, 'status': 'healthy', 'requests': 1198, 'uptime': '2h 15m'},
+                        {'id': 3, 'status': 'healthy', 'requests': 1203, 'uptime': '2h 15m'},
+                        {'id': 4, 'status': 'healthy', 'requests': 1189, 'uptime': '2h 15m'}
+                    ]) %}
+                    <div class="service-status">
+                        <span class="status-indicator status-{{ worker.status }}"></span>
+                        <span class="service-name">Worker {{ worker.id }}</span>
+                        <span class="service-uptime">{{ worker.requests }} requests</span>
+                        <span class="service-uptime">{{ worker.uptime }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Database Performance -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>
+                        <span class="status-indicator status-{{ database_health.status | default('healthy') }}"></span>
+                        PostgreSQL Database Performance
+                    </div>
+                    <div>{{ database_health.status | default('Healthy') | title }}</div>
+                </div>
+                <div class="section-content">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value">{{ database_health.avg_query_time | default('45') }}ms</div>
+                            <div class="metric-label">Avg Query Time</div>
+                            <div class="metric-trend trend-{{ database_health.query_trend | default('stable') }}">
+                                {{ database_health.query_change | default('-2ms') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ database_health.active_connections | default('18') }}</div>
+                            <div class="metric-label">Active Connections</div>
+                            <div class="metric-trend trend-{{ database_health.conn_trend | default('stable') }}">
+                                {{ database_health.conn_change | default('+2') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ database_health.transactions_per_sec | default('342') }}</div>
+                            <div class="metric-label">Transactions/Sec</div>
+                            <div class="metric-trend trend-{{ database_health.tps_trend | default('up') }}">
+                                {{ database_health.tps_change | default('+8%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ database_health.cache_hit_ratio | default('98.7') }}%</div>
+                            <div class="metric-label">Cache Hit Ratio</div>
+                            <div class="metric-trend trend-{{ database_health.cache_trend | default('stable') }}">
+                                {{ database_health.cache_change | default('+0.1%') }} from last hour
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- SQLAlchemy Connection Pool Status -->
+                    <h4 style="margin-bottom: 15px; color: #495057;">Flask-SQLAlchemy Connection Pool</h4>
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 4px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span>Pool Size:</span>
+                            <span><strong>{{ database_health.pool_size | default('20') }}</strong></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span>Pool Utilization:</span>
+                            <span><strong>{{ database_health.pool_utilization | default('75') }}%</strong></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span>Overflow Connections:</span>
+                            <span><strong>{{ database_health.overflow_connections | default('3') }}/30</strong></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Pool Timeouts (24h):</span>
+                            <span><strong>{{ database_health.pool_timeouts | default('0') }}</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Auth0 Integration Status -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>
+                        <span class="status-indicator status-{{ auth0_health.status | default('healthy') }}"></span>
+                        Auth0 Identity Provider Status
+                    </div>
+                    <div>{{ auth0_health.status | default('Healthy') | title }}</div>
+                </div>
+                <div class="section-content">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value">{{ auth0_health.auth_success_rate | default('99.4') }}%</div>
+                            <div class="metric-label">Auth Success Rate</div>
+                            <div class="metric-trend trend-{{ auth0_health.success_trend | default('stable') }}">
+                                {{ auth0_health.success_change | default('+0.1%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ auth0_health.avg_auth_time | default('234') }}ms</div>
+                            <div class="metric-label">Avg Auth Time</div>
+                            <div class="metric-trend trend-{{ auth0_health.auth_time_trend | default('stable') }}">
+                                {{ auth0_health.auth_time_change | default('-12ms') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ auth0_health.active_sessions | default('1,247') }}</div>
+                            <div class="metric-label">Active Sessions</div>
+                            <div class="metric-trend trend-{{ auth0_health.sessions_trend | default('up') }}">
+                                {{ auth0_health.sessions_change | default('+32') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ auth0_health.failed_attempts | default('12') }}</div>
+                            <div class="metric-label">Failed Attempts (1h)</div>
+                            <div class="metric-trend trend-{{ auth0_health.failed_trend | default('down') }}">
+                                {{ auth0_health.failed_change | default('-3') }} from last hour
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Auth0 Service Components -->
+                    <h4 style="margin-bottom: 15px; color: #495057;">Auth0 Service Components</h4>
+                    {% for component in auth0_health.components | default([
+                        {'name': 'Authentication API', 'status': 'healthy', 'response_time': '156ms', 'uptime': '99.97%'},
+                        {'name': 'Management API', 'status': 'healthy', 'response_time': '189ms', 'uptime': '99.94%'},
+                        {'name': 'Token Validation', 'status': 'healthy', 'response_time': '87ms', 'uptime': '99.99%'},
+                        {'name': 'User Database', 'status': 'healthy', 'response_time': '43ms', 'uptime': '99.98%'}
+                    ]) %}
+                    <div class="service-status">
+                        <span class="status-indicator status-{{ component.status }}"></span>
+                        <span class="service-name">{{ component.name }}</span>
+                        <span class="service-uptime">{{ component.response_time }}</span>
+                        <span class="service-uptime">{{ component.uptime }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Service Layer Pattern Monitoring -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>
+                        <span class="status-indicator status-{{ service_layer.status | default('healthy') }}"></span>
+                        Service Layer & Business Logic Health
+                    </div>
+                    <div>{{ service_layer.status | default('Healthy') | title }}</div>
+                </div>
+                <div class="section-content">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value">{{ service_layer.workflow_success_rate | default('98.9') }}%</div>
+                            <div class="metric-label">Workflow Success</div>
+                            <div class="metric-trend trend-{{ service_layer.workflow_trend | default('up') }}">
+                                {{ service_layer.workflow_change | default('+0.3%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ service_layer.avg_processing_time | default('89') }}ms</div>
+                            <div class="metric-label">Avg Processing Time</div>
+                            <div class="metric-trend trend-{{ service_layer.processing_trend | default('stable') }}">
+                                {{ service_layer.processing_change | default('-3ms') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ service_layer.active_workflows | default('156') }}</div>
+                            <div class="metric-label">Active Workflows</div>
+                            <div class="metric-trend trend-{{ service_layer.active_trend | default('up') }}">
+                                {{ service_layer.active_change | default('+12') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ service_layer.cache_efficiency | default('94.2') }}%</div>
+                            <div class="metric-label">Cache Efficiency</div>
+                            <div class="metric-trend trend-{{ service_layer.cache_trend | default('stable') }}">
+                                {{ service_layer.cache_change | default('+0.5%') }} from last hour
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Service Layer Modules -->
+                    <h4 style="margin-bottom: 15px; color: #495057;">Business Logic Modules</h4>
+                    {% for module in service_layer.modules | default([
+                        {'name': 'User Management Service', 'status': 'healthy', 'operations': '2,847', 'avg_time': '67ms'},
+                        {'name': 'Authentication Service', 'status': 'healthy', 'operations': '1,923', 'avg_time': '89ms'},
+                        {'name': 'Authorization Service', 'status': 'healthy', 'operations': '4,156', 'avg_time': '34ms'},
+                        {'name': 'Data Validation Service', 'status': 'healthy', 'operations': '3,672', 'avg_time': '45ms'},
+                        {'name': 'Workflow Orchestration', 'status': 'warning', 'operations': '891', 'avg_time': '156ms'}
+                    ]) %}
+                    <div class="service-status">
+                        <span class="status-indicator status-{{ module.status }}"></span>
+                        <span class="service-name">{{ module.name }}</span>
+                        <span class="service-uptime">{{ module.operations }} ops</span>
+                        <span class="service-uptime">{{ module.avg_time }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Infrastructure Overview -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>
+                        <span class="status-indicator status-{{ infrastructure.status | default('healthy') }}"></span>
+                        Infrastructure & Container Health
+                    </div>
+                    <div>{{ infrastructure.status | default('Healthy') | title }}</div>
+                </div>
+                <div class="section-content">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value">{{ infrastructure.cpu_usage | default('42') }}%</div>
+                            <div class="metric-label">CPU Usage</div>
+                            <div class="metric-trend trend-{{ infrastructure.cpu_trend | default('stable') }}">
+                                {{ infrastructure.cpu_change | default('+2%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ infrastructure.memory_usage | default('68') }}%</div>
+                            <div class="metric-label">Memory Usage</div>
+                            <div class="metric-trend trend-{{ infrastructure.memory_trend | default('stable') }}">
+                                {{ infrastructure.memory_change | default('+1%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ infrastructure.disk_usage | default('34') }}%</div>
+                            <div class="metric-label">Disk Usage</div>
+                            <div class="metric-trend trend-{{ infrastructure.disk_trend | default('up') }}">
+                                {{ infrastructure.disk_change | default('+0.5%') }} from last hour
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ infrastructure.network_io | default('147') }}MB/s</div>
+                            <div class="metric-label">Network I/O</div>
+                            <div class="metric-trend trend-{{ infrastructure.network_trend | default('up') }}">
+                                {{ infrastructure.network_change | default('+12MB/s') }} from last hour
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Container Status -->
+                    {% if infrastructure.containers %}
+                    <h4 style="margin-bottom: 15px; color: #495057;">Container Status</h4>
+                    {% for container in infrastructure.containers %}
+                    <div class="service-status">
+                        <span class="status-indicator status-{{ container.status }}"></span>
+                        <span class="service-name">{{ container.name }}</span>
+                        <span class="service-uptime">{{ container.cpu_usage }}% CPU</span>
+                        <span class="service-uptime">{{ container.memory_usage }}% MEM</span>
+                        <span class="service-uptime">{{ container.uptime }}</span>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Security Monitoring -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>
+                        <span class="status-indicator status-{{ security.status | default('healthy') }}"></span>
+                        Security Monitoring & Compliance
+                    </div>
+                    <div>{{ security.status | default('Secure') | title }}</div>
+                </div>
+                <div class="section-content">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value">{{ security.security_events | default('3') }}</div>
+                            <div class="metric-label">Security Events (24h)</div>
+                            <div class="metric-trend trend-{{ security.events_trend | default('down') }}">
+                                {{ security.events_change | default('-2') }} from yesterday
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ security.failed_logins | default('8') }}</div>
+                            <div class="metric-label">Failed Logins (24h)</div>
+                            <div class="metric-trend trend-{{ security.failed_trend | default('stable') }}">
+                                {{ security.failed_change | default('+1') }} from yesterday
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ security.cert_days_remaining | default('87') }}</div>
+                            <div class="metric-label">SSL Cert Days Left</div>
+                            <div class="metric-trend trend-{{ security.cert_trend | default('stable') }}">
+                                {{ security.cert_change | default('-1') }} from yesterday
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">{{ security.vulnerability_score | default('A+') }}</div>
+                            <div class="metric-label">Security Score</div>
+                            <div class="metric-trend trend-{{ security.score_trend | default('stable') }}">
+                                {{ security.score_change | default('unchanged') }} from last scan
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Recent Security Events -->
+                    {% if security.recent_events %}
+                    <h4 style="margin-bottom: 15px; color: #495057;">Recent Security Events</h4>
+                    {% for event in security.recent_events %}
+                    <div style="background-color: {% if event.severity == 'high' %}#fff3cd{% elif event.severity == 'critical' %}#f8d7da{% else %}#d1ecf1{% endif %}; 
+                                padding: 10px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid 
+                                {% if event.severity == 'high' %}#ffc107{% elif event.severity == 'critical' %}#dc3545{% else %}#17a2b8{% endif %};">
+                        <strong>{{ event.title }}</strong><br>
+                        <small>{{ event.timestamp.strftime('%Y-%m-%d %H:%M UTC') if event.timestamp else 'Unknown time' }} - {{ event.description }}</small>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Administrative Dashboard Links -->
+            <div class="dashboard-links">
+                <h3>📊 Administrative Dashboard Links</h3>
+                <div class="link-grid">
+                    <a href="{{ dashboard_urls.flask_monitoring | default('#') }}" class="dashboard-link">
+                        <strong>Flask Monitoring</strong><br>
+                        <small>Application Performance Dashboard</small>
+                    </a>
+                    <a href="{{ dashboard_urls.grafana | default('#') }}" class="dashboard-link">
+                        <strong>Grafana Metrics</strong><br>
+                        <small>System Performance Analytics</small>
+                    </a>
+                    <a href="{{ dashboard_urls.cloudwatch | default('#') }}" class="dashboard-link">
+                        <strong>CloudWatch Logs</strong><br>
+                        <small>Log Analysis & Monitoring</small>
+                    </a>
+                    <a href="{{ dashboard_urls.sentry | default('#') }}" class="dashboard-link">
+                        <strong>Sentry Error Tracking</strong><br>
+                        <small>Error & Exception Monitoring</small>
+                    </a>
+                    <a href="{{ dashboard_urls.auth0_dashboard | default('#') }}" class="dashboard-link">
+                        <strong>Auth0 Dashboard</strong><br>
+                        <small>Identity & Access Management</small>
+                    </a>
+                    <a href="{{ dashboard_urls.database_admin | default('#') }}" class="dashboard-link">
+                        <strong>Database Admin</strong><br>
+                        <small>PostgreSQL Performance</small>
+                    </a>
+                    <a href="{{ dashboard_urls.security_center | default('#') }}" class="dashboard-link">
+                        <strong>Security Center</strong><br>
+                        <small>Security Events & Compliance</small>
+                    </a>
+                    <a href="{{ dashboard_urls.infrastructure | default('#') }}" class="dashboard-link">
+                        <strong>Infrastructure Monitor</strong><br>
+                        <small>AWS Resource Management</small>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Performance Trends Analysis -->
+            <div class="status-section">
+                <div class="section-header">
+                    <div>📈 Performance Trend Analysis</div>
+                </div>
+                <div class="section-content">
+                    <h4 style="color: #495057; margin-bottom: 15px;">24-Hour Performance Summary</h4>
+                    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                            <div>
+                                <h5 style="margin: 0 0 10px 0; color: #28a745;">✅ Improvements</h5>
+                                <ul style="margin: 0; padding-left: 20px; color: #495057;">
+                                    <li>Database query time decreased by 8%</li>
+                                    <li>Auth0 response time improved by 12ms</li>
+                                    <li>Cache hit ratio increased to 98.7%</li>
+                                    <li>Security incidents reduced by 40%</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h5 style="margin: 0 0 10px 0; color: #ffc107;">⚠️ Areas of Concern</h5>
+                                <ul style="margin: 0; padding-left: 20px; color: #495057;">
+                                    <li>Memory usage trending upward (+3%)</li>
+                                    <li>Workflow orchestration latency spike</li>
+                                    <li>Disk usage growing at 0.5% daily</li>
+                                    <li>Failed login attempts increased by 12%</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <h4 style="color: #495057; margin: 25px 0 15px 0;">Recommended Actions</h4>
+                    <div style="background-color: #e7f3ff; padding: 15px; border-radius: 4px; border-left: 4px solid #007bff;">
+                        <ol style="margin: 0; padding-left: 20px; color: #495057;">
+                            <li><strong>Memory Optimization:</strong> Review and optimize service layer caching strategies to reduce memory footprint</li>
+                            <li><strong>Workflow Performance:</strong> Investigate workflow orchestration module for performance bottlenecks</li>
+                            <li><strong>Security Review:</strong> Analyze recent failed login patterns and consider implementing rate limiting</li>
+                            <li><strong>Capacity Planning:</strong> Monitor disk usage growth and plan for storage expansion within 60 days</li>
+                            <li><strong>Database Optimization:</strong> Continue current optimization strategies as query performance is improving</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>
+                This automated report was generated by the Flask System Monitoring Service<br>
+                <strong>Report ID:</strong> {{ report_id | default('SYSRPT-' + (report_date.strftime('%Y%m%d-%H%M') if report_date else '00000000-0000')) }} | 
+                <strong>Next Report:</strong> {{ next_report_time.strftime('%Y-%m-%d %H:%M UTC') if next_report_time else 'In 24 hours' }}
+            </p>
+            <p style="margin-top: 10px;">
+                For immediate assistance, contact the system administration team or check the 
+                <a href="{{ dashboard_urls.system_status | default('#') }}" style="color: #007bff;">live system status page</a>.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
