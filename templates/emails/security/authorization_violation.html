@@ -1,0 +1,453 @@
+{% extends "emails/base/layout.html" %}
+
+{# Authorization Violation Security Alert Email Template #}
+{# Integrates with Flask-SQLAlchemy RBAC system and CloudWatch security monitoring #}
+{# Provides comprehensive violation context for security team incident response #}
+
+{% block title %}
+Security Alert: Authorization Violation Detected
+{% endblock %}
+
+{% block email_title %}
+🚨 Security Alert: Authorization Violation Detected
+{% endblock %}
+
+{% block email_main_content %}
+<div class="security-alert-container" style="background-color: #fff5f5; border: 2px solid #f56565; border-radius: 8px; padding: 25px; margin: 20px 0;">
+  
+  <!-- Alert Header Section -->
+  <div class="alert-header" style="text-align: center; margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #fed7d7;">
+    <h2 style="color: #c53030; margin: 0 0 10px 0; font-size: 24px; font-weight: bold;">
+      ⚠️ UNAUTHORIZED ACCESS ATTEMPT DETECTED
+    </h2>
+    <p style="color: #744210; background-color: #fef5e7; padding: 10px; border-radius: 6px; margin: 0; font-size: 16px; font-weight: 600;">
+      Risk Level: <span style="color: #c53030; text-transform: uppercase;">{{ violation.risk_level or 'HIGH' }}</span> | 
+      Incident ID: <span style="font-family: 'Courier New', monospace; background-color: #f7fafc; padding: 2px 6px; border-radius: 3px;">{{ violation.incident_id }}</span>
+    </p>
+  </div>
+
+  <!-- Violation Summary Section -->
+  <div class="violation-summary" style="background-color: #ffffff; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #f56565;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      📋 Violation Summary
+    </h3>
+    
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568; width: 30%;">Timestamp:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if violation.timestamp else 'Unknown' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f7fafc;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">User ID:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.user_id or 'Anonymous' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Username:</td>
+        <td style="padding: 8px 12px; color: #2d3748;">
+          {{ violation.username or 'Unknown User' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f7fafc;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Source IP:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.source_ip or 'Unknown' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">User Agent:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-size: 12px; word-break: break-all;">
+          {{ violation.user_agent[:100] + '...' if violation.user_agent and violation.user_agent|length > 100 else (violation.user_agent or 'Unknown') }}
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Attempted Access Section -->
+  <div class="attempted-access" style="background-color: #ffffff; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #f6ad55;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      🎯 Attempted Resource Access
+    </h3>
+    
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568; width: 30%;">Resource:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace; background-color: #fff5f5;">
+          {{ violation.attempted_resource or 'Unknown Resource' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f7fafc;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Action:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace; text-transform: uppercase;">
+          {{ violation.attempted_action or 'Unknown Action' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Request Method:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.request_method or 'Unknown' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f7fafc;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Endpoint Path:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.request_path or 'Unknown Path' }}
+        </td>
+      </tr>
+      {% if violation.resource_id %}
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Resource ID:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.resource_id }}
+        </td>
+      </tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <!-- User Permissions and Role Hierarchy Section -->
+  <div class="user-permissions" style="background-color: #ffffff; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #4299e1;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      👤 Current User Authorization Context
+    </h3>
+    
+    <!-- User Roles -->
+    <div style="margin-bottom: 20px;">
+      <h4 style="color: #4a5568; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;">
+        Assigned Roles:
+      </h4>
+      {% if violation.user_roles and violation.user_roles|length > 0 %}
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          {% for role in violation.user_roles %}
+            <span style="background-color: #ebf8ff; color: #2b6cb0; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; border: 1px solid #bee3f8;">
+              {{ role.name }}
+              {% if role.priority %}
+                <span style="color: #4a5568; font-size: 11px;">(Priority: {{ role.priority }})</span>
+              {% endif %}
+            </span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p style="color: #e53e3e; font-style: italic; margin: 0; background-color: #fed7d7; padding: 8px; border-radius: 4px;">
+          ⚠️ No roles assigned to this user
+        </p>
+      {% endif %}
+    </div>
+
+    <!-- User Permissions -->
+    <div style="margin-bottom: 20px;">
+      <h4 style="color: #4a5568; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;">
+        Current Permissions:
+      </h4>
+      {% if violation.user_permissions and violation.user_permissions|length > 0 %}
+        <div style="max-height: 150px; overflow-y: auto; background-color: #f7fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+          {% for permission in violation.user_permissions %}
+            <div style="margin: 4px 0; font-family: 'Courier New', monospace; font-size: 13px; color: #2d3748;">
+              <span style="color: #3182ce;">{{ permission.resource }}</span>.<span style="color: #38a169;">{{ permission.action }}</span>
+              {% if permission.scope %}
+                <span style="color: #718096; font-size: 11px;">[{{ permission.scope }}]</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p style="color: #e53e3e; font-style: italic; margin: 0; background-color: #fed7d7; padding: 8px; border-radius: 4px;">
+          ⚠️ No permissions granted to this user
+        </p>
+      {% endif %}
+    </div>
+
+    <!-- Required Permission -->
+    <div style="background-color: #fff5f5; padding: 15px; border-radius: 6px; border: 1px solid #feb2b2;">
+      <h4 style="color: #c53030; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;">
+        🔒 Required Permission:
+      </h4>
+      <p style="margin: 0; font-family: 'Courier New', monospace; font-size: 14px; color: #2d3748; background-color: #ffffff; padding: 8px; border-radius: 4px;">
+        <span style="color: #c53030; font-weight: 600;">{{ violation.attempted_resource }}.{{ violation.attempted_action }}</span>
+        {% if violation.required_scope %}
+          <span style="color: #718096; font-size: 12px;">[Scope: {{ violation.required_scope }}]</span>
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Security Analysis Section -->
+  <div class="security-analysis" style="background-color: #ffffff; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #9f7aea;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      🔍 Security Analysis & Risk Assessment
+    </h3>
+    
+    <!-- Risk Assessment -->
+    <div style="margin-bottom: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h4 style="color: #4a5568; margin: 0; font-size: 16px; font-weight: 600;">Risk Assessment:</h4>
+        <span style="
+          background-color: {% if violation.risk_level == 'CRITICAL' %}#fed7d7{% elif violation.risk_level == 'HIGH' %}#fef5e7{% elif violation.risk_level == 'MEDIUM' %}#e6fffa{% else %}#f0fff4{% endif %}; 
+          color: {% if violation.risk_level == 'CRITICAL' %}#c53030{% elif violation.risk_level == 'HIGH' %}#dd6b20{% elif violation.risk_level == 'MEDIUM' %}#2c7a7b{% else %}#2f855a{% endif %}; 
+          padding: 6px 12px; 
+          border-radius: 20px; 
+          font-size: 13px; 
+          font-weight: 600; 
+          text-transform: uppercase;
+        ">
+          {{ violation.risk_level or 'HIGH' }}
+        </span>
+      </div>
+      
+      <div style="background-color: #f7fafc; padding: 15px; border-radius: 6px; border-left: 3px solid #9f7aea;">
+        <p style="margin: 0 0 10px 0; color: #4a5568; font-size: 14px; line-height: 1.5;">
+          <strong>Analysis:</strong> {{ violation.risk_analysis or 'User attempted to access restricted resource without appropriate permissions. This could indicate potential privilege escalation attempt or misconfigured user access.' }}
+        </p>
+        {% if violation.similar_attempts_count and violation.similar_attempts_count > 1 %}
+        <p style="margin: 0; color: #c53030; font-size: 14px; font-weight: 600; background-color: #fed7d7; padding: 8px; border-radius: 4px;">
+          ⚠️ <strong>Pattern Alert:</strong> {{ violation.similar_attempts_count }} similar violation attempts detected in the last 24 hours
+        </p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Threat Indicators -->
+    {% if violation.threat_indicators and violation.threat_indicators|length > 0 %}
+    <div style="margin-bottom: 20px;">
+      <h4 style="color: #4a5568; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;">Threat Indicators:</h4>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for indicator in violation.threat_indicators %}
+        <li style="color: #c53030; margin: 5px 0; font-size: 14px;">{{ indicator }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <!-- Session Context -->
+    {% if violation.session_context %}
+    <div style="background-color: #f7fafc; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+      <h4 style="color: #4a5568; margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">Session Context:</h4>
+      <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        {% if violation.session_context.session_duration %}
+        <tr>
+          <td style="padding: 4px 8px; color: #718096; width: 40%;">Session Duration:</td>
+          <td style="padding: 4px 8px; color: #2d3748; font-family: 'Courier New', monospace;">{{ violation.session_context.session_duration }}</td>
+        </tr>
+        {% endif %}
+        {% if violation.session_context.last_successful_action %}
+        <tr style="background-color: #ffffff;">
+          <td style="padding: 4px 8px; color: #718096;">Last Successful Action:</td>
+          <td style="padding: 4px 8px; color: #2d3748; font-family: 'Courier New', monospace;">{{ violation.session_context.last_successful_action }}</td>
+        </tr>
+        {% endif %}
+        {% if violation.session_context.authentication_method %}
+        <tr>
+          <td style="padding: 4px 8px; color: #718096;">Auth Method:</td>
+          <td style="padding: 4px 8px; color: #2d3748; font-family: 'Courier New', monospace;">{{ violation.session_context.authentication_method }}</td>
+        </tr>
+        {% endif %}
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Recommended Security Actions Section -->
+  <div class="security-actions" style="background-color: #ffffff; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #38a169;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      ⚡ Recommended Security Response Actions
+    </h3>
+    
+    <div style="background-color: #f0fff4; padding: 15px; border-radius: 6px; border: 1px solid #9ae6b4;">
+      <h4 style="color: #2f855a; margin: 0 0 15px 0; font-size: 16px; font-weight: 600;">
+        Immediate Actions Required:
+      </h4>
+      
+      <ol style="margin: 0; padding-left: 20px; color: #2d3748;">
+        <li style="margin: 8px 0; font-size: 14px; line-height: 1.4;">
+          <strong>Verify User Identity:</strong> Confirm user legitimacy and investigate potential account compromise
+        </li>
+        <li style="margin: 8px 0; font-size: 14px; line-height: 1.4;">
+          <strong>Review Access Patterns:</strong> Analyze recent user activity for additional suspicious behavior
+        </li>
+        <li style="margin: 8px 0; font-size: 14px; line-height: 1.4;">
+          <strong>Permission Audit:</strong> Validate current user role assignments and permission grants
+        </li>
+        {% if violation.risk_level in ['CRITICAL', 'HIGH'] %}
+        <li style="margin: 8px 0; font-size: 14px; line-height: 1.4; color: #c53030;">
+          <strong>Consider Session Termination:</strong> Evaluate terminating active user sessions if compromise suspected
+        </li>
+        {% endif %}
+        <li style="margin: 8px 0; font-size: 14px; line-height: 1.4;">
+          <strong>Monitor Continued Activity:</strong> Implement enhanced monitoring for this user account
+        </li>
+      </ol>
+    </div>
+
+    {% if violation.automated_actions and violation.automated_actions|length > 0 %}
+    <div style="background-color: #ebf8ff; padding: 15px; border-radius: 6px; border: 1px solid #bee3f8; margin-top: 15px;">
+      <h4 style="color: #3182ce; margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">
+        Automated Security Actions Taken:
+      </h4>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for action in violation.automated_actions %}
+        <li style="color: #2d3748; margin: 5px 0; font-size: 13px;">{{ action }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- CloudWatch Integration & Incident Tracking -->
+  <div class="incident-tracking" style="background-color: #ffffff; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #ed8936;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      📊 Incident Tracking & Correlation
+    </h3>
+    
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568; width: 30%;">Incident ID:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.incident_id }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f7fafc;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">CloudWatch Log Group:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.cloudwatch_log_group or 'flask-app-security' }}
+        </td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Security Event Stream:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.cloudwatch_stream or 'security-events' }}
+        </td>
+      </tr>
+      {% if violation.correlation_id %}
+      <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f7fafc;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Correlation ID:</td>
+        <td style="padding: 8px 12px; color: #2d3748; font-family: 'Courier New', monospace;">
+          {{ violation.correlation_id }}
+        </td>
+      </tr>
+      {% endif %}
+      {% if violation.sentry_issue_id %}
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px 12px; font-weight: 600; color: #4a5568;">Sentry Issue ID:</td>
+        <td style="padding: 8px 12px; color: #2d3748;">
+          <a href="https://sentry.io/organizations/{{ sentry_org }}/issues/{{ violation.sentry_issue_id }}/" 
+             style="color: #3182ce; text-decoration: none; font-family: 'Courier New', monospace;"
+             target="_blank">
+            {{ violation.sentry_issue_id }}
+          </a>
+        </td>
+      </tr>
+      {% endif %}
+    </table>
+
+    {% if violation.related_events_count and violation.related_events_count > 0 %}
+    <div style="background-color: #fff5f5; padding: 12px; border-radius: 6px; margin-top: 15px; border: 1px solid #feb2b2;">
+      <p style="margin: 0; color: #c53030; font-size: 14px; font-weight: 600;">
+        📈 <strong>{{ violation.related_events_count }}</strong> related security events detected in CloudWatch Logs
+      </p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Technical Details Section -->
+  <div class="technical-details" style="background-color: #f7fafc; padding: 20px; border-radius: 6px; border: 1px solid #e2e8f0;">
+    <h3 style="color: #2d3748; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+      🔧 Technical Details
+    </h3>
+    
+    <div style="font-family: 'Courier New', monospace; font-size: 12px; background-color: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; overflow-x: auto;">
+      <strong>Flask Application Context:</strong><br>
+      Request ID: {{ violation.request_id or 'Unknown' }}<br>
+      WSGI Server: {{ violation.wsgi_server_info or 'Gunicorn' }}<br>
+      Container ID: {{ violation.container_id or 'N/A' }}<br>
+      Auth0 Trace ID: {{ violation.auth0_trace_id or 'N/A' }}<br>
+      SQLAlchemy Session: {{ violation.db_session_id or 'N/A' }}<br>
+      <br>
+      <strong>Security Middleware Stack:</strong><br>
+      Flask-JWT-Extended: {{ violation.jwt_version or 'Active' }}<br>
+      Authorization Decorator: {{ violation.auth_decorator or 'require_permission' }}<br>
+      RBAC Policy Engine: {{ violation.rbac_engine_version or 'v1.0' }}<br>
+      <br>
+      <strong>Database Context:</strong><br>
+      User Model ID: {{ violation.user_model_id or violation.user_id }}<br>
+      Role Assignments: {{ violation.user_roles|length if violation.user_roles else 0 }} active<br>
+      Permission Count: {{ violation.user_permissions|length if violation.user_permissions else 0 }} granted<br>
+      <br>
+      <strong>Raw Event Data:</strong><br>
+      {{ violation.raw_event_data[:200] + '...' if violation.raw_event_data and violation.raw_event_data|length > 200 else (violation.raw_event_data or 'Event data not available') }}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block email_cta %}
+<div class="security-response-cta" style="text-align: center; margin: 30px 0;">
+  <div style="background-color: #fff5f5; padding: 20px; border-radius: 8px; border: 2px solid #feb2b2; margin-bottom: 20px;">
+    <p style="margin: 0 0 15px 0; color: #c53030; font-size: 16px; font-weight: 600;">
+      🚨 Immediate Security Team Action Required
+    </p>
+    <p style="margin: 0; color: #744210; font-size: 14px;">
+      This authorization violation requires prompt investigation and response.
+    </p>
+  </div>
+  
+  {% if security_dashboard_url %}
+  <a href="{{ security_dashboard_url }}" 
+     style="display: inline-block; background-color: #c53030; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+    🔍 View Security Dashboard
+  </a>
+  {% endif %}
+  
+  {% if cloudwatch_logs_url %}
+  <a href="{{ cloudwatch_logs_url }}" 
+     style="display: inline-block; background-color: #3182ce; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+    📊 View CloudWatch Logs
+  </a>
+  {% endif %}
+  
+  {% if incident_response_url %}
+  <a href="{{ incident_response_url }}" 
+     style="display: inline-block; background-color: #38a169; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+    📋 Create Incident Ticket
+  </a>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block email_additional_content %}
+<div class="security-footer-info" style="background-color: #f7fafc; padding: 20px; border-radius: 6px; border: 1px solid #e2e8f0; margin: 20px 0;">
+  <h4 style="color: #4a5568; margin: 0 0 15px 0; font-size: 16px; font-weight: 600;">
+    📚 Security Response Resources
+  </h4>
+  
+  <div style="font-size: 14px; color: #2d3748; line-height: 1.6;">
+    <p style="margin: 0 0 10px 0;">
+      <strong>Security Runbooks:</strong> 
+      <a href="{{ security_runbook_url or '/security/runbooks' }}" style="color: #3182ce; text-decoration: none;">Authorization Violation Response Procedures</a>
+    </p>
+    <p style="margin: 0 0 10px 0;">
+      <strong>Escalation Policy:</strong> 
+      <a href="{{ escalation_policy_url or '/security/escalation' }}" style="color: #3182ce; text-decoration: none;">Security Incident Escalation Matrix</a>
+    </p>
+    <p style="margin: 0 0 10px 0;">
+      <strong>RBAC Documentation:</strong> 
+      <a href="{{ rbac_docs_url or '/docs/rbac' }}" style="color: #3182ce; text-decoration: none;">Flask-SQLAlchemy RBAC System Guide</a>
+    </p>
+    <p style="margin: 0;">
+      <strong>24/7 Security Hotline:</strong> 
+      <span style="font-family: 'Courier New', monospace; background-color: #ffffff; padding: 2px 6px; border-radius: 3px;">{{ security_hotline or '+1-XXX-XXX-XXXX' }}</span>
+    </p>
+  </div>
+</div>
+
+<div style="background-color: #ebf8ff; padding: 15px; border-radius: 6px; border: 1px solid #bee3f8; margin: 20px 0; text-align: center;">
+  <p style="margin: 0; color: #2b6cb0; font-size: 13px; font-style: italic;">
+    🔐 This authorization violation alert was generated by the Flask Security Monitoring System<br>
+    Powered by Flask-SQLAlchemy RBAC | CloudWatch Security Event Correlation | Sentry Error Tracking<br>
+    <span style="font-family: 'Courier New', monospace;">Generated at {{ now().strftime('%Y-%m-%d %H:%M:%S UTC') if now else 'System Time' }}</span>
+  </p>
+</div>
+{% endblock %}
