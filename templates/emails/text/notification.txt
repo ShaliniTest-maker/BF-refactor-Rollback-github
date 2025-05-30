@@ -1,0 +1,68 @@
+{{ application_name or "System" }} Notification
+{{ "=" * (application_name|length + 13 if application_name else 19) }}
+
+Date: {{ timestamp or now().strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Type: {{ notification_type or "General Notification" }}
+Priority: {{ priority or "Normal" }}
+{% if reference_id %}Reference ID: {{ reference_id }}{% endif %}
+
+{% if recipient_name %}Dear {{ recipient_name }},{% else %}Hello,{% endif %}
+
+{{ message_body or "This is a system notification from " + (application_name or "the application") + "." }}
+
+{% if details %}
+Details:
+--------
+{% for key, value in details.items() %}
+{{ key.replace('_', ' ').title() }}: {{ value }}
+{% endfor %}
+{% endif %}
+
+{% if action_required %}
+Action Required:
+---------------
+{{ action_required }}
+{% if action_url %}
+Please visit: {{ action_url }}
+{% endif %}
+{% if action_deadline %}
+Deadline: {{ action_deadline }}
+{% endif %}
+{% endif %}
+
+{% if additional_info %}
+Additional Information:
+----------------------
+{{ additional_info }}
+{% endif %}
+
+{% if contact_info %}
+Support Contact:
+---------------
+{% if contact_info.email %}Email: {{ contact_info.email }}{% endif %}
+{% if contact_info.phone %}Phone: {{ contact_info.phone }}{% endif %}
+{% if contact_info.hours %}Hours: {{ contact_info.hours }}{% endif %}
+{% endif %}
+
+{% if unsubscribe_info %}
+Unsubscribe Information:
+-----------------------
+{{ unsubscribe_info }}
+{% if unsubscribe_url %}
+Unsubscribe: {{ unsubscribe_url }}
+{% endif %}
+{% endif %}
+
+{% if footer_message %}
+{{ footer_message }}
+{% else %}
+This is an automated message from {{ application_name or "the system" }}.
+Please do not reply directly to this email.
+{% endif %}
+
+{% if company_info %}
+---
+{{ company_info.name or "Your Company" }}
+{% if company_info.address %}{{ company_info.address }}{% endif %}
+{% if company_info.website %}Website: {{ company_info.website }}{% endif %}
+{% endif %}
