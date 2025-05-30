@@ -1,0 +1,283 @@
+PERFORMANCE ALERT - {{ alert_severity.upper() }} SEVERITY
+========================================================================
+
+ALERT SUMMARY
+-------------
+Timestamp: {{ alert_timestamp }}
+Alert ID: {{ alert_id }}
+Environment: {{ environment }}
+Severity: {{ alert_severity }}
+Duration: {{ alert_duration_minutes }} minutes
+
+PERFORMANCE DEGRADATION DETECTED
+Service Level Agreement (SLA) violations have been detected in the Flask application infrastructure.
+Immediate attention required for performance incident response.
+
+========================================================================
+SLA THRESHOLD VIOLATIONS
+========================================================================
+
+API PERFORMANCE METRICS
+------------------------
+Current Response Time: {{ current_api_response_time }}ms
+SLA Threshold: < 200ms
+Status: {% if current_api_response_time > 200 %}VIOLATION - EXCEEDS SLA BY {{ current_api_response_time - 200 }}ms{% else %}WITHIN SLA{% endif %}
+Affected Endpoints: {{ affected_endpoints | join(', ') }}
+
+DATABASE PERFORMANCE METRICS  
+-----------------------------
+Current Query Response Time: {{ current_db_response_time }}ms
+SLA Threshold: < 100ms
+Status: {% if current_db_response_time > 100 %}VIOLATION - EXCEEDS SLA BY {{ current_db_response_time - 100 }}ms{% else %}WITHIN SLA{% endif %}
+Slow Queries Count: {{ slow_queries_count }}
+Average Connection Pool Utilization: {{ db_pool_utilization }}%
+
+AUTHENTICATION PERFORMANCE
+---------------------------
+Current Auth Response Time: {{ current_auth_response_time }}ms
+SLA Threshold: < 150ms
+Status: {% if current_auth_response_time > 150 %}VIOLATION - EXCEEDS SLA BY {{ current_auth_response_time - 150 }}ms{% else %}WITHIN SLA{% endif %}
+Auth0 Integration Status: {{ auth0_status }}
+Failed Authentication Rate: {{ failed_auth_rate }}%
+
+========================================================================
+CONTAINER INFRASTRUCTURE METRICS
+========================================================================
+
+DOCKER CONTAINER STATISTICS
+----------------------------
+Total Containers: {{ total_containers }}
+Healthy Containers: {{ healthy_containers }}
+Unhealthy Containers: {{ unhealthy_containers }}
+
+Container CPU Utilization:
+  Average: {{ container_cpu_avg }}%
+  Peak: {{ container_cpu_peak }}%
+  Threshold: 80%
+  Status: {% if container_cpu_avg > 80 %}CRITICAL - EXCEEDS THRESHOLD{% else %}NORMAL{% endif %}
+
+Container Memory Utilization:
+  Average: {{ container_memory_avg }}%
+  Peak: {{ container_memory_peak }}%
+  Threshold: 80%
+  Status: {% if container_memory_avg > 80 %}CRITICAL - EXCEEDS THRESHOLD{% else %}NORMAL{% endif %}
+
+Container Network I/O:
+  Inbound Traffic: {{ container_network_in }}MB/s
+  Outbound Traffic: {{ container_network_out }}MB/s
+  Network Errors: {{ container_network_errors }}
+
+ECS/EKS ORCHESTRATION STATUS
+----------------------------
+Service Status: {{ container_service_status }}
+Running Tasks: {{ running_tasks }}
+Desired Tasks: {{ desired_tasks }}
+Pending Tasks: {{ pending_tasks }}
+Service Health: {% if running_tasks == desired_tasks %}HEALTHY{% else %}DEGRADED{% endif %}
+Recent Scaling Events: {{ recent_scaling_events }}
+
+========================================================================
+WSGI SERVER PERFORMANCE DATA
+========================================================================
+
+GUNICORN WORKER METRICS
+-----------------------
+Active Workers: {{ active_workers }}
+Total Workers: {{ total_workers }}
+Worker Utilization: {{ worker_utilization }}%
+Worker Restart Count: {{ worker_restart_count }}
+
+Worker Performance Statistics:
+  Average Request Processing Time: {{ worker_avg_processing_time }}ms
+  Request Queue Depth: {{ request_queue_depth }}
+  Worker Memory Usage: {{ worker_memory_usage }}MB per worker
+  Worker Timeout Incidents: {{ worker_timeout_count }}
+
+WSGI Request Handling:
+  Requests per Second: {{ requests_per_second }}
+  Active Connections: {{ active_connections }}
+  Connection Pool Status: {% if connection_pool_utilization > 90 %}CRITICAL{% elif connection_pool_utilization > 70 %}WARNING{% else %}NORMAL{% endif %}
+  Failed Requests: {{ failed_requests_count }}
+
+========================================================================
+DATABASE STATISTICS
+========================================================================
+
+SQLALCHEMY CONNECTION POOL
+---------------------------
+Pool Size: {{ db_pool_size }}
+Active Connections: {{ db_active_connections }}
+Pool Utilization: {{ db_pool_utilization }}%
+Connection Pool Status: {% if db_pool_utilization > 90 %}CRITICAL - POOL EXHAUSTION RISK{% elif db_pool_utilization > 70 %}WARNING - HIGH UTILIZATION{% else %}NORMAL{% endif %}
+
+Connection Metrics:
+  Average Connection Acquisition Time: {{ db_connection_acquisition_time }}ms
+  Connection Timeouts: {{ db_connection_timeouts }}
+  Connection Leaks Detected: {{ db_connection_leaks }}
+  Pool Overflow Count: {{ db_pool_overflow_count }}
+
+DATABASE QUERY PERFORMANCE
+---------------------------
+Total Queries (Last Hour): {{ total_queries_last_hour }}
+Slow Queries (>100ms): {{ slow_queries_count }}
+Query Error Rate: {{ query_error_rate }}%
+Average Query Execution Time: {{ avg_query_execution_time }}ms
+
+Top Slow Query Categories:
+{% for query_type, avg_time in slow_query_types %}
+  {{ query_type }}: {{ avg_time }}ms average
+{% endfor %}
+
+Database Connection Health:
+  Primary Database: {{ primary_db_status }}
+  Read Replicas: {{ read_replica_status }}
+  Connection Latency: {{ db_connection_latency }}ms
+
+========================================================================
+MIGRATION PERFORMANCE VALIDATION
+========================================================================
+
+FLASK vs NODE.JS BASELINE COMPARISON
+------------------------------------
+API Response Time Difference: {{ api_response_diff }}ms ({{ api_response_diff_percent }}% {% if api_response_diff > 0 %}slower{% else %}faster{% endif %})
+Database Performance Difference: {{ db_performance_diff }}ms ({{ db_performance_diff_percent }}% {% if db_performance_diff > 0 %}slower{% else %}faster{% endif %})
+Overall Performance Degradation: {{ overall_performance_degradation }}%
+Migration SLA Compliance: {% if overall_performance_degradation > 10 %}VIOLATION - EXCEEDS 10% DEGRADATION THRESHOLD{% else %}COMPLIANT{% endif %}
+
+Resource Utilization Comparison:
+  Memory Usage Change: {{ memory_usage_change }}% 
+  CPU Usage Change: {{ cpu_usage_change }}%
+  Network I/O Change: {{ network_io_change }}%
+
+========================================================================
+ERROR ANALYSIS
+========================================================================
+
+APPLICATION ERROR METRICS
+--------------------------
+Error Rate (Last Hour): {{ error_rate_last_hour }}%
+SLA Threshold: < 1%
+Status: {% if error_rate_last_hour > 1 %}VIOLATION - EXCEEDS SLA{% else %}WITHIN SLA{% endif %}
+
+Error Breakdown:
+  HTTP 5xx Errors: {{ http_5xx_errors }}
+  HTTP 4xx Errors: {{ http_4xx_errors }}
+  Database Connection Errors: {{ db_connection_errors }}
+  Authentication Errors: {{ auth_errors }}
+  WSGI Worker Errors: {{ wsgi_worker_errors }}
+
+Recent Critical Errors:
+{% for error in recent_critical_errors %}
+  {{ error.timestamp }} - {{ error.type }}: {{ error.message }}
+{% endfor %}
+
+SENTRY ERROR TRACKING
+----------------------
+New Exceptions (Last Hour): {{ sentry_new_exceptions }}
+Exception Rate Trend: {{ sentry_exception_trend }}
+Top Exception Types:
+{% for exception_type, count in top_exception_types %}
+  {{ exception_type }}: {{ count }} occurrences
+{% endfor %}
+
+========================================================================
+INCIDENT RESPONSE ACTIONS
+========================================================================
+
+IMMEDIATE ACTIONS REQUIRED
+---------------------------
+{% if current_api_response_time > 200 %}
+1. CRITICAL: Investigate API performance degradation
+   - Check WSGI worker health and scaling
+   - Verify container resource availability
+   - Review database connection pool status
+{% endif %}
+
+{% if current_db_response_time > 100 %}
+2. CRITICAL: Database performance investigation required
+   - Analyze slow query patterns
+   - Check connection pool exhaustion
+   - Verify database server health
+{% endif %}
+
+{% if container_cpu_avg > 80 or container_memory_avg > 80 %}
+3. URGENT: Container resource exhaustion detected
+   - Scale container instances immediately
+   - Investigate resource leak patterns
+   - Verify container orchestration health
+{% endif %}
+
+{% if db_pool_utilization > 90 %}
+4. URGENT: Database connection pool near exhaustion
+   - Increase connection pool size
+   - Investigate connection leak sources
+   - Monitor for cascade failures
+{% endif %}
+
+{% if error_rate_last_hour > 1 %}
+5. HIGH: Application error rate exceeds SLA
+   - Review Sentry error reports
+   - Check WSGI worker error logs
+   - Validate deployment health
+{% endif %}
+
+ESCALATION PROCEDURES
+---------------------
+Response Time: {{ escalation_response_time }}
+Primary Contact: {{ primary_contact }}
+Escalation Path: {{ escalation_path }}
+
+For CRITICAL alerts:
+- Immediate response required
+- On-call engineer notification sent
+- CTO escalation if unresolved within 15 minutes
+
+MONITORING DASHBOARDS
+---------------------
+CloudWatch Dashboard: {{ cloudwatch_dashboard_url }}
+Grafana Performance Dashboard: {{ grafana_dashboard_url }}
+Flask MonitoringDashboard: {{ flask_monitoring_url }}
+Container Insights: {{ container_insights_url }}
+Sentry Error Tracking: {{ sentry_dashboard_url }}
+
+RUNBOOK REFERENCES
+------------------
+Performance Degradation Response: {{ performance_runbook_url }}
+Migration Rollback Procedure: {{ rollback_runbook_url }}
+Database Incident Response: {{ database_runbook_url }}
+Container Scaling Guide: {{ scaling_runbook_url }}
+
+========================================================================
+TECHNICAL CONTEXT
+========================================================================
+
+SYSTEM INFORMATION
+------------------
+Flask Application Version: {{ flask_app_version }}
+Python Runtime Version: {{ python_version }}
+Gunicorn Version: {{ gunicorn_version }}
+Container Platform: {{ container_platform }}
+Database Engine: {{ database_engine }}
+SQLAlchemy Version: {{ sqlalchemy_version }}
+
+DEPLOYMENT CONTEXT
+-------------------
+Deployment Environment: {{ deployment_environment }}
+Container Image: {{ container_image }}
+ECS/EKS Cluster: {{ container_cluster }}
+Load Balancer Status: {{ load_balancer_status }}
+Auto Scaling Status: {{ auto_scaling_status }}
+
+ALERT METADATA
+--------------
+Alert Generation Time: {{ alert_generation_time }}
+Monitoring System: {{ monitoring_system }}
+Alert Configuration Version: {{ alert_config_version }}
+Next Scheduled Check: {{ next_check_time }}
+
+========================================================================
+This is an automated performance alert from the Flask application monitoring system.
+For immediate assistance, contact the on-call engineering team.
+Alert ID: {{ alert_id }}
+Generated by: Flask Performance Monitoring System
+========================================================================
