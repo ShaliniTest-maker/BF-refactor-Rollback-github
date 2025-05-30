@@ -1,0 +1,133 @@
+USER ACCOUNT STATUS CHANGE NOTIFICATION
+==========================================
+
+ADMINISTRATIVE ALERT: User Account Status Modified
+
+Dear Administrator,
+
+This is an automated notification to inform you that a user account status has been changed in the system.
+
+CHANGE DETAILS
+--------------
+User ID: {{ user.id }}
+Username: {{ user.username }}
+Email: {{ user.email }}
+Full Name: {{ user.full_name if user.full_name else 'Not specified' }}
+
+STATUS CHANGE INFORMATION
+-------------------------
+Previous Status: {{ previous_status }}
+Current Status: {{ current_status }}
+Change Type: {{ change_type }}
+Status Description: {{ status_description }}
+
+ADMINISTRATIVE DETAILS
+-----------------------
+Change Timestamp: {{ change_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Changed By: {{ changed_by_admin.username }} ({{ changed_by_admin.email }})
+Administrator Role: {{ changed_by_admin.role if changed_by_admin.role else 'System Administrator' }}
+Change Reason: {{ change_reason if change_reason else 'No reason specified' }}
+Reference ID: {{ reference_id if reference_id else 'AUTO-' + change_timestamp.strftime('%Y%m%d%H%M%S') }}
+
+ACCOUNT INFORMATION
+-------------------
+Account Created: {{ user.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if user.created_at else 'Unknown' }}
+Last Login: {{ user.last_login.strftime('%Y-%m-%d %H:%M:%S UTC') if user.last_login else 'Never' }}
+User Roles: {{ user_roles if user_roles else 'No roles assigned' }}
+Account Type: {{ user.account_type if user.account_type else 'Standard User' }}
+
+IMPACT ASSESSMENT
+-----------------
+Access Level: {{ access_level_change }}
+System Permissions: {{ permission_changes if permission_changes else 'No permission changes' }}
+Active Sessions: {{ active_sessions_count }} session(s) affected
+Data Access: {{ data_access_impact }}
+
+ADMINISTRATIVE ACTIONS REQUIRED
+--------------------------------
+{% if requires_approval %}
+APPROVAL REQUIRED: This change requires administrative approval.
+- Review the change details above
+- Verify the authorization for this status change
+- Approve or reject the change in the admin panel
+- Approval deadline: {{ approval_deadline.strftime('%Y-%m-%d %H:%M:%S UTC') if approval_deadline else 'No deadline specified' }}
+{% endif %}
+
+{% if requires_notification %}
+USER NOTIFICATION: The affected user has been automatically notified of this status change.
+{% else %}
+USER NOTIFICATION: The affected user has NOT been notified of this change.
+- Consider whether manual notification is required
+- User contact information is available above
+{% endif %}
+
+{% if requires_audit %}
+AUDIT TRAIL: This change has been logged for compliance purposes.
+- Audit Reference: {{ audit_reference }}
+- Compliance Category: {{ compliance_category if compliance_category else 'User Management' }}
+{% endif %}
+
+NEXT STEPS AND RECOMMENDATIONS
+-------------------------------
+{% if current_status == 'ACTIVE' %}
+1. Verify that the user has appropriate access permissions
+2. Confirm user training completion if required
+3. Monitor initial system usage for any issues
+4. Ensure proper role assignments are in place
+{% elif current_status == 'INACTIVE' or current_status == 'SUSPENDED' %}
+1. Verify that all active sessions have been terminated
+2. Review any pending work assignments for the user
+3. Consider data backup if account will be permanently disabled
+4. Update team members about user availability changes
+5. Review access to shared resources and documents
+{% elif current_status == 'PENDING' %}
+1. Complete required verification procedures
+2. Schedule user onboarding if applicable
+3. Prepare account activation materials
+4. Assign temporary access if immediate access is needed
+{% elif current_status == 'DELETED' or current_status == 'ARCHIVED' %}
+1. Confirm data retention compliance requirements
+2. Transfer ownership of user-created content if needed
+3. Update system documentation and user directories
+4. Verify removal from all distribution lists and groups
+{% endif %}
+
+SECURITY CONSIDERATIONS
+-----------------------
+- All status changes are logged for security audit purposes
+- Multi-factor authentication settings: {{ mfa_status if mfa_status else 'Not configured' }}
+- IP access restrictions: {{ ip_restrictions if ip_restrictions else 'None' }}
+- Account lockout status: {{ lockout_status if lockout_status else 'No lockouts' }}
+
+{% if security_alerts %}
+SECURITY ALERTS:
+{{ security_alerts }}
+{% endif %}
+
+SYSTEM INFORMATION
+------------------
+Application: Flask User Management System
+Environment: {{ environment if environment else 'Production' }}
+Server: {{ server_name if server_name else 'Primary Application Server' }}
+Notification ID: {{ notification_id }}
+Template Version: 1.0
+
+ADMINISTRATIVE CONTACT INFORMATION
+-----------------------------------
+For questions about this notification:
+- System Administrator: {{ system_admin_email if system_admin_email else 'admin@company.com' }}
+- Security Team: {{ security_team_email if security_team_email else 'security@company.com' }}
+- Help Desk: {{ helpdesk_email if helpdesk_email else 'help@company.com' }}
+
+IMPORTANT NOTICE
+----------------
+This is an automated system notification. Please do not reply directly to this email.
+All user status changes are subject to company policy and regulatory compliance requirements.
+For urgent security concerns, contact the security team immediately.
+
+If you believe this notification was sent in error, please contact the system administrator immediately.
+
+======================================================================
+This notification was generated automatically by the Flask User Management System.
+Timestamp: {{ notification_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+======================================================================
