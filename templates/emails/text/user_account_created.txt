@@ -1,0 +1,184 @@
+========================================================================
+                    NEW USER ACCOUNT CREATED - ADMINISTRATIVE ALERT
+========================================================================
+
+NOTIFICATION DETAILS
+------------------------------------------------------------------------
+Timestamp:        {{ timestamp }}
+Alert ID:         {{ alert_id }}
+System:           Flask User Management System
+Notification Type: User Account Creation
+
+USER ACCOUNT INFORMATION
+------------------------------------------------------------------------
+User ID:          {{ user.id }}
+Username:         {{ user.username }}
+Email Address:    {{ user.email }}
+Full Name:        {{ user.full_name or 'Not provided' }}
+Registration Date: {{ user.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Account Status:   {{ user.status or 'Pending Activation' }}
+Registration IP:  {{ user.registration_ip or 'Not available' }}
+User Agent:       {{ user.registration_user_agent or 'Not available' }}
+
+AUTH0 INTEGRATION DETAILS
+------------------------------------------------------------------------
+Auth0 User ID:    {{ user.auth0_user_id or 'Pending Auth0 sync' }}
+{% if user.auth0_connection %}
+Auth0 Connection: {{ user.auth0_connection }}
+{% endif %}
+{% if user.email_verified %}
+Email Verified:   Yes ({{ user.email_verified_at.strftime('%Y-%m-%d %H:%M:%S UTC') }})
+{% else %}
+Email Verified:   No - Verification Required
+{% endif %}
+{% if user.phone_verified %}
+Phone Verified:   Yes
+{% else %}
+Phone Verified:   No
+{% endif %}
+
+ACCOUNT SECURITY INFORMATION
+------------------------------------------------------------------------
+Initial Role:     {{ user.initial_role or 'Default User' }}
+{% if user.assigned_permissions %}
+Permissions:      
+{% for permission in user.assigned_permissions %}
+  - {{ permission }}
+{% endfor %}
+{% else %}
+Permissions:      Default user permissions applied
+{% endif %}
+MFA Status:       {{ 'Enabled' if user.mfa_enabled else 'Not enabled' }}
+{% if user.security_flags %}
+Security Flags:   
+{% for flag in user.security_flags %}
+  - {{ flag }}
+{% endfor %}
+{% endif %}
+
+REGISTRATION CONTEXT
+------------------------------------------------------------------------
+Registration Method: {{ user.registration_method or 'Direct signup' }}
+{% if user.invitation_code %}
+Invitation Code:  {{ user.invitation_code }}
+Invited By:       {{ user.invited_by or 'System' }}
+{% endif %}
+{% if user.referral_source %}
+Referral Source:  {{ user.referral_source }}
+{% endif %}
+Account Type:     {{ user.account_type or 'Standard' }}
+{% if user.organization %}
+Organization:     {{ user.organization }}
+{% endif %}
+
+ADMINISTRATIVE ACTION ITEMS
+------------------------------------------------------------------------
+
+IMMEDIATE ACTIONS REQUIRED:
+1. Review user account details and registration information
+2. Validate email domain against organizational policies
+3. Confirm appropriate role and permission assignments
+4. {% if not user.email_verified %}Verify email verification completion{% else %}Email verification completed{% endif %}
+5. {% if user.requires_approval %}APPROVAL REQUIRED - Account pending administrative approval{% else %}Account automatically approved per current policies{% endif %}
+
+SECURITY REVIEW CHECKLIST:
+□ Verify registration IP address against security policies
+□ Review user agent string for suspicious patterns  
+□ Confirm registration method aligns with access policies
+□ Validate user information completeness and accuracy
+□ Check for duplicate or suspicious account patterns
+□ Review assigned permissions for least privilege compliance
+
+{% if user.requires_approval %}
+APPROVAL WORKFLOW:
+To approve this account:
+1. Log into administrative dashboard
+2. Navigate to Pending User Approvals
+3. Review complete user profile and registration details
+4. Click "Approve Account" or "Reject Account"
+5. Account activation email will be sent upon approval
+
+Direct approval link: {{ approval_url }}
+{% endif %}
+
+SYSTEM INTEGRATION STATUS
+------------------------------------------------------------------------
+Flask-SQLAlchemy: Account record created successfully
+Auth0 Integration: {{ 'Synchronized' if user.auth0_synced else 'Pending synchronization' }}
+{% if user.auth0_sync_error %}
+Auth0 Sync Error:  {{ user.auth0_sync_error }}
+{% endif %}
+Service Layer:    User creation workflow completed
+Database Status:  All user data persisted successfully
+
+MONITORING AND COMPLIANCE
+------------------------------------------------------------------------
+Account Creation Rate: {{ daily_account_creation_count }} accounts created today
+Monthly Total:    {{ monthly_account_creation_count }} accounts this month
+Security Score:   {{ user.security_score or 'Not calculated' }}
+Risk Level:       {{ user.risk_level or 'Standard' }}
+Compliance Status: {{ user.compliance_status or 'Under review' }}
+
+{% if anomaly_detected %}
+SECURITY ALERT: Potential anomaly detected in account creation pattern
+Anomaly Details:  {{ anomaly_details }}
+{% endif %}
+
+CONTACT INFORMATION AND ESCALATION
+------------------------------------------------------------------------
+For account approval questions:
+  Email: {{ admin_contact_email }}
+  Phone: {{ admin_contact_phone }}
+
+For security concerns:
+  Email: {{ security_contact_email }}
+  Emergency: {{ security_emergency_phone }}
+
+For Auth0 integration issues:
+  Email: {{ tech_contact_email }}
+  Escalation: {{ tech_escalation_contact }}
+
+ADMINISTRATIVE DASHBOARD LINKS
+------------------------------------------------------------------------
+{% if admin_dashboard_available %}
+User Management:    {{ user_management_url }}
+Account Details:    {{ user_details_url }}
+Security Dashboard: {{ security_dashboard_url }}
+Auth0 Console:      {{ auth0_console_url }}
+Audit Logs:         {{ audit_logs_url }}
+{% else %}
+Administrative dashboard links not available in this notification.
+Please access the system directly for detailed user management.
+{% endif %}
+
+NOTIFICATION SETTINGS
+------------------------------------------------------------------------
+This is an automated administrative notification generated by the
+Flask User Management System. To modify notification preferences or
+unsubscribe from these alerts, contact the system administrator.
+
+Notification ID: {{ notification_id }}
+Generated at:    {{ timestamp }}
+System Version:  {{ system_version }}
+
+For technical support regarding this notification system:
+Email: {{ support_email }}
+Documentation: {{ documentation_url }}
+
+========================================================================
+                    END OF ADMINISTRATIVE NOTIFICATION
+========================================================================
+
+This email was sent to administrative users for account creation oversight.
+If you received this message in error, please contact the system administrator.
+
+CONFIDENTIALITY NOTICE: This message contains sensitive user account 
+information intended only for authorized administrative personnel. If you 
+are not an authorized recipient, please delete this message and notify 
+the sender immediately.
+
+------------------------------------------------------------------------
+{{ company_name }} | Flask User Management System
+{{ company_address }}
+{{ company_contact_info }}
+========================================================================
