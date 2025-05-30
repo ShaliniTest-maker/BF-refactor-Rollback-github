@@ -1,0 +1,191 @@
+Subject: System Update - {{ update_type }}: {{ update_title }}
+
+================================================
+SYSTEM UPDATE NOTIFICATION
+================================================
+
+Dear {{ user_name or 'Valued User' }},
+
+We are writing to inform you about an important system update that affects your account and service experience.
+
+UPDATE DETAILS:
+================================================
+
+Update Type: {{ update_type }}
+Update Title: {{ update_title }}
+Effective Date: {{ effective_date }}
+Impact Level: {{ impact_level or 'Standard' }}
+
+DESCRIPTION:
+{{ update_description }}
+
+{% if new_features %}
+NEW FEATURES:
+================================================
+{% for feature in new_features %}
+• {{ feature.name }}: {{ feature.description }}
+{% endfor %}
+{% endif %}
+
+{% if policy_changes %}
+POLICY CHANGES:
+================================================
+{% for change in policy_changes %}
+• {{ change.area }}: {{ change.description }}
+  Previous: {{ change.previous_policy }}
+  New: {{ change.new_policy }}
+{% endfor %}
+{% endif %}
+
+{% if system_improvements %}
+SYSTEM IMPROVEMENTS:
+================================================
+{% for improvement in system_improvements %}
+• {{ improvement.component }}: {{ improvement.description }}
+  Benefit: {{ improvement.benefit }}
+{% endfor %}
+{% endif %}
+
+{% if security_updates %}
+SECURITY ENHANCEMENTS:
+================================================
+{% for security_update in security_updates %}
+• {{ security_update.area }}: {{ security_update.description }}
+{% endfor %}
+{% endif %}
+
+{% if breaking_changes %}
+IMPORTANT CHANGES REQUIRING ACTION:
+================================================
+{% for change in breaking_changes %}
+• {{ change.component }}: {{ change.description }}
+  Required Action: {{ change.required_action }}
+  Deadline: {{ change.deadline }}
+{% endfor %}
+{% endif %}
+
+{% if user_actions %}
+RECOMMENDED USER ACTIONS:
+================================================
+{% for action in user_actions %}
+{{ loop.index }}. {{ action.description }}
+{% if action.steps %}
+   Steps to complete:
+{% for step in action.steps %}
+   - {{ step }}
+{% endfor %}
+{% endif %}
+   Priority: {{ action.priority or 'Standard' }}
+{% if action.deadline %}
+   Deadline: {{ action.deadline }}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if maintenance_window %}
+MAINTENANCE INFORMATION:
+================================================
+Maintenance Window: {{ maintenance_window.start_time }} to {{ maintenance_window.end_time }}
+Expected Downtime: {{ maintenance_window.duration }}
+Services Affected: {{ maintenance_window.affected_services|join(', ') }}
+{% endif %}
+
+{% if compatibility_notes %}
+COMPATIBILITY INFORMATION:
+================================================
+• Browser Requirements: {{ compatibility_notes.browsers }}
+• Mobile App Updates: {{ compatibility_notes.mobile_apps }}
+• API Changes: {{ compatibility_notes.api_changes }}
+{% endif %}
+
+{% if rollback_info %}
+ROLLBACK INFORMATION:
+================================================
+If you experience issues after this update:
+• Rollback Window: {{ rollback_info.window }}
+• Contact Support: {{ support_contact }}
+• Emergency Contact: {{ emergency_contact }}
+{% endif %}
+
+SUPPORT AND RESOURCES:
+================================================
+
+Documentation: {{ documentation_url or 'Available in your account dashboard' }}
+Support Portal: {{ support_url or 'Contact your administrator' }}
+Video Tutorials: {{ tutorial_url or 'Available upon request' }}
+
+For immediate assistance:
+• Email: {{ support_email or 'support@company.com' }}
+• Phone: {{ support_phone or 'Contact your administrator' }}
+• Live Chat: {{ chat_url or 'Available in your account' }}
+
+{% if faq_items %}
+FREQUENTLY ASKED QUESTIONS:
+================================================
+{% for faq in faq_items %}
+Q: {{ faq.question }}
+A: {{ faq.answer }}
+
+{% endfor %}
+{% endif %}
+
+NEXT STEPS:
+================================================
+
+1. Review this notification carefully
+2. Complete any required actions by the specified deadlines
+3. Test your workflows after the update is applied
+4. Contact support if you experience any issues
+5. Update your bookmarks if any URLs have changed
+
+{% if feedback_request %}
+FEEDBACK REQUEST:
+================================================
+We value your feedback on this update. Please share your thoughts:
+• Feedback Survey: {{ feedback_url }}
+• Email Feedback: {{ feedback_email }}
+• Feedback Deadline: {{ feedback_deadline }}
+{% endif %}
+
+CONTACT INFORMATION:
+================================================
+
+Primary Support: {{ support_email or 'support@company.com' }}
+Technical Support: {{ technical_support_email or 'technical@company.com' }}
+Account Management: {{ account_management_email or 'accounts@company.com' }}
+
+Support Hours: {{ support_hours or 'Monday-Friday, 9 AM - 5 PM EST' }}
+Emergency Contact: {{ emergency_contact or 'Available 24/7 for critical issues' }}
+
+{% if additional_notes %}
+ADDITIONAL NOTES:
+================================================
+{{ additional_notes }}
+{% endif %}
+
+================================================
+IMPORTANT REMINDER:
+================================================
+
+This update is part of our ongoing commitment to improving your service experience, enhancing security, and providing new capabilities. We recommend reviewing all changes and completing any required actions promptly.
+
+If you have not taken any action by the specified deadlines, some features may not work as expected. Please contact our support team if you need assistance.
+
+Thank you for your attention to this important update.
+
+Best regards,
+{{ sender_name or 'System Administration Team' }}
+{{ company_name or 'Your Service Provider' }}
+
+================================================
+
+This is an automated system notification. Please do not reply directly to this email. For support inquiries, please use the contact methods listed above.
+
+Update Reference: {{ update_reference_id }}
+Notification Date: {{ notification_date }}
+System Version: {{ system_version or 'Latest' }}
+
+For more information about our update process and policies, please visit our documentation portal or contact our support team.
+
+© {{ current_year }} {{ company_name or 'Your Service Provider' }}. All rights reserved.
