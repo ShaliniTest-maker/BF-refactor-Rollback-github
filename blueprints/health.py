@@ -1,58 +1,62 @@
 """
-Health Check Blueprint for Flask Application
+Flask Health Check Blueprint
 
 This module provides comprehensive system monitoring endpoints for application health validation,
-database connectivity checks, and service availability reporting. Implements container orchestration
-integration with Kubernetes liveness and readiness probes while supporting production monitoring
-and alerting systems.
+database connectivity checks, and service availability reporting. The blueprint enables container
+orchestration integration with Kubernetes liveness and readiness probes while supporting production
+monitoring and alerting systems.
 
 Key Features:
-- Multi-tier health check endpoints with configurable response time requirements
-- Database connectivity validation with Flask-SQLAlchemy health checks
-- Resource utilization metrics for performance monitoring 
-- Container orchestration integration for Kubernetes deployment
-- Docker HEALTHCHECK instruction support with appropriate timeouts
-- Service availability reporting for external dependencies
-- Comprehensive system status validation with detailed diagnostics
+- Application health endpoint providing comprehensive system status per Section 6.1.5
+- Database connectivity validation for operational monitoring per Section 5.2.4
+- Container orchestration integration for Kubernetes deployment per Section 6.1.5
+- Resource utilization metrics for performance monitoring per Section 6.1.5
+- Docker HEALTHCHECK instruction support per Section 6.1.5
 
 Health Check Endpoints:
-- /health/liveness: Basic application responsiveness (<50ms) for load balancer checks
-- /health/readiness: Full system readiness validation (<100ms) for deployment validation  
-- /health/detailed: Comprehensive system status (<200ms) for administrative monitoring
+- GET /health - Basic application health with database connectivity
+- GET /health/liveness - Kubernetes liveness probe (minimal checks)
+- GET /health/readiness - Kubernetes readiness probe (comprehensive checks)
+- GET /health/detailed - Administrative monitoring with detailed metrics
+
+Performance Requirements:
+- Basic health check: <50ms response time
+- Readiness probe: <100ms response time
+- Detailed health check: <200ms response time
+- Database connectivity validation within timeout limits
 
 Dependencies:
-- Flask 3.1.1: Core blueprint and routing functionality
+- Flask 3.1.1: Blueprint registration and route handling
 - Flask-SQLAlchemy 3.1.1: Database connectivity validation
-- psutil: System resource monitoring and utilization metrics
-- python-dotenv 1.0.1: Environment configuration management
-- requests: External service dependency validation
-
-Container Integration:
-- Kubernetes liveness probe endpoint with appropriate timeout configuration
-- Kubernetes readiness probe endpoint with comprehensive validation
-- Docker HEALTHCHECK instruction support for container orchestration
-- ECS/EKS health check integration for AWS container services
+- DatabaseManager: Health check utilities from models module
+- Jinja2 templates: JSON response formatting and template inheritance
 """
 
 import os
-import logging
+import sys
 import time
 import psutil
 import platform
+import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, Tuple, Optional, List
-from functools import wraps
+from typing import Dict, Any, Tuple, Optional, Union
+from uuid import uuid4
 
-from flask import Blueprint, jsonify, current_app, request, g
+# Core Flask imports
+from flask import Blueprint, jsonify, render_template, request, g, current_app
+from flask import __version__ as flask_version
+
+# SQLAlchemy imports for database health checks
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
-from models import db, get_database_health
+# Database models and utilities
+from models import db, DatabaseManager, DatabaseError
 
 # Configure logging for health check operations
 logger = logging.getLogger(__name__)
 
-# Create health check blueprint with organized route structure
+# Create health check blueprint with template and static folder configuration
 health_bp = Blueprint(
     'health',
     __name__,
@@ -61,777 +65,813 @@ health_bp = Blueprint(
     static_folder='../static'
 )
 
-# Health check response time requirements per Section 6.5.2.1
-HEALTH_CHECK_TIMEOUTS = {
-    'liveness': 0.050,    # 50ms - Basic connectivity for load balancers
-    'readiness': 0.100,   # 100ms - Full system readiness for deployment
-    'detailed': 0.200     # 200ms - Comprehensive status for monitoring
-}
 
-# Service availability thresholds and configuration
-SERVICE_HEALTH_THRESHOLDS = {
-    'database_max_response_time': 0.100,    # 100ms max database response
-    'memory_usage_threshold': 0.80,         # 80% memory usage warning
-    'cpu_usage_threshold': 0.85,            # 85% CPU usage warning
-    'disk_usage_threshold': 0.90,           # 90% disk usage critical
-    'connection_pool_threshold': 0.90       # 90% connection pool utilization warning
-}
-
-# Cache for system information to improve performance
-_system_info_cache = {}
-_cache_ttl = 60  # Cache system info for 60 seconds
+class HealthCheckError(Exception):
+    """Custom exception for health check operations."""
+    pass
 
 
-def with_timeout(timeout_seconds: float):
+class HealthCheckManager:
     """
-    Decorator to enforce response time requirements for health check endpoints.
+    Comprehensive health check management utility for system monitoring.
     
-    Ensures health check endpoints meet their SLA requirements per Section 6.5.2.1:
-    - Liveness checks: <50ms for load balancer health validation
-    - Readiness checks: <100ms for deployment health validation  
-    - Detailed checks: <200ms for administrative monitoring
-    
-    Args:
-        timeout_seconds: Maximum allowed execution time in seconds
-        
-    Returns:
-        Decorator function that enforces timeout and logs performance metrics
+    Provides health check coordination, performance metrics collection,
+    and status reporting for container orchestration and monitoring systems.
     """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            start_time = time.time()
-            
-            try:
-                result = func(*args, **kwargs)
-                execution_time = time.time() - start_time
-                
-                # Log performance metrics for monitoring
-                logger.debug(
-                    f"Health check {func.__name__} completed in {execution_time:.3f}s "
-                    f"(limit: {timeout_seconds:.3f}s)"
-                )
-                
-                # Add performance metadata to response
-                if isinstance(result, tuple) and len(result) == 2:
-                    response_data, status_code = result
-                    if isinstance(response_data, dict):
-                        response_data['_performance'] = {
-                            'execution_time_ms': round(execution_time * 1000, 2),
-                            'timeout_ms': round(timeout_seconds * 1000, 2),
-                            'within_sla': execution_time <= timeout_seconds
-                        }
-                    return response_data, status_code
-                
-                return result
-                
-            except Exception as e:
-                execution_time = time.time() - start_time
-                logger.error(
-                    f"Health check {func.__name__} failed after {execution_time:.3f}s: {e}"
-                )
-                
-                return {
-                    'status': 'error',
-                    'message': f'Health check failed: {str(e)}',
-                    '_performance': {
-                        'execution_time_ms': round(execution_time * 1000, 2),
-                        'timeout_ms': round(timeout_seconds * 1000, 2),
-                        'within_sla': False
-                    }
-                }, 500
-                
-        return wrapper
-    return decorator
-
-
-def get_system_info(force_refresh: bool = False) -> Dict[str, Any]:
-    """
-    Get cached system information with TTL-based refresh for performance optimization.
     
-    Provides comprehensive system resource information including CPU, memory, disk,
-    and network statistics for health monitoring and resource utilization tracking.
-    
-    Args:
-        force_refresh: Force cache refresh ignoring TTL
+    @staticmethod
+    def get_application_info() -> Dict[str, Any]:
+        """
+        Retrieve comprehensive application information and metadata.
         
-    Returns:
-        Dictionary containing system resource information and utilization metrics
-    """
-    global _system_info_cache
-    
-    current_time = time.time()
-    cache_key = 'system_info'
-    
-    # Check cache validity
-    if (not force_refresh and 
-        cache_key in _system_info_cache and 
-        current_time - _system_info_cache[cache_key]['timestamp'] < _cache_ttl):
-        return _system_info_cache[cache_key]['data']
-    
-    try:
-        # Collect comprehensive system information
-        cpu_percent = psutil.cpu_percent(interval=0.1)
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        network = psutil.net_io_counters()
-        boot_time = datetime.fromtimestamp(psutil.boot_time(), tz=timezone.utc)
-        
-        # Calculate derived metrics
-        uptime_seconds = current_time - psutil.boot_time()
-        
-        system_info = {
-            'platform': {
-                'system': platform.system(),
-                'release': platform.release(),
-                'machine': platform.machine(),
-                'processor': platform.processor(),
+        Returns:
+            Dict containing application details and system information
+        """
+        try:
+            # Get process and system information
+            process = psutil.Process()
+            system_info = {
+                'hostname': platform.node(),
+                'process_id': os.getpid(),
+                'worker_id': os.environ.get('WORKER_ID', 'main'),
+                'container_id': os.environ.get('HOSTNAME', '')[:12],  # Docker container ID
                 'python_version': platform.python_version(),
-                'architecture': platform.architecture()[0]
-            },
-            'cpu': {
-                'count': psutil.cpu_count(),
-                'count_logical': psutil.cpu_count(logical=True),
-                'usage_percent': cpu_percent,
-                'load_average': list(os.getloadavg()) if hasattr(os, 'getloadavg') else None
-            },
-            'memory': {
-                'total_bytes': memory.total,
-                'available_bytes': memory.available,
-                'used_bytes': memory.used,
-                'usage_percent': memory.percent,
-                'total_gb': round(memory.total / (1024**3), 2),
-                'available_gb': round(memory.available / (1024**3), 2),
-                'used_gb': round(memory.used / (1024**3), 2)
-            },
-            'disk': {
-                'total_bytes': disk.total,
-                'free_bytes': disk.free,
-                'used_bytes': disk.used,
-                'usage_percent': (disk.used / disk.total) * 100,
-                'total_gb': round(disk.total / (1024**3), 2),
-                'free_gb': round(disk.free / (1024**3), 2),
-                'used_gb': round(disk.used / (1024**3), 2)
-            },
-            'network': {
-                'bytes_sent': network.bytes_sent,
-                'bytes_recv': network.bytes_recv,
-                'packets_sent': network.packets_sent,
-                'packets_recv': network.packets_recv,
-                'errors_in': network.errin,
-                'errors_out': network.errout,
-                'drops_in': network.dropin,
-                'drops_out': network.dropout
-            },
-            'system': {
-                'boot_time': boot_time.isoformat(),
-                'uptime_seconds': round(uptime_seconds, 2),
-                'uptime_hours': round(uptime_seconds / 3600, 2),
-                'process_count': len(psutil.pids())
+                'flask_version': flask_version,
+                'platform': platform.system(),
+                'architecture': platform.machine()
             }
-        }
-        
-        # Cache the results
-        _system_info_cache[cache_key] = {
-            'data': system_info,
-            'timestamp': current_time
-        }
-        
-        return system_info
-        
-    except Exception as e:
-        logger.error(f"Failed to collect system information: {e}")
-        return {
-            'error': f'System information collection failed: {str(e)}',
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-
-
-def check_database_connectivity() -> Dict[str, Any]:
-    """
-    Validate database connectivity and performance using Flask-SQLAlchemy health checks.
+            
+            # Calculate application uptime
+            app_start_time = getattr(current_app, '_start_time', time.time())
+            uptime_seconds = int(time.time() - app_start_time)
+            
+            # Get environment configuration
+            app_info = {
+                'name': current_app.config.get('APP_NAME', 'flask-application'),
+                'version': current_app.config.get('APP_VERSION', '1.0.0'),
+                'environment': current_app.config.get('FLASK_ENV', 'development'),
+                'debug_mode': current_app.debug,
+                'uptime_seconds': uptime_seconds,
+                'instance_id': os.environ.get('INSTANCE_ID', platform.node())
+            }
+            
+            return {
+                'application': app_info,
+                'system': system_info,
+                'process': {
+                    'pid': process.pid,
+                    'ppid': process.ppid(),
+                    'create_time': process.create_time(),
+                    'num_threads': process.num_threads()
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting application info: {str(e)}")
+            return {
+                'application': {'name': 'flask-application', 'version': '1.0.0'},
+                'system': {'hostname': 'unknown'},
+                'process': {'pid': os.getpid()}
+            }
     
-    Performs comprehensive database health validation including connection pool status,
-    query performance testing, and SSL encryption verification per Section 5.2.4
-    database access layer requirements.
+    @staticmethod
+    def get_performance_metrics() -> Dict[str, Union[float, int]]:
+        """
+        Collect system performance and resource utilization metrics.
+        
+        Returns:
+            Dict containing performance metrics for monitoring
+        """
+        try:
+            # Get process-specific metrics
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            cpu_percent = process.cpu_percent(interval=0.1)
+            
+            # Get system-wide metrics
+            system_memory = psutil.virtual_memory()
+            system_cpu = psutil.cpu_percent(interval=0.1)
+            disk_usage = psutil.disk_usage('/')
+            
+            # Calculate memory usage in MB
+            memory_usage_mb = memory_info.rss / (1024 * 1024)
+            system_memory_usage_mb = system_memory.used / (1024 * 1024)
+            
+            return {
+                'process_memory_mb': round(memory_usage_mb, 2),
+                'process_cpu_percent': round(cpu_percent, 2),
+                'system_memory_mb': round(system_memory_usage_mb, 2),
+                'system_memory_percent': round(system_memory.percent, 2),
+                'system_cpu_percent': round(system_cpu, 2),
+                'disk_usage_percent': round(disk_usage.percent, 2),
+                'disk_free_gb': round(disk_usage.free / (1024**3), 2),
+                'load_average': os.getloadavg()[0] if hasattr(os, 'getloadavg') else 0.0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error collecting performance metrics: {str(e)}")
+            return {
+                'process_memory_mb': 0.0,
+                'process_cpu_percent': 0.0,
+                'system_memory_percent': 0.0,
+                'system_cpu_percent': 0.0,
+                'disk_usage_percent': 0.0,
+                'error': str(e)
+            }
+    
+    @staticmethod
+    def check_database_connectivity() -> Dict[str, Any]:
+        """
+        Perform comprehensive database connectivity and health validation.
+        
+        Returns:
+            Dict containing database health status and connection metrics
+        """
+        database_health = {
+            'status': 'unknown',
+            'accessible': False,
+            'response_time_ms': 0,
+            'pool_status': {},
+            'version_info': '',
+            'ssl_enabled': False,
+            'errors': []
+        }
+        
+        start_time = time.time()
+        
+        try:
+            # Use DatabaseManager for comprehensive health check
+            health_result = DatabaseManager.check_database_health()
+            
+            # Calculate response time
+            response_time = (time.time() - start_time) * 1000
+            database_health.update({
+                'status': health_result.get('status', 'unknown'),
+                'accessible': health_result.get('database_accessible', False),
+                'response_time_ms': round(response_time, 2),
+                'pool_status': health_result.get('metrics', {}),
+                'ssl_enabled': health_result.get('ssl_enabled', False),
+                'errors': health_result.get('errors', [])
+            })
+            
+            # Additional database version check
+            if health_result.get('database_accessible'):
+                try:
+                    version_result = db.session.execute(text('SELECT version()')).scalar()
+                    database_health['version_info'] = version_result
+                except Exception as e:
+                    database_health['errors'].append(f"Version check failed: {str(e)}")
+            
+            # Validate connection pool health
+            pool_metrics = DatabaseManager.get_connection_pool_status()
+            if pool_metrics:
+                database_health['pool_status'] = pool_metrics
+                
+                # Check for pool health issues
+                invalid_connections = pool_metrics.get('invalid', 0)
+                total_connections = pool_metrics.get('total_connections', 0)
+                
+                if invalid_connections > 0:
+                    database_health['errors'].append(f"Pool has {invalid_connections} invalid connections")
+                
+                if total_connections == 0:
+                    database_health['errors'].append("No active database connections")
+            
+        except DatabaseError as e:
+            database_health.update({
+                'status': 'unhealthy',
+                'accessible': False,
+                'response_time_ms': round((time.time() - start_time) * 1000, 2),
+                'errors': [f"Database error: {str(e)}"]
+            })
+            logger.error(f"Database health check failed: {str(e)}")
+            
+        except Exception as e:
+            database_health.update({
+                'status': 'error',
+                'accessible': False,
+                'response_time_ms': round((time.time() - start_time) * 1000, 2),
+                'errors': [f"Unexpected error: {str(e)}"]
+            })
+            logger.error(f"Unexpected database health check error: {str(e)}")
+        
+        return database_health
+    
+    @staticmethod
+    def check_external_services() -> Dict[str, Any]:
+        """
+        Validate external service connectivity and availability.
+        
+        Returns:
+            Dict containing external service health status
+        """
+        services_health = {
+            'auth0': {'status': 'unknown', 'response_time_ms': 0},
+            'monitoring': {'status': 'healthy', 'response_time_ms': 0},
+            'overall_status': 'unknown'
+        }
+        
+        # Check Auth0 connectivity (if configured)
+        auth0_domain = current_app.config.get('AUTH0_DOMAIN')
+        if auth0_domain:
+            start_time = time.time()
+            try:
+                # Simple connectivity check to Auth0 domain
+                import requests
+                response = requests.head(f"https://{auth0_domain}/.well-known/jwks.json", timeout=5)
+                response_time = (time.time() - start_time) * 1000
+                
+                if response.status_code == 200:
+                    services_health['auth0'] = {
+                        'status': 'healthy',
+                        'response_time_ms': round(response_time, 2)
+                    }
+                else:
+                    services_health['auth0'] = {
+                        'status': 'degraded',
+                        'response_time_ms': round(response_time, 2),
+                        'error': f"HTTP {response.status_code}"
+                    }
+                    
+            except Exception as e:
+                services_health['auth0'] = {
+                    'status': 'unhealthy',
+                    'response_time_ms': round((time.time() - start_time) * 1000, 2),
+                    'error': str(e)
+                }
+        else:
+            services_health['auth0'] = {'status': 'not_configured', 'response_time_ms': 0}
+        
+        # Determine overall service status
+        service_statuses = [svc['status'] for svc in services_health.values() if isinstance(svc, dict)]
+        if 'unhealthy' in service_statuses:
+            services_health['overall_status'] = 'unhealthy'
+        elif 'degraded' in service_statuses:
+            services_health['overall_status'] = 'degraded'
+        else:
+            services_health['overall_status'] = 'healthy'
+        
+        return services_health
+    
+    @staticmethod
+    def determine_overall_health(database_health: Dict[str, Any], 
+                               services_health: Dict[str, Any], 
+                               performance_metrics: Dict[str, Any]) -> Tuple[str, int]:
+        """
+        Determine overall application health status based on component checks.
+        
+        Args:
+            database_health: Database connectivity results
+            services_health: External services connectivity results
+            performance_metrics: System performance metrics
+            
+        Returns:
+            Tuple of (status_string, http_status_code)
+        """
+        # Check database health
+        db_healthy = database_health.get('status') == 'healthy'
+        db_accessible = database_health.get('accessible', False)
+        
+        # Check services health
+        services_overall = services_health.get('overall_status', 'unknown')
+        
+        # Check performance thresholds
+        cpu_percent = performance_metrics.get('process_cpu_percent', 0)
+        memory_percent = performance_metrics.get('system_memory_percent', 0)
+        disk_percent = performance_metrics.get('disk_usage_percent', 0)
+        
+        # Define performance thresholds
+        performance_healthy = (
+            cpu_percent < 80 and
+            memory_percent < 85 and
+            disk_percent < 90
+        )
+        
+        # Determine overall status
+        if not db_accessible:
+            return 'unhealthy', 503
+        elif not db_healthy:
+            return 'degraded', 200
+        elif services_overall == 'unhealthy':
+            return 'degraded', 200
+        elif not performance_healthy:
+            return 'warning', 200
+        elif services_overall in ['degraded', 'warning']:
+            return 'warning', 200
+        else:
+            return 'healthy', 200
+
+
+def create_health_context(check_type: str = 'basic', 
+                         start_time: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Create comprehensive health check context for template rendering.
+    
+    Args:
+        check_type: Type of health check being performed
+        start_time: Start time for duration calculation
+        
+    Returns:
+        Dict containing all health check data for template rendering
+    """
+    if start_time is None:
+        start_time = time.time()
+    
+    # Set request ID for tracing
+    if not hasattr(g, 'request_id'):
+        g.request_id = str(uuid4())
+    
+    # Get application information
+    app_info = HealthCheckManager.get_application_info()
+    
+    # Get performance metrics
+    performance_metrics = HealthCheckManager.get_performance_metrics()
+    
+    # Get database health (for readiness and detailed checks)
+    database_health = {}
+    services_health = {}
+    
+    if check_type in ['readiness', 'detailed', 'basic']:
+        database_health = HealthCheckManager.check_database_connectivity()
+    
+    # Get external services health (for detailed checks)
+    if check_type == 'detailed':
+        services_health = HealthCheckManager.check_external_services()
+    
+    # Determine overall health status
+    overall_status, http_status = HealthCheckManager.determine_overall_health(
+        database_health, services_health, performance_metrics
+    )
+    
+    # Calculate check duration
+    check_duration_ms = round((time.time() - start_time) * 1000, 2)
+    
+    # Create comprehensive context
+    context = {
+        # Basic application info
+        'health_status': overall_status,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'hostname': app_info['system']['hostname'],
+        'instance_id': app_info['application']['instance_id'],
+        'uptime_seconds': app_info['application']['uptime_seconds'],
+        'process_id': app_info['system']['process_id'],
+        'worker_id': app_info['system']['worker_id'],
+        'container_id': app_info['system']['container_id'],
+        
+        # Performance metrics
+        'response_time_ms': check_duration_ms,
+        'memory_usage_mb': performance_metrics.get('process_memory_mb', 0),
+        'cpu_usage_percent': performance_metrics.get('process_cpu_percent', 0),
+        
+        # Application status
+        'application_status': 'healthy' if overall_status in ['healthy', 'warning'] else 'degraded',
+        
+        # Version information
+        'flask_version': flask_version,
+        'python_version': app_info['system']['python_version'],
+        
+        # Check metadata
+        'check_duration_ms': check_duration_ms,
+        'orchestration_platform': os.environ.get('ORCHESTRATION_PLATFORM', 'docker'),
+        
+        # HTTP status for response
+        'http_status': http_status,
+        
+        # Request context
+        'request_url': request.url if request else '/health',
+        
+        # Additional data for detailed checks
+        'database_health': database_health,
+        'services_health': services_health,
+        'performance_metrics': performance_metrics,
+        'app_info': app_info
+    }
+    
+    return context
+
+
+@health_bp.route('/', methods=['GET'])
+def health_check():
+    """
+    Basic application health check endpoint.
+    
+    Provides essential health status with database connectivity validation.
+    Optimized for load balancer health checks and basic monitoring.
+    
+    Performance Target: <50ms response time
     
     Returns:
-        Dictionary containing database health status and performance metrics
+        JSON response with basic health status and HTTP status code
     """
     start_time = time.time()
     
     try:
-        # Use the centralized database health function from models
-        db_health = get_database_health()
+        # Create health context with basic checks
+        context = create_health_context('basic', start_time)
         
-        # Perform additional performance validation
-        query_start = time.time()
-        result = db.session.execute(text('SELECT 1 as health_check')).scalar()
-        query_time = time.time() - query_start
-        
-        total_time = time.time() - start_time
-        
-        # Determine overall health status
-        is_healthy = (
-            db_health.get('status') == 'healthy' and
-            result == 1 and
-            query_time <= SERVICE_HEALTH_THRESHOLDS['database_max_response_time']
-        )
-        
-        return {
-            'status': 'healthy' if is_healthy else 'degraded',
-            'connectivity': 'connected' if result == 1 else 'failed',
-            'query_response_time_ms': round(query_time * 1000, 2),
-            'total_check_time_ms': round(total_time * 1000, 2),
-            'within_sla': query_time <= SERVICE_HEALTH_THRESHOLDS['database_max_response_time'],
-            'pool_info': {
-                'pool_size': db_health.get('pool_size'),
-                'active_connections': db_health.get('active_connections'),
-                'ssl_enabled': db_health.get('ssl_enabled')
+        # Create simplified response for basic health check
+        response_data = {
+            'status': context['health_status'],
+            'timestamp': context['timestamp'],
+            'service': {
+                'name': current_app.config.get('APP_NAME', 'flask-application'),
+                'version': current_app.config.get('APP_VERSION', '1.0.0'),
+                'uptime_seconds': context['uptime_seconds']
             },
-            'error': db_health.get('error'),
-            'timestamp': datetime.now(timezone.utc).isoformat()
+            'database': {
+                'accessible': context['database_health'].get('accessible', False),
+                'response_time_ms': context['database_health'].get('response_time_ms', 0)
+            },
+            'performance': {
+                'response_time_ms': context['response_time_ms'],
+                'memory_usage_mb': context['memory_usage_mb']
+            },
+            'metadata': {
+                'check_type': 'basic',
+                'check_duration_ms': context['check_duration_ms']
+            }
         }
         
-    except SQLAlchemyError as e:
-        total_time = time.time() - start_time
-        logger.error(f"Database connectivity check failed: {e}")
+        return jsonify(response_data), context['http_status']
         
-        return {
-            'status': 'unhealthy',
-            'connectivity': 'failed',
-            'query_response_time_ms': None,
-            'total_check_time_ms': round(total_time * 1000, 2),
-            'within_sla': False,
-            'pool_info': None,
-            'error': f'Database error: {str(e)}',
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-    
     except Exception as e:
-        total_time = time.time() - start_time
-        logger.error(f"Unexpected error during database health check: {e}")
-        
-        return {
+        logger.error(f"Health check failed: {str(e)}")
+        error_response = {
             'status': 'error',
-            'connectivity': 'unknown',
-            'query_response_time_ms': None,
-            'total_check_time_ms': round(total_time * 1000, 2),
-            'within_sla': False,
-            'pool_info': None,
-            'error': f'Health check error: {str(e)}',
-            'timestamp': datetime.now(timezone.utc).isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'error': str(e),
+            'metadata': {
+                'check_type': 'basic',
+                'check_duration_ms': round((time.time() - start_time) * 1000, 2)
+            }
         }
-
-
-def validate_external_services() -> Dict[str, Any]:
-    """
-    Validate external service dependencies and integration health.
-    
-    Checks the availability and response times of external services including
-    authentication providers and any configured external APIs per Section 6.5.1.2
-    external service monitoring requirements.
-    
-    Returns:
-        Dictionary containing external service health status and response metrics
-    """
-    services_status = {}
-    overall_healthy = True
-    
-    # Auth0 Authentication Service Health Check
-    auth0_domain = current_app.config.get('AUTH0_DOMAIN')
-    if auth0_domain:
-        try:
-            import requests
-            auth0_start = time.time()
-            
-            # Check Auth0 well-known configuration endpoint
-            auth0_url = f"https://{auth0_domain}/.well-known/jwks.json"
-            response = requests.get(auth0_url, timeout=5)
-            auth0_time = time.time() - auth0_start
-            
-            services_status['auth0'] = {
-                'status': 'healthy' if response.status_code == 200 else 'degraded',
-                'response_time_ms': round(auth0_time * 1000, 2),
-                'status_code': response.status_code,
-                'endpoint': auth0_url,
-                'within_sla': auth0_time <= 0.150  # 150ms SLA for auth services
-            }
-            
-            if response.status_code != 200 or auth0_time > 0.150:
-                overall_healthy = False
-                
-        except Exception as e:
-            logger.warning(f"Auth0 health check failed: {e}")
-            services_status['auth0'] = {
-                'status': 'unhealthy',
-                'response_time_ms': None,
-                'error': str(e),
-                'within_sla': False
-            }
-            overall_healthy = False
-    
-    # Add additional external service checks here as needed
-    # Example: External API dependencies, message queues, cache services
-    
-    return {
-        'overall_status': 'healthy' if overall_healthy else 'degraded',
-        'services': services_status,
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    }
-
-
-def analyze_resource_utilization() -> Dict[str, Any]:
-    """
-    Analyze system resource utilization and generate health alerts.
-    
-    Monitors CPU, memory, disk, and network utilization against configured thresholds
-    for proactive system monitoring and capacity planning per Section 6.5.1.1
-    metrics collection requirements.
-    
-    Returns:
-        Dictionary containing resource utilization analysis and threshold alerts
-    """
-    system_info = get_system_info()
-    alerts = []
-    overall_status = 'healthy'
-    
-    # Analyze CPU utilization
-    cpu_usage = system_info.get('cpu', {}).get('usage_percent', 0)
-    if cpu_usage > SERVICE_HEALTH_THRESHOLDS['cpu_usage_threshold'] * 100:
-        alerts.append({
-            'type': 'cpu_high',
-            'severity': 'warning',
-            'message': f'High CPU usage: {cpu_usage:.1f}%',
-            'threshold': f"{SERVICE_HEALTH_THRESHOLDS['cpu_usage_threshold'] * 100}%"
-        })
-        overall_status = 'warning'
-    
-    # Analyze memory utilization
-    memory_usage = system_info.get('memory', {}).get('usage_percent', 0)
-    if memory_usage > SERVICE_HEALTH_THRESHOLDS['memory_usage_threshold'] * 100:
-        alerts.append({
-            'type': 'memory_high',
-            'severity': 'warning',
-            'message': f'High memory usage: {memory_usage:.1f}%',
-            'threshold': f"{SERVICE_HEALTH_THRESHOLDS['memory_usage_threshold'] * 100}%"
-        })
-        overall_status = 'warning'
-    
-    # Analyze disk utilization
-    disk_usage = system_info.get('disk', {}).get('usage_percent', 0)
-    if disk_usage > SERVICE_HEALTH_THRESHOLDS['disk_usage_threshold'] * 100:
-        alerts.append({
-            'type': 'disk_critical',
-            'severity': 'critical',
-            'message': f'Critical disk usage: {disk_usage:.1f}%',
-            'threshold': f"{SERVICE_HEALTH_THRESHOLDS['disk_usage_threshold'] * 100}%"
-        })
-        overall_status = 'critical'
-    
-    # Analyze connection pool utilization if available
-    try:
-        db_health = get_database_health()
-        pool_size = db_health.get('pool_size', 0)
-        active_connections = db_health.get('active_connections', 0)
-        
-        if pool_size > 0:
-            pool_utilization = (active_connections / pool_size) * 100
-            if pool_utilization > SERVICE_HEALTH_THRESHOLDS['connection_pool_threshold'] * 100:
-                alerts.append({
-                    'type': 'connection_pool_high',
-                    'severity': 'warning',
-                    'message': f'High connection pool usage: {pool_utilization:.1f}%',
-                    'threshold': f"{SERVICE_HEALTH_THRESHOLDS['connection_pool_threshold'] * 100}%"
-                })
-                if overall_status == 'healthy':
-                    overall_status = 'warning'
-    except Exception as e:
-        logger.debug(f"Connection pool analysis skipped: {e}")
-    
-    return {
-        'status': overall_status,
-        'alerts': alerts,
-        'alert_count': len(alerts),
-        'resource_summary': {
-            'cpu_usage_percent': cpu_usage,
-            'memory_usage_percent': memory_usage,
-            'disk_usage_percent': disk_usage
-        },
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    }
+        return jsonify(error_response), 500
 
 
 @health_bp.route('/liveness', methods=['GET'])
-@with_timeout(HEALTH_CHECK_TIMEOUTS['liveness'])
 def liveness_probe():
     """
-    Kubernetes liveness probe endpoint for basic application responsiveness.
+    Kubernetes liveness probe endpoint.
     
-    Provides minimal health check validation required for container orchestration
-    and load balancer health validation. Optimized for <50ms response time per
-    Section 6.1.5 health check endpoint implementation requirements.
+    Minimal health check for container orchestration liveness validation.
+    Validates basic application responsiveness without external dependencies.
+    
+    Performance Target: <50ms response time
     
     Returns:
-        JSON response with basic application status for liveness validation
-        
-    HTTP Status Codes:
-        200: Application is responsive and healthy
-        503: Application is unresponsive or critical failure detected
+        JSON response indicating application liveness status
     """
+    start_time = time.time()
+    
     try:
-        # Minimal validation for fastest response
-        response_data = {
-            'status': 'healthy',
-            'service': 'flask-app',
-            'version': current_app.config.get('APP_VERSION', '1.0.0'),
+        # Minimal check for application responsiveness
+        context = {
+            'health_status': 'healthy',
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'liveness'
+            'hostname': platform.node(),
+            'process_id': os.getpid(),
+            'uptime_seconds': int(time.time() - getattr(current_app, '_start_time', time.time())),
+            'response_time_ms': round((time.time() - start_time) * 1000, 2),
+            'flask_version': flask_version,
+            'python_version': platform.python_version(),
+            'check_duration_ms': round((time.time() - start_time) * 1000, 2)
         }
         
-        logger.debug("Liveness probe successful")
-        return jsonify(response_data), 200
+        # Render liveness template
+        try:
+            response_json = render_template('liveness.json', **context)
+            return current_app.response_class(
+                response_json,
+                status=200,
+                mimetype='application/json'
+            )
+        except Exception:
+            # Fallback to direct JSON response
+            response_data = {
+                'status': 'healthy',
+                'timestamp': context['timestamp'],
+                'service': {
+                    'name': current_app.config.get('APP_NAME', 'flask-application'),
+                    'uptime_seconds': context['uptime_seconds']
+                },
+                'metadata': {
+                    'check_type': 'liveness',
+                    'check_duration_ms': context['check_duration_ms']
+                }
+            }
+            return jsonify(response_data), 200
         
     except Exception as e:
-        logger.error(f"Liveness probe failed: {e}")
-        return jsonify({
-            'status': 'unhealthy',
-            'service': 'flask-app',
-            'error': str(e),
+        logger.error(f"Liveness probe failed: {str(e)}")
+        error_response = {
+            'status': 'error',
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'liveness'
-        }), 503
+            'error': str(e),
+            'metadata': {
+                'check_type': 'liveness',
+                'check_duration_ms': round((time.time() - start_time) * 1000, 2)
+            }
+        }
+        return jsonify(error_response), 500
 
 
 @health_bp.route('/readiness', methods=['GET'])
-@with_timeout(HEALTH_CHECK_TIMEOUTS['readiness'])
 def readiness_probe():
     """
-    Kubernetes readiness probe endpoint for full system readiness validation.
+    Kubernetes readiness probe endpoint.
     
-    Performs comprehensive system readiness checks including database connectivity
-    and critical service availability. Optimized for <100ms response time per
-    Section 6.1.5 container orchestration integration requirements.
+    Comprehensive readiness validation including database connectivity
+    and external service availability. Used for deployment health validation.
+    
+    Performance Target: <100ms response time
     
     Returns:
-        JSON response with system readiness status for deployment validation
-        
-    HTTP Status Codes:
-        200: System is ready to handle traffic
-        503: System is not ready (database unavailable, critical services down)
+        JSON response with comprehensive readiness status
     """
+    start_time = time.time()
+    
     try:
-        # Perform critical dependency checks
-        db_status = check_database_connectivity()
+        # Create comprehensive health context for readiness
+        context = create_health_context('readiness', start_time)
         
-        # Determine overall readiness
-        is_ready = (
-            db_status['status'] in ['healthy', 'degraded'] and
-            db_status['connectivity'] == 'connected'
-        )
+        # Determine readiness based on critical dependencies
+        database_ready = context['database_health'].get('accessible', False)
         
-        response_data = {
-            'status': 'ready' if is_ready else 'not_ready',
-            'service': 'flask-app',
-            'version': current_app.config.get('APP_VERSION', '1.0.0'),
-            'checks': {
+        # Override status for readiness - must have database connectivity
+        if not database_ready:
+            context['health_status'] = 'not_ready'
+            context['http_status'] = 503
+        elif context['health_status'] == 'healthy':
+            context['health_status'] = 'ready'
+        
+        # Render readiness template
+        try:
+            response_json = render_template('readiness.json', **context)
+            return current_app.response_class(
+                response_json,
+                status=context['http_status'],
+                mimetype='application/json'
+            )
+        except Exception:
+            # Fallback to direct JSON response
+            response_data = {
+                'status': context['health_status'],
+                'timestamp': context['timestamp'],
+                'service': {
+                    'name': current_app.config.get('APP_NAME', 'flask-application'),
+                    'version': current_app.config.get('APP_VERSION', '1.0.0'),
+                    'uptime_seconds': context['uptime_seconds']
+                },
                 'database': {
-                    'status': db_status['status'],
-                    'connectivity': db_status['connectivity'],
-                    'response_time_ms': db_status['query_response_time_ms']
+                    'accessible': database_ready,
+                    'response_time_ms': context['database_health'].get('response_time_ms', 0),
+                    'status': context['database_health'].get('status', 'unknown')
+                },
+                'metadata': {
+                    'check_type': 'readiness',
+                    'check_duration_ms': context['check_duration_ms']
                 }
-            },
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'readiness'
-        }
-        
-        status_code = 200 if is_ready else 503
-        
-        logger.debug(f"Readiness probe completed: {'ready' if is_ready else 'not ready'}")
-        return jsonify(response_data), status_code
+            }
+            return jsonify(response_data), context['http_status']
         
     except Exception as e:
-        logger.error(f"Readiness probe failed: {e}")
-        return jsonify({
+        logger.error(f"Readiness probe failed: {str(e)}")
+        error_response = {
             'status': 'not_ready',
-            'service': 'flask-app',
-            'error': str(e),
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'readiness'
-        }), 503
+            'error': str(e),
+            'metadata': {
+                'check_type': 'readiness',
+                'check_duration_ms': round((time.time() - start_time) * 1000, 2)
+            }
+        }
+        return jsonify(error_response), 503
 
 
 @health_bp.route('/detailed', methods=['GET'])
-@with_timeout(HEALTH_CHECK_TIMEOUTS['detailed'])
-def detailed_health():
+def detailed_health_check():
     """
-    Comprehensive system health check for administrative monitoring and diagnostics.
+    Detailed administrative health check endpoint.
     
-    Provides detailed system status including resource utilization metrics, external
-    service validation, and performance diagnostics. Optimized for <200ms response time
-    per Section 6.5.2.1 health check endpoint implementation requirements.
+    Comprehensive system monitoring with detailed metrics collection,
+    performance analysis, and administrative monitoring information.
+    
+    Performance Target: <200ms response time
     
     Returns:
-        JSON response with comprehensive system health status and metrics
-        
-    HTTP Status Codes:
-        200: Detailed health information available
-        503: Critical system issues detected
-        500: Health check execution failed
+        JSON response with comprehensive system health details
     """
+    start_time = time.time()
+    
     try:
-        # Collect comprehensive health information
-        db_status = check_database_connectivity()
-        external_services = validate_external_services()
-        resource_analysis = analyze_resource_utilization()
-        system_info = get_system_info()
+        # Create comprehensive health context with all checks
+        context = create_health_context('detailed', start_time)
         
-        # Determine overall system health
-        overall_status = 'healthy'
-        
-        # Check for critical issues
-        if db_status['status'] == 'unhealthy':
-            overall_status = 'critical'
-        elif (db_status['status'] == 'degraded' or 
-              external_services['overall_status'] == 'degraded' or
-              resource_analysis['status'] in ['warning', 'critical']):
-            overall_status = 'degraded'
-        
-        if resource_analysis['status'] == 'critical':
-            overall_status = 'critical'
-        
-        response_data = {
-            'status': overall_status,
-            'service': 'flask-app',
-            'version': current_app.config.get('APP_VERSION', '1.0.0'),
-            'environment': current_app.config.get('FLASK_ENV', 'production'),
-            'checks': {
-                'database': db_status,
-                'external_services': external_services,
-                'resource_utilization': resource_analysis,
-                'system_info': system_info
-            },
-            'summary': {
-                'database_healthy': db_status['status'] in ['healthy', 'degraded'],
-                'external_services_healthy': external_services['overall_status'] in ['healthy', 'degraded'],
-                'resources_optimal': resource_analysis['status'] == 'healthy',
-                'total_alerts': resource_analysis['alert_count']
-            },
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'detailed'
-        }
-        
-        status_code = 200 if overall_status in ['healthy', 'degraded'] else 503
-        
-        logger.info(f"Detailed health check completed: {overall_status}")
-        return jsonify(response_data), status_code
+        # Render detailed health template
+        try:
+            response_json = render_template('detailed.json', **context)
+            return current_app.response_class(
+                response_json,
+                status=context['http_status'],
+                mimetype='application/json'
+            )
+        except Exception as template_error:
+            logger.warning(f"Template rendering failed, using fallback: {str(template_error)}")
+            
+            # Comprehensive fallback response
+            response_data = {
+                'status': context['health_status'],
+                'timestamp': context['timestamp'],
+                'environment': current_app.config.get('FLASK_ENV', 'development'),
+                'version': current_app.config.get('APP_VERSION', '1.0.0'),
+                'service': {
+                    'name': current_app.config.get('APP_NAME', 'flask-application'),
+                    'instance_id': context['instance_id'],
+                    'uptime_seconds': context['uptime_seconds'],
+                    'request_id': getattr(g, 'request_id', '')
+                },
+                'system': {
+                    'hostname': context['hostname'],
+                    'process_id': context['process_id'],
+                    'worker_id': context['worker_id'],
+                    'container_id': context['container_id']
+                },
+                'performance': {
+                    'response_time_ms': context['response_time_ms'],
+                    'memory_usage_mb': context['memory_usage_mb'],
+                    'cpu_usage_percent': context['cpu_usage_percent'],
+                    'detailed_metrics': context['performance_metrics']
+                },
+                'checks': {
+                    'application': {
+                        'status': context['application_status'],
+                        'details': 'Flask application running normally'
+                    },
+                    'database': context['database_health'],
+                    'external_services': context['services_health']
+                },
+                'metadata': {
+                    'check_type': 'detailed',
+                    'check_duration_ms': context['check_duration_ms'],
+                    'flask_version': context['flask_version'],
+                    'python_version': context['python_version'],
+                    'monitoring': {
+                        'alb_compatible': True,
+                        'ec2_compatible': True,
+                        'container_orchestration': context['orchestration_platform']
+                    }
+                },
+                'links': {
+                    'self': context['request_url'],
+                    'related': {
+                        'liveness': '/health/liveness',
+                        'readiness': '/health/readiness',
+                        'basic': '/health',
+                        'metrics': '/metrics'
+                    }
+                }
+            }
+            
+            return jsonify(response_data), context['http_status']
         
     except Exception as e:
-        logger.error(f"Detailed health check failed: {e}")
-        return jsonify({
+        logger.error(f"Detailed health check failed: {str(e)}")
+        error_response = {
             'status': 'error',
-            'service': 'flask-app',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'error': str(e),
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'detailed'
-        }), 500
-
-
-@health_bp.route('/', methods=['GET'])
-def health_index():
-    """
-    Default health endpoint providing quick system status overview.
-    
-    Serves as the primary health check endpoint for general monitoring
-    with balanced performance and information content.
-    
-    Returns:
-        JSON response with basic system health status and quick metrics
-    """
-    try:
-        # Quick database connectivity check
-        db_status = check_database_connectivity()
-        
-        # Basic system metrics
-        system_info = get_system_info()
-        cpu_usage = system_info.get('cpu', {}).get('usage_percent', 0)
-        memory_usage = system_info.get('memory', {}).get('usage_percent', 0)
-        
-        is_healthy = db_status['status'] in ['healthy', 'degraded']
-        
-        response_data = {
-            'status': 'healthy' if is_healthy else 'unhealthy',
-            'service': 'flask-app',
-            'version': current_app.config.get('APP_VERSION', '1.0.0'),
-            'database': db_status['connectivity'],
-            'metrics': {
-                'cpu_usage_percent': cpu_usage,
-                'memory_usage_percent': memory_usage,
-                'database_response_ms': db_status['query_response_time_ms']
-            },
-            'endpoints': {
-                'liveness': '/health/liveness',
-                'readiness': '/health/readiness', 
-                'detailed': '/health/detailed'
-            },
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'overview'
+            'metadata': {
+                'check_type': 'detailed',
+                'check_duration_ms': round((time.time() - start_time) * 1000, 2)
+            }
         }
-        
-        status_code = 200 if is_healthy else 503
-        return jsonify(response_data), status_code
-        
-    except Exception as e:
-        logger.error(f"Health overview failed: {e}")
-        return jsonify({
-            'status': 'error',
-            'service': 'flask-app',
-            'error': str(e),
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'check_type': 'overview'
-        }), 500
+        return jsonify(error_response), 500
 
 
-@health_bp.route('/metrics', methods=['GET'])
-def health_metrics():
+@health_bp.before_app_request
+def before_health_check():
     """
-    Prometheus-compatible metrics endpoint for monitoring integration.
+    Pre-request processing for health check endpoints.
     
-    Provides system metrics in a format compatible with Prometheus scraping
-    for comprehensive monitoring and alerting integration per Section 6.5.1.1
-    metrics collection requirements.
+    Sets up request tracking and performance monitoring for health endpoints.
+    """
+    if request.endpoint and 'health' in request.endpoint:
+        # Set request start time for performance tracking
+        g.request_start_time = time.time()
+        
+        # Generate request ID for tracing
+        g.request_id = str(uuid4())
+        
+        # Log health check request (debug level to avoid log spam)
+        logger.debug(f"Health check request: {request.endpoint} from {request.remote_addr}")
+
+
+@health_bp.after_app_request
+def after_health_check(response):
+    """
+    Post-request processing for health check endpoints.
     
+    Logs performance metrics and request completion for monitoring.
+    
+    Args:
+        response: Flask response object
+        
     Returns:
-        Plain text response with Prometheus-compatible metrics format
+        Modified response object
     """
-    try:
-        # Collect current metrics
-        db_status = check_database_connectivity()
-        system_info = get_system_info()
-        resource_analysis = analyze_resource_utilization()
+    if request.endpoint and 'health' in request.endpoint:
+        # Calculate request duration
+        if hasattr(g, 'request_start_time'):
+            duration_ms = round((time.time() - g.request_start_time) * 1000, 2)
+            
+            # Log performance metrics (debug level)
+            logger.debug(
+                f"Health check completed: {request.endpoint} "
+                f"duration={duration_ms}ms status={response.status_code}"
+            )
+            
+            # Add performance headers for monitoring
+            response.headers['X-Response-Time'] = f"{duration_ms}ms"
+            response.headers['X-Request-ID'] = getattr(g, 'request_id', '')
         
-        # Generate Prometheus metrics format
-        metrics_lines = [
-            '# HELP flask_app_health Application health status (1=healthy, 0=unhealthy)',
-            '# TYPE flask_app_health gauge',
-            f'flask_app_health{{service="flask-app"}} {1 if db_status["status"] in ["healthy", "degraded"] else 0}',
-            '',
-            '# HELP flask_app_database_response_time Database response time in milliseconds',
-            '# TYPE flask_app_database_response_time gauge',
-            f'flask_app_database_response_time{{service="flask-app"}} {db_status.get("query_response_time_ms", 0)}',
-            '',
-            '# HELP flask_app_cpu_usage CPU usage percentage',
-            '# TYPE flask_app_cpu_usage gauge',
-            f'flask_app_cpu_usage{{service="flask-app"}} {system_info.get("cpu", {}).get("usage_percent", 0)}',
-            '',
-            '# HELP flask_app_memory_usage Memory usage percentage',
-            '# TYPE flask_app_memory_usage gauge',
-            f'flask_app_memory_usage{{service="flask-app"}} {system_info.get("memory", {}).get("usage_percent", 0)}',
-            '',
-            '# HELP flask_app_disk_usage Disk usage percentage',
-            '# TYPE flask_app_disk_usage gauge',
-            f'flask_app_disk_usage{{service="flask-app"}} {system_info.get("disk", {}).get("usage_percent", 0)}',
-            '',
-            '# HELP flask_app_alerts_total Total number of active alerts',
-            '# TYPE flask_app_alerts_total gauge',
-            f'flask_app_alerts_total{{service="flask-app"}} {resource_analysis.get("alert_count", 0)}',
-            ''
-        ]
+        # Add caching headers for health endpoints
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
         
-        # Add database connection pool metrics if available
-        pool_info = db_status.get('pool_info', {})
-        if pool_info.get('pool_size'):
-            metrics_lines.extend([
-                '# HELP flask_app_db_pool_size Database connection pool size',
-                '# TYPE flask_app_db_pool_size gauge',
-                f'flask_app_db_pool_size{{service="flask-app"}} {pool_info["pool_size"]}',
-                '',
-                '# HELP flask_app_db_active_connections Active database connections',
-                '# TYPE flask_app_db_active_connections gauge',
-                f'flask_app_db_active_connections{{service="flask-app"}} {pool_info.get("active_connections", 0)}',
-                ''
-            ])
+        # Add CORS headers for cross-origin monitoring
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET'
         
-        metrics_content = '\n'.join(metrics_lines)
-        
-        logger.debug("Health metrics generated successfully")
-        return metrics_content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-        
-    except Exception as e:
-        logger.error(f"Health metrics generation failed: {e}")
-        return f'# Error generating metrics: {str(e)}\n', 500, {'Content-Type': 'text/plain; charset=utf-8'}
-
-
-# Error handlers for health check blueprint
-@health_bp.errorhandler(404)
-def health_not_found(error):
-    """Handle 404 errors within health check blueprint."""
-    return jsonify({
-        'status': 'error',
-        'message': 'Health check endpoint not found',
-        'available_endpoints': [
-            '/health/',
-            '/health/liveness',
-            '/health/readiness',
-            '/health/detailed',
-            '/health/metrics'
-        ],
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    }), 404
-
-
-@health_bp.errorhandler(500)
-def health_internal_error(error):
-    """Handle 500 errors within health check blueprint."""
-    logger.error(f"Internal error in health check: {error}")
-    return jsonify({
-        'status': 'error',
-        'message': 'Internal health check error',
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    }), 500
-
-
-# Request logging for health check monitoring
-@health_bp.before_request
-def log_health_check_request():
-    """Log health check requests for monitoring and debugging."""
-    g.health_check_start_time = time.time()
-    logger.debug(f"Health check request: {request.method} {request.path} from {request.remote_addr}")
-
-
-@health_bp.after_request
-def log_health_check_response(response):
-    """Log health check responses with performance metrics."""
-    if hasattr(g, 'health_check_start_time'):
-        duration = time.time() - g.health_check_start_time
-        logger.debug(
-            f"Health check response: {request.path} -> {response.status_code} "
-            f"({duration:.3f}s)"
-        )
     return response
 
 
-# Initialize health check configuration
-def init_health_checks(app):
+@health_bp.errorhandler(Exception)
+def handle_health_check_error(error):
     """
-    Initialize health check configuration and register with Flask application.
+    Global error handler for health check blueprint.
     
-    Configures health check thresholds, logging, and integration settings
-    for optimal monitoring performance and reliability.
+    Ensures health check endpoints always return proper JSON responses
+    even in case of unexpected errors.
+    
+    Args:
+        error: Exception that occurred
+        
+    Returns:
+        JSON error response with proper HTTP status
+    """
+    logger.error(f"Health check error: {str(error)}", exc_info=True)
+    
+    error_response = {
+        'status': 'error',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'error': str(error),
+        'metadata': {
+            'check_type': 'error',
+            'endpoint': request.endpoint or 'unknown'
+        }
+    }
+    
+    # Determine appropriate HTTP status based on error type
+    if isinstance(error, DatabaseError):
+        status_code = 503
+    elif isinstance(error, HealthCheckError):
+        status_code = 500
+    else:
+        status_code = 500
+    
+    return jsonify(error_response), status_code
+
+
+# Export blueprint for application registration
+__all__ = ['health_bp', 'HealthCheckManager', 'HealthCheckError']
+
+
+def register_health_blueprint(app):
+    """
+    Register health check blueprint with Flask application.
+    
+    This function provides a convenient way to register the health blueprint
+    with proper configuration and initialization.
     
     Args:
         app: Flask application instance
     """
-    # Configure health check specific logging
-    health_logger = logging.getLogger('blueprints.health')
-    health_logger.setLevel(app.config.get('HEALTH_CHECK_LOG_LEVEL', logging.INFO))
+    # Set application start time for uptime calculation
+    if not hasattr(app, '_start_time'):
+        app._start_time = time.time()
     
-    # Register health check configuration
-    app.config.setdefault('HEALTH_CHECK_TIMEOUTS', HEALTH_CHECK_TIMEOUTS)
-    app.config.setdefault('SERVICE_HEALTH_THRESHOLDS', SERVICE_HEALTH_THRESHOLDS)
+    # Register the blueprint
+    app.register_blueprint(health_bp)
     
-    logger.info("Health check blueprint initialized successfully")
+    # Log successful registration
+    app.logger.info("Health check blueprint registered successfully")
+    app.logger.info("Available health endpoints: /health, /health/liveness, /health/readiness, /health/detailed")
 
 
-# Export blueprint and initialization function
-__all__ = ['health_bp', 'init_health_checks']
+# Initialize logging for the health module
+if __name__ != '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
