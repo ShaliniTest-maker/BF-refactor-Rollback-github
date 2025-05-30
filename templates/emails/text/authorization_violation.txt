@@ -1,0 +1,189 @@
+SECURITY ALERT: Authorization Violation Detected
+
+================================================================================
+FLASK APPLICATION SECURITY MONITORING SYSTEM
+Authorization Violation Notification
+================================================================================
+
+INCIDENT SUMMARY:
+----------------
+Alert Type:          Authorization Violation
+Severity:            HIGH PRIORITY
+Incident ID:         {{ incident_id }}
+Detection Time:      {{ violation_timestamp }}
+System:              Flask Application ({{ app_environment }})
+
+VIOLATION DETAILS:
+-----------------
+User Information:
+  - User ID:         {{ user_id }}
+  - Username:        {{ username }}
+  - Email:           {{ user_email }}
+  - Current Roles:   {{ user_roles | join(', ') }}
+  - Session ID:      {{ session_id }}
+
+Attempted Access:
+  - Resource:        {{ attempted_resource }}
+  - Action:          {{ attempted_action }}
+  - Resource ID:     {{ resource_id }}
+  - Required Permission: {{ required_permission }}
+  - Endpoint:        {{ request_endpoint }}
+  - HTTP Method:     {{ request_method }}
+
+Request Context:
+  - Source IP:       {{ client_ip }}
+  - User Agent:      {{ user_agent }}
+  - Referer:         {{ referer }}
+  - Request Time:    {{ request_timestamp }}
+  - Geographic Location: {{ geo_location }}
+
+RBAC ANALYSIS:
+-------------
+Authorization Check Results:
+  - User Permissions: {{ user_permissions | join(', ') }}
+  - Missing Permission: {{ missing_permission }}
+  - Role Hierarchy: {{ role_hierarchy }}
+  - Permission Inheritance: {{ permission_inheritance }}
+
+SQLAlchemy RBAC System Details:
+  - Role Query Result: {{ role_query_result }}
+  - Permission Lookup: {{ permission_lookup_result }}
+  - Access Control Matrix: {{ access_control_matrix }}
+
+SECURITY ASSESSMENT:
+-------------------
+Risk Level:          {{ risk_level }}
+Threat Indicators:
+  - Multiple failed attempts: {{ multiple_attempts }}
+  - Privilege escalation attempt: {{ privilege_escalation }}
+  - Suspicious access pattern: {{ suspicious_pattern }}
+  - Off-hours access: {{ off_hours_access }}
+
+Previous Violations:
+  - Last 24 hours: {{ violations_24h }}
+  - Last 7 days:   {{ violations_7d }}
+  - Total count:   {{ total_violations }}
+
+IMMEDIATE RESPONSE ACTIONS:
+--------------------------
+Automated Security Measures Taken:
+  ✓ Access attempt logged and denied
+  ✓ Security event recorded in audit trail
+  ✓ User session flagged for monitoring
+  ✓ CloudWatch security metrics updated
+  ✓ Sentry error tracking notification sent
+
+Recommended Manual Actions:
+  1. Review user access patterns for the past 24 hours
+  2. Verify user identity and account integrity
+  3. Check for account compromise indicators
+  4. Review role assignments and permission grants
+  5. Consider temporary access restrictions if pattern continues
+
+INVESTIGATION GUIDANCE:
+----------------------
+Flask Application Logs:
+  - Check CloudWatch log group: {{ cloudwatch_log_group }}
+  - Search for request ID: {{ request_id }}
+  - Review authentication events: {{ auth_event_filter }}
+
+Database Investigation:
+  - User table: SELECT * FROM users WHERE id = {{ user_id }}
+  - Role assignments: SELECT * FROM user_roles WHERE user_id = {{ user_id }}
+  - Permission audit: SELECT * FROM audit_logs WHERE user_id = {{ user_id }}
+  - Recent access: SELECT * FROM user_activity WHERE user_id = {{ user_id }}
+
+Security Monitoring:
+  - Sentry dashboard: {{ sentry_dashboard_url }}
+  - CloudWatch metrics: {{ cloudwatch_metrics_url }}
+  - Auth0 logs: {{ auth0_logs_url }}
+
+ESCALATION PROCEDURES:
+---------------------
+Immediate Escalation (Critical Threats):
+  - Contact Security Team: security@{{ company_domain }}
+  - Emergency Hotline: {{ security_hotline }}
+  - Slack Channel: #security-incidents
+
+Standard Escalation Path:
+  1. Security Analyst (0-15 minutes)
+  2. Security Team Lead (15-30 minutes)
+  3. CISO/Security Manager (30-60 minutes)
+  4. Executive Team (if business impact critical)
+
+TECHNICAL DETAILS:
+-----------------
+Flask Application Configuration:
+  - Environment: {{ app_environment }}
+  - Version: {{ app_version }}
+  - Deployment: {{ deployment_info }}
+
+Security Framework Details:
+  - Authentication Provider: Auth0 ({{ auth0_domain }})
+  - Session Management: Flask-Login with ItsDangerous
+  - RBAC Implementation: Flask-SQLAlchemy with custom authorization
+  - JWT Framework: Flask-JWT-Extended {{ jwt_version }}
+
+Infrastructure Context:
+  - Container ID: {{ container_id }}
+  - ECS/EKS Cluster: {{ cluster_name }}
+  - Load Balancer: {{ load_balancer_info }}
+  - Region: {{ aws_region }}
+
+COMPLIANCE AND AUDIT:
+---------------------
+Regulatory Requirements:
+  - Data access logging: COMPLETED
+  - Security incident documentation: IN PROGRESS
+  - Breach notification timeline: {{ breach_timeline }}
+
+Audit Trail References:
+  - Audit Log ID: {{ audit_log_id }}
+  - CloudTrail Event: {{ cloudtrail_event_id }}
+  - Security Hub Finding: {{ security_hub_finding }}
+
+RESPONSE CHECKLIST:
+------------------
+[ ] Acknowledge security alert within 15 minutes
+[ ] Review violation details and context
+[ ] Investigate user account and recent activity
+[ ] Verify no account compromise occurred
+[ ] Document investigation findings
+[ ] Update user permissions if necessary
+[ ] Close incident with resolution notes
+
+ADDITIONAL RESOURCES:
+--------------------
+Security Runbooks:
+  - Authorization Violation Response: {{ runbook_auth_violation_url }}
+  - Account Compromise Investigation: {{ runbook_compromise_url }}
+  - RBAC Permission Management: {{ runbook_rbac_url }}
+
+Monitoring Dashboards:
+  - Real-time Security Metrics: {{ security_dashboard_url }}
+  - User Access Analytics: {{ access_analytics_url }}
+  - System Health Status: {{ health_dashboard_url }}
+
+Contact Information:
+  - Security Team: security@{{ company_domain }}
+  - System Administrator: admin@{{ company_domain }}
+  - On-Call Engineer: {{ oncall_contact }}
+
+================================================================================
+AUTOMATED SECURITY NOTIFICATION SYSTEM
+Generated by Flask Application Security Monitor
+Incident Time: {{ notification_timestamp }}
+System ID: {{ system_id }}
+================================================================================
+
+IMPORTANT: This is an automated security alert from the Flask application 
+monitoring system. If you believe this alert was generated in error, please 
+contact the security team immediately at security@{{ company_domain }}.
+
+Do not reply to this email - this mailbox is not monitored. For urgent 
+security matters, use the emergency contact information provided above.
+
+This message contains sensitive security information. Handle according to 
+your organization's information security policies.
+
+================================================================================
