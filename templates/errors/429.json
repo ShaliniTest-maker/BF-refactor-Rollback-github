@@ -1,0 +1,113 @@
+{%- set current_time = moment().utc().format() -%}
+{%- set request_id = request.headers.get('X-Request-ID', g.get('request_id', 'req-' + current_time.replace(':', '').replace('-', '').replace('.', '') + '-' + range(1000, 9999) | random | string)) -%}
+{%- set rate_limit_type = context.get('rate_limit_type', 'general') -%}
+{%- set rate_limit_window = context.get('rate_limit_window', 300) -%}
+{%- set rate_limit_max_requests = context.get('rate_limit_max_requests', 100) -%}
+{%- set current_usage = context.get('current_usage', rate_limit_max_requests) -%}
+{%- set retry_after = context.get('retry_after', rate_limit_window) -%}
+{%- set waf_rule_id = context.get('waf_rule_id', 'flask-app-rate-limit-rule') -%}
+{%- set client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) -%}
+{%- set user_agent = request.headers.get('User-Agent', 'Unknown') -%}
+{%- set geographic_region = context.get('geographic_region', 'Unknown') -%}
+{%- set is_api_gateway = context.get('is_api_gateway', true) -%}
+{%- set ddos_protection_level = context.get('ddos_protection_level', 'standard') -%}
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Too Many Requests: Request rate limit exceeded for this client",
+    "status": 429,
+    "timestamp": "{{ current_time }}",
+    "request_id": "{{ request_id }}",
+    "documentation_url": "https://docs.api.company.com/errors/rate-limiting"
+  },
+  "rate_limit": {
+    "type": "{{ rate_limit_type }}",
+    "window_seconds": {{ rate_limit_window }},
+    "max_requests": {{ rate_limit_max_requests }},
+    "current_usage": {{ current_usage }},
+    "reset_time": "{{ (moment().utc().add(retry_after, 'seconds')).format() }}",
+    "retry_after_seconds": {{ retry_after }},
+    "headers": {
+      "Retry-After": "{{ retry_after }}",
+      "X-RateLimit-Limit": "{{ rate_limit_max_requests }}",
+      "X-RateLimit-Remaining": "0",
+      "X-RateLimit-Reset": "{{ moment().utc().add(retry_after, 'seconds').unix() }}"
+    }
+  },
+  "aws_protection": {
+    "waf_integration": {
+      "enabled": true,
+      "rule_id": "{{ waf_rule_id }}",
+      "rule_name": "Flask App Rate Limiting Rule",
+      "action": "BLOCK",
+      "priority": 100,
+      "cloudfront_distribution": {%- if is_api_gateway %}"api-gateway-distribution"{% else %}null{% endif %}
+    },
+    "api_gateway": {
+      "protection_enabled": {{ is_api_gateway | lower }},
+      "throttling_burst_limit": {{ rate_limit_max_requests }},
+      "throttling_rate_limit": {{ (rate_limit_max_requests / rate_limit_window) | round(2) }},
+      "usage_plan": "{{ context.get('usage_plan', 'default-api-plan') }}"
+    },
+    "ddos_protection": {
+      "level": "{{ ddos_protection_level }}",
+      "shield_enabled": true,
+      "guard_duty_integration": true,
+      "cloudwatch_monitoring": true
+    }
+  },
+  "client_info": {
+    "ip_address": "{{ client_ip | replace('.', '*') | replace(':', '*') }}",
+    "user_agent_hash": "{{ user_agent | hash('sha256') | truncate(16, true, '') }}",
+    "geographic_region": "{{ geographic_region }}",
+    "request_method": "{{ request.method }}",
+    "request_path": "{{ request.path }}",
+    "request_size_bytes": {{ request.content_length or 0 }}
+  },
+  "retry_guidance": {
+    "strategy": "exponential_backoff",
+    "initial_delay_seconds": {{ retry_after }},
+    "max_delay_seconds": {{ retry_after * 8 }},
+    "backoff_multiplier": 2.0,
+    "jitter_enabled": true,
+    "max_retries": 5,
+    "implementation_example": {
+      "pseudo_code": "delay = min(initial_delay * (backoff_multiplier ^ attempt) + jitter, max_delay)",
+      "recommended_libraries": {
+        "python": "tenacity, backoff",
+        "javascript": "axios-retry, retry",
+        "java": "spring-retry, resilience4j"
+      }
+    }
+  },
+  "monitoring": {
+    "incident_logged": true,
+    "cloudwatch_metric": "Flask/RateLimit/Exceeded",
+    "sentry_event_id": "{{ context.get('sentry_event_id', '') }}",
+    "security_alert_level": "{% if current_usage > (rate_limit_max_requests * 1.5) %}HIGH{% elif current_usage > rate_limit_max_requests %}MEDIUM{% else %}LOW{% endif %}",
+    "correlationId": "{{ request_id }}"
+  },
+  "compliance": {
+    "rate_limit_policy_url": "https://docs.api.company.com/policies/rate-limiting",
+    "fair_use_policy": "https://docs.api.company.com/policies/fair-use",
+    "contact_support": "https://support.company.com/api-rate-limits",
+    "upgrade_options": "https://billing.company.com/api-plans"
+  },
+  "response_metadata": {
+    "template_version": "1.0.0",
+    "flask_version": "{{ config.get('FLASK_VERSION', '3.1.1') }}",
+    "environment": "{{ config.get('FLASK_ENV', 'production') }}",
+    "server_time": "{{ current_time }}",
+    "response_time_ms": {{ context.get('response_time_ms', 0) }}
+  }{% if config.get('FLASK_ENV') == 'development' %},
+  "debug_info": {
+    "rate_limit_algorithm": "{{ context.get('rate_limit_algorithm', 'sliding_window') }}",
+    "waf_rule_details": {
+      "condition": "Rate based rule for {{ rate_limit_max_requests }} requests per {{ rate_limit_window }} seconds",
+      "scope": "{{ context.get('waf_scope', 'CLOUDFRONT') }}",
+      "web_acl": "{{ context.get('web_acl_name', 'flask-app-protection') }}"
+    },
+    "backend_server": "{{ request.environ.get('SERVER_NAME', 'unknown') }}",
+    "load_balancer_target": "{{ request.headers.get('X-Forwarded-Host', '') }}"
+  }{% endif %}
+}
