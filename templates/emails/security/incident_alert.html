@@ -1,0 +1,502 @@
+{% extends "emails/base/layout.html" %}
+
+{# Security Incident Alert Email Template #}
+{# Comprehensive security incident notification with automated response recommendations #}
+{# Integrates with AWS GuardDuty, OWASP ZAP, and container security monitoring #}
+
+{% block title %}
+🚨 SECURITY INCIDENT ALERT: {{ incident.severity }} - {{ incident.type }}
+{% endblock %}
+
+{% block email_header %}
+<div class="email-header" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); padding: 25px 30px; border-bottom: 3px solid #721c24; text-align: center; color: white;">
+  
+  <!-- Critical Security Alert Banner -->
+  <div class="security-alert-banner" style="margin-bottom: 15px;">
+    <div style="font-size: 28px; font-weight: 700; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">
+      🚨 SECURITY INCIDENT ALERT
+    </div>
+    <div style="font-size: 16px; opacity: 0.9; margin-top: 5px;">
+      Immediate Security Team Action Required
+    </div>
+  </div>
+
+  <!-- Incident Severity Badge -->
+  <div class="severity-badge" style="display: inline-block; background-color: 
+    {%- if incident.severity == 'CRITICAL' -%}#721c24
+    {%- elif incident.severity == 'HIGH' -%}#fd7e14  
+    {%- elif incident.severity == 'MEDIUM' -%}#ffc107
+    {%- else -%}#6c757d
+    {%- endif -%}; 
+    color: white; padding: 8px 20px; border-radius: 20px; font-weight: 600; font-size: 14px; border: 2px solid rgba(255,255,255,0.3);">
+    {{ incident.severity }} SEVERITY
+  </div>
+
+</div>
+{% endblock email_header %}
+
+{% block email_main_content %}
+<div class="incident-alert-content" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+
+  <!-- Incident Summary Section -->
+  <div class="incident-summary" style="background-color: #f8f9fa; border-left: 5px solid #dc3545; padding: 20px; margin-bottom: 25px; border-radius: 0 8px 8px 0;">
+    <h2 style="margin: 0 0 15px 0; color: #721c24; font-size: 20px; font-weight: 600;">
+      📋 Incident Summary
+    </h2>
+    
+    <div class="incident-details" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+      <div class="detail-item">
+        <strong style="color: #495057;">Incident ID:</strong><br>
+        <span style="font-family: 'Courier New', monospace; background-color: #e9ecef; padding: 3px 8px; border-radius: 4px; font-size: 14px;">{{ incident.id }}</span>
+      </div>
+      <div class="detail-item">
+        <strong style="color: #495057;">Detection Time:</strong><br>
+        <span style="color: #dc3545; font-weight: 600;">{{ incident.detected_at.strftime('%Y-%m-%d %H:%M:%S UTC') if incident.detected_at else 'Unknown' }}</span>
+      </div>
+      <div class="detail-item">
+        <strong style="color: #495057;">Incident Type:</strong><br>
+        <span style="color: #721c24; font-weight: 600;">{{ incident.type }}</span>
+      </div>
+      <div class="detail-item">
+        <strong style="color: #495057;">Affected System:</strong><br>
+        <span style="color: #495057;">{{ incident.affected_system or 'Flask Application Infrastructure' }}</span>
+      </div>
+    </div>
+
+    <div class="incident-description" style="background-color: #ffffff; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6;">
+      <strong style="color: #721c24;">Description:</strong><br>
+      <span style="color: #495057; line-height: 1.5;">{{ incident.description }}</span>
+    </div>
+  </div>
+
+  <!-- AWS GuardDuty Findings Section -->
+  {% if incident.guardduty_findings %}
+  <div class="guardduty-section" style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; color: #856404; font-size: 18px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">🛡️</span> AWS GuardDuty Threat Detection
+    </h3>
+    
+    {% for finding in incident.guardduty_findings %}
+    <div class="guardduty-finding" style="background-color: #ffffff; border: 1px solid #f1c40f; border-radius: 6px; padding: 15px; margin-bottom: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+        <strong style="color: #856404; font-size: 16px;">{{ finding.title }}</strong>
+        <span style="background-color: 
+          {%- if finding.severity >= 7.0 -%}#dc3545
+          {%- elif finding.severity >= 4.0 -%}#fd7e14
+          {%- else -%}#ffc107
+          {%- endif -%}; 
+          color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">
+          Severity: {{ "%.1f"|format(finding.severity) }}
+        </span>
+      </div>
+      <p style="margin: 0 0 10px 0; color: #495057; line-height: 1.4;">{{ finding.description }}</p>
+      <div style="font-size: 14px; color: #6c757d;">
+        <strong>Type:</strong> {{ finding.type }}<br>
+        <strong>Region:</strong> {{ finding.region }}<br>
+        {% if finding.affected_resources %}
+        <strong>Affected Resources:</strong> {{ finding.affected_resources|join(', ') }}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Container Security Information -->
+  {% if incident.container_info %}
+  <div class="container-security" style="background-color: #e3f2fd; border: 1px solid #90caf9; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; color: #1565c0; font-size: 18px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">📦</span> Container Security Status
+    </h3>
+    
+    <div class="container-details" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+      <div class="container-item">
+        <strong style="color: #1565c0;">Platform:</strong><br>
+        <span style="color: #495057;">{{ incident.container_info.platform|upper }} ({{ incident.container_info.orchestration|default('Docker') }})</span>
+      </div>
+      <div class="container-item">
+        <strong style="color: #1565c0;">Instance/Container ID:</strong><br>
+        <span style="font-family: 'Courier New', monospace; font-size: 13px; color: #495057;">{{ incident.container_info.instance_id or incident.container_info.container_id }}</span>
+      </div>
+      {% if incident.container_info.cluster_name %}
+      <div class="container-item">
+        <strong style="color: #1565c0;">Cluster:</strong><br>
+        <span style="color: #495057;">{{ incident.container_info.cluster_name }}</span>
+      </div>
+      {% endif %}
+      {% if incident.container_info.isolation_status %}
+      <div class="container-item">
+        <strong style="color: #1565c0;">Isolation Status:</strong><br>
+        <span style="color: 
+          {%- if incident.container_info.isolation_status == 'ISOLATED' -%}#28a745
+          {%- elif incident.container_info.isolation_status == 'ISOLATING' -%}#ffc107
+          {%- else -%}#dc3545
+          {%- endif -%}; font-weight: 600;">
+          {{ incident.container_info.isolation_status }}
+        </span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- OWASP ZAP Security Findings -->
+  {% if incident.owasp_findings %}
+  <div class="owasp-section" style="background-color: #f3e5f5; border: 1px solid #ce93d8; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; color: #7b1fa2; font-size: 18px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">🔍</span> OWASP ZAP Security Analysis
+    </h3>
+    
+    {% for finding in incident.owasp_findings[:3] %}
+    <div class="owasp-finding" style="background-color: #ffffff; border-left: 4px solid 
+      {%- if finding.risk == 'High' -%}#dc3545
+      {%- elif finding.risk == 'Medium' -%}#fd7e14
+      {%- else -%}#ffc107
+      {%- endif -%}; 
+      padding: 12px 15px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
+      <div style="display: flex; justify-content: between; align-items: flex-start; margin-bottom: 8px;">
+        <strong style="color: #7b1fa2; font-size: 15px;">{{ finding.name }}</strong>
+        <span style="background-color: 
+          {%- if finding.risk == 'High' -%}#dc3545
+          {%- elif finding.risk == 'Medium' -%}#fd7e14
+          {%- else -%}#ffc107
+          {%- endif -%}; 
+          color: white; padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 10px;">
+          {{ finding.risk }} Risk
+        </span>
+      </div>
+      <div style="font-size: 14px; color: #495057; margin-bottom: 8px;">
+        <strong>URL:</strong> <code style="background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;">{{ finding.url }}</code>
+      </div>
+      <div style="font-size: 13px; color: #6c757d;">
+        {{ finding.description|truncate(120) }}
+      </div>
+    </div>
+    {% endfor %}
+    
+    {% if incident.owasp_findings|length > 3 %}
+    <div style="text-align: center; margin-top: 15px; font-size: 14px; color: #7b1fa2;">
+      <em>{{ incident.owasp_findings|length - 3 }} additional findings available in security dashboard</em>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Automated Response Actions -->
+  <div class="automated-response" style="background-color: #e8f5e8; border: 1px solid #81c784; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; color: #2e7d32; font-size: 18px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">⚡</span> Automated Response Actions
+    </h3>
+    
+    {% if incident.automated_actions %}
+    <div class="actions-taken" style="margin-bottom: 15px;">
+      <h4 style="margin: 0 0 10px 0; color: #1b5e20; font-size: 16px;">✅ Actions Already Taken:</h4>
+      <ul style="margin: 0; padding-left: 20px; color: #2e7d32;">
+        {% for action in incident.automated_actions %}
+        <li style="margin-bottom: 5px;">{{ action }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div class="recommended-actions">
+      <h4 style="margin: 0 0 10px 0; color: #1b5e20; font-size: 16px;">🔧 Recommended Immediate Actions:</h4>
+      <ol style="margin: 0; padding-left: 20px; color: #2e7d32; line-height: 1.6;">
+        {% if incident.severity == 'CRITICAL' %}
+        <li><strong>Immediately verify container isolation status</strong> in AWS ECS/EKS console</li>
+        <li><strong>Check IAM role revocation</strong> for affected resources</li>
+        <li><strong>Review authentication logs</strong> for suspicious activity patterns</li>
+        <li><strong>Initiate incident response protocol</strong> and notify security team lead</li>
+        {% elif incident.severity == 'HIGH' %}
+        <li><strong>Review security logs</strong> for correlated events in past 24 hours</li>
+        <li><strong>Validate container network isolation</strong> and security group configurations</li>
+        <li><strong>Check Flask application logs</strong> for authentication anomalies</li>
+        <li><strong>Monitor GuardDuty findings</strong> for ongoing threat indicators</li>
+        {% else %}
+        <li><strong>Document incident details</strong> in security ticketing system</li>
+        <li><strong>Schedule security review</strong> of affected system components</li>
+        <li><strong>Update security monitoring rules</strong> if applicable</li>
+        <li><strong>Review and update access controls</strong> as needed</li>
+        {% endif %}
+        
+        {% if incident.type in ['container_compromise', 'container_isolation'] %}
+        <li><strong>Verify Gunicorn WSGI worker health</strong> across remaining containers</li>
+        <li><strong>Check SQLAlchemy connection pool integrity</strong> for data access security</li>
+        {% endif %}
+        
+        {% if incident.guardduty_findings %}
+        <li><strong>Correlate GuardDuty findings</strong> with Flask application security events</li>
+        <li><strong>Review AWS CloudTrail logs</strong> for API access patterns</li>
+        {% endif %}
+      </ol>
+    </div>
+  </div>
+
+  <!-- Escalation Information -->
+  <div class="escalation-info" style="background-color: #fff3e0; border: 1px solid #ffb74d; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; color: #ef6c00; font-size: 18px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">📞</span> Escalation Procedures
+    </h3>
+    
+    <div class="escalation-timeline" style="background-color: #ffffff; border-radius: 6px; padding: 15px;">
+      {% if incident.severity == 'CRITICAL' %}
+      <div class="escalation-step" style="display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5;">
+        <div style="background-color: #dc3545; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 15px;">1</div>
+        <div>
+          <strong style="color: #dc3545;">IMMEDIATE:</strong> On-call engineer notification sent<br>
+          <span style="font-size: 14px; color: #6c757d;">If no acknowledgment in 15 minutes → Auto-escalate to Team Lead</span>
+        </div>
+      </div>
+      <div class="escalation-step" style="display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5;">
+        <div style="background-color: #fd7e14; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 15px;">2</div>
+        <div>
+          <strong style="color: #fd7e14;">15 MINUTES:</strong> Engineering Manager notification<br>
+          <span style="font-size: 14px; color: #6c757d;">If unresolved in 30 minutes → CTO notification</span>
+        </div>
+      </div>
+      <div class="escalation-step" style="display: flex; align-items: center;">
+        <div style="background-color: #721c24; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 15px;">3</div>
+        <div>
+          <strong style="color: #721c24;">45 MINUTES:</strong> Executive escalation and incident commander assignment<br>
+          <span style="font-size: 14px; color: #6c757d;">War room activation for business-critical impacts</span>
+        </div>
+      </div>
+      {% else %}
+      <div class="escalation-step" style="display: flex; align-items: center; margin-bottom: 12px;">
+        <div style="background-color: #fd7e14; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 15px;">1</div>
+        <div>
+          <strong style="color: #fd7e14;">{{ '15 MINUTES' if incident.severity == 'HIGH' else '1 HOUR' }}:</strong> Security team notification<br>
+          <span style="font-size: 14px; color: #6c757d;">Acknowledgment required within {{ '15 minutes' if incident.severity == 'HIGH' else '1 hour' }}</span>
+        </div>
+      </div>
+      <div class="escalation-step" style="display: flex; align-items: center;">
+        <div style="background-color: #ffc107; color: #212529; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 15px;">2</div>
+        <div>
+          <strong style="color: #856404;">{{ '1 HOUR' if incident.severity == 'HIGH' else '4 HOURS' }}:</strong> Team Lead escalation<br>
+          <span style="font-size: 14px; color: #6c757d;">If unresolved → Manager notification</span>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Technical Details & Resources -->
+  <div class="technical-details" style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; color: #495057; font-size: 18px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">🔧</span> Technical Details & Resources
+    </h3>
+    
+    <div class="tech-resources" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <div class="resource-links">
+        <h4 style="margin: 0 0 10px 0; color: #343a40; font-size: 16px;">📊 Monitoring Dashboards</h4>
+        <ul style="margin: 0; padding-left: 20px; list-style: none;">
+          <li style="margin-bottom: 8px;">
+            <a href="{{ security_dashboard_url }}" style="color: #007bff; text-decoration: none;">🛡️ Security Monitoring Dashboard</a>
+          </li>
+          <li style="margin-bottom: 8px;">
+            <a href="{{ cloudwatch_url }}" style="color: #007bff; text-decoration: none;">📈 AWS CloudWatch Metrics</a>
+          </li>
+          <li style="margin-bottom: 8px;">
+            <a href="{{ container_dashboard_url }}" style="color: #007bff; text-decoration: none;">📦 Container Status Dashboard</a>
+          </li>
+          <li style="margin-bottom: 8px;">
+            <a href="{{ guardduty_console_url }}" style="color: #007bff; text-decoration: none;">🛡️ AWS GuardDuty Console</a>
+          </li>
+        </ul>
+      </div>
+      
+      <div class="incident-tools">
+        <h4 style="margin: 0 0 10px 0; color: #343a40; font-size: 16px;">🛠️ Response Tools</h4>
+        <ul style="margin: 0; padding-left: 20px; list-style: none;">
+          <li style="margin-bottom: 8px;">
+            <a href="{{ incident_response_playbook_url }}" style="color: #007bff; text-decoration: none;">📖 Incident Response Playbook</a>
+          </li>
+          <li style="margin-bottom: 8px;">
+            <a href="{{ security_runbook_url }}" style="color: #007bff; text-decoration: none;">📋 Security Runbook</a>
+          </li>
+          <li style="margin-bottom: 8px;">
+            <a href="{{ container_isolation_guide_url }}" style="color: #007bff; text-decoration: none;">🔒 Container Isolation Guide</a>
+          </li>
+          <li style="margin-bottom: 8px;">
+            <a href="{{ forensics_toolkit_url }}" style="color: #007bff; text-decoration: none;">🔍 Digital Forensics Toolkit</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    {% if incident.correlation_id %}
+    <div class="correlation-info" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6;">
+      <h4 style="margin: 0 0 10px 0; color: #343a40; font-size: 16px;">🔗 Correlation Information</h4>
+      <div style="background-color: #ffffff; padding: 12px; border-radius: 6px; border: 1px solid #e9ecef;">
+        <strong>Correlation ID:</strong> <code style="background-color: #f8f9fa; padding: 2px 6px; border-radius: 3px;">{{ incident.correlation_id }}</code><br>
+        {% if incident.related_events %}
+        <strong>Related Events:</strong> {{ incident.related_events|length }} correlated security events in past 24 hours<br>
+        {% endif %}
+        {% if incident.threat_indicators %}
+        <strong>Threat Indicators:</strong> {{ incident.threat_indicators|join(', ') }}
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Mobile Response Quick Actions -->
+  <div class="mobile-actions" style="background-color: #e3f2fd; border: 2px solid #2196f3; border-radius: 8px; padding: 15px; margin-bottom: 25px; text-align: center;">
+    <h4 style="margin: 0 0 15px 0; color: #1565c0; font-size: 16px;">📱 Quick Mobile Response Actions</h4>
+    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+      <a href="{{ acknowledge_incident_url }}" style="background-color: #4caf50; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">✅ Acknowledge</a>
+      <a href="{{ escalate_incident_url }}" style="background-color: #ff9800; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">⬆️ Escalate</a>
+      <a href="{{ incident_details_url }}" style="background-color: #2196f3; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">📋 Details</a>
+      <a href="{{ war_room_url }}" style="background-color: #f44336; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">🚨 War Room</a>
+    </div>
+  </div>
+
+</div>
+{% endblock email_main_content %}
+
+{% block email_additional_content %}
+<!-- System Information Footer -->
+<div class="system-info" style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #dee2e6; margin-top: 20px;">
+  <h4 style="margin: 0 0 15px 0; color: #495057; font-size: 16px;">🖥️ System Information</h4>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 14px; color: #6c757d;">
+    <div>
+      <strong>Application:</strong> Flask Security Monitor<br>
+      <strong>Environment:</strong> {{ application_environment|default('Production') }}<br>
+      <strong>Alert Source:</strong> {{ alert_source|default('Automated Security System') }}
+    </div>
+    <div>
+      <strong>Detection System:</strong> {{ detection_system|default('Multi-layer Security Stack') }}<br>
+      <strong>Response Team:</strong> {{ response_team|default('Security Operations Center') }}<br>
+      <strong>Incident Timestamp:</strong> {{ incident.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if incident.created_at else 'Unknown' }}
+    </div>
+  </div>
+</div>
+
+<!-- Important Security Notice -->
+<div class="security-notice" style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 15px; margin-top: 15px; text-align: center;">
+  <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.5;">
+    <strong>⚠️ CONFIDENTIAL SECURITY INFORMATION</strong><br>
+    This incident alert contains sensitive security information. Do not forward this email to unauthorized personnel. 
+    Follow established security protocols and maintain confidentiality throughout the incident response process.
+  </p>
+</div>
+{% endblock email_additional_content %}
+
+{% block email_footer %}
+<div class="email-footer" style="background-color: #343a40; color: #ffffff; padding: 25px 30px; border-radius: 0 0 8px 8px;">
+  
+  <!-- Security Team Contact Information -->
+  <div class="security-contacts" style="margin-bottom: 20px; text-align: center;">
+    <h4 style="margin: 0 0 15px 0; color: #ffffff; font-size: 16px;">🚨 Emergency Security Contacts</h4>
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; font-size: 14px;">
+      <div>
+        <strong style="color: #ffc107;">Security On-Call</strong><br>
+        <a href="tel:{{ security_oncall_phone|default('+1-555-SEC-URITY') }}" style="color: #17a2b8; text-decoration: none;">{{ security_oncall_phone|default('+1-555-SEC-URITY') }}</a><br>
+        <a href="mailto:{{ security_oncall_email|default('security-oncall@company.com') }}" style="color: #17a2b8; text-decoration: none;">{{ security_oncall_email|default('security-oncall@company.com') }}</a>
+      </div>
+      <div>
+        <strong style="color: #ffc107;">Security Team Lead</strong><br>
+        <a href="tel:{{ security_lead_phone|default('+1-555-SEC-LEAD') }}" style="color: #17a2b8; text-decoration: none;">{{ security_lead_phone|default('+1-555-SEC-LEAD') }}</a><br>
+        <a href="mailto:{{ security_lead_email|default('security-lead@company.com') }}" style="color: #17a2b8; text-decoration: none;">{{ security_lead_email|default('security-lead@company.com') }}</a>
+      </div>
+      <div>
+        <strong style="color: #ffc107;">Incident Commander</strong><br>
+        <a href="tel:{{ incident_commander_phone|default('+1-555-INC-RESP') }}" style="color: #17a2b8; text-decoration: none;">{{ incident_commander_phone|default('+1-555-INC-RESP') }}</a><br>
+        <a href="mailto:{{ incident_commander_email|default('incident-response@company.com') }}" style="color: #17a2b8; text-decoration: none;">{{ incident_commander_email|default('incident-response@company.com') }}</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Additional Resources -->
+  <div class="additional-resources" style="text-align: center; padding-top: 15px; border-top: 1px solid #495057;">
+    <div style="font-size: 14px; color: #adb5bd; margin-bottom: 10px;">
+      <strong>Security Resources:</strong>
+      <a href="{{ security_wiki_url|default('#') }}" style="color: #17a2b8; margin: 0 10px; text-decoration: none;">Security Wiki</a> |
+      <a href="{{ incident_history_url|default('#') }}" style="color: #17a2b8; margin: 0 10px; text-decoration: none;">Incident History</a> |
+      <a href="{{ threat_intel_url|default('#') }}" style="color: #17a2b8; margin: 0 10px; text-decoration: none;">Threat Intelligence</a>
+    </div>
+    <div style="font-size: 13px; color: #868e96;">
+      Generated by Flask Security Monitoring System | 
+      Alert ID: {{ incident.id }} | 
+      Severity: {{ incident.severity }} |
+      {% if incident.detected_at %}
+      Detection: {{ incident.detected_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock email_footer %}
+
+<!-- Mobile-Responsive CSS -->
+<style type="text/css">
+  /* Mobile optimizations for security incident alerts */
+  @media only screen and (max-width: 600px) {
+    .incident-details,
+    .container-details,
+    .tech-resources {
+      grid-template-columns: 1fr !important;
+      gap: 10px !important;
+    }
+    
+    .mobile-actions div {
+      flex-direction: column !important;
+    }
+    
+    .mobile-actions a {
+      margin: 5px 0 !important;
+      display: block !important;
+    }
+    
+    .security-contacts > div {
+      grid-template-columns: 1fr !important;
+      gap: 20px !important;
+    }
+    
+    .severity-badge {
+      font-size: 12px !important;
+      padding: 6px 15px !important;
+    }
+    
+    .guardduty-finding,
+    .owasp-finding {
+      padding: 10px !important;
+    }
+    
+    .escalation-step {
+      flex-direction: column !important;
+      align-items: flex-start !important;
+      gap: 10px !important;
+    }
+  }
+  
+  /* High contrast for critical alerts */
+  @media (prefers-contrast: high) {
+    .severity-badge,
+    .mobile-actions a {
+      border: 2px solid #000000 !important;
+    }
+  }
+  
+  /* Dark mode support for security alerts */
+  @media (prefers-color-scheme: dark) {
+    .incident-summary,
+    .automated-response,
+    .escalation-info,
+    .technical-details {
+      background-color: #2d3436 !important;
+      border-color: #636e72 !important;
+      color: #ddd !important;
+    }
+    
+    .guardduty-section {
+      background-color: #2d3436 !important;
+      border-color: #fdcb6e !important;
+    }
+    
+    .container-security {
+      background-color: #2d3436 !important;
+      border-color: #74b9ff !important;
+    }
+  }
+</style>
