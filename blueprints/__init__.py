@@ -1,738 +1,705 @@
 """
-Flask Blueprint Package Initialization - Centralized Blueprint Management
+Flask Blueprint Package Initialization
 
-This module serves as the orchestration point for all Flask blueprint registration within
-the application factory pattern. It provides automatic blueprint discovery, systematic
-registration with proper URL prefix assignment, and comprehensive dependency resolution
-for Service Layer pattern integration.
+This module provides centralized blueprint registration functionality for the Flask 3.1.1 application
+factory pattern, implementing automated blueprint discovery and registration mechanisms that replace
+Express.js router patterns with Flask's modular blueprint architecture per Section 5.2.2.
 
 Key Features:
-- Automatic blueprint discovery and registration per Section 4.3.1.2
-- Centralized URL prefix management for API versioning per Section 5.2.2  
-- Blueprint interdependency resolution for Service Layer coordination per Section 6.1.6
-- Flask 3.1.1 application factory pattern integration
-- Comprehensive error handling and registration validation
-- Performance-optimized blueprint loading with dependency tracking
-- Production-ready configuration and monitoring integration
+- Centralized blueprint registration function for Flask application factory pattern per Section 5.2.2
+- Automatic blueprint discovery mechanism enabling modular route organization per Section 4.3.1.2
+- URL prefix assignment for API versioning and namespace management per Section 5.2.2
+- Blueprint interdependency resolution supporting Service Layer pattern integration per Section 6.1.6
+- Blueprint health monitoring and registration validation per Section 6.1.5
+- Error handling and logging for blueprint registration failures
 
-Architecture:
-This initialization system implements the Flask Blueprint Management System specified
-in Section 5.2.2, providing modular route organization that replaces Express.js router
-patterns while maintaining identical external API behavior and supporting enhanced
-Service Layer pattern integration for business logic coordination.
+Architecture Benefits:
+- Replaces Express.js router patterns with structured Flask blueprint architecture
+- Enables automatic discovery and registration of blueprint modules per Section 4.3.1.2
+- Provides URL prefix management for API versioning and namespace organization
+- Supports Service Layer pattern coordination across blueprint boundaries
+- Implements comprehensive error handling for blueprint registration failures
+- Facilitates testing and development through modular blueprint isolation
 
 Blueprint Organization:
-- Main Application Routes: Core web interface and navigation (/main)
-- API Endpoints: RESTful API with versioning support (/api/v1)
-- Authentication System: User authentication and session management (/auth)
-- Health Monitoring: System health checks and metrics (/health)
+- main_bp: Core application routes and navigation endpoints
+- api_bp: RESTful API endpoints with comprehensive HTTP method support
+- auth_bp: Authentication and session management routes  
+- health_bp: System monitoring and health check endpoints
 
 Dependencies:
-- Flask 3.1.1: Core blueprint functionality and application factory support
-- Service Layer Integration: Business logic coordination and workflow management
-- Automatic Module Discovery: Dynamic blueprint detection and validation
-- URL Prefix Management: API versioning and namespace organization
+- Flask 3.1.1: Core blueprint functionality and application factory pattern
+- Python logging: Comprehensive logging and error tracking
+- Service Layer: Business logic coordination across blueprint boundaries
+- Type hints: Enhanced code maintainability and IDE support
+
+This package orchestrates all blueprint modules and ensures proper registration sequence,
+enabling the Flask application to locate and register all route definitions while maintaining
+clear separation of concerns and modular architecture benefits.
 """
 
-from __future__ import annotations
-
 import logging
-import importlib
 import inspect
-from typing import Dict, List, Tuple, Optional, Any, Union
-from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any, Type, Union
+from importlib import import_module
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from flask import Flask, Blueprint
+# Core Flask imports for blueprint management
+from flask import Flask, Blueprint, current_app
+from flask.blueprints import BlueprintSetupState
 
-# Configure logging for blueprint management operations
+# Configure logging for blueprint registration operations
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class BlueprintConfig:
+    """
+    Configuration class for blueprint registration metadata.
+    
+    Provides structured configuration data for blueprint registration including
+    dependency relationships, URL prefix assignments, and initialization requirements.
+    """
+    name: str
+    module_path: str
+    blueprint_name: str
+    url_prefix: Optional[str] = None
+    dependencies: List[str] = None
+    init_function: Optional[str] = None
+    enabled: bool = True
+    priority: int = 0
+    description: str = ""
+    
+    def __post_init__(self):
+        """Initialize default values after dataclass creation."""
+        if self.dependencies is None:
+            self.dependencies = []
+
+
 class BlueprintRegistrationError(Exception):
-    """Custom exception for blueprint registration errors"""
+    """Custom exception for blueprint registration failures."""
     
     def __init__(self, message: str, blueprint_name: str = None, error_code: str = None):
+        super().__init__(message)
         self.message = message
         self.blueprint_name = blueprint_name
-        self.error_code = error_code
-        super().__init__(self.message)
+        self.error_code = error_code or 'BLUEPRINT_REGISTRATION_ERROR'
 
 
-class BlueprintManager:
+class BlueprintRegistry:
     """
-    Centralized blueprint management system providing automatic discovery,
-    registration, and dependency resolution for Flask application factory pattern.
+    Centralized blueprint registry for automated discovery and registration.
     
-    This manager implements the blueprint registration functionality specified in
-    Section 5.2.2 and supports Service Layer pattern integration per Section 6.1.6
-    for enhanced business logic coordination and modular application architecture.
+    Implements comprehensive blueprint management including automatic discovery,
+    dependency resolution, URL prefix assignment, and registration validation
+    for Flask application factory pattern integration per Section 5.2.2.
     """
     
     def __init__(self):
-        self.registered_blueprints: Dict[str, Blueprint] = {}
-        self.blueprint_metadata: Dict[str, Dict[str, Any]] = {}
-        self.dependency_graph: Dict[str, List[str]] = {}
-        self.registration_order: List[str] = []
+        """Initialize blueprint registry with configuration and tracking."""
+        self._blueprints: Dict[str, BlueprintConfig] = {}
+        self._registered_blueprints: Dict[str, Blueprint] = {}
+        self._registration_order: List[str] = []
+        self._failed_registrations: Dict[str, str] = {}
         
-    def discover_blueprints(self) -> Dict[str, Dict[str, Any]]:
+        # Initialize default blueprint configurations
+        self._initialize_default_blueprints()
+    
+    def _initialize_default_blueprints(self):
         """
-        Automatically discover available blueprints in the blueprints package.
+        Initialize default blueprint configurations for core application modules.
         
-        Implements automatic blueprint discovery mechanism per Section 4.3.1.2
-        blueprint architecture implementation, enabling systematic blueprint
-        detection and validation for Flask application factory integration.
+        Defines blueprint metadata including dependencies, URL prefixes, and
+        initialization requirements based on Flask application architecture.
+        """
+        # Define core blueprint configurations per Section 5.2.2
+        default_configs = [
+            BlueprintConfig(
+                name='health',
+                module_path='blueprints.health',
+                blueprint_name='health_bp',
+                url_prefix='/health',
+                dependencies=[],
+                enabled=True,
+                priority=1,
+                description='System health monitoring and container orchestration endpoints'
+            ),
+            BlueprintConfig(
+                name='auth',
+                module_path='blueprints.auth',
+                blueprint_name='auth_bp',
+                url_prefix='/auth',
+                dependencies=['health'],
+                init_function='init_auth_blueprint',
+                enabled=True,
+                priority=2,
+                description='Authentication and session management routes'
+            ),
+            BlueprintConfig(
+                name='api',
+                module_path='blueprints.api',
+                blueprint_name='api_bp',
+                url_prefix='/api/v1',
+                dependencies=['health', 'auth'],
+                init_function='register_api_blueprint',
+                enabled=True,
+                priority=3,
+                description='RESTful API endpoints with comprehensive HTTP method support'
+            ),
+            BlueprintConfig(
+                name='main',
+                module_path='blueprints.main',
+                blueprint_name='main_bp',
+                url_prefix='/',
+                dependencies=['health', 'auth', 'api'],
+                init_function='init_main_blueprint',
+                enabled=True,
+                priority=4,
+                description='Core application routes and navigation endpoints'
+            )
+        ]
+        
+        # Register default configurations
+        for config in default_configs:
+            self._blueprints[config.name] = config
+        
+        logger.info(f"Initialized {len(default_configs)} default blueprint configurations")
+    
+    def register_blueprint_config(self, config: BlueprintConfig) -> bool:
+        """
+        Register a new blueprint configuration for discovery and registration.
+        
+        Args:
+            config: Blueprint configuration instance
+            
+        Returns:
+            Boolean indicating successful configuration registration
+        """
+        try:
+            # Validate configuration
+            if not config.name or not config.module_path or not config.blueprint_name:
+                raise BlueprintRegistrationError(
+                    f"Invalid blueprint configuration: missing required fields",
+                    blueprint_name=config.name
+                )
+            
+            # Check for naming conflicts
+            if config.name in self._blueprints:
+                logger.warning(f"Blueprint configuration '{config.name}' already exists, updating")
+            
+            # Register configuration
+            self._blueprints[config.name] = config
+            logger.info(f"Registered blueprint configuration: {config.name}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to register blueprint configuration '{config.name}': {e}")
+            return False
+    
+    def discover_blueprints(self) -> List[str]:
+        """
+        Discover available blueprint modules through configuration registry.
+        
+        Returns blueprint configurations in dependency-resolved order for proper
+        registration sequence and Service Layer pattern coordination.
         
         Returns:
-            Dictionary mapping blueprint names to their metadata and instances
-            
-        Raises:
-            BlueprintRegistrationError: If blueprint discovery or validation fails
+            List of blueprint names in registration order
         """
-        discovered_blueprints = {}
-        blueprints_dir = Path(__file__).parent
-        
         try:
-            # Define known blueprint modules with their expected configurations
-            blueprint_modules = {
-                'main': {
-                    'module_name': 'blueprints.main',
-                    'blueprint_attr': 'main_bp',
-                    'url_prefix': '/',
-                    'priority': 1,
-                    'dependencies': ['services', 'models']
-                },
-                'api': {
-                    'module_name': 'blueprints.api',
-                    'blueprint_attr': 'api_bp', 
-                    'url_prefix': '/api/v1',
-                    'priority': 2,
-                    'dependencies': ['services', 'models', 'auth']
-                },
-                'auth': {
-                    'module_name': 'blueprints.auth',
-                    'blueprint_attr': 'auth_bp',
-                    'url_prefix': '/auth',
-                    'priority': 3,
-                    'dependencies': ['services', 'models']
-                },
-                'health': {
-                    'module_name': 'blueprints.health',
-                    'blueprint_attr': 'health_bp',
-                    'url_prefix': '/health',
-                    'priority': 4,
-                    'dependencies': ['models']
-                }
+            # Get enabled blueprints
+            enabled_blueprints = {
+                name: config for name, config in self._blueprints.items()
+                if config.enabled
             }
             
-            # Discover and validate each blueprint module
-            for blueprint_name, config in blueprint_modules.items():
-                try:
-                    # Import the blueprint module
-                    module = importlib.import_module(config['module_name'])
-                    
-                    # Get the blueprint instance
-                    blueprint_attr = config['blueprint_attr']
-                    if not hasattr(module, blueprint_attr):
-                        logger.warning(
-                            f"Blueprint attribute '{blueprint_attr}' not found in "
-                            f"module '{config['module_name']}'"
-                        )
-                        continue
-                    
-                    blueprint_instance = getattr(module, blueprint_attr)
-                    
-                    # Validate blueprint instance
-                    if not isinstance(blueprint_instance, Blueprint):
-                        logger.warning(
-                            f"Invalid blueprint instance in module '{config['module_name']}': "
-                            f"Expected Blueprint, got {type(blueprint_instance)}"
-                        )
-                        continue
-                    
-                    # Extract blueprint metadata
-                    blueprint_metadata = {
-                        'name': blueprint_name,
-                        'instance': blueprint_instance,
-                        'url_prefix': config['url_prefix'],
-                        'priority': config['priority'],
-                        'dependencies': config['dependencies'],
-                        'module': module,
-                        'module_name': config['module_name'],
-                        'blueprint_attr': blueprint_attr,
-                        'routes': self._extract_route_info(blueprint_instance),
-                        'has_init_function': self._check_init_function(module),
-                        'version': getattr(module, '__version__', '1.0.0')
-                    }
-                    
-                    discovered_blueprints[blueprint_name] = blueprint_metadata
-                    
-                    logger.debug(
-                        f"Discovered blueprint '{blueprint_name}' from module "
-                        f"'{config['module_name']}' with {len(blueprint_metadata['routes'])} routes"
-                    )
-                    
-                except ImportError as e:
-                    logger.error(
-                        f"Failed to import blueprint module '{config['module_name']}': {e}"
-                    )
-                    continue
-                except Exception as e:
-                    logger.error(
-                        f"Error discovering blueprint '{blueprint_name}': {e}"
-                    )
-                    continue
+            # Resolve dependencies and sort by priority
+            registration_order = self._resolve_dependencies(enabled_blueprints)
             
-            logger.info(f"Successfully discovered {len(discovered_blueprints)} blueprints")
-            return discovered_blueprints
+            logger.info(f"Discovered {len(registration_order)} blueprint modules: {registration_order}")
+            return registration_order
             
         except Exception as e:
             logger.error(f"Blueprint discovery failed: {e}")
-            raise BlueprintRegistrationError(
-                f"Failed to discover blueprints: {str(e)}",
-                error_code="DISCOVERY_ERROR"
-            )
-    
-    def _extract_route_info(self, blueprint: Blueprint) -> List[Dict[str, Any]]:
-        """
-        Extract route information from blueprint for metadata and validation.
-        
-        Args:
-            blueprint: Flask Blueprint instance
-            
-        Returns:
-            List of route information dictionaries
-        """
-        routes = []
-        
-        try:
-            # Access blueprint's deferred functions to extract route information
-            for deferred_func in blueprint.deferred_functions:
-                if hasattr(deferred_func, 'func') and hasattr(deferred_func.func, '__name__'):
-                    func_name = deferred_func.func.__name__
-                    if func_name == 'add_url_rule':
-                        # Extract URL rule information
-                        args = getattr(deferred_func, 'args', ())
-                        kwargs = getattr(deferred_func, 'kwargs', {})
-                        
-                        if args:
-                            route_info = {
-                                'rule': args[0] if len(args) > 0 else None,
-                                'endpoint': args[1] if len(args) > 1 else kwargs.get('endpoint'),
-                                'view_func': args[2] if len(args) > 2 else kwargs.get('view_func'),
-                                'methods': kwargs.get('methods', ['GET'])
-                            }
-                            routes.append(route_info)
-            
-            return routes
-            
-        except Exception as e:
-            logger.debug(f"Could not extract route info from blueprint: {e}")
             return []
     
-    def _check_init_function(self, module) -> bool:
+    def _resolve_dependencies(self, blueprints: Dict[str, BlueprintConfig]) -> List[str]:
         """
-        Check if blueprint module has initialization function.
+        Resolve blueprint dependencies and determine registration order.
+        
+        Implements topological sorting to ensure blueprints with dependencies are
+        registered after their dependencies, supporting Service Layer integration.
         
         Args:
-            module: Imported blueprint module
+            blueprints: Dictionary of blueprint configurations
             
         Returns:
-            True if module has initialization function, False otherwise
-        """
-        init_function_names = [
-            'init_auth',           # auth.py
-            'init_health_checks',  # health.py
-            'register_api_blueprint'  # api.py
-        ]
-        
-        for func_name in init_function_names:
-            if hasattr(module, func_name):
-                return True
-        
-        return False
-    
-    def resolve_dependencies(self, blueprints: Dict[str, Dict[str, Any]]) -> List[str]:
-        """
-        Resolve blueprint dependencies and determine optimal registration order.
-        
-        Implements blueprint interdependency resolution per Section 6.1.6 architectural
-        organization, ensuring proper Service Layer pattern integration and coordinated
-        functionality across blueprint modules.
-        
-        Args:
-            blueprints: Dictionary of discovered blueprint metadata
-            
-        Returns:
-            List of blueprint names in optimal registration order
-            
-        Raises:
-            BlueprintRegistrationError: If circular dependencies detected
+            List of blueprint names in dependency-resolved order
         """
         try:
             # Build dependency graph
             dependency_graph = {}
-            for name, metadata in blueprints.items():
-                dependencies = metadata.get('dependencies', [])
-                # Filter dependencies to only include other blueprints
-                blueprint_dependencies = [
-                    dep for dep in dependencies 
-                    if dep in blueprints.keys()
-                ]
-                dependency_graph[name] = blueprint_dependencies
+            in_degree = {}
             
-            # Topological sort with cycle detection
-            registration_order = []
-            visited = set()
-            visiting = set()
+            for name, config in blueprints.items():
+                dependency_graph[name] = []
+                in_degree[name] = 0
             
-            def visit(blueprint_name: str):
-                if blueprint_name in visiting:
-                    raise BlueprintRegistrationError(
-                        f"Circular dependency detected involving blueprint '{blueprint_name}'",
-                        blueprint_name=blueprint_name,
-                        error_code="CIRCULAR_DEPENDENCY"
-                    )
-                
-                if blueprint_name in visited:
-                    return
-                
-                visiting.add(blueprint_name)
-                
-                # Visit dependencies first
-                for dependency in dependency_graph.get(blueprint_name, []):
+            # Populate dependency relationships
+            for name, config in blueprints.items():
+                for dependency in config.dependencies:
                     if dependency in blueprints:
-                        visit(dependency)
+                        dependency_graph[dependency].append(name)
+                        in_degree[name] += 1
+                    else:
+                        logger.warning(f"Blueprint '{name}' depends on unknown blueprint '{dependency}'")
+            
+            # Topological sort with priority consideration
+            result = []
+            queue = []
+            
+            # Find blueprints with no dependencies, sorted by priority
+            initial_blueprints = [
+                (config.priority, name) for name, config in blueprints.items()
+                if in_degree[name] == 0
+            ]
+            initial_blueprints.sort()
+            queue.extend([name for _, name in initial_blueprints])
+            
+            # Process dependencies
+            while queue:
+                current = queue.pop(0)
+                result.append(current)
                 
-                visiting.remove(blueprint_name)
-                visited.add(blueprint_name)
-                registration_order.append(blueprint_name)
+                # Update in-degrees for dependent blueprints
+                dependent_blueprints = []
+                for dependent in dependency_graph[current]:
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        config = blueprints[dependent]
+                        dependent_blueprints.append((config.priority, dependent))
+                
+                # Sort dependents by priority before adding to queue
+                dependent_blueprints.sort()
+                queue.extend([name for _, name in dependent_blueprints])
             
-            # Process all blueprints
-            for blueprint_name in blueprints.keys():
-                if blueprint_name not in visited:
-                    visit(blueprint_name)
+            # Check for circular dependencies
+            if len(result) != len(blueprints):
+                remaining = [name for name in blueprints.keys() if name not in result]
+                logger.error(f"Circular dependencies detected in blueprints: {remaining}")
+                # Add remaining blueprints anyway to prevent complete failure
+                result.extend(remaining)
             
-            # Sort by priority as secondary criteria
-            def sort_key(name):
-                priority = blueprints[name].get('priority', 50)
-                return (priority, name)
+            return result
             
-            registration_order.sort(key=sort_key)
-            
-            logger.info(f"Resolved blueprint registration order: {registration_order}")
-            return registration_order
-            
-        except BlueprintRegistrationError:
-            raise
         except Exception as e:
             logger.error(f"Dependency resolution failed: {e}")
-            raise BlueprintRegistrationError(
-                f"Failed to resolve blueprint dependencies: {str(e)}",
-                error_code="DEPENDENCY_RESOLUTION_ERROR"
+            # Fallback to priority-based ordering
+            fallback_order = sorted(
+                blueprints.items(),
+                key=lambda x: x[1].priority
             )
+            return [name for name, _ in fallback_order]
     
-    def register_blueprint(
+    def load_blueprint(self, blueprint_name: str) -> Optional[Blueprint]:
+        """
+        Load blueprint module and extract blueprint object.
+        
+        Dynamically imports blueprint module and retrieves the blueprint object
+        for registration with Flask application instance.
+        
+        Args:
+            blueprint_name: Name of blueprint to load
+            
+        Returns:
+            Blueprint object or None if loading fails
+        """
+        try:
+            # Get blueprint configuration
+            if blueprint_name not in self._blueprints:
+                raise BlueprintRegistrationError(
+                    f"Unknown blueprint: {blueprint_name}",
+                    blueprint_name=blueprint_name
+                )
+            
+            config = self._blueprints[blueprint_name]
+            
+            # Import blueprint module
+            logger.debug(f"Importing blueprint module: {config.module_path}")
+            module = import_module(config.module_path)
+            
+            # Extract blueprint object
+            if not hasattr(module, config.blueprint_name):
+                raise BlueprintRegistrationError(
+                    f"Blueprint object '{config.blueprint_name}' not found in module '{config.module_path}'",
+                    blueprint_name=blueprint_name
+                )
+            
+            blueprint = getattr(module, config.blueprint_name)
+            
+            # Validate blueprint object
+            if not isinstance(blueprint, Blueprint):
+                raise BlueprintRegistrationError(
+                    f"Object '{config.blueprint_name}' is not a valid Flask Blueprint",
+                    blueprint_name=blueprint_name
+                )
+            
+            # Store loaded blueprint
+            self._registered_blueprints[blueprint_name] = blueprint
+            
+            logger.info(f"Successfully loaded blueprint: {blueprint_name}")
+            return blueprint
+            
+        except Exception as e:
+            error_msg = f"Failed to load blueprint '{blueprint_name}': {e}"
+            logger.error(error_msg)
+            self._failed_registrations[blueprint_name] = error_msg
+            return None
+    
+    def register_blueprint_with_app(
         self, 
         app: Flask, 
-        blueprint_name: str, 
-        blueprint_metadata: Dict[str, Any]
+        blueprint: Blueprint, 
+        blueprint_name: str
     ) -> bool:
         """
-        Register individual blueprint with Flask application factory.
+        Register blueprint with Flask application instance.
         
-        Implements systematic blueprint registration with proper URL prefix assignment
-        per Section 5.2.2 blueprint management system and validates Service Layer
-        integration for enhanced business logic coordination.
+        Performs blueprint registration with proper URL prefix assignment,
+        error handling, and initialization function execution if configured.
         
         Args:
             app: Flask application instance
-            blueprint_name: Name of blueprint to register
-            blueprint_metadata: Blueprint metadata and configuration
+            blueprint: Blueprint object to register
+            blueprint_name: Name of blueprint for configuration lookup
             
         Returns:
-            True if registration successful, False otherwise
-            
-        Raises:
-            BlueprintRegistrationError: If blueprint registration fails
+            Boolean indicating successful registration
         """
         try:
-            blueprint_instance = blueprint_metadata['instance']
-            url_prefix = blueprint_metadata['url_prefix']
-            module = blueprint_metadata['module']
-            
-            # Validate blueprint before registration
-            if not isinstance(blueprint_instance, Blueprint):
+            # Get blueprint configuration
+            config = self._blueprints.get(blueprint_name)
+            if not config:
                 raise BlueprintRegistrationError(
-                    f"Invalid blueprint instance for '{blueprint_name}'",
-                    blueprint_name=blueprint_name,
-                    error_code="INVALID_BLUEPRINT"
+                    f"Configuration not found for blueprint: {blueprint_name}",
+                    blueprint_name=blueprint_name
                 )
+            
+            # Prepare registration options
+            registration_options = {}
+            
+            # Apply URL prefix from configuration
+            if config.url_prefix is not None:
+                registration_options['url_prefix'] = config.url_prefix
             
             # Register blueprint with Flask application
-            app.register_blueprint(blueprint_instance, url_prefix=url_prefix)
+            logger.debug(f"Registering blueprint '{blueprint_name}' with options: {registration_options}")
+            app.register_blueprint(blueprint, **registration_options)
             
-            # Execute blueprint initialization function if available
-            init_executed = False
-            
-            # Check for specific initialization functions
-            if hasattr(module, 'init_auth') and callable(getattr(module, 'init_auth')):
-                # Authentication blueprint initialization
+            # Execute initialization function if specified
+            if config.init_function:
                 try:
-                    module.init_auth(app)
-                    init_executed = True
-                    logger.debug(f"Executed init_auth for blueprint '{blueprint_name}'")
-                except Exception as e:
-                    logger.warning(f"Failed to execute init_auth for '{blueprint_name}': {e}")
+                    # Import module to access initialization function
+                    module = import_module(config.module_path)
+                    
+                    if hasattr(module, config.init_function):
+                        init_func = getattr(module, config.init_function)
+                        logger.debug(f"Executing initialization function: {config.init_function}")
+                        init_func(app)
+                        logger.info(f"Blueprint '{blueprint_name}' initialization completed")
+                    else:
+                        logger.warning(f"Initialization function '{config.init_function}' not found for blueprint '{blueprint_name}'")
+                
+                except Exception as init_error:
+                    logger.error(f"Blueprint '{blueprint_name}' initialization failed: {init_error}")
+                    # Continue registration even if initialization fails
             
-            elif hasattr(module, 'init_health_checks') and callable(getattr(module, 'init_health_checks')):
-                # Health check blueprint initialization
-                try:
-                    module.init_health_checks(app)
-                    init_executed = True
-                    logger.debug(f"Executed init_health_checks for blueprint '{blueprint_name}'")
-                except Exception as e:
-                    logger.warning(f"Failed to execute init_health_checks for '{blueprint_name}': {e}")
+            # Track successful registration
+            self._registration_order.append(blueprint_name)
             
-            elif hasattr(module, 'register_api_blueprint') and callable(getattr(module, 'register_api_blueprint')):
-                # API blueprint initialization (already registered, but may have additional setup)
-                try:
-                    # Note: The API blueprint is already registered above, this is for additional setup
-                    init_executed = True
-                    logger.debug(f"API blueprint '{blueprint_name}' registration completed")
-                except Exception as e:
-                    logger.warning(f"Additional API setup failed for '{blueprint_name}': {e}")
-            
-            # Store registration metadata
-            self.registered_blueprints[blueprint_name] = blueprint_instance
-            self.blueprint_metadata[blueprint_name] = blueprint_metadata
-            self.registration_order.append(blueprint_name)
-            
-            # Log successful registration
-            route_count = len(blueprint_metadata.get('routes', []))
-            logger.info(
-                f"Successfully registered blueprint '{blueprint_name}' "
-                f"at prefix '{url_prefix}' with {route_count} routes"
-                f"{' (with initialization)' if init_executed else ''}"
-            )
-            
+            logger.info(f"Successfully registered blueprint: {blueprint_name} -> {config.url_prefix}")
             return True
             
-        except BlueprintRegistrationError:
-            raise
         except Exception as e:
-            logger.error(f"Failed to register blueprint '{blueprint_name}': {e}")
-            raise BlueprintRegistrationError(
-                f"Blueprint registration failed: {str(e)}",
-                blueprint_name=blueprint_name,
-                error_code="REGISTRATION_ERROR"
-            )
+            error_msg = f"Failed to register blueprint '{blueprint_name}': {e}"
+            logger.error(error_msg)
+            self._failed_registrations[blueprint_name] = error_msg
+            return False
     
-    def register_all_blueprints(self, app: Flask) -> Dict[str, bool]:
+    def get_registration_status(self) -> Dict[str, Any]:
         """
-        Register all discovered blueprints with Flask application in dependency order.
-        
-        Implements centralized blueprint registration function per Section 0 blueprint-based
-        architecture transformation, enabling Flask application factory pattern with
-        comprehensive Service Layer pattern integration and dependency coordination.
-        
-        Args:
-            app: Flask application instance
-            
-        Returns:
-            Dictionary mapping blueprint names to registration success status
-            
-        Raises:
-            BlueprintRegistrationError: If critical blueprint registration fails
-        """
-        registration_results = {}
-        
-        try:
-            # Discover all available blueprints
-            discovered_blueprints = self.discover_blueprints()
-            
-            if not discovered_blueprints:
-                logger.warning("No blueprints discovered for registration")
-                return registration_results
-            
-            # Resolve dependencies and determine registration order
-            registration_order = self.resolve_dependencies(discovered_blueprints)
-            
-            # Register blueprints in dependency order
-            successful_registrations = 0
-            failed_registrations = 0
-            
-            for blueprint_name in registration_order:
-                try:
-                    blueprint_metadata = discovered_blueprints[blueprint_name]
-                    success = self.register_blueprint(app, blueprint_name, blueprint_metadata)
-                    registration_results[blueprint_name] = success
-                    
-                    if success:
-                        successful_registrations += 1
-                    else:
-                        failed_registrations += 1
-                        
-                except BlueprintRegistrationError as e:
-                    logger.error(f"Blueprint registration error for '{blueprint_name}': {e.message}")
-                    registration_results[blueprint_name] = False
-                    failed_registrations += 1
-                    
-                    # Check if this is a critical blueprint
-                    if blueprint_name in ['main', 'api']:
-                        raise BlueprintRegistrationError(
-                            f"Critical blueprint '{blueprint_name}' registration failed: {e.message}",
-                            blueprint_name=blueprint_name,
-                            error_code="CRITICAL_BLUEPRINT_FAILED"
-                        )
-                
-                except Exception as e:
-                    logger.error(f"Unexpected error registering blueprint '{blueprint_name}': {e}")
-                    registration_results[blueprint_name] = False
-                    failed_registrations += 1
-            
-            # Log registration summary
-            logger.info(
-                f"Blueprint registration completed: {successful_registrations} successful, "
-                f"{failed_registrations} failed out of {len(discovered_blueprints)} total"
-            )
-            
-            # Validate minimum required blueprints are registered
-            required_blueprints = ['main', 'health']
-            missing_required = [
-                name for name in required_blueprints 
-                if not registration_results.get(name, False)
-            ]
-            
-            if missing_required:
-                raise BlueprintRegistrationError(
-                    f"Required blueprints failed to register: {missing_required}",
-                    error_code="REQUIRED_BLUEPRINTS_MISSING"
-                )
-            
-            # Store configuration in app context for monitoring
-            app.config['REGISTERED_BLUEPRINTS'] = list(self.registered_blueprints.keys())
-            app.config['BLUEPRINT_REGISTRATION_ORDER'] = self.registration_order
-            
-            return registration_results
-            
-        except BlueprintRegistrationError:
-            raise
-        except Exception as e:
-            logger.error(f"Blueprint registration process failed: {e}")
-            raise BlueprintRegistrationError(
-                f"Blueprint registration process failed: {str(e)}",
-                error_code="REGISTRATION_PROCESS_ERROR"
-            )
-    
-    def get_blueprint_status(self) -> Dict[str, Any]:
-        """
-        Get comprehensive status information for all registered blueprints.
+        Get comprehensive blueprint registration status and metrics.
         
         Returns:
-            Dictionary containing blueprint registration status and metadata
+            Dictionary containing registration statistics and status information
         """
         return {
-            'registered_count': len(self.registered_blueprints),
-            'registered_blueprints': list(self.registered_blueprints.keys()),
-            'registration_order': self.registration_order,
-            'blueprint_metadata': {
+            'total_configured': len(self._blueprints),
+            'total_registered': len(self._registration_order),
+            'registration_order': self._registration_order.copy(),
+            'failed_registrations': self._failed_registrations.copy(),
+            'enabled_blueprints': [
+                name for name, config in self._blueprints.items() 
+                if config.enabled
+            ],
+            'blueprint_configs': {
                 name: {
-                    'url_prefix': metadata.get('url_prefix'),
-                    'route_count': len(metadata.get('routes', [])),
-                    'dependencies': metadata.get('dependencies', []),
-                    'version': metadata.get('version', 'unknown')
+                    'module_path': config.module_path,
+                    'url_prefix': config.url_prefix,
+                    'dependencies': config.dependencies,
+                    'priority': config.priority,
+                    'description': config.description
                 }
-                for name, metadata in self.blueprint_metadata.items()
-            }
+                for name, config in self._blueprints.items()
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
 
-# Global blueprint manager instance
-_blueprint_manager = BlueprintManager()
+# Global blueprint registry instance
+_blueprint_registry = BlueprintRegistry()
 
 
-def register_blueprints(app: Flask) -> Dict[str, bool]:
+def register_all_blueprints(app: Flask) -> Dict[str, Any]:
     """
-    Main entry point for registering all blueprints with Flask application factory.
+    Centralized blueprint registration function for Flask application factory pattern.
     
-    This function serves as the centralized blueprint registration mechanism specified
-    in Section 0 summary of changes, implementing automatic blueprint discovery and
-    registration with Flask application factory pattern integration per Section 4.3.1.2.
-    
-    Key Features:
-    - Automatic blueprint discovery from blueprints package
-    - Dependency resolution and optimal registration ordering
-    - URL prefix assignment for API versioning per Section 5.2.2
-    - Service Layer pattern integration per Section 6.1.6
-    - Comprehensive error handling and validation
-    - Registration status tracking and monitoring
-    
-    Args:
-        app: Flask application instance from application factory
-        
-    Returns:
-        Dictionary mapping blueprint names to registration success status
-        
-    Raises:
-        BlueprintRegistrationError: If critical blueprint registration fails
-        
-    Example:
-        from flask import Flask
-        from blueprints import register_blueprints
-        
-        def create_app():
-            app = Flask(__name__)
-            
-            # Register all blueprints
-            registration_results = register_blueprints(app)
-            
-            return app
-    """
-    try:
-        logger.info("Starting blueprint registration process")
-        
-        # Register all blueprints using the global manager
-        registration_results = _blueprint_manager.register_all_blueprints(app)
-        
-        # Log final status
-        successful_count = sum(1 for success in registration_results.values() if success)
-        total_count = len(registration_results)
-        
-        logger.info(
-            f"Blueprint registration process completed: {successful_count}/{total_count} "
-            f"blueprints registered successfully"
-        )
-        
-        return registration_results
-        
-    except BlueprintRegistrationError as e:
-        logger.error(f"Blueprint registration failed: {e.message}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error during blueprint registration: {e}")
-        raise BlueprintRegistrationError(
-            f"Blueprint registration process failed: {str(e)}",
-            error_code="REGISTRATION_PROCESS_FAILED"
-        )
-
-
-def get_blueprint_info() -> Dict[str, Any]:
-    """
-    Get comprehensive information about registered blueprints.
-    
-    Provides detailed status information for monitoring and debugging blueprint
-    registration and configuration within the Flask application factory pattern.
-    
-    Returns:
-        Dictionary containing comprehensive blueprint status and metadata
-    """
-    try:
-        return _blueprint_manager.get_blueprint_status()
-    except Exception as e:
-        logger.error(f"Failed to get blueprint info: {e}")
-        return {
-            'error': f'Failed to retrieve blueprint information: {str(e)}',
-            'registered_count': 0,
-            'registered_blueprints': [],
-            'registration_order': []
-        }
-
-
-def validate_blueprint_health(app: Flask) -> Dict[str, Any]:
-    """
-    Validate health and status of all registered blueprints.
-    
-    Performs comprehensive validation of blueprint registration status,
-    route availability, and integration health for monitoring and diagnostics.
+    Implements automatic blueprint discovery and registration mechanism that replaces
+    Express.js router patterns with Flask's modular blueprint architecture per Section 5.2.2.
+    Provides URL prefix assignment for API versioning support and blueprint interdependency
+    resolution for Service Layer pattern integration per Section 6.1.6.
     
     Args:
         app: Flask application instance
         
     Returns:
-        Dictionary containing blueprint health validation results
+        Dictionary containing registration results and status information
+        
+    Raises:
+        BlueprintRegistrationError: If critical blueprint registration fails
     """
     try:
-        health_results = {
-            'overall_status': 'healthy',
-            'blueprint_health': {},
-            'total_blueprints': len(_blueprint_manager.registered_blueprints),
-            'total_routes': 0,
-            'issues': []
+        logger.info("Starting centralized blueprint registration process")
+        start_time = datetime.now(timezone.utc)
+        
+        # Validate Flask application instance
+        if not isinstance(app, Flask):
+            raise BlueprintRegistrationError("Invalid Flask application instance provided")
+        
+        # Discover available blueprints in dependency order
+        blueprint_names = _blueprint_registry.discover_blueprints()
+        
+        if not blueprint_names:
+            logger.warning("No blueprints discovered for registration")
+            return {
+                'success': False,
+                'message': 'No blueprints found for registration',
+                'results': {}
+            }
+        
+        # Track registration results
+        registration_results = {
+            'successful': [],
+            'failed': [],
+            'total_attempted': len(blueprint_names)
         }
         
-        # Validate each registered blueprint
-        for blueprint_name, blueprint_instance in _blueprint_manager.registered_blueprints.items():
+        # Register each blueprint in dependency order
+        for blueprint_name in blueprint_names:
             try:
-                metadata = _blueprint_manager.blueprint_metadata.get(blueprint_name, {})
-                routes = metadata.get('routes', [])
+                logger.debug(f"Processing blueprint: {blueprint_name}")
                 
-                # Basic blueprint health check
-                blueprint_health = {
-                    'status': 'healthy',
-                    'registered': True,
-                    'route_count': len(routes),
-                    'url_prefix': getattr(blueprint_instance, 'url_prefix', None),
-                    'issues': []
-                }
+                # Load blueprint module and object
+                blueprint = _blueprint_registry.load_blueprint(blueprint_name)
                 
-                # Validate blueprint has routes
-                if not routes:
-                    blueprint_health['issues'].append('No routes detected')
-                    blueprint_health['status'] = 'warning'
+                if blueprint is None:
+                    registration_results['failed'].append(blueprint_name)
+                    continue
                 
-                health_results['blueprint_health'][blueprint_name] = blueprint_health
-                health_results['total_routes'] += len(routes)
+                # Register blueprint with Flask application
+                success = _blueprint_registry.register_blueprint_with_app(
+                    app, blueprint, blueprint_name
+                )
                 
-                # Add any issues to overall issues list
-                if blueprint_health['issues']:
-                    health_results['issues'].extend([
-                        f"{blueprint_name}: {issue}" for issue in blueprint_health['issues']
-                    ])
+                if success:
+                    registration_results['successful'].append(blueprint_name)
+                else:
+                    registration_results['failed'].append(blueprint_name)
                 
             except Exception as e:
-                logger.error(f"Health check failed for blueprint '{blueprint_name}': {e}")
-                health_results['blueprint_health'][blueprint_name] = {
-                    'status': 'error',
-                    'registered': False,
-                    'error': str(e)
-                }
-                health_results['issues'].append(f"{blueprint_name}: Health check failed")
-                health_results['overall_status'] = 'degraded'
+                logger.error(f"Blueprint registration error for '{blueprint_name}': {e}")
+                registration_results['failed'].append(blueprint_name)
         
-        # Determine overall health status
-        if health_results['issues']:
-            error_count = sum(
-                1 for bp_health in health_results['blueprint_health'].values()
-                if bp_health.get('status') == 'error'
-            )
-            if error_count > 0:
-                health_results['overall_status'] = 'unhealthy'
-            elif health_results['overall_status'] != 'unhealthy':
-                health_results['overall_status'] = 'degraded'
+        # Calculate registration metrics
+        end_time = datetime.now(timezone.utc)
+        registration_duration = (end_time - start_time).total_seconds()
         
-        return health_results
+        # Log registration summary
+        logger.info(
+            f"Blueprint registration completed: "
+            f"{len(registration_results['successful'])}/{registration_results['total_attempted']} successful "
+            f"({registration_duration:.3f}s)"
+        )
+        
+        if registration_results['failed']:
+            logger.warning(f"Failed blueprint registrations: {registration_results['failed']}")
+        
+        # Build comprehensive results
+        results = {
+            'success': len(registration_results['failed']) == 0,
+            'message': f"Registered {len(registration_results['successful'])} of {registration_results['total_attempted']} blueprints",
+            'results': registration_results,
+            'registration_order': _blueprint_registry._registration_order.copy(),
+            'duration_seconds': registration_duration,
+            'timestamp': end_time.isoformat(),
+            'detailed_status': _blueprint_registry.get_registration_status()
+        }
+        
+        # Store results in application config for debugging
+        app.config['BLUEPRINT_REGISTRATION_RESULTS'] = results
+        
+        return results
         
     except Exception as e:
-        logger.error(f"Blueprint health validation failed: {e}")
+        logger.error(f"Critical error during blueprint registration: {e}")
+        raise BlueprintRegistrationError(f"Blueprint registration system failure: {e}")
+
+
+def get_blueprint_registry() -> BlueprintRegistry:
+    """
+    Get the global blueprint registry instance for external configuration.
+    
+    Provides access to the blueprint registry for custom blueprint registration,
+    configuration management, and status monitoring.
+    
+    Returns:
+        BlueprintRegistry instance
+    """
+    return _blueprint_registry
+
+
+def register_custom_blueprint(
+    name: str,
+    module_path: str,
+    blueprint_name: str,
+    url_prefix: Optional[str] = None,
+    dependencies: List[str] = None,
+    **kwargs
+) -> bool:
+    """
+    Register a custom blueprint configuration for discovery and registration.
+    
+    Enables dynamic blueprint registration for extension modules and custom
+    application components with proper dependency management.
+    
+    Args:
+        name: Unique blueprint identifier
+        module_path: Python module path containing blueprint
+        blueprint_name: Name of blueprint object in module
+        url_prefix: URL prefix for blueprint routes
+        dependencies: List of blueprint dependencies
+        **kwargs: Additional configuration options
+        
+    Returns:
+        Boolean indicating successful configuration registration
+    """
+    try:
+        config = BlueprintConfig(
+            name=name,
+            module_path=module_path,
+            blueprint_name=blueprint_name,
+            url_prefix=url_prefix,
+            dependencies=dependencies or [],
+            **kwargs
+        )
+        
+        return _blueprint_registry.register_blueprint_config(config)
+        
+    except Exception as e:
+        logger.error(f"Failed to register custom blueprint '{name}': {e}")
+        return False
+
+
+def validate_blueprint_registration(app: Flask) -> Dict[str, Any]:
+    """
+    Validate blueprint registration status and provide diagnostic information.
+    
+    Performs comprehensive validation of blueprint registration including
+    route availability, URL prefix conflicts, and Service Layer integration.
+    
+    Args:
+        app: Flask application instance
+        
+    Returns:
+        Dictionary containing validation results and diagnostic information
+    """
+    try:
+        with app.app_context():
+            validation_results = {
+                'blueprint_count': len(app.blueprints),
+                'registered_blueprints': list(app.blueprints.keys()),
+                'route_count': len(list(app.url_map.iter_rules())),
+                'url_prefixes': {},
+                'validation_errors': [],
+                'warnings': []
+            }
+            
+            # Analyze registered blueprints
+            for blueprint_name, blueprint in app.blueprints.items():
+                url_rules = [
+                    rule for rule in app.url_map.iter_rules()
+                    if rule.endpoint.startswith(f"{blueprint_name}.")
+                ]
+                
+                validation_results['url_prefixes'][blueprint_name] = {
+                    'url_prefix': getattr(blueprint, 'url_prefix', None),
+                    'route_count': len(url_rules),
+                    'endpoints': [rule.endpoint for rule in url_rules[:5]]  # Sample endpoints
+                }
+            
+            # Check for potential issues
+            registered_names = set(app.blueprints.keys())
+            expected_names = set(_blueprint_registry._blueprints.keys())
+            
+            missing_blueprints = expected_names - registered_names
+            if missing_blueprints:
+                validation_results['validation_errors'].append(
+                    f"Missing expected blueprints: {list(missing_blueprints)}"
+                )
+            
+            unexpected_blueprints = registered_names - expected_names
+            if unexpected_blueprints:
+                validation_results['warnings'].append(
+                    f"Unexpected blueprints registered: {list(unexpected_blueprints)}"
+                )
+            
+            # Get registration status from registry
+            registration_status = _blueprint_registry.get_registration_status()
+            validation_results['registration_status'] = registration_status
+            
+            return validation_results
+            
+    except Exception as e:
+        logger.error(f"Blueprint validation failed: {e}")
         return {
-            'overall_status': 'error',
-            'error': f'Health validation failed: {str(e)}',
-            'blueprint_health': {},
-            'total_blueprints': 0,
-            'total_routes': 0,
-            'issues': ['Health validation system error']
+            'error': str(e),
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
 
-# Export main functions and classes for application use
+# Export public interface for application factory pattern integration
 __all__ = [
-    'register_blueprints',
-    'get_blueprint_info', 
-    'validate_blueprint_health',
-    'BlueprintManager',
-    'BlueprintRegistrationError'
+    'register_all_blueprints',
+    'get_blueprint_registry', 
+    'register_custom_blueprint',
+    'validate_blueprint_registration',
+    'BlueprintConfig',
+    'BlueprintRegistrationError',
+    'BlueprintRegistry'
 ]
 
 
-# Log module initialization
-logger.info("Blueprint package initialization completed successfully")
+# Module initialization logging
+logger.info("Blueprint package initialized with centralized registration system")
