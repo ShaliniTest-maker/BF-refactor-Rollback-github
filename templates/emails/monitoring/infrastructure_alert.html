@@ -1,584 +1,581 @@
-{% extends "templates/emails/base/base.html" %}
+{% extends "templates/emails/base/email_base.html" %}
 
-{% block title %}Infrastructure Alert - {{ alert_type }} - {{ severity|upper }}{% endblock %}
+{% block title %}Infrastructure Alert - {{ alert_type | title }} - {{ environment | title }}{% endblock %}
 
-{% block email_label %}Infrastructure monitoring alert for {{ alert_type }}{% endblock %}
+{% block additional_styles %}
+<style>
+    /* Infrastructure Alert Specific Styles */
+    .alert-critical {
+        background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
+        color: #ffffff;
+    }
 
-{% block header_title %}Infrastructure Alert{% endblock %}
+    .alert-high {
+        background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+        color: #ffffff;
+    }
 
-{% block email_styles %}
-/* Infrastructure Alert Specific Styles */
-.alert-container {
-    margin: 0 0 20px 0;
-    border-radius: 8px;
-    border-left: 6px solid;
-    padding: 20px;
-    background-color: #f8f9fa;
-}
+    .alert-medium {
+        background: linear-gradient(135deg, #fbc02d 0%, #f57f17 100%);
+        color: #333333;
+    }
 
-.alert-critical {
-    border-left-color: #dc3545;
-    background-color: #f8d7da;
-    color: #721c24;
-}
+    .alert-low {
+        background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+        color: #ffffff;
+    }
 
-.alert-high {
-    border-left-color: #fd7e14;
-    background-color: #fdeaa7;
-    color: #664d03;
-}
-
-.alert-medium {
-    border-left-color: #ffc107;
-    background-color: #fff3cd;
-    color: #664d03;
-}
-
-.alert-low {
-    border-left-color: #28a745;
-    background-color: #d4edda;
-    color: #155724;
-}
-
-.alert-header {
-    margin: 0 0 16px 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-}
-
-.alert-severity {
-    font-weight: 700;
-    font-size: 18px;
-    text-transform: uppercase;
-    margin: 0;
-}
-
-.alert-timestamp {
-    font-size: 14px;
-    opacity: 0.8;
-    margin: 0;
-}
-
-.metrics-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 20px;
-    margin: 20px 0;
-}
-
-.metrics-card {
-    background-color: #ffffff;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 20px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.metrics-card h3 {
-    margin: 0 0 16px 0;
-    font-size: 18px;
-    color: #495057;
-    border-bottom: 2px solid #e9ecef;
-    padding-bottom: 8px;
-}
-
-.metric-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid #f8f9fa;
-}
-
-.metric-row:last-child {
-    border-bottom: none;
-}
-
-.metric-label {
-    font-weight: 500;
-    color: #495057;
-}
-
-.metric-value {
-    font-weight: 600;
-    color: #212529;
-}
-
-.metric-status {
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.status-healthy { background-color: #d4edda; color: #155724; }
-.status-warning { background-color: #fff3cd; color: #664d03; }
-.status-critical { background-color: #f8d7da; color: #721c24; }
-.status-unknown { background-color: #e2e3e5; color: #495057; }
-
-.action-section {
-    background-color: #e9ecef;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 20px 0;
-}
-
-.action-section h3 {
-    margin: 0 0 16px 0;
-    color: #495057;
-}
-
-.action-list {
-    margin: 0;
-    padding-left: 20px;
-}
-
-.action-list li {
-    margin: 8px 0;
-    color: #495057;
-}
-
-.resource-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 16px 0;
-    font-size: 14px;
-}
-
-.resource-table th,
-.resource-table td {
-    text-align: left;
-    padding: 8px 12px;
-    border-bottom: 1px solid #e9ecef;
-}
-
-.resource-table th {
-    background-color: #f8f9fa;
-    font-weight: 600;
-    color: #495057;
-}
-
-.resource-table td {
-    color: #212529;
-}
-
-.progress-bar {
-    height: 8px;
-    background-color: #e9ecef;
-    border-radius: 4px;
-    overflow: hidden;
-    margin: 4px 0;
-}
-
-.progress-fill {
-    height: 100%;
-    transition: width 0.3s ease;
-}
-
-.progress-normal { background-color: #28a745; }
-.progress-warning { background-color: #ffc107; }
-.progress-danger { background-color: #dc3545; }
-
-.contact-info {
-    background-color: #f8f9fa;
-    border-radius: 8px;
-    padding: 16px;
-    margin: 20px 0;
-    font-size: 14px;
-}
-
-.contact-info h4 {
-    margin: 0 0 12px 0;
-    color: #495057;
-}
-
-.contact-link {
-    color: #007bff;
-    text-decoration: none;
-    font-weight: 500;
-}
-
-.contact-link:hover {
-    text-decoration: underline;
-}
-
-/* Responsive adjustments */
-@media screen and (max-width: 600px) {
+    /* Metric Cards */
     .metrics-grid {
-        grid-template-columns: 1fr;
-        gap: 16px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin: 30px 0;
     }
-    
-    .alert-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .alert-timestamp {
-        margin-top: 8px;
-    }
-    
-    .metric-row {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .metric-value {
-        margin-top: 4px;
-    }
-    
-    .resource-table {
-        font-size: 12px;
-    }
-    
-    .resource-table th,
-    .resource-table td {
-        padding: 6px 8px;
-    }
-}
 
-/* Dark mode adjustments */
-@media (prefers-color-scheme: dark) {
-    .metrics-card {
-        background-color: #2d2d2d !important;
-        border-color: #404040 !important;
+    .metric-card {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        transition: all 0.3s ease;
     }
-    
-    .metrics-card h3 {
-        color: #ffffff !important;
-        border-bottom-color: #404040 !important;
+
+    .metric-card:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        transform: translateY(-2px);
     }
-    
-    .metric-label,
+
+    .metric-card.critical {
+        border-left: 5px solid #d32f2f;
+        background: #ffebee;
+    }
+
+    .metric-card.warning {
+        border-left: 5px solid #ff9800;
+        background: #fff3e0;
+    }
+
+    .metric-card.healthy {
+        border-left: 5px solid #4caf50;
+        background: #e8f5e8;
+    }
+
     .metric-value {
-        color: #ffffff !important;
+        font-size: 32px;
+        font-weight: 700;
+        margin: 10px 0;
+        line-height: 1;
     }
-    
-    .action-section,
-    .contact-info {
-        background-color: #2d2d2d !important;
+
+    .metric-value.critical {
+        color: #d32f2f;
     }
-    
-    .resource-table th {
-        background-color: #404040 !important;
-        color: #ffffff !important;
+
+    .metric-value.warning {
+        color: #f57c00;
     }
-    
-    .resource-table td {
-        color: #ffffff !important;
+
+    .metric-value.healthy {
+        color: #4caf50;
     }
-    
-    .progress-bar {
-        background-color: #404040 !important;
+
+    .metric-label {
+        font-size: 14px;
+        font-weight: 600;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
     }
-}
+
+    .metric-description {
+        font-size: 12px;
+        color: #999;
+        margin-top: 5px;
+    }
+
+    /* Container Status */
+    .container-status {
+        background: #ffffff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .container-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        border-bottom: 1px solid #e9ecef;
+        padding-bottom: 15px;
+    }
+
+    .container-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
+        margin: 0;
+    }
+
+    .status-badge {
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-badge.running {
+        background-color: #c8e6c9;
+        color: #2e7d2e;
+    }
+
+    .status-badge.degraded {
+        background-color: #fff3e0;
+        color: #e65100;
+    }
+
+    .status-badge.failed {
+        background-color: #ffcdd2;
+        color: #c62828;
+    }
+
+    .status-badge.unknown {
+        background-color: #f3e5f5;
+        color: #7b1fa2;
+    }
+
+    /* Timeline Styles */
+    .incident-timeline {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .timeline-item {
+        display: flex;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .timeline-item:last-child {
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+
+    .timeline-time {
+        font-size: 12px;
+        color: #6c757d;
+        font-weight: 600;
+        min-width: 100px;
+        margin-right: 15px;
+    }
+
+    .timeline-content {
+        flex: 1;
+        font-size: 14px;
+        color: #495057;
+    }
+
+    /* Action Items */
+    .action-items {
+        background: #e3f2fd;
+        border: 1px solid #2196f3;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+    }
+
+    .action-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1565c0;
+        margin: 0 0 15px 0;
+        display: flex;
+        align-items: center;
+    }
+
+    .action-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        fill: #1565c0;
+    }
+
+    .action-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .action-item {
+        margin-bottom: 10px;
+        padding-left: 20px;
+        position: relative;
+        font-size: 14px;
+        color: #1565c0;
+    }
+
+    .action-item:before {
+        content: "→";
+        position: absolute;
+        left: 0;
+        font-weight: bold;
+        color: #1976d2;
+    }
+
+    /* Responsive adjustments */
+    @media only screen and (max-width: 600px) {
+        .metrics-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .container-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+        }
+    }
+
+    /* Dark mode adjustments */
+    @media (prefers-color-scheme: dark) {
+        .metric-card,
+        .container-status,
+        .incident-timeline {
+            background-color: #374151 !important;
+            border-color: #4b5563 !important;
+        }
+        
+        .metric-card.critical {
+            background-color: #4c1d1d !important;
+        }
+        
+        .metric-card.warning {
+            background-color: #4d2d00 !important;
+        }
+        
+        .metric-card.healthy {
+            background-color: #1e4a21 !important;
+        }
+        
+        .container-title,
+        .timeline-content {
+            color: #e5e7eb !important;
+        }
+        
+        .metric-label,
+        .timeline-time {
+            color: #9ca3af !important;
+        }
+    }
+</style>
 {% endblock %}
 
-{% block email_content %}
-<div class="alert-container alert-{{ severity|lower }}">
-    <div class="alert-header">
-        <h2 class="alert-severity">{{ severity }} Alert</h2>
-        <p class="alert-timestamp">{{ timestamp|strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
-    </div>
-    <h1>{{ alert_type }}: {{ alert_title }}</h1>
-    <p><strong>Alert ID:</strong> {{ alert_id }}</p>
-    <p><strong>Environment:</strong> {{ environment|upper }}</p>
-    <p><strong>Description:</strong> {{ description }}</p>
-    {% if alert_details %}
-    <p><strong>Details:</strong> {{ alert_details }}</p>
-    {% endif %}
+{% block header %}
+<div class="logo">
+    {% block logo %}
+    <!-- Infrastructure monitoring logo/icon -->
+    {% endblock %}
+</div>
+<h1 class="header-title alert-{{ severity | lower }}">Infrastructure Alert</h1>
+<p class="header-subtitle">{{ alert_type | title }} - {{ environment | title }} Environment</p>
+{% endblock %}
+
+{% block content %}
+<!-- Alert Summary -->
+<div class="alert alert-{{ severity | lower if severity else 'warning' }}">
+    <h2 style="margin: 0 0 10px 0; font-size: 20px;">
+        🚨 {{ alert_title | default('Infrastructure Issue Detected') }}
+    </h2>
+    <p style="margin: 0; font-size: 16px;">
+        <strong>Service:</strong> {{ service_name | default('Flask Application') }}<br>
+        <strong>Environment:</strong> {{ environment | title }}<br>
+        <strong>Severity:</strong> {{ severity | title }}<br>
+        <strong>First Detected:</strong> {{ first_detected | default('Just now') }}<br>
+        <strong>Duration:</strong> {{ duration | default('Unknown') }}
+    </p>
 </div>
 
-{% if container_metrics %}
-<div class="metrics-card">
-    <h3>🐳 Container Health Status</h3>
-    
-    {% if container_metrics.cluster_info %}
-    <div class="metric-row">
-        <span class="metric-label">Orchestration Platform:</span>
-        <span class="metric-value">{{ container_metrics.cluster_info.platform }} ({{ container_metrics.cluster_info.cluster_name }})</span>
+<!-- Primary Infrastructure Metrics -->
+<div class="metrics-grid">
+    <!-- Container Health Metrics -->
+    <div class="metric-card {{ container_health_status | default('warning') }}">
+        <div class="metric-value {{ container_health_status | default('warning') }}">
+            {{ container_health_percentage | default('--') }}%
+        </div>
+        <div class="metric-label">Container Health</div>
+        <div class="metric-description">
+            {{ containers_running | default('--') }}/{{ total_containers | default('--') }} containers healthy
+        </div>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">Cluster Status:</span>
-        <span class="metric-status status-{{ container_metrics.cluster_info.status|lower }}">{{ container_metrics.cluster_info.status }}</span>
-    </div>
-    {% endif %}
-    
-    <table class="resource-table">
-        <thead>
-            <tr>
-                <th>Container Instance</th>
-                <th>Status</th>
-                <th>CPU Usage</th>
-                <th>Memory Usage</th>
-                <th>Uptime</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for container in container_metrics.containers %}
-            <tr>
-                <td>{{ container.name }}</td>
-                <td><span class="metric-status status-{{ container.status|lower }}">{{ container.status }}</span></td>
-                <td>
-                    {{ container.cpu_usage }}%
-                    <div class="progress-bar">
-                        <div class="progress-fill progress-{% if container.cpu_usage > 80 %}danger{% elif container.cpu_usage > 60 %}warning{% else %}normal{% endif %}" 
-                             style="width: {{ container.cpu_usage }}%"></div>
-                    </div>
-                </td>
-                <td>
-                    {{ container.memory_usage }}%
-                    <div class="progress-bar">
-                        <div class="progress-fill progress-{% if container.memory_usage > 80 %}danger{% elif container.memory_usage > 60 %}warning{% else %}normal{% endif %}" 
-                             style="width: {{ container.memory_usage }}%"></div>
-                    </div>
-                </td>
-                <td>{{ container.uptime }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    
-    {% if container_metrics.network_io %}
-    <div class="metric-row">
-        <span class="metric-label">Network I/O:</span>
-        <span class="metric-value">{{ container_metrics.network_io.rx_bytes }} / {{ container_metrics.network_io.tx_bytes }}</span>
-    </div>
-    {% endif %}
-</div>
-{% endif %}
 
-{% if wsgi_metrics %}
-<div class="metrics-card">
-    <h3>⚙️ WSGI Server Performance</h3>
-    
-    <div class="metric-row">
-        <span class="metric-label">Gunicorn Master Process:</span>
-        <span class="metric-status status-{{ wsgi_metrics.master_status|lower }}">{{ wsgi_metrics.master_status }}</span>
+    <!-- WSGI Server Performance -->
+    <div class="metric-card {{ wsgi_status | default('warning') }}">
+        <div class="metric-value {{ wsgi_status | default('warning') }}">
+            {{ wsgi_worker_utilization | default('--') }}%
+        </div>
+        <div class="metric-label">WSGI Worker Load</div>
+        <div class="metric-description">
+            {{ active_workers | default('--') }} active workers, {{ request_queue_depth | default('--') }} queued
+        </div>
     </div>
-    
-    <table class="resource-table">
-        <thead>
-            <tr>
-                <th>Worker ID</th>
-                <th>Status</th>
-                <th>Requests Handled</th>
-                <th>Memory Usage</th>
-                <th>Last Activity</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for worker in wsgi_metrics.workers %}
-            <tr>
-                <td>{{ worker.id }}</td>
-                <td><span class="metric-status status-{{ worker.status|lower }}">{{ worker.status }}</span></td>
-                <td>{{ worker.requests_handled }}</td>
-                <td>{{ worker.memory_usage }} MB</td>
-                <td>{{ worker.last_activity }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    
-    <div class="metric-row">
-        <span class="metric-label">Request Queue Depth:</span>
-        <span class="metric-value">{{ wsgi_metrics.queue_depth }}</span>
+
+    <!-- Database Connectivity -->
+    <div class="metric-card {{ database_status | default('critical') }}">
+        <div class="metric-value {{ database_status | default('critical') }}">
+            {{ database_connection_utilization | default('--') }}%
+        </div>
+        <div class="metric-label">DB Pool Usage</div>
+        <div class="metric-description">
+            {{ active_connections | default('--') }}/{{ max_connections | default('--') }} connections active
+        </div>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">Average Response Time:</span>
-        <span class="metric-value">{{ wsgi_metrics.avg_response_time }}ms</span>
+
+    <!-- AWS Service Health -->
+    <div class="metric-card {{ aws_services_status | default('warning') }}">
+        <div class="metric-value {{ aws_services_status | default('warning') }}">
+            {{ aws_services_healthy | default('--') }}/{{ total_aws_services | default('--') }}
+        </div>
+        <div class="metric-label">AWS Services</div>
+        <div class="metric-description">
+            CloudWatch, ECR, RDS status
+        </div>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">Worker Restart Count (24h):</span>
-        <span class="metric-value">{{ wsgi_metrics.restart_count }}</span>
+
+    <!-- Resource Utilization -->
+    <div class="metric-card {{ resource_status | default('warning') }}">
+        <div class="metric-value {{ resource_status | default('warning') }}">
+            {{ cpu_utilization | default('--') }}%
+        </div>
+        <div class="metric-label">CPU Utilization</div>
+        <div class="metric-description">
+            Memory: {{ memory_utilization | default('--') }}% | Disk: {{ disk_utilization | default('--') }}%
+        </div>
+    </div>
+
+    <!-- Network Performance -->
+    <div class="metric-card {{ network_status | default('healthy') }}">
+        <div class="metric-value {{ network_status | default('healthy') }}">
+            {{ network_latency | default('--') }}ms
+        </div>
+        <div class="metric-label">Network Latency</div>
+        <div class="metric-description">
+            {{ network_throughput | default('--') }} Mbps throughput
+        </div>
     </div>
 </div>
-{% endif %}
 
-{% if database_metrics %}
-<div class="metrics-card">
-    <h3>💾 Database Connectivity</h3>
-    
-    <div class="metric-row">
-        <span class="metric-label">Database Status:</span>
-        <span class="metric-status status-{{ database_metrics.status|lower }}">{{ database_metrics.status }}</span>
-    </div>
-    <div class="metric-row">
-        <span class="metric-label">Connection Pool Status:</span>
-        <span class="metric-value">{{ database_metrics.pool.active_connections }}/{{ database_metrics.pool.max_connections }} active</span>
-    </div>
-    <div class="metric-row">
-        <span class="metric-label">Pool Utilization:</span>
-        <span class="metric-value">
-            {{ database_metrics.pool.utilization }}%
-            <div class="progress-bar">
-                <div class="progress-fill progress-{% if database_metrics.pool.utilization > 90 %}danger{% elif database_metrics.pool.utilization > 70 %}warning{% else %}normal{% endif %}" 
-                     style="width: {{ database_metrics.pool.utilization }}%"></div>
-            </div>
+<!-- Detailed Component Status -->
+{% if container_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">Container Orchestration Status</h3>
+        <span class="status-badge {{ container_overall_status | default('unknown') }}">
+            {{ container_overall_status | title | default('Unknown') }}
         </span>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">Average Query Time:</span>
-        <span class="metric-value">{{ database_metrics.avg_query_time }}ms</span>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>ECS/EKS Cluster Health:</strong>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">Failed Connections (1h):</span>
-        <span class="metric-value">{{ database_metrics.failed_connections }}</span>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>Running Containers:</strong> {{ containers_running | default('--') }}<br>
+        • <strong>Failed Containers:</strong> {{ containers_failed | default('--') }}<br>
+        • <strong>Container Restarts (24h):</strong> {{ container_restarts_24h | default('--') }}<br>
+        • <strong>Average Container CPU:</strong> {{ avg_container_cpu | default('--') }}%<br>
+        • <strong>Average Container Memory:</strong> {{ avg_container_memory | default('--') }}%<br>
+        • <strong>Container Registry Status:</strong> {{ ecr_status | default('Unknown') }}<br>
+        {% if container_error_details %}
+        • <strong>Recent Errors:</strong> {{ container_error_details }}<br>
+        {% endif %}
     </div>
-    {% if database_metrics.slow_queries %}
-    <div class="metric-row">
-        <span class="metric-label">Slow Queries (>100ms):</span>
-        <span class="metric-value">{{ database_metrics.slow_queries }} queries</span>
-    </div>
-    {% endif %}
 </div>
 {% endif %}
 
-{% if aws_metrics %}
-<div class="metrics-card">
-    <h3>☁️ AWS Infrastructure Health</h3>
-    
-    {% if aws_metrics.cloudwatch %}
-    <div class="metric-row">
-        <span class="metric-label">CloudWatch Container Insights:</span>
-        <span class="metric-status status-{{ aws_metrics.cloudwatch.status|lower }}">{{ aws_metrics.cloudwatch.status }}</span>
-    </div>
-    {% endif %}
-    
-    {% if aws_metrics.ecs %}
-    <div class="metric-row">
-        <span class="metric-label">ECS Service Status:</span>
-        <span class="metric-value">{{ aws_metrics.ecs.running_tasks }}/{{ aws_metrics.ecs.desired_tasks }} tasks running</span>
-    </div>
-    <div class="metric-row">
-        <span class="metric-label">ECS Cluster Utilization:</span>
-        <span class="metric-value">{{ aws_metrics.ecs.cpu_utilization }}% CPU, {{ aws_metrics.ecs.memory_utilization }}% Memory</span>
-    </div>
-    {% endif %}
-    
-    {% if aws_metrics.eks %}
-    <div class="metric-row">
-        <span class="metric-label">EKS Cluster Status:</span>
-        <span class="metric-status status-{{ aws_metrics.eks.status|lower }}">{{ aws_metrics.eks.status }}</span>
-    </div>
-    <div class="metric-row">
-        <span class="metric-label">Pod Status:</span>
-        <span class="metric-value">{{ aws_metrics.eks.running_pods }}/{{ aws_metrics.eks.desired_pods }} pods running</span>
-    </div>
-    {% endif %}
-    
-    {% if aws_metrics.rds %}
-    <div class="metric-row">
-        <span class="metric-label">RDS Instance Status:</span>
-        <span class="metric-status status-{{ aws_metrics.rds.status|lower }}">{{ aws_metrics.rds.status }}</span>
-    </div>
-    <div class="metric-row">
-        <span class="metric-label">RDS CPU Utilization:</span>
-        <span class="metric-value">{{ aws_metrics.rds.cpu_utilization }}%</span>
-    </div>
-    {% endif %}
-    
-    {% if aws_metrics.load_balancer %}
-    <div class="metric-row">
-        <span class="metric-label">Load Balancer Health:</span>
-        <span class="metric-value">{{ aws_metrics.load_balancer.healthy_targets }}/{{ aws_metrics.load_balancer.total_targets }} targets healthy</span>
-    </div>
-    {% endif %}
-</div>
-{% endif %}
-
-{% if system_metrics %}
-<div class="metrics-card">
-    <h3>📊 System Resource Utilization</h3>
-    
-    <div class="metric-row">
-        <span class="metric-label">Overall System CPU:</span>
-        <span class="metric-value">
-            {{ system_metrics.cpu_usage }}%
-            <div class="progress-bar">
-                <div class="progress-fill progress-{% if system_metrics.cpu_usage > 80 %}danger{% elif system_metrics.cpu_usage > 60 %}warning{% else %}normal{% endif %}" 
-                     style="width: {{ system_metrics.cpu_usage }}%"></div>
-            </div>
+{% if wsgi_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">WSGI Server Performance</h3>
+        <span class="status-badge {{ wsgi_overall_status | default('unknown') }}">
+            {{ wsgi_overall_status | title | default('Unknown') }}
         </span>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">System Memory Usage:</span>
-        <span class="metric-value">
-            {{ system_metrics.memory_usage }}%
-            <div class="progress-bar">
-                <div class="progress-fill progress-{% if system_metrics.memory_usage > 80 %}danger{% elif system_metrics.memory_usage > 60 %}warning{% else %}normal{% endif %}" 
-                     style="width: {{ system_metrics.memory_usage }}%"></div>
-            </div>
-        </span>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>Gunicorn Worker Metrics:</strong>
     </div>
-    <div class="metric-row">
-        <span class="metric-label">Disk I/O:</span>
-        <span class="metric-value">{{ system_metrics.disk_io.read_ops }}/{{ system_metrics.disk_io.write_ops }} ops/sec</span>
-    </div>
-    <div class="metric-row">
-        <span class="metric-label">Network Traffic:</span>
-        <span class="metric-value">{{ system_metrics.network.rx_mbps }} Mbps in / {{ system_metrics.network.tx_mbps }} Mbps out</span>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>Total Workers:</strong> {{ total_wsgi_workers | default('--') }}<br>
+        • <strong>Active Workers:</strong> {{ active_workers | default('--') }}<br>
+        • <strong>Worker Timeouts (1h):</strong> {{ worker_timeouts_1h | default('--') }}<br>
+        • <strong>Average Request Time:</strong> {{ avg_request_time | default('--') }}ms<br>
+        • <strong>Request Queue Depth:</strong> {{ request_queue_depth | default('--') }}<br>
+        • <strong>Worker Memory Usage:</strong> {{ worker_memory_avg | default('--') }}MB avg<br>
+        • <strong>Worker Restart Rate:</strong> {{ worker_restart_rate | default('--') }}/hour<br>
+        {% if wsgi_error_details %}
+        • <strong>Recent Issues:</strong> {{ wsgi_error_details }}<br>
+        {% endif %}
     </div>
 </div>
 {% endif %}
 
-<div class="action-section">
-    <h3>🚨 Immediate Actions Required</h3>
+{% if database_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">Database Connectivity</h3>
+        <span class="status-badge {{ database_overall_status | default('unknown') }}">
+            {{ database_overall_status | title | default('Unknown') }}
+        </span>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>SQLAlchemy Connection Pool Health:</strong>
+    </div>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>Active Connections:</strong> {{ active_connections | default('--') }}/{{ max_connections | default('--') }}<br>
+        • <strong>Pool Utilization:</strong> {{ pool_utilization | default('--') }}%<br>
+        • <strong>Connection Acquisition Time:</strong> {{ connection_acquisition_time | default('--') }}ms avg<br>
+        • <strong>Failed Connections (1h):</strong> {{ failed_connections_1h | default('--') }}<br>
+        • <strong>Connection Timeouts (1h):</strong> {{ connection_timeouts_1h | default('--') }}<br>
+        • <strong>Query Performance:</strong> {{ avg_query_time | default('--') }}ms avg<br>
+        • <strong>Database Latency:</strong> {{ database_latency | default('--') }}ms<br>
+        {% if database_error_details %}
+        • <strong>Connection Errors:</strong> {{ database_error_details }}<br>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if aws_service_details %}
+<div class="container-status">
+    <div class="container-header">
+        <h3 class="container-title">AWS Service Health</h3>
+        <span class="status-badge {{ aws_overall_status | default('unknown') }}">
+            {{ aws_overall_status | title | default('Unknown') }}
+        </span>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>AWS Infrastructure Components:</strong>
+    </div>
+    
+    <div style="font-size: 14px; color: #666; line-height: 1.6;">
+        • <strong>CloudWatch Status:</strong> {{ cloudwatch_status | default('Unknown') }}<br>
+        • <strong>Container Insights:</strong> {{ container_insights_status | default('Unknown') }}<br>
+        • <strong>ECR Registry:</strong> {{ ecr_status | default('Unknown') }}<br>
+        • <strong>RDS Database:</strong> {{ rds_status | default('Unknown') }}<br>
+        • <strong>Load Balancer:</strong> {{ alb_status | default('Unknown') }}<br>
+        • <strong>Auto Scaling:</strong> {{ autoscaling_status | default('Unknown') }}<br>
+        • <strong>Secrets Manager:</strong> {{ secrets_manager_status | default('Unknown') }}<br>
+        • <strong>Parameter Store:</strong> {{ parameter_store_status | default('Unknown') }}<br>
+        {% if aws_error_details %}
+        • <strong>Service Issues:</strong> {{ aws_error_details }}<br>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Incident Timeline -->
+{% if incident_timeline %}
+<div class="incident-timeline">
+    <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600; color: #333;">
+        📅 Incident Timeline
+    </h3>
+    
+    {% for event in incident_timeline %}
+    <div class="timeline-item">
+        <div class="timeline-time">{{ event.time }}</div>
+        <div class="timeline-content">{{ event.description }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Immediate Action Items -->
+<div class="action-items">
+    <h3 class="action-title">
+        <svg class="action-icon" viewBox="0 0 24 24">
+            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,14V16H13V14H11M11,8V12H13V8H11Z"/>
+        </svg>
+        Immediate Actions Required
+    </h3>
+    
     <ul class="action-list">
-        {% if recommended_actions %}
-            {% for action in recommended_actions %}
-            <li>{{ action }}</li>
+        {% if action_items %}
+            {% for action in action_items %}
+            <li class="action-item">{{ action }}</li>
             {% endfor %}
         {% else %}
-        <li>Review infrastructure metrics and determine appropriate response</li>
-        <li>Check container orchestration platform for service health</li>
-        <li>Validate WSGI server worker processes and request handling</li>
-        <li>Monitor database connection pool and query performance</li>
-        <li>Verify AWS service health and resource utilization</li>
+        <li class="action-item">Acknowledge this alert to prevent escalation</li>
+        <li class="action-item">Investigate {% if service_name %}{{ service_name }}{% else %}affected services{% endif %} for root cause</li>
+        <li class="action-item">Monitor system metrics for continued degradation</li>
+        <li class="action-item">Prepare rollback procedures if performance continues to decline</li>
+        <li class="action-item">Contact on-call engineer if issue persists beyond {{ escalation_time | default('15 minutes') }}</li>
         {% endif %}
     </ul>
 </div>
 
-{% if runbook_links %}
-<div class="action-section">
-    <h3>📖 Operations Runbooks</h3>
-    <ul class="action-list">
-        {% for runbook in runbook_links %}
-        <li><a href="{{ runbook.url }}" class="contact-link">{{ runbook.title }}</a></li>
-        {% endfor %}
-    </ul>
-</div>
-{% endif %}
-
-<div class="contact-info">
-    <h4>🆘 Emergency Contacts</h4>
-    <p><strong>Operations Team:</strong> <a href="mailto:{{ ops_team_email|default('ops@company.com') }}" class="contact-link">{{ ops_team_email|default('ops@company.com') }}</a></p>
-    <p><strong>Infrastructure Team:</strong> <a href="mailto:{{ infra_team_email|default('infrastructure@company.com') }}" class="contact-link">{{ infra_team_email|default('infrastructure@company.com') }}</a></p>
-    <p><strong>On-Call Engineer:</strong> <a href="tel:{{ oncall_phone|default('+1-800-ON-CALL') }}" class="contact-link">{{ oncall_phone|default('+1-800-ON-CALL') }}</a></p>
-    {% if slack_channel %}
-    <p><strong>Slack Channel:</strong> <a href="{{ slack_channel.url }}" class="contact-link">{{ slack_channel.name }}</a></p>
-    {% endif %}
-    {% if dashboard_url %}
-    <p><strong>Monitoring Dashboard:</strong> <a href="{{ dashboard_url }}" class="contact-link">View Real-time Metrics</a></p>
-    {% endif %}
+<!-- Escalation Information -->
+<div class="security-info">
+    <h4 class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,3.18L19,6.3V11C19,15.26 16.22,19.39 12,20.72C7.78,19.39 5,15.26 5,11V6.3L12,3.18M11,8V14H13V8H11M11,16V18H13V16H11Z"/>
+        </svg>
+        Escalation & Support Information
+    </h4>
+    
+    <p class="security-text">
+        <strong>Primary Contact:</strong> {{ primary_contact | default('On-call Engineer') }}<br>
+        <strong>Escalation Time:</strong> {{ escalation_time | default('15 minutes') }}<br>
+        <strong>Severity Level:</strong> {{ severity | title }} ({{ severity_description | default('See incident response playbook') }})<br>
+        <strong>Monitoring Dashboard:</strong> <a href="{{ dashboard_url | default('#') }}" style="color: #667eea;">Infrastructure Dashboard</a><br>
+        <strong>Runbook:</strong> <a href="{{ runbook_url | default('#') }}" style="color: #667eea;">{{ alert_type | title }} Response Procedures</a><br>
+        <strong>Alert ID:</strong> {{ alert_id | default('AUTO-' + timestamp) }}
+    </p>
 </div>
 
-<div class="alert-container alert-{{ severity|lower }}">
-    <p><strong>Alert Generated:</strong> {{ timestamp|strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
-    <p><strong>Monitoring System:</strong> Flask Application Infrastructure Monitor</p>
-    <p><strong>Next Check:</strong> {{ next_check|strftime('%Y-%m-%d %H:%M:%S UTC') if next_check else 'Continuous monitoring active' }}</p>
+<!-- System Information -->
+<div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0; font-size: 12px; color: #6c757d;">
+    <strong>System Information:</strong><br>
+    Environment: {{ environment | title }} | Region: {{ aws_region | default('us-east-1') }} | 
+    Application Version: {{ app_version | default('Unknown') }} | 
+    Container Image: {{ container_image | default('latest') }}<br>
+    Generated: {{ timestamp | default('now') }} | 
+    Monitoring Source: {{ monitoring_source | default('CloudWatch Container Insights') }}
 </div>
 {% endblock %}
 
-{% block footer_content %}
-<p>Flask Infrastructure Monitoring System</p>
-<p>
-    <a href="{{ monitoring_dashboard_url|default('#') }}">Monitoring Dashboard</a> |
-    <a href="{{ runbook_url|default('#') }}">Operations Runbooks</a> |
-    <a href="{{ escalation_url|default('#') }}">Escalation Procedures</a>
+{% block footer %}
+<p class="footer-text">
+    This infrastructure alert was generated automatically by the Flask application monitoring system.
+    Critical alerts require immediate attention from the operations team.
 </p>
-<p>This is an automated infrastructure alert from the Flask application monitoring system.</p>
+
+<div class="footer-links">
+    {% block footer_links %}
+    <a href="{{ dashboard_url | default('#') }}" class="footer-link">Infrastructure Dashboard</a>
+    <a href="{{ runbook_url | default('#') }}" class="footer-link">Response Runbook</a>
+    <a href="{{ support_url | default('#') }}" class="footer-link">Contact Support</a>
+    {% endblock %}
+</div>
+
+<p class="footer-copyright">
+    {% block copyright %}
+    © {{ current_year | default('2024') }} Infrastructure Monitoring System. Alert ID: {{ alert_id | default('AUTO-' + timestamp) }}
+    {% endblock %}
+</p>
 {% endblock %}
