@@ -1,137 +1,191 @@
-{% extends "templates/emails/base/email_base.txt" %}
-
-{% block subject %}
-Data Export Completed - {{ export_type }} (Export ID: {{ export_id }})
-{% endblock %}
-
-{% block content %}
 DATA EXPORT COMPLETION NOTIFICATION
-====================================
+=====================================
 
-Export Details:
----------------
+Export Status: COMPLETED
 Export ID: {{ export_id }}
-Export Type: {{ export_type }}
-Request Date: {{ request_date.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-Completion Date: {{ completion_date.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Request Date: {{ request_date }}
+Completion Date: {{ completion_date }}
 Processing Duration: {{ processing_duration }}
-Requested By: {{ requester_name }} ({{ requester_email }})
 
-Data Summary:
--------------
-Total Records Exported: {{ record_count }}
-{% if user_data_records -%}
-User Data Records: {{ user_data_records }}
-{% endif -%}
-{% if business_entity_records -%}
-Business Entity Records: {{ business_entity_records }}
-{% endif -%}
-{% if audit_log_records -%}
-Audit Log Records: {{ audit_log_records }}
-{% endif -%}
-Data Classification: {{ data_classification }}
-Export Format: {{ export_format }}
+REQUESTOR INFORMATION
+---------------------
+Requested By: {{ requestor_name }}
+Requestor Email: {{ requestor_email }}
+Request Type: {{ request_type }}
+Authorization Level: {{ authorization_level }}
 
-File Information:
------------------
-{% for file in export_files %}
-File {{ loop.index }}: {{ file.filename }}
-  Location: {{ file.secure_path }}
-  Size: {{ file.size_formatted }}
-  Checksum (SHA-256): {{ file.checksum }}
-  Encryption: {{ file.encryption_status }}
+EXPORT DETAILS
+--------------
+Total Records Exported: {{ total_records }}
+File Format: {{ file_format }}
+Export File Size: {{ file_size }}
+Number of Files Generated: {{ file_count }}
+
+DATA CATEGORIES INCLUDED:
+{% for category in data_categories %}
+- {{ category.name }}: {{ category.record_count }} records
 {% endfor %}
 
-Security and Compliance:
-------------------------
-Encryption Status: {{ encryption_details.status }}
-{% if encryption_details.algorithm -%}
-Encryption Algorithm: {{ encryption_details.algorithm }}
-Key Management: {{ encryption_details.key_management }}
-{% endif -%}
+FILE LOCATIONS AND ACCESS
+--------------------------
+Primary Export File: {{ primary_file_path }}
+{% if additional_files %}
+Additional Files:
+{% for file in additional_files %}
+- {{ file.name }}: {{ file.path }}
+{% endfor %}
+{% endif %}
 
-Access Controls:
-- File access restricted to authorized personnel only
-- Download link expires: {{ download_expiry.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-- Access attempts will be logged and monitored
+Secure Download Link: {{ download_url }}
+Download Expires: {{ download_expiry }}
+Access Code: {{ access_code }}
 
-GDPR Compliance Information:
+SECURITY AND COMPLIANCE INFORMATION
+------------------------------------
+Encryption Status: {{ encryption_status }}
+Data Classification: {{ data_classification }}
+Compliance Framework: {{ compliance_framework }}
+
+GDPR Article 20 Compliance: VERIFIED
+Data Portability Requirements: MET
+Personal Data Anonymization: {{ anonymization_status }}
+Cross-Border Transfer Compliance: {{ transfer_compliance }}
+
+AUDIT AND VALIDATION
+---------------------
+Export Validation Status: {{ validation_status }}
+Data Integrity Check: {{ integrity_check_result }}
+Schema Validation: {{ schema_validation }}
+Record Count Verification: {{ count_verification }}
+
+Audit Log Entry ID: {{ audit_log_id }}
+Digital Signature: {{ digital_signature }}
+Checksum (SHA-256): {{ file_checksum }}
+
+ADMINISTRATIVE PROCEDURES
+--------------------------
+1. VERIFICATION REQUIRED
+   - Review export completeness against original request
+   - Validate data categories and record counts
+   - Confirm security and encryption compliance
+
+2. DELIVERY COORDINATION
+   - Notify requestor of completed export via secure channel
+   - Provide access credentials through separate communication
+   - Schedule secure file transfer if required
+
+3. RETENTION AND CLEANUP
+   - Export files retained for {{ retention_period }} days
+   - Automatic deletion scheduled for {{ deletion_date }}
+   - Audit trail preserved per compliance requirements
+
+4. QUALITY ASSURANCE
+   - Perform random sampling validation (if required)
+   - Document any discrepancies or issues identified
+   - Update export procedures based on findings
+
+COMPLIANCE CHECKLIST
+---------------------
+☑ Data subject consent verified
+☑ Export scope validated against request
+☑ Personal data anonymization completed (where applicable)
+☑ Cross-border transfer requirements met
+☑ Encryption and security standards applied
+☑ Audit trail documentation complete
+☑ Retention and deletion schedule established
+
+NEXT ACTIONS REQUIRED
+---------------------
+{% if manual_review_required %}
+⚠ MANUAL REVIEW REQUIRED
+Priority: {{ review_priority }}
+Reviewer: {{ assigned_reviewer }}
+Review Due Date: {{ review_due_date }}
+Review Instructions: {{ review_instructions }}
+{% endif %}
+
+{% if delivery_required %}
+📤 DELIVERY COORDINATION
+Delivery Method: {{ delivery_method }}
+Recipient Verification: {{ recipient_verification }}
+Delivery Schedule: {{ delivery_schedule }}
+{% endif %}
+
+{% if additional_approvals %}
+📋 ADDITIONAL APPROVALS NEEDED
+{% for approval in additional_approvals %}
+- {{ approval.type }}: {{ approval.approver }} (Due: {{ approval.due_date }})
+{% endfor %}
+{% endif %}
+
+CONTACT INFORMATION
+-------------------
+Export Administrator: {{ admin_name }}
+Administrative Email: {{ admin_email }}
+Support Phone: {{ support_phone }}
+Emergency Contact: {{ emergency_contact }}
+
+Data Protection Officer: {{ dpo_name }}
+DPO Email: {{ dpo_email }}
+Compliance Hotline: {{ compliance_phone }}
+
+TECHNICAL SUPPORT
+-----------------
+System: Flask Application Data Export Service
+Version: {{ system_version }}
+Export Service ID: {{ service_instance_id }}
+Database Instance: {{ database_instance }}
+
+For technical issues with this export:
+- Reference Export ID: {{ export_id }}
+- Log Correlation ID: {{ log_correlation_id }}
+- Support Ticket Portal: {{ support_portal_url }}
+
+IMPORTANT SECURITY NOTICES
 ---------------------------
-{% if gdpr_request_type -%}
-Request Type: {{ gdpr_request_type }}
-Legal Basis: {{ legal_basis }}
-Data Subject Rights: {{ data_subject_rights }}
-{% endif -%}
-Compliance Validation: {{ compliance_status }}
-Data Retention Period: {{ retention_period }}
-{% if pseudonymization_applied -%}
-Pseudonymization Applied: Yes
-Pseudonymization Method: {{ pseudonymization_method }}
-{% endif -%}
+⚠ This export contains personally identifiable information (PII)
+⚠ Handle in accordance with data protection policies
+⚠ Secure disposal required upon completion of business purpose
+⚠ Report any suspected data breaches immediately
 
-Next Steps for Administrators:
-------------------------------
-1. Verify export file integrity using provided checksums
-2. Review compliance validation results
-3. Coordinate secure delivery to authorized recipient
-{% if gdpr_request_type == 'Subject Access Request' -%}
-4. Prepare data subject communication within required timeframe
-{% endif -%}
-{% if manual_review_required -%}
-5. MANUAL REVIEW REQUIRED: {{ manual_review_reason }}
-{% endif -%}
+ACCESS INSTRUCTIONS
+-------------------
+1. Navigate to secure download portal: {{ portal_url }}
+2. Enter Export ID: {{ export_id }}
+3. Provide access code: {{ access_code }}
+4. Complete multi-factor authentication if prompted
+5. Download files within {{ download_window }} hours
 
-Download Access:
-----------------
-Secure Download URL: {{ secure_download_url }}
-Access Token: {{ access_token }}
+For assistance accessing files:
+- Review troubleshooting guide: {{ troubleshooting_url }}
+- Contact technical support with Export ID
+- Alternative delivery methods available upon request
 
-IMPORTANT: This URL is valid until {{ download_expiry.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-Access is logged and monitored for security compliance.
+LEGAL AND REGULATORY NOTICES
+-----------------------------
+This data export has been prepared in compliance with:
+- General Data Protection Regulation (GDPR) Article 20
+- {{ additional_regulations }}
+- Internal data governance policies
+- Industry-specific compliance requirements
 
-Administrative Actions:
------------------------
-{% if requires_approval -%}
-⚠️  APPROVAL REQUIRED: This export requires management approval before delivery
-Approval URL: {{ approval_url }}
-{% endif -%}
+Data Controller: {{ data_controller }}
+Legal Basis for Processing: {{ legal_basis }}
+Retention Period: {{ legal_retention_period }}
 
-For export verification or issues:
-- Export Dashboard: {{ dashboard_url }}
-- Administrative Contact: {{ admin_contact_email }}
-- Security Team: {{ security_contact_email }}
+Any questions regarding legal compliance should be directed to:
+Legal Department: {{ legal_email }}
+Compliance Team: {{ compliance_email }}
 
-Operational Notes:
-------------------
-{% if export_notes -%}
-{{ export_notes }}
-{% endif -%}
-Database Performance Impact: {{ performance_impact }}
-System Resources Used: {{ resource_usage }}
-
-This export was generated by the Flask Data Export Service as part of our
-compliance and administrative reporting infrastructure.
-
-All export activities are logged in accordance with our data governance
-policies and regulatory requirements.
-
-{% endblock %}
-
-{% block footer %}
 ---
-Flask Application Data Export Service
-Compliance and Administrative Reporting System
+This automated notification was generated by the Flask Data Export Service
+Timestamp: {{ notification_timestamp }}
+Notification ID: {{ notification_id }}
+System Instance: {{ system_hostname }}
 
-This is an automated notification. Please do not reply to this email.
+Please retain this notification for audit and compliance purposes.
+For system status updates: {{ status_page_url }}
 
-For technical support or questions regarding this export:
-- Administrative Dashboard: {{ base_url }}/admin/exports
-- Support Email: {{ support_email }}
-- Security Issues: {{ security_email }}
-
-Data Export ID: {{ export_id }}
-Generated: {{ completion_date.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-
-CONFIDENTIAL: This email contains sensitive data export information.
-Handle in accordance with organizational data protection policies.
-{% endblock %}
+© {{ current_year }} {{ organization_name }} - All rights reserved
+Data Protection Policy: {{ privacy_policy_url }}
+Terms of Service: {{ terms_url }}
