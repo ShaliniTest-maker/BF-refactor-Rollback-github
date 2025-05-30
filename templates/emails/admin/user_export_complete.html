@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>User Data Export Complete - Administrative Notification</title>
+    <style>
+        /* Email client compatibility styles */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #5B39F3 0%, #4f32e0 100%);
+            color: #ffffff;
+            padding: 30px 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .header .subtitle {
+            margin: 8px 0 0 0;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 30px 25px;
+        }
+        
+        .export-summary {
+            background-color: #f8f9fa;
+            border-left: 4px solid #28a745;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .export-summary h2 {
+            margin: 0 0 15px 0;
+            color: #28a745;
+            font-size: 18px;
+        }
+        
+        .export-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 25px 0;
+        }
+        
+        .detail-card {
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .detail-card h3 {
+            margin: 0 0 10px 0;
+            color: #5B39F3;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .detail-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #333333;
+        }
+        
+        .compliance-section {
+            background-color: #e8f4f8;
+            border: 1px solid #bee5eb;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 25px 0;
+        }
+        
+        .compliance-section h3 {
+            margin: 0 0 15px 0;
+            color: #0c5460;
+            font-size: 16px;
+        }
+        
+        .security-badge {
+            display: inline-block;
+            background-color: #28a745;
+            color: #ffffff;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .file-info {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .file-info strong {
+            color: #856404;
+        }
+        
+        .action-section {
+            background-color: #f8f9fa;
+            padding: 25px;
+            margin: 30px -25px -30px -25px;
+            text-align: center;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #5B39F3;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            margin: 0 10px;
+            transition: background-color 0.3s ease;
+        }
+        
+        .btn:hover {
+            background-color: #4f32e0;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+        
+        .metadata-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        .metadata-table th,
+        .metadata-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .metadata-table th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .footer {
+            background-color: #343a40;
+            color: #ffffff;
+            padding: 20px 25px;
+            text-align: center;
+            font-size: 12px;
+        }
+        
+        .footer a {
+            color: #5B39F3;
+            text-decoration: none;
+        }
+        
+        /* Responsive design for mobile devices */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                margin: 0;
+                border-radius: 0;
+            }
+            
+            .export-details {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .content {
+                padding: 20px 15px;
+            }
+            
+            .action-section {
+                margin: 20px -15px -20px -15px;
+                padding: 20px 15px;
+            }
+            
+            .btn {
+                display: block;
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header Section -->
+        <div class="header">
+            <h1>Data Export Complete</h1>
+            <p class="subtitle">Administrative Notification - User Data Export Processed</p>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Export Status Summary -->
+            <div class="export-summary">
+                <h2>✓ Export Successfully Completed</h2>
+                <p>User data export request <strong>{{ export_id }}</strong> has been completed successfully. All requested data has been extracted, validated, and prepared for administrative review.</p>
+            </div>
+            
+            <!-- Export Details Grid -->
+            <div class="export-details">
+                <div class="detail-card">
+                    <h3>Total Records Exported</h3>
+                    <div class="detail-value">{{ total_records | default('N/A') }}</div>
+                    <small>Across all data categories</small>
+                </div>
+                
+                <div class="detail-card">
+                    <h3>Export Duration</h3>
+                    <div class="detail-value">{{ export_duration | default('N/A') }}</div>
+                    <small>Processing time</small>
+                </div>
+                
+                <div class="detail-card">
+                    <h3>File Size</h3>
+                    <div class="detail-value">{{ file_size | default('N/A') }}</div>
+                    <small>Total export package size</small>
+                </div>
+                
+                <div class="detail-card">
+                    <h3>Data Categories</h3>
+                    <div class="detail-value">{{ data_categories_count | default('N/A') }}</div>
+                    <small>User data types included</small>
+                </div>
+            </div>
+            
+            <!-- File Information -->
+            <div class="file-info">
+                <strong>Secure File Location:</strong><br>
+                {{ file_location | default('Location will be provided separately for security') }}<br>
+                <strong>File Format:</strong> {{ file_format | default('Encrypted ZIP Archive') }}<br>
+                <strong>Encryption:</strong> AES-256 with secure key management
+            </div>
+            
+            <!-- Compliance and Security Section -->
+            <div class="compliance-section">
+                <h3>🛡️ Compliance & Security Validation</h3>
+                <p><span class="security-badge">GDPR Compliant</span> All data export procedures comply with GDPR Article 20 (Right to Data Portability) and Article 15 (Right of Access) requirements.</p>
+                
+                <ul style="margin: 15px 0; padding-left: 20px;">
+                    <li>Data integrity verified through Service Layer validation</li>
+                    <li>Access controls validated via RBAC authentication</li>
+                    <li>Audit trail logged for compliance documentation</li>
+                    <li>Encryption applied per organizational security policies</li>
+                    <li>Administrative approval workflow completed</li>
+                </ul>
+            </div>
+            
+            <!-- Detailed Metadata Table -->
+            <table class="metadata-table">
+                <thead>
+                    <tr>
+                        <th>Export Metadata</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Export ID</td>
+                        <td><code>{{ export_id | default('EXP-' + timestamp) }}</code></td>
+                    </tr>
+                    <tr>
+                        <td>Requested By</td>
+                        <td>{{ requester_name | default('Administrator') }} ({{ requester_email | default('admin@system.local') }})</td>
+                    </tr>
+                    <tr>
+                        <td>Target User(s)</td>
+                        <td>{{ target_users | default('Multiple Users') }} ({{ target_user_count | default('N/A') }} users)</td>
+                    </tr>
+                    <tr>
+                        <td>Export Type</td>
+                        <td>{{ export_type | default('Full User Data Export') }}</td>
+                    </tr>
+                    <tr>
+                        <td>Processing Started</td>
+                        <td>{{ start_time | default('N/A') }}</td>
+                    </tr>
+                    <tr>
+                        <td>Completed At</td>
+                        <td>{{ completion_time | default(timestamp) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Service Layer Workflow</td>
+                        <td>{{ workflow_id | default('SL-WF-' + export_id) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Audit Log Entry</td>
+                        <td>{{ audit_log_id | default('AUDIT-' + export_id) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <!-- Data Categories Breakdown -->
+            {% if data_categories %}
+            <h3>📊 Data Categories Exported</h3>
+            <ul style="margin: 15px 0; padding-left: 20px;">
+                {% for category in data_categories %}
+                <li><strong>{{ category.name }}:</strong> {{ category.record_count }} records ({{ category.size }})</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <h3>📊 Data Categories Exported</h3>
+            <ul style="margin: 15px 0; padding-left: 20px;">
+                <li><strong>User Profiles:</strong> Personal information and account details</li>
+                <li><strong>Authentication Data:</strong> Login history and session records</li>
+                <li><strong>Business Entities:</strong> Associated business objects and relationships</li>
+                <li><strong>Audit Logs:</strong> Activity tracking and security events</li>
+                <li><strong>RBAC Data:</strong> Role assignments and permission records</li>
+            </ul>
+            {% endif %}
+            
+            <!-- Next Steps Section -->
+            <h3>📋 Next Steps for Administrators</h3>
+            <ol style="margin: 15px 0; padding-left: 20px;">
+                <li><strong>Review Export:</strong> Validate the exported data meets the original request requirements</li>
+                <li><strong>Security Check:</strong> Verify file integrity and encryption status</li>
+                <li><strong>Compliance Documentation:</strong> Update compliance records with export completion</li>
+                <li><strong>User Notification:</strong> Inform the requesting party of export availability (if applicable)</li>
+                <li><strong>Data Retention:</strong> Schedule appropriate data retention and disposal procedures</li>
+            </ol>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="action-section">
+            <h3>Administrative Actions</h3>
+            <p>Access the administrative dashboard to review export details and manage data compliance workflows.</p>
+            
+            <a href="{{ admin_dashboard_url | default('#') }}" class="btn">View Export Details</a>
+            <a href="{{ compliance_dashboard_url | default('#') }}" class="btn btn-secondary">Compliance Dashboard</a>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>This notification was generated automatically by the Flask Service Layer data export workflow.</p>
+            <p>System: {{ system_name | default('Flask Application') }} | Environment: {{ environment | default('Production') }}</p>
+            <p>Generated at {{ timestamp | default('System Timestamp') }} | 
+               <a href="{{ privacy_policy_url | default('#') }}">Privacy Policy</a> | 
+               <a href="{{ data_protection_url | default('#') }}">Data Protection</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
