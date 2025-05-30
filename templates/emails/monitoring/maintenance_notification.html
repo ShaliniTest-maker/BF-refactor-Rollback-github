@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ maintenance.title }} - Scheduled Maintenance Notification</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #5B39F3 0%, #4A28E8 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .maintenance-type {
+            display: inline-block;
+            background-color: rgba(255, 255, 255, 0.2);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+            border-left: 4px solid #5B39F3;
+            padding-left: 20px;
+        }
+        .section h2 {
+            color: #5B39F3;
+            margin-top: 0;
+            font-size: 20px;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        .schedule-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .schedule-item {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+        .schedule-item strong {
+            color: #5B39F3;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .impact-assessment {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .impact-high {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .impact-medium {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+        }
+        .impact-low {
+            background-color: #d1ecf1;
+            border-color: #b3d7e6;
+        }
+        .timeline {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .timeline-item {
+            display: flex;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+        .timeline-time {
+            background-color: #5B39F3;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-weight: 600;
+            min-width: 120px;
+            text-align: center;
+            margin-right: 15px;
+        }
+        .timeline-description {
+            flex: 1;
+        }
+        .system-components {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .component-card {
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            background-color: #ffffff;
+        }
+        .component-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-affected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-unaffected {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        .status-partial {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .contact-info {
+            background-color: #e3f2fd;
+            border: 1px solid #b3d7e6;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .contact-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .contact-item {
+            text-align: center;
+        }
+        .contact-item strong {
+            display: block;
+            color: #5B39F3;
+            margin-bottom: 5px;
+        }
+        .rollback-info {
+            background-color: #fff3e0;
+            border: 1px solid #ffcc80;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .alert-box {
+            background-color: #ffeaa7;
+            border-left: 5px solid #fdcb6e;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 6px 6px 0;
+        }
+        .alert-box.critical {
+            background-color: #ffebee;
+            border-color: #e57373;
+        }
+        .alert-box.info {
+            background-color: #e3f2fd;
+            border-color: #64b5f6;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+        }
+        .footer a {
+            color: #5B39F3;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        .pre-maintenance-checklist {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .checklist-item {
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .checklist-item:last-child {
+            border-bottom: none;
+        }
+        .technical-details {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            .content {
+                padding: 20px;
+            }
+            .schedule-grid,
+            .system-components,
+            .contact-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header Section -->
+        <div class="header">
+            <h1>🔧 {{ maintenance.title | default('Scheduled System Maintenance') }}</h1>
+            <div class="maintenance-type">{{ maintenance.type | default('Infrastructure Upgrade') }}</div>
+        </div>
+
+        <div class="content">
+            <!-- Maintenance Overview -->
+            <div class="section">
+                <h2>📋 Maintenance Overview</h2>
+                <p><strong>{{ maintenance.description | default('We will be performing scheduled maintenance to enhance system performance, security, and reliability. This maintenance includes infrastructure updates, database optimizations, and security patches.') }}</strong></p>
+                
+                {% if maintenance.migration_context %}
+                <div class="alert-box info">
+                    <strong>🔄 System Migration Context:</strong><br>
+                    This maintenance is part of our ongoing Flask application architecture optimization, transitioning from our previous Node.js infrastructure to enhance performance, security, and scalability.
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Schedule Information -->
+            <div class="section">
+                <h2>📅 Maintenance Schedule</h2>
+                <div class="schedule-grid">
+                    <div class="schedule-item">
+                        <strong>Start Date & Time</strong>
+                        {{ maintenance.start_time | default('Saturday, January 15, 2024 at 2:00 AM UTC') }}
+                    </div>
+                    <div class="schedule-item">
+                        <strong>Expected End Time</strong>
+                        {{ maintenance.end_time | default('Saturday, January 15, 2024 at 6:00 AM UTC') }}
+                    </div>
+                    <div class="schedule-item">
+                        <strong>Duration</strong>
+                        {{ maintenance.duration | default('4 hours') }}
+                    </div>
+                    <div class="schedule-item">
+                        <strong>Timezone</strong>
+                        {{ maintenance.timezone | default('UTC (Coordinated Universal Time)') }}
+                    </div>
+                </div>
+
+                <div class="timeline">
+                    <h3>🕐 Detailed Timeline</h3>
+                    {% for phase in maintenance.phases | default([
+                        {'time': '2:00 AM UTC', 'description': 'Maintenance window begins - User notifications sent'},
+                        {'time': '2:15 AM UTC', 'description': 'Database backup and validation completed'},
+                        {'time': '2:30 AM UTC', 'description': 'Flask application deployment begins'},
+                        {'time': '3:30 AM UTC', 'description': 'Database migration execution (Flask-Migrate)'},
+                        {'time': '4:30 AM UTC', 'description': 'Security updates and infrastructure provisioning'},
+                        {'time': '5:00 AM UTC', 'description': 'System validation and health checks'},
+                        {'time': '5:30 AM UTC', 'description': 'Performance benchmarking and monitoring validation'},
+                        {'time': '6:00 AM UTC', 'description': 'Maintenance complete - Full service restoration'}
+                    ]) %}
+                    <div class="timeline-item">
+                        <div class="timeline-time">{{ phase.time }}</div>
+                        <div class="timeline-description">{{ phase.description }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Impact Assessment -->
+            <div class="section">
+                <h2>⚠️ Service Impact Assessment</h2>
+                <div class="impact-assessment impact-{{ maintenance.impact_level | default('medium') }}">
+                    <strong>Impact Level: {{ maintenance.impact_level | default('Medium') | title }}</strong><br>
+                    {{ maintenance.impact_description | default('During the maintenance window, some services may experience intermittent availability. Users may encounter brief disruptions during the database migration phase (3:30-4:30 AM UTC).') }}
+                </div>
+
+                <div class="system-components">
+                    {% for component in maintenance.affected_components | default([
+                        {'name': 'Web Application', 'status': 'affected', 'description': 'Flask application restart during deployment'},
+                        {'name': 'API Services', 'status': 'affected', 'description': 'Brief interruption during container restart'},
+                        {'name': 'Database (PostgreSQL)', 'status': 'affected', 'description': 'Schema updates via Flask-Migrate'},
+                        {'name': 'Authentication (Auth0)', 'status': 'unaffected', 'description': 'No changes to authentication service'},
+                        {'name': 'CDN & Static Assets', 'status': 'unaffected', 'description': 'Continuous availability maintained'},
+                        {'name': 'Monitoring & Alerting', 'status': 'partial', 'description': 'Enhanced monitoring deployment'}
+                    ]) %}
+                    <div class="component-card">
+                        <h4>{{ component.name }}</h4>
+                        <span class="component-status status-{{ component.status }}">{{ component.status }}</span>
+                        <p>{{ component.description }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Technical Details -->
+            <div class="section">
+                <h2>🔧 Technical Maintenance Details</h2>
+                
+                <div class="technical-details">
+                    <strong>Infrastructure Updates:</strong><br>
+                    • Flask 3.1.1 application deployment with enhanced performance<br>
+                    • Gunicorn WSGI server optimization and security hardening<br>
+                    • Docker container updates with Python 3.13.3 base images<br>
+                    • AWS ECS/EKS cluster configuration updates<br><br>
+                    
+                    <strong>Database Operations:</strong><br>
+                    • Flask-Migrate database schema updates<br>
+                    • PostgreSQL performance optimizations<br>
+                    • Connection pool configuration enhancements<br>
+                    • Data integrity validation and backup verification<br><br>
+                    
+                    <strong>Security Enhancements:</strong><br>
+                    • Security patch deployment across all components<br>
+                    • SSL/TLS certificate updates and cipher suite optimization<br>
+                    • AWS KMS encryption key rotation procedures<br>
+                    • Authentication system security validation<br><br>
+                    
+                    <strong>Monitoring & Observability:</strong><br>
+                    • CloudWatch integration enhancement<br>
+                    • Sentry error tracking system updates<br>
+                    • Performance monitoring baseline establishment<br>
+                    • Automated alerting configuration validation
+                </div>
+
+                {% if maintenance.database_migrations %}
+                <div class="alert-box">
+                    <strong>🗄️ Database Migration Information:</strong><br>
+                    This maintenance includes database schema updates using Flask-Migrate (Alembic). All migrations have been thoroughly tested in staging environments. Database backups will be completed before migration execution with validated rollback procedures available.
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Pre-Maintenance Checklist -->
+            <div class="section">
+                <h2>✅ Pre-Maintenance Preparation</h2>
+                <div class="pre-maintenance-checklist">
+                    <h3>Recommended Actions for Stakeholders:</h3>
+                    {% for item in maintenance.preparation_steps | default([
+                        'Save any in-progress work before the maintenance window',
+                        'Download important reports or data that may be needed during the maintenance',
+                        'Communicate the maintenance schedule to your team members',
+                        'Plan alternative workflows for the maintenance duration',
+                        'Ensure critical integrations have appropriate timeout and retry logic',
+                        'Review and test your disaster recovery procedures if applicable',
+                        'Verify contact information for emergency escalation'
+                    ]) %}
+                    <div class="checklist-item">
+                        <strong>{{ loop.index }}.</strong> {{ item }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Rollback and Emergency Procedures -->
+            <div class="section">
+                <h2>🔄 Rollback & Emergency Procedures</h2>
+                <div class="rollback-info">
+                    <h3>Automated Rollback Capabilities:</h3>
+                    <ul>
+                        <li><strong>Database Rollback:</strong> Flask-Migrate downgrade procedures with transaction consistency validation</li>
+                        <li><strong>Application Rollback:</strong> Blue-green deployment with instant traffic switching capability</li>
+                        <li><strong>Infrastructure Rollback:</strong> Terraform state restoration to previous stable configuration</li>
+                        <li><strong>Emergency Fallback:</strong> Ability to restore to previous Node.js system if critical issues arise</li>
+                    </ul>
+                    
+                    <div class="alert-box critical">
+                        <strong>🚨 Emergency Escalation Process:</strong><br>
+                        If you experience critical issues during or after maintenance, our automated monitoring will detect problems and initiate rollback procedures. For immediate assistance, contact our emergency support team using the information below.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contact Information -->
+            <div class="section">
+                <h2>📞 Emergency Contact Information</h2>
+                <div class="contact-info">
+                    <div class="contact-grid">
+                        <div class="contact-item">
+                            <strong>Emergency Hotline</strong>
+                            {{ maintenance.emergency_phone | default('+1-800-SUPPORT (24/7)') }}
+                        </div>
+                        <div class="contact-item">
+                            <strong>Technical Support Email</strong>
+                            <a href="mailto:{{ maintenance.support_email | default('support@company.com') }}">{{ maintenance.support_email | default('support@company.com') }}</a>
+                        </div>
+                        <div class="contact-item">
+                            <strong>Status Page</strong>
+                            <a href="{{ maintenance.status_url | default('https://status.company.com') }}">{{ maintenance.status_url | default('status.company.com') }}</a>
+                        </div>
+                        <div class="contact-item">
+                            <strong>Slack Channel</strong>
+                            {{ maintenance.slack_channel | default('#system-status') }}
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; text-align: center;">
+                        <strong>Maintenance Lead:</strong> {{ maintenance.lead_engineer | default('Site Reliability Engineering Team') }}<br>
+                        <strong>Incident Commander:</strong> {{ maintenance.incident_commander | default('Operations Manager') }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Post-Maintenance Information -->
+            <div class="section">
+                <h2>📈 Post-Maintenance Validation</h2>
+                <p>Following maintenance completion, our team will:</p>
+                <ul>
+                    <li><strong>Performance Validation:</strong> Verify all systems meet or exceed pre-maintenance performance benchmarks</li>
+                    <li><strong>Security Verification:</strong> Confirm all security measures are functioning correctly</li>
+                    <li><strong>Integration Testing:</strong> Validate all external integrations and API endpoints</li>
+                    <li><strong>Monitoring Verification:</strong> Ensure all monitoring and alerting systems are operational</li>
+                    <li><strong>User Communication:</strong> Send confirmation notification once all validations are complete</li>
+                </ul>
+                
+                <div class="alert-box info">
+                    <strong>📊 Performance Monitoring:</strong><br>
+                    Enhanced monitoring will be active for 48 hours post-maintenance to ensure system stability and optimal performance. You can track real-time system status at our monitoring dashboard.
+                </div>
+            </div>
+
+            <!-- Additional Resources -->
+            <div class="section">
+                <h2>📚 Additional Resources</h2>
+                <ul>
+                    <li><a href="{{ maintenance.documentation_url | default('#') }}">Detailed maintenance documentation</a></li>
+                    <li><a href="{{ maintenance.faq_url | default('#') }}">Frequently Asked Questions</a></li>
+                    <li><a href="{{ maintenance.api_docs_url | default('#') }}">Updated API documentation</a></li>
+                    <li><a href="{{ maintenance.release_notes_url | default('#') }}">Release notes and feature updates</a></li>
+                    <li><a href="{{ maintenance.feedback_url | default('#') }}">Maintenance feedback form</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>This is an automated notification from the <strong>{{ maintenance.system_name | default('Flask Application Monitoring System') }}</strong></p>
+            <p>Generated on {{ maintenance.notification_date | default('now') | date('%Y-%m-%d at %H:%M UTC') }}</p>
+            <p>
+                <a href="{{ maintenance.unsubscribe_url | default('#') }}">Unsubscribe from maintenance notifications</a> | 
+                <a href="{{ maintenance.preferences_url | default('#') }}">Notification preferences</a> | 
+                <a href="{{ maintenance.support_url | default('#') }}">Contact support</a>
+            </p>
+            <p style="font-size: 12px; margin-top: 20px;">
+                This maintenance notification includes comprehensive scheduling information, impact assessments, and emergency contact details for stakeholder planning and coordination. All maintenance procedures include automated rollback capabilities and 24/7 support availability.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
