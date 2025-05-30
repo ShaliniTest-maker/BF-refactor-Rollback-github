@@ -1,253 +1,390 @@
-SCHEDULED MAINTENANCE NOTIFICATION
-==================================
+================================================================
+SYSTEM MAINTENANCE NOTIFICATION
+================================================================
 
-Dear Stakeholder,
+Subject: {{ maintenance_type | upper }} MAINTENANCE SCHEDULED - {{ system_name }}
+Date: {{ notification_date }}
+Maintenance ID: {{ maintenance_id }}
 
-This is to inform you of upcoming scheduled maintenance for our Flask application infrastructure. Please review the details below and plan accordingly.
+================================================================
+MAINTENANCE SUMMARY
+================================================================
 
-MAINTENANCE OVERVIEW
-====================
+Maintenance Type: {{ maintenance_type }}
+Scheduled Start: {{ start_time }} ({{ timezone }})
+Scheduled End: {{ end_time }} ({{ timezone }})
+Duration: {{ duration }}
+Priority Level: {{ priority_level }}
 
-Maintenance ID: [MAINTENANCE_ID]
-Scheduled Date: [MAINTENANCE_DATE]
-Maintenance Window: [START_TIME] to [END_TIME] ([TIMEZONE])
-Duration: [ESTIMATED_DURATION]
-Priority: [PRIORITY_LEVEL]
-Maintenance Type: [MAINTENANCE_TYPE]
+System: {{ system_name }}
+Environment: {{ environment }}
+Maintenance Window: {{ maintenance_window }}
 
-AFFECTED SYSTEMS
-================
+================================================================
+IMPACT ASSESSMENT
+================================================================
 
-Primary Systems:
-• Flask Application Services (ECS/EKS containers)
-• Gunicorn WSGI servers and worker processes
-• PostgreSQL database cluster
-• Redis cache cluster
-• AWS Application Load Balancer
-• CloudWatch monitoring and alerting
+Affected Services:
+{% for service in affected_services %}
+- {{ service.name }}: {{ service.impact_level }}
+  Status: {{ service.expected_status }}
+  {% if service.alternate_access %}
+  Alternative Access: {{ service.alternate_access }}
+  {% endif %}
+{% endfor %}
 
-Secondary Systems:
-• AWS Parameter Store configuration
-• Container registry (ECR) operations
-• Terraform infrastructure state
-• Security scanning and monitoring tools
+Expected User Impact:
+{{ user_impact_description }}
 
-MAINTENANCE ACTIVITIES
-======================
+Availability Status:
+- API Endpoints: {{ api_availability }}
+- Web Interface: {{ web_availability }}
+- Database Access: {{ database_availability }}
+- Authentication: {{ auth_availability }}
 
-The following activities will be performed during this maintenance window:
+================================================================
+MAINTENANCE DETAILS
+================================================================
 
+Maintenance Scope:
+{{ maintenance_description }}
+
+Technical Components:
+{% for component in technical_components %}
+- {{ component.name }}: {{ component.action }}
+  {% if component.details %}
+  Details: {{ component.details }}
+  {% endif %}
+{% endfor %}
+
+{% if security_updates %}
 Security Updates:
-• [SECURITY_UPDATES_DESCRIPTION]
-• Automated dependency vulnerability remediation
-• Base container image security patches
-• SSL/TLS certificate renewals
+{% for update in security_updates %}
+- {{ update.component }}: {{ update.vulnerability_type }}
+  Severity: {{ update.severity }}
+  CVE ID: {{ update.cve_id | default('N/A') }}
+{% endfor %}
+{% endif %}
 
-Infrastructure Maintenance:
-• [INFRASTRUCTURE_UPDATES_DESCRIPTION]
-• Container image rebuilds with latest security patches
-• ECS/EKS service updates and health validation
-• Load balancer configuration optimization
+{% if database_changes %}
+Database Changes:
+{% for change in database_changes %}
+- Migration: {{ change.migration_id }}
+  Type: {{ change.change_type }}
+  Impact: {{ change.impact_description }}
+{% endfor %}
+{% endif %}
 
-Database Operations:
-• [DATABASE_OPERATIONS_DESCRIPTION]
-• Flask-Migrate schema migrations (if applicable)
-• Database performance optimization
-• Backup validation and integrity checks
+{% if container_updates %}
+Container Updates:
+{% for container in container_updates %}
+- Image: {{ container.image_name }}
+  Current Version: {{ container.current_version }}
+  New Version: {{ container.new_version }}
+  Update Type: {{ container.update_type }}
+{% endfor %}
+{% endif %}
 
-Application Updates:
-• [APPLICATION_UPDATES_DESCRIPTION]
-• Configuration parameter updates via AWS Parameter Store
-• Flask application restart with zero-downtime deployment
-• Health check validation across all endpoints
+================================================================
+TIMELINE AND COORDINATION
+================================================================
 
-EXPECTED IMPACT
-===============
+Pre-Maintenance ({{ pre_maintenance_start }}):
+{% for task in pre_maintenance_tasks %}
+- {{ task.time }}: {{ task.description }}
+  Responsible: {{ task.owner }}
+{% endfor %}
 
-Service Availability:
-• [SERVICE_IMPACT_DESCRIPTION]
-• API endpoints: [API_IMPACT_LEVEL]
-• Web interface: [WEB_IMPACT_LEVEL]
-• Background processes: [BACKGROUND_IMPACT_LEVEL]
+Maintenance Execution:
+{% for phase in maintenance_phases %}
+- {{ phase.time }}: {{ phase.description }}
+  Duration: {{ phase.estimated_duration }}
+  Risk Level: {{ phase.risk_level }}
+  {% if phase.rollback_point %}
+  Rollback Point: Available
+  {% endif %}
+{% endfor %}
 
-Performance Expectations:
-• Brief service interruptions: [INTERRUPTION_DETAILS]
-• Possible increased response times during deployment
-• Automatic failover to healthy containers during updates
+Post-Maintenance Validation:
+{% for validation in post_maintenance_validations %}
+- {{ validation.time }}: {{ validation.description }}
+  Success Criteria: {{ validation.criteria }}
+{% endfor %}
 
-User Actions Required:
-• [USER_ACTIONS_REQUIRED]
-• Save work frequently during maintenance window
-• Re-authenticate if session expires during updates
-• Report any persistent issues after maintenance completion
+================================================================
+STAKEHOLDER COORDINATION
+================================================================
 
-ROLLBACK PROCEDURES
-===================
+Maintenance Team:
+{% for member in maintenance_team %}
+- {{ member.role }}: {{ member.name }}
+  Contact: {{ member.contact }}
+  {% if member.backup %}
+  Backup: {{ member.backup }}
+  {% endif %}
+{% endfor %}
 
-Emergency Rollback Plan:
-• Immediate rollback capability via Terraform infrastructure restoration
-• Flask-Migrate database rollback procedures available
-• Container image rollback to previous stable version
-• Estimated rollback time: [ROLLBACK_TIME_ESTIMATE]
+Communication Channels:
+- Primary: {{ primary_communication_channel }}
+- Emergency: {{ emergency_contact }}
+- Status Updates: {{ status_update_channel }}
+- Incident Response: {{ incident_response_contact }}
 
+Approval Chain:
+{% for approver in approval_chain %}
+- {{ approver.level }}: {{ approver.name }}
+  Status: {{ approver.approval_status }}
+  {% if approver.approval_time %}
+  Approved: {{ approver.approval_time }}
+  {% endif %}
+{% endfor %}
+
+================================================================
+RISK MANAGEMENT AND CONTINGENCY
+================================================================
+
+Risk Assessment:
+Overall Risk Level: {{ overall_risk_level }}
+
+Identified Risks:
+{% for risk in identified_risks %}
+- Risk: {{ risk.description }}
+  Probability: {{ risk.probability }}
+  Impact: {{ risk.impact }}
+  Mitigation: {{ risk.mitigation_strategy }}
+{% endfor %}
+
+Rollback Procedures:
+{% if rollback_available %}
+Rollback Available: YES
+Rollback Window: {{ rollback_window }}
 Rollback Triggers:
-• Service unavailability exceeding [AVAILABILITY_THRESHOLD]
-• Error rates above [ERROR_RATE_THRESHOLD]
-• Performance degradation beyond [PERFORMANCE_THRESHOLD]
-• Critical security incidents during maintenance
+{% for trigger in rollback_triggers %}
+- {{ trigger.condition }}: {{ trigger.action }}
+{% endfor %}
 
-MONITORING AND COMMUNICATION
-=============================
+Emergency Rollback Contact: {{ emergency_rollback_contact }}
+{% else %}
+Rollback Available: NO
+Reason: {{ rollback_unavailable_reason }}
+{% endif %}
 
-Real-time Status Updates:
-• CloudWatch dashboards: [DASHBOARD_URL]
-• Maintenance status page: [STATUS_PAGE_URL]
-• Slack channel for updates: [SLACK_CHANNEL]
+Testing and Validation:
+Pre-Production Testing: {{ pre_prod_testing_status }}
+Staging Environment: {{ staging_validation_status }}
+{% if automated_tests %}
+Automated Test Suite: {{ automated_test_coverage }}
+{% endif %}
 
-Contact Information:
-• Primary Contact: [PRIMARY_CONTACT_NAME] ([PRIMARY_CONTACT_EMAIL])
-• Secondary Contact: [SECONDARY_CONTACT_NAME] ([SECONDARY_CONTACT_EMAIL])
-• Emergency Contact: [EMERGENCY_CONTACT_NAME] ([EMERGENCY_CONTACT_PHONE])
-• Technical Support: [SUPPORT_EMAIL]
+================================================================
+BUSINESS CONTINUITY
+================================================================
 
-Escalation Procedures:
-• Issues will be escalated to engineering management after [ESCALATION_TIME]
-• Critical issues will trigger immediate CTO notification
-• Post-maintenance review scheduled within 24 hours
+Critical Business Functions:
+{% for function in critical_functions %}
+- {{ function.name }}: {{ function.continuity_status }}
+  {% if function.workaround %}
+  Workaround: {{ function.workaround }}
+  {% endif %}
+  SLA Impact: {{ function.sla_impact }}
+{% endfor %}
 
-TECHNICAL DETAILS
-=================
+Alternative Procedures:
+{% if alternative_procedures %}
+{% for procedure in alternative_procedures %}
+- {{ procedure.scenario }}: {{ procedure.procedure }}
+  Contact: {{ procedure.contact }}
+{% endfor %}
+{% else %}
+No alternative procedures available during maintenance window.
+{% endif %}
 
-Container Operations:
-• Docker image updates for Python 3.13.3 base images
-• Gunicorn WSGI server configuration optimization
-• ECS task definition updates with enhanced security settings
-• Container health check validation and performance tuning
+Data Backup Status:
+- Last Full Backup: {{ last_full_backup }}
+- Backup Verification: {{ backup_verification_status }}
+- Recovery Time Objective: {{ rto }}
+- Recovery Point Objective: {{ rpo }}
 
-Database Maintenance:
-• PostgreSQL cluster maintenance and optimization
-• Flask-SQLAlchemy connection pool adjustments
-• Alembic migration script execution (if applicable)
-• Database backup verification and integrity validation
-
-Security Enhancements:
-• Automated vulnerability scanning with Snyk and Clair
-• SSL/TLS certificate rotation and validation
-• IAM role and policy review and optimization
-• Security audit log review and compliance validation
-
-Infrastructure Updates:
-• Terraform state synchronization and validation
-• AWS resource optimization and cost management
-• Load balancer health check configuration updates
-• CloudWatch alarm threshold adjustments
-
-PREPARATION CHECKLIST
-======================
+================================================================
+STAKEHOLDER ACTIONS REQUIRED
+================================================================
 
 Before Maintenance:
-□ Review critical workflows and save work in progress
-□ Verify backup procedures for essential data
-□ Identify alternative processes during service interruption
-□ Confirm contact information for maintenance updates
+{% for action in pre_maintenance_actions %}
+- {{ action.deadline }}: {{ action.description }}
+  Responsible: {{ action.responsible_party }}
+  Priority: {{ action.priority }}
+{% endfor %}
 
 During Maintenance:
-□ Monitor status updates through provided channels
-□ Avoid initiating critical transactions during peak activity
-□ Report any unexpected issues to technical support
-□ Document any business impact for post-maintenance review
+{% for action in during_maintenance_actions %}
+- {{ action.description }}
+  Responsible: {{ action.responsible_party }}
+  {% if action.contact_method %}
+  Contact Method: {{ action.contact_method }}
+  {% endif %}
+{% endfor %}
 
 After Maintenance:
-□ Verify application functionality and performance
-□ Confirm all critical workflows are operational
-□ Review any changes to user interfaces or processes
-□ Provide feedback on maintenance impact and communication
+{% for action in post_maintenance_actions %}
+- {{ action.description }}
+  Deadline: {{ action.deadline }}
+  Responsible: {{ action.responsible_party }}
+{% endfor %}
 
-COMPLIANCE AND AUDIT
-=====================
+================================================================
+MONITORING AND STATUS UPDATES
+================================================================
+
+Real-Time Status Monitoring:
+- Status Page: {{ status_page_url }}
+- Monitoring Dashboard: {{ monitoring_dashboard_url }}
+- Health Check Endpoint: {{ health_check_url }}
+
+Automated Notifications:
+- Start Notification: {{ start_notification_method }}
+- Progress Updates: {{ progress_update_frequency }}
+- Completion Notification: {{ completion_notification_method }}
+- Issue Alerts: {{ issue_alert_method }}
+
+Manual Status Updates:
+{% for update in manual_status_updates %}
+- {{ update.time }}: {{ update.channel }}
+  Content: {{ update.content_type }}
+{% endfor %}
+
+Performance Metrics Monitoring:
+- API Response Time: Target < {{ api_response_target }}ms
+- Database Query Time: Target < {{ db_query_target }}ms
+- System Availability: Target {{ availability_target }}%
+- Error Rate: Target < {{ error_rate_target }}%
+
+================================================================
+COMPLIANCE AND DOCUMENTATION
+================================================================
 
 Regulatory Compliance:
-• All maintenance activities follow established change management procedures
-• Security controls maintained throughout the maintenance window
-• Data integrity validation performed before and after maintenance
-• Audit trails preserved for all infrastructure and application changes
+{% if compliance_requirements %}
+{% for requirement in compliance_requirements %}
+- {{ requirement.regulation }}: {{ requirement.compliance_action }}
+  Documentation: {{ requirement.documentation_required }}
+{% endfor %}
+{% else %}
+No specific regulatory compliance requirements for this maintenance.
+{% endif %}
 
-Documentation:
-• Complete maintenance log will be available within 24 hours
-• Performance metrics comparison (before/after maintenance)
-• Security validation reports for all updated components
-• Compliance certification for regulatory requirements
+Change Management:
+Change Request ID: {{ change_request_id }}
+Approval Date: {{ approval_date }}
+Change Category: {{ change_category }}
+Business Justification: {{ business_justification }}
 
-POST-MAINTENANCE ACTIVITIES
-============================
+Documentation Updates:
+{% for doc in documentation_updates %}
+- {{ doc.document_name }}: {{ doc.update_type }}
+  Owner: {{ doc.owner }}
+  Due Date: {{ doc.due_date }}
+{% endfor %}
 
-Validation Procedures:
-• Comprehensive system health checks across all components
-• Performance benchmarking against pre-maintenance baselines
-• Security scanning validation for all updated systems
-• User acceptance testing for critical business workflows
+================================================================
+POST-MAINTENANCE REPORTING
+================================================================
 
-Reporting:
-• Maintenance completion notification within 2 hours of completion
-• Detailed technical report available within 24 hours
-• Performance impact analysis within 48 hours
-• Lessons learned documentation within one week
+Success Criteria:
+{% for criteria in success_criteria %}
+- {{ criteria.metric }}: {{ criteria.target_value }}
+  Measurement Method: {{ criteria.measurement_method }}
+{% endfor %}
 
-ADDITIONAL RESOURCES
-====================
+Post-Maintenance Review:
+Scheduled Review Date: {{ review_date }}
+Review Participants: {{ review_participants }}
+Review Scope: {{ review_scope }}
 
-Documentation:
-• Flask application user guide: [USER_GUIDE_URL]
-• API documentation: [API_DOCS_URL]
-• System status and monitoring: [MONITORING_URL]
-• Change management procedures: [CHANGE_MGMT_URL]
+Lessons Learned Documentation:
+Template: {{ lessons_learned_template }}
+Deadline: {{ lessons_learned_deadline }}
+Distribution: {{ lessons_learned_distribution }}
 
-Support Resources:
-• Technical support knowledge base: [KB_URL]
-• Emergency procedures documentation: [EMERGENCY_DOCS_URL]
-• Service level agreement details: [SLA_URL]
-• Business continuity planning: [BCP_URL]
+================================================================
+CONTACT INFORMATION
+================================================================
 
-MAINTENANCE TEAM
-================
+24/7 Emergency Contacts:
+- On-Call Engineer: {{ oncall_engineer_contact }}
+- Technical Lead: {{ technical_lead_contact }}
+- Incident Commander: {{ incident_commander_contact }}
 
-Technical Lead: [TECH_LEAD_NAME]
-Database Administrator: [DBA_NAME]
-Security Engineer: [SECURITY_ENGINEER_NAME]
-Infrastructure Engineer: [INFRA_ENGINEER_NAME]
-Quality Assurance: [QA_ENGINEER_NAME]
+Business Contacts:
+- Business Owner: {{ business_owner_contact }}
+- Stakeholder Representative: {{ stakeholder_rep_contact }}
+- Communications Lead: {{ communications_lead_contact }}
 
-QUESTIONS AND SUPPORT
-=====================
+Support Channels:
+- Technical Support: {{ technical_support_contact }}
+- Help Desk: {{ help_desk_contact }}
+- Emergency Escalation: {{ emergency_escalation_contact }}
 
-If you have questions about this maintenance or need additional information:
+================================================================
+ADDITIONAL INFORMATION
+================================================================
 
-Email: [MAINTENANCE_SUPPORT_EMAIL]
-Phone: [MAINTENANCE_SUPPORT_PHONE]
-Slack: [MAINTENANCE_SLACK_CHANNEL]
+Related Maintenance Activities:
+{% if related_maintenance %}
+{% for related in related_maintenance %}
+- {{ related.date }}: {{ related.description }}
+  Impact: {{ related.impact }}
+{% endfor %}
+{% else %}
+No related maintenance activities scheduled.
+{% endif %}
 
-For urgent issues during maintenance:
-Emergency Hotline: [EMERGENCY_HOTLINE]
-On-call Engineer: [ONCALL_CONTACT]
+Reference Documentation:
+{% for doc in reference_docs %}
+- {{ doc.title }}: {{ doc.location }}
+  Purpose: {{ doc.purpose }}
+{% endfor %}
 
-Thank you for your patience and cooperation during this scheduled maintenance. We are committed to minimizing disruption while ensuring the continued security, performance, and reliability of our systems.
+Historical Context:
+{% if maintenance_history %}
+Last Similar Maintenance: {{ last_similar_maintenance_date }}
+Previous Duration: {{ previous_duration }}
+Previous Issues: {{ previous_issues }}
+Improvements Made: {{ improvements_made }}
+{% endif %}
 
-This maintenance is essential for:
-• Maintaining the highest security standards for your data
-• Ensuring optimal system performance and reliability
-• Implementing the latest feature enhancements and improvements
-• Meeting compliance requirements and industry best practices
+================================================================
+ACKNOWLEDGMENT AND CONFIRMATION
+================================================================
 
-We appreciate your understanding and will keep you informed throughout the maintenance process.
+This maintenance notification requires acknowledgment from:
+{% for recipient in acknowledgment_required %}
+- {{ recipient.role }}: {{ recipient.name }}
+  Deadline: {{ recipient.acknowledgment_deadline }}
+  Method: {{ recipient.acknowledgment_method }}
+{% endfor %}
 
-Best regards,
+To acknowledge receipt and understanding of this maintenance notice:
+{{ acknowledgment_instructions }}
 
-[SENDER_NAME]
-[SENDER_TITLE]
-[ORGANIZATION_NAME]
-Technical Operations Team
+Questions or Concerns:
+Direct all questions to: {{ questions_contact }}
+Response SLA: {{ question_response_sla }}
 
----
-This is an automated notification from the Flask Application Monitoring System.
-For the most current information, please check our status page: [STATUS_PAGE_URL]
-Maintenance scheduled via infrastructure automation and change management systems.
+================================================================
+MAINTENANCE NOTIFICATION FOOTER
+================================================================
+
+This is an automated maintenance notification generated by the
+{{ system_name }} monitoring and maintenance management system.
+
+Notification Generated: {{ notification_timestamp }}
+Notification Version: {{ notification_version }}
+Next Update Scheduled: {{ next_update_time }}
+
+For the most current information, please check:
+{{ status_page_url }}
+
+================================================================
+END OF MAINTENANCE NOTIFICATION
+================================================================
