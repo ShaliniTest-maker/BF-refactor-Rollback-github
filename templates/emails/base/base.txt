@@ -1,0 +1,279 @@
+{#
+Base Text Email Template for Flask Application
+==============================================
+
+This template provides the foundational plain-text structure for all text-formatted emails
+in the Flask application, implementing Jinja2 template inheritance with configurable
+blocks for subject, content, and footer. It ensures accessibility and compatibility
+with text-only email clients while maintaining readability across all platforms.
+
+Template Features:
+- Jinja2 template inheritance for code reusability
+- Configurable blocks for content customization
+- Consistent text formatting and spacing patterns
+- Accessibility compliance for text-only clients
+- Multipart email support compatibility
+
+Usage:
+{% extends "emails/base/base.txt" %}
+{% block subject %}Your Custom Subject{% endblock %}
+{% block content %}Your email content here{% endblock %}
+#}
+
+{#- Email Subject Block - Override in child templates -#}
+{% block subject -%}
+Flask Application Notification
+{%- endblock %}
+
+{#- Email Header Section -#}
+{% block header -%}
+===============================================================================
+{{ self.subject() }}
+===============================================================================
+{%- endblock %}
+
+{#- Pre-header Text Block - Optional additional context -#}
+{% block preheader -%}
+{#- Override in child templates if needed -#}
+{%- endblock %}
+
+{#- Main Content Area -#}
+{% block content -%}
+Hello,
+
+This is a notification from the Flask Application.
+
+If you have any questions or need assistance, please contact our support team.
+
+Thank you for using our service.
+{%- endblock %}
+
+{#- Content Separator -#}
+{% block separator -%}
+
+-------------------------------------------------------------------------------
+
+{%- endblock %}
+
+{#- Additional Information Block -#}
+{% block additional_info -%}
+{#- Override in child templates for specific information -#}
+{%- endblock %}
+
+{#- Action Items Block - For CTAs or next steps -#}
+{% block action_items -%}
+{#- Override in child templates for specific actions -#}
+{%- endblock %}
+
+{#- Contact Information Block -#}
+{% block contact_info -%}
+Need help? Contact our support team:
+- Email: support@company.com
+- Phone: 1-800-SUPPORT (1-800-786-7678)
+- Help Center: https://help.company.com
+
+Business Hours: Monday - Friday, 9:00 AM - 6:00 PM EST
+{%- endblock %}
+
+{#- Footer Section -#}
+{% block footer -%}
+
+===============================================================================
+Flask Application | Secure, Reliable, Scalable
+===============================================================================
+
+This email was sent to you because you have an account with Flask Application.
+If you believe this email was sent to you in error, please contact support.
+
+{% block unsubscribe_info -%}
+To manage your email preferences or unsubscribe:
+https://app.company.com/preferences
+
+{%- endblock %}
+
+{% block legal_info -%}
+© {% now 'Y' %} Company Name. All rights reserved.
+
+This message contains confidential information and is intended only for the
+individual named. If you have received this message in error, please delete
+it immediately.
+
+{%- endblock %}
+
+{% block compliance_info -%}
+Company Name
+123 Business Street
+City, State 12345
+United States
+
+{%- endblock %}
+{%- endblock %}
+
+{#- Technical Headers Block - For email metadata -#}
+{% block technical_headers -%}
+{#- This block can be used for email tracking or technical information -#}
+{#- Generally not visible to users but available for system use -#}
+{%- endblock %}
+
+{#- Template Configuration Variables -#}
+{%- set email_config = {
+    'max_line_length': 78,
+    'indent_size': 4,
+    'section_separator': '-------------------------------------------------------------------------------',
+    'header_separator': '==============================================================================='
+} -%}
+
+{#- Utility Macros for Text Formatting -#}
+{%- macro format_text_block(content, width=78) -%}
+{#- Format text block with proper line wrapping -#}
+{% for line in content.split('\n') -%}
+{% if line.strip() -%}
+{{ line[:width].strip() }}
+{% if line|length > width %}
+{{ format_text_block(line[width:], width) }}
+{% endif -%}
+{% else -%}
+
+{% endif -%}
+{% endfor -%}
+{%- endmacro -%}
+
+{%- macro create_section_divider(char='-', length=78) -%}
+{{ char * length }}
+{%- endmacro -%}
+
+{%- macro format_list_item(item, bullet='- ', indent=0) -%}
+{{ ' ' * indent }}{{ bullet }}{{ item }}
+{%- endmacro -%}
+
+{%- macro format_key_value(key, value, separator=': ', width=78) -%}
+{% set formatted_line = key + separator + value -%}
+{% if formatted_line|length <= width -%}
+{{ formatted_line }}
+{% else -%}
+{{ key }}{{ separator }}
+{{ ' ' * (key|length + separator|length) }}{{ value }}
+{% endif -%}
+{%- endmacro -%}
+
+{#- Accessibility Helpers -#}
+{%- macro screen_reader_text(text) -%}
+[{{ text }}]
+{%- endmacro -%}
+
+{%- macro format_url_for_text(url, description=none) -%}
+{% if description -%}
+{{ description }}: {{ url }}
+{% else -%}
+{{ url }}
+{% endif -%}
+{%- endmacro -%}
+
+{#-
+Template Usage Examples:
+========================
+
+1. Basic Email:
+{% extends "emails/base/base.txt" %}
+{% block subject %}Welcome to Our Service{% endblock %}
+{% block content %}
+Welcome to our platform! We're excited to have you on board.
+
+Your account has been successfully created and is ready to use.
+{% endblock %}
+
+2. Notification Email:
+{% extends "emails/base/base.txt" %}
+{% block subject %}Account Security Alert{% endblock %}
+{% block content %}
+We detected a new login to your account from an unrecognized device.
+
+{{ format_key_value('Time', '2024-01-15 14:30:00 UTC') }}
+{{ format_key_value('Location', 'New York, NY, United States') }}
+{{ format_key_value('Device', 'Chrome on Windows') }}
+
+If this was you, no action is needed. If not, please secure your account.
+{% endblock %}
+{% block action_items %}
+To secure your account:
+{{ format_list_item('Change your password immediately') }}
+{{ format_list_item('Review recent account activity') }}
+{{ format_list_item('Enable two-factor authentication') }}
+{% endblock %}
+
+3. Transactional Email:
+{% extends "emails/base/base.txt" %}
+{% block subject %}Your Order Confirmation #12345{% endblock %}
+{% block content %}
+Thank you for your order! Here are the details:
+
+{{ format_key_value('Order Number', '#12345') }}
+{{ format_key_value('Order Date', 'January 15, 2024') }}
+{{ format_key_value('Total Amount', '$99.99') }}
+
+Your order is being processed and will ship within 2-3 business days.
+{% endblock %}
+{% block additional_info %}
+Track your order: {{ format_url_for_text('https://app.company.com/orders/12345', 'Order Tracking') }}
+{% endblock %}
+
+4. System Alert Email:
+{% extends "emails/base/base.txt" %}
+{% block subject %}System Maintenance Notification{% endblock %}
+{% block preheader %}Scheduled maintenance window: Jan 20, 2024{% endblock %}
+{% block content %}
+We will be performing scheduled maintenance on our systems.
+
+{{ format_key_value('Maintenance Window', 'January 20, 2024, 2:00 AM - 4:00 AM EST') }}
+{{ format_key_value('Expected Duration', '2 hours') }}
+{{ format_key_value('Affected Services', 'Web application, API, mobile app') }}
+
+During this time, services may be temporarily unavailable.
+{% endblock %}
+{% block action_items %}
+What you can do:
+{{ format_list_item('Plan accordingly for the maintenance window') }}
+{{ format_list_item('Download any needed data beforehand') }}
+{{ format_list_item('Monitor our status page for updates') }}
+{% endblock %}
+
+5. Multi-block Complex Email:
+{% extends "emails/base/base.txt" %}
+{% block subject %}Monthly Account Summary{% endblock %}
+{% block content %}
+Here's your account activity summary for this month.
+{% endblock %}
+{% block additional_info %}
+ACCOUNT STATISTICS
+{{ create_section_divider('-', 40) }}
+{{ format_key_value('Total Logins', '28') }}
+{{ format_key_value('Data Usage', '2.3 GB') }}
+{{ format_key_value('API Calls', '1,245') }}
+{{ format_key_value('Storage Used', '156 MB') }}
+
+RECENT ACTIVITY
+{{ create_section_divider('-', 40) }}
+{{ format_list_item('Profile updated on Jan 10') }}
+{{ format_list_item('Password changed on Jan 5') }}
+{{ format_list_item('New device added on Jan 3') }}
+{% endblock %}
+{% block action_items %}
+Recommended actions:
+{{ format_list_item('Review security settings') }}
+{{ format_list_item('Update payment information if needed') }}
+{{ format_list_item('Consider upgrading your plan') }}
+{% endblock %}
+
+Template Design Principles:
+===========================
+1. Maximum line length of 78 characters for email client compatibility
+2. Clear visual hierarchy using text formatting and spacing
+3. Consistent indentation and bullet point formatting
+4. Accessible design with screen reader considerations
+5. Modular block structure for easy customization
+6. Professional appearance while maintaining readability
+7. Support for both simple and complex email layouts
+8. Integration with Flask's Jinja2 template system
+9. Compatibility with multipart HTML/text email sending
+10. Comprehensive macro library for common text formatting needs
+-#}
