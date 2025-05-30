@@ -1,491 +1,199 @@
-{#
-Login Notification Text Email Template for Flask Application
-============================================================
+Security Alert: New Login to Your Account
 
-This template provides plain text login notification emails for security monitoring
-and user awareness. It supports text-only email clients for maximum accessibility
-while delivering comprehensive security information including device details,
-location data, and actionable security instructions.
+Hello {{ user.first_name or user.name or "User" }},
 
-Template Features:
-- Auth0 integration for authentication event data
-- Device and location information display
-- Security instructions and contact information
-- Accessibility compliance for text-only clients
-- Comprehensive security monitoring support
+We detected a new login to your {{ config.COMPANY_NAME or "Application" }} account. This email is sent as a security measure to keep you informed about account access activity.
 
-Usage in Flask routes:
-from flask import render_template
-render_template('emails/auth/login_notification.txt', 
-               user=user_data, 
-               login_info=login_details,
-               security_alert=alert_data)
-#}
+LOGIN DETAILS
+=============
 
-{% extends "emails/base/base.txt" %}
+Account: {{ user.email }}
+Login Time: {{ login_time.strftime('%B %d, %Y at %I:%M %p %Z') if login_time else 'Just now' }}
+Login Status: {{ login_status or 'Successful' }}
+Session ID: {{ session_id or 'Not available' }}
 
-{#- Email Subject Block -#}
-{% block subject -%}
-{% if security_alert and security_alert.suspicious -%}
-SECURITY ALERT: New login detected to your account
-{% else -%}
-Login notification for your account
-{% endif -%}
-{%- endblock %}
+DEVICE INFORMATION
+==================
 
-{#- Pre-header Text Block -#}
-{% block preheader -%}
-{% if security_alert and security_alert.suspicious -%}
-Unrecognized device or location detected. Review immediately.
-{% else -%}
-Login activity summary for {{ login_info.timestamp|strftime('%B %d, %Y') }}
-{% endif -%}
-{%- endblock %}
+Device Type: {{ device_info.device_type or 'Unknown device' }}
+Operating System: {{ device_info.os or 'Unknown OS' }}
+Browser: {{ device_info.browser or 'Unknown browser' }} {{ device_info.browser_version or '' }}
+User Agent: {{ device_info.user_agent or 'Not available' }}
 
-{#- Main Content Area -#}
-{% block content -%}
-{% if user and user.name -%}
-Hello {{ user.name }},
-{% else -%}
-Hello,
-{% endif %}
-
-{% if security_alert and security_alert.suspicious -%}
-We detected a new login to your account from an unrecognized device or location.
-If this was you, no action is needed. If this wasn't you, please secure your
-account immediately by following the instructions below.
-
-SECURITY ALERT DETAILS:
-{% else -%}
-We're sending you this notification to keep you informed about access to your
-account. A successful login was recorded with the following details:
-
-LOGIN ACTIVITY SUMMARY:
-{% endif %}
-
-{{ create_section_divider('-', 60) }}
-
-LOGIN INFORMATION:
-{{ format_key_value('Date & Time', login_info.timestamp|strftime('%B %d, %Y at %I:%M %p %Z')) }}
-{{ format_key_value('Login Method', login_info.method|default('Username/Password')) }}
-{% if login_info.session_id -%}
-{{ format_key_value('Session ID', login_info.session_id[-8:] + '...') }}
-{% endif -%}
-{% if login_info.user_agent -%}
-{{ format_key_value('User Agent', login_info.user_agent[:50] + '...' if login_info.user_agent|length > 50 else login_info.user_agent) }}
-{% endif %}
-
-DEVICE INFORMATION:
-{% if login_info.device -%}
-{{ format_key_value('Device Type', login_info.device.type|default('Unknown')) }}
-{{ format_key_value('Operating System', login_info.device.os|default('Unknown')) }}
-{{ format_key_value('Browser', login_info.device.browser|default('Unknown')) }}
-{% if login_info.device.is_mobile -%}
-{{ format_key_value('Device Category', 'Mobile Device') }}
-{% elif login_info.device.is_tablet -%}
-{{ format_key_value('Device Category', 'Tablet Device') }}
-{% else -%}
-{{ format_key_value('Device Category', 'Desktop/Laptop') }}
-{% endif -%}
-{% else -%}
-{{ format_key_value('Device Type', 'Information not available') }}
-{% endif %}
-
-LOCATION INFORMATION:
-{% if login_info.location -%}
-{{ format_key_value('IP Address', login_info.location.ip_address|default('Unknown')) }}
-{% if login_info.location.city and login_info.location.country -%}
-{{ format_key_value('Location', login_info.location.city + ', ' + login_info.location.region|default('') + ', ' + login_info.location.country) }}
-{% elif login_info.location.country -%}
-{{ format_key_value('Country', login_info.location.country) }}
-{% endif -%}
-{% if login_info.location.timezone -%}
-{{ format_key_value('Timezone', login_info.location.timezone) }}
-{% endif -%}
-{% if login_info.location.isp -%}
-{{ format_key_value('Internet Provider', login_info.location.isp) }}
-{% endif -%}
-{% else -%}
-{{ format_key_value('Location', 'Information not available') }}
-{% endif %}
-
-{% if login_info.authentication_factors -%}
-AUTHENTICATION DETAILS:
-{% for factor in login_info.authentication_factors -%}
-{{ format_list_item(factor.type + ': ' + factor.status) }}
-{% endfor -%}
-{% endif %}
-
-{% if security_alert and security_alert.risk_score -%}
-SECURITY ASSESSMENT:
-{{ format_key_value('Risk Level', security_alert.risk_level|default('Medium')) }}
-{{ format_key_value('Risk Score', security_alert.risk_score + '/100') }}
-{% if security_alert.risk_factors -%}
-Risk factors identified:
-{% for factor in security_alert.risk_factors -%}
-{{ format_list_item(factor) }}
-{% endfor -%}
-{% endif -%}
-{% endif %}
-{%- endblock %}
-
-{#- Action Items Block - Security instructions and next steps -#}
-{% block action_items -%}
-{% if security_alert and security_alert.suspicious -%}
-IMMEDIATE ACTION REQUIRED:
-
-If this login was NOT you, take these steps immediately:
-{{ format_list_item('Change your password right now') }}
-{{ format_list_item('Review your recent account activity') }}
-{{ format_list_item('Enable two-factor authentication (2FA)') }}
-{{ format_list_item('Check for any unauthorized changes to your account') }}
-{{ format_list_item('Contact our security team if you need assistance') }}
-
-To change your password:
-{{ format_url_for_text('https://app.company.com/reset-password', 'Password Reset') }}
-
-To enable two-factor authentication:
-{{ format_url_for_text('https://app.company.com/security/2fa', 'Enable 2FA') }}
-
-To review your account activity:
-{{ format_url_for_text('https://app.company.com/security/activity', 'Account Activity') }}
-
-{% else -%}
-SECURITY RECOMMENDATIONS:
-
-To keep your account secure:
-{{ format_list_item('Regularly review your account activity') }}
-{{ format_list_item('Use a strong, unique password') }}
-{{ format_list_item('Enable two-factor authentication if not already active') }}
-{{ format_list_item('Keep your contact information up to date') }}
-{{ format_list_item('Log out of shared or public devices') }}
-
-Manage your security settings:
-{{ format_url_for_text('https://app.company.com/security', 'Security Settings') }}
-
-View recent account activity:
-{{ format_url_for_text('https://app.company.com/security/activity', 'Account Activity') }}
-
-{% endif -%}
-{%- endblock %}
-
-{#- Additional Information Block -#}
-{% block additional_info -%}
-ABOUT LOGIN NOTIFICATIONS:
-
-We send these notifications to help protect your account from unauthorized access.
-These emails are sent for all successful logins, including your own.
-
-{% if security_alert and security_alert.suspicious -%}
-This notification was triggered because:
-{% for reason in security_alert.trigger_reasons -%}
-{{ format_list_item(reason) }}
-{% endfor %}
-
-{% endif -%}
-Login notifications cannot be disabled as they are a critical security feature.
-However, you can manage other email preferences in your account settings.
-
-Manage email preferences:
-{{ format_url_for_text('https://app.company.com/preferences', 'Email Preferences') }}
-
-SECURITY TIPS:
-
-{{ format_list_item('Never share your login credentials with anyone') }}
-{{ format_list_item('Always log out when using shared computers') }}
-{{ format_list_item('Be cautious of phishing emails asking for your login information') }}
-{{ format_list_item('Contact support if you receive unexpected login notifications') }}
-{{ format_list_item('Keep your recovery email and phone number current') }}
-{%- endblock %}
-
-{#- Contact Information Block - Enhanced security contact -#}
-{% block contact_info -%}
-NEED HELP WITH ACCOUNT SECURITY?
-
-Security Emergency (Unauthorized Access):
-- Email: security@company.com
-- Phone: 1-800-SECURITY (1-800-732-8748)
-- 24/7 Security Hotline: Available immediately
-
-General Support:
-- Email: support@company.com  
-- Phone: 1-800-SUPPORT (1-800-786-7678)
-- Help Center: https://help.company.com
-- Live Chat: Available in your account dashboard
-
-Response Times:
-- Security Issues: Immediate response (24/7)
-- General Support: Within 2 hours during business hours
-- Business Hours: Monday - Friday, 9:00 AM - 6:00 PM EST
-
-When contacting security support, please provide:
-{{ format_list_item('Your username or email address') }}
-{{ format_list_item('The time and date of the suspicious activity') }}
-{{ format_list_item('Any relevant details about the incident') }}
-{%- endblock %}
-
-{#- Footer Section - Enhanced with security information -#}
-{% block footer -%}
-
-===============================================================================
-Flask Application Security | Protecting Your Account 24/7
-===============================================================================
-
-This security notification was sent because a login occurred on your account.
-Login notifications are mandatory security emails and cannot be unsubscribed.
-
-{% block security_footer_info -%}
-SECURITY COMMITMENT:
-
-We take your account security seriously and continuously monitor for suspicious
-activity. Our security systems use advanced threat detection to identify
-potential unauthorized access attempts.
-
-Learn more about our security measures:
-{{ format_url_for_text('https://app.company.com/security/info', 'Security Information') }}
-
-Report security concerns:
-security@company.com
-
-{% endblock %}
-
-{% block unsubscribe_info -%}
-IMPORTANT: This is a mandatory security notification and cannot be unsubscribed.
-
-To manage other email preferences:
-https://app.company.com/preferences
-
-{% endblock %}
-
-{% block legal_info -%}
-© {% now 'Y' %} Company Name. All rights reserved.
-
-This security notification contains important account access information and is
-intended only for the account holder. If you received this email in error,
-please delete it immediately and contact security@company.com.
-
-CONFIDENTIALITY NOTICE: This message may contain confidential information
-protected by law. Unauthorized disclosure is strictly prohibited.
-
-{% endblock %}
-
-{% block compliance_info -%}
-Company Name - Security Department
-123 Business Street
-City, State 12345
-United States
-
-Email: security@company.com
-Security Hotline: 1-800-SECURITY
-
-This notification complies with our security monitoring policies and
-applicable data protection regulations including GDPR and CCPA.
-
-{% endblock %}
-{%- endblock %}
-
-{#- Technical Headers Block - Security tracking information -#}
-{% block technical_headers -%}
-{#- Security notification tracking -#}
-{% if login_info and login_info.tracking_id -%}
-{#- Tracking ID: {{ login_info.tracking_id }} -#}
-{% endif -%}
-{#- Notification Type: login_security_alert -#}
-{#- Template Version: 1.0.0 -#}
-{#- Generated: {{ moment().utc().format('YYYY-MM-DD HH:mm:ss') }} UTC -#}
-{%- endblock %}
-
-{#-
-Template Usage Examples for Flask Routes:
-=========================================
-
-1. Standard Login Notification:
-```python
-# In your Flask route or service
-from flask import render_template
-
-def send_login_notification(user, login_details):
-    email_content = render_template(
-        'emails/auth/login_notification.txt',
-        user={
-            'name': user.full_name,
-            'email': user.email,
-            'id': user.id
-        },
-        login_info={
-            'timestamp': datetime.utcnow(),
-            'method': 'Username/Password',
-            'session_id': session.get('session_id'),
-            'user_agent': request.headers.get('User-Agent'),
-            'device': {
-                'type': device_detector.device_type(),
-                'os': device_detector.os(),
-                'browser': device_detector.browser(),
-                'is_mobile': device_detector.is_mobile(),
-                'is_tablet': device_detector.is_tablet()
-            },
-            'location': {
-                'ip_address': request.remote_addr,
-                'city': geo_location.city,
-                'region': geo_location.region,
-                'country': geo_location.country,
-                'timezone': geo_location.timezone,
-                'isp': geo_location.isp
-            },
-            'authentication_factors': [
-                {'type': 'Password', 'status': 'Verified'},
-                {'type': 'Two-Factor Authentication', 'status': 'Not Used'}
-            ]
-        },
-        security_alert=None  # No alert for normal login
-    )
-    return email_content
-```
-
-2. Suspicious Login Alert:
-```python
-def send_suspicious_login_alert(user, login_details, security_assessment):
-    email_content = render_template(
-        'emails/auth/login_notification.txt',
-        user={
-            'name': user.full_name,
-            'email': user.email
-        },
-        login_info=login_details,
-        security_alert={
-            'suspicious': True,
-            'risk_level': 'High',
-            'risk_score': '85',
-            'risk_factors': [
-                'Login from new geographic location',
-                'Unrecognized device fingerprint',
-                'Login outside normal hours'
-            ],
-            'trigger_reasons': [
-                'First login from this IP address',
-                'Location differs from recent logins',
-                'Device not previously seen'
-            ]
-        }
-    )
-    return email_content
-```
-
-3. Two-Factor Authentication Login:
-```python
-def send_2fa_login_notification(user, login_details):
-    login_details['authentication_factors'] = [
-        {'type': 'Password', 'status': 'Verified'},
-        {'type': 'Two-Factor Authentication', 'status': 'Verified'},
-        {'type': 'Device Recognition', 'status': 'Trusted Device'}
-    ]
-    
-    email_content = render_template(
-        'emails/auth/login_notification.txt',
-        user={'name': user.full_name},
-        login_info=login_details,
-        security_alert=None
-    )
-    return email_content
-```
-
-Integration with Flask-Mail:
-============================
-
-```python
-from flask_mail import Message, Mail
-
-def send_login_notification_email(user_email, subject, text_body):
-    msg = Message(
-        subject=subject,
-        recipients=[user_email],
-        body=text_body,
-        sender=current_app.config['MAIL_DEFAULT_SENDER']
-    )
-    
-    # Send both HTML and text versions for multipart email
-    html_body = render_template(
-        'emails/auth/login_notification.html', 
-        **template_variables
-    )
-    msg.html = html_body
-    
-    mail.send(msg)
-```
-
-Auth0 Integration Example:
-=========================
-
-```python
-# In your Auth0 post-login hook or Flask route
-@auth0_callback
-def handle_auth0_login():
-    user_info = auth0.get_user_info()
-    login_details = extract_login_info(request)
-    
-    # Security assessment based on Auth0 data
-    security_assessment = evaluate_login_security(user_info, login_details)
-    
-    # Send appropriate notification
-    if security_assessment['suspicious']:
-        send_suspicious_login_alert(user_info, login_details, security_assessment)
-    else:
-        send_login_notification(user_info, login_details)
-    
-    return redirect('/dashboard')
-```
-
-Security Event Integration:
-==========================
-
-```python
-# Integration with security monitoring system
-from security_logger import SecurityLogger
-
-def process_login_notification(user, login_info, security_alert=None):
-    # Log security event
-    SecurityLogger.log_authentication_event(
-        'login_notification_sent',
-        user_id=user.id,
-        success=True,
-        extra_context={
-            'notification_type': 'suspicious' if security_alert else 'standard',
-            'device_info': login_info.get('device'),
-            'location_info': login_info.get('location')
-        }
-    )
-    
-    # Generate email content
-    email_content = render_template(
-        'emails/auth/login_notification.txt',
-        user=user,
-        login_info=login_info,
-        security_alert=security_alert
-    )
-    
-    return email_content
-```
-
-Template Customization:
-======================
-
-To customize this template for specific use cases:
-
-1. Override specific blocks in child templates
-2. Add custom variables to the template context
-3. Modify the security assessment logic
-4. Customize the contact information
-5. Adjust the security recommendations
-6. Add organization-specific security policies
-
-Template Maintenance:
+LOCATION INFORMATION
 ====================
 
-- Review and update security recommendations regularly
-- Update contact information as needed
-- Verify all URLs are current and functional
-- Test template rendering with various data scenarios
-- Ensure accessibility compliance for text-only clients
-- Validate template against email client compatibility
-- Keep security messaging current with threat landscape
--#}
+IP Address: {{ location_info.ip_address or 'Not available' }}
+Country: {{ location_info.country or 'Unknown' }}
+Region: {{ location_info.region or 'Unknown' }}
+City: {{ location_info.city or 'Unknown' }}
+ISP: {{ location_info.isp or 'Unknown' }}
+
+{% if is_suspicious_login %}
+⚠️  SECURITY WARNING
+====================
+
+This login appears suspicious based on our security analysis:
+
+{% if suspicious_reasons %}
+Suspicious Activity Indicators:
+{% for reason in suspicious_reasons %}
+• {{ reason }}
+{% endfor %}
+{% endif %}
+
+IMMEDIATE ACTION REQUIRED:
+
+1. If this was you, no action is needed
+2. If this was NOT you, immediately:
+   • Change your password: {{ config.BASE_URL or request.host_url }}reset-password
+   • Enable two-factor authentication: {{ config.BASE_URL or request.host_url }}security/2fa
+   • Review recent account activity: {{ config.BASE_URL or request.host_url }}security/activity
+   • Contact our security team: {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}
+
+{% endif %}
+
+WAS THIS YOU?
+=============
+
+✓ If this login was authorized by you:
+  No action is required. You can safely ignore this email.
+
+✗ If you did not authorize this login:
+  Your account may be compromised. Take immediate action by following the security steps below.
+
+SECURITY ACTIONS TO TAKE
+=========================
+
+{% if not is_suspicious_login %}
+Even for normal logins, we recommend these security best practices:
+
+{% endif %}
+1. VERIFY YOUR ACCOUNT
+   • Review recent login activity: {{ config.BASE_URL or request.host_url }}security/activity
+   • Check for any unauthorized changes: {{ config.BASE_URL or request.host_url }}account/activity
+
+2. STRENGTHEN YOUR SECURITY
+   • Enable two-factor authentication: {{ config.BASE_URL or request.host_url }}security/2fa
+   • Use a strong, unique password
+   • Keep your recovery information up to date
+
+3. MONITOR YOUR ACCOUNT
+   • Enable login notifications (currently enabled)
+   • Set up security alerts: {{ config.BASE_URL or request.host_url }}security/alerts
+   • Regularly review account activity
+
+4. SECURE YOUR DEVICES
+   • Log out of unused sessions: {{ config.BASE_URL or request.host_url }}security/sessions
+   • Use secure networks for accessing your account
+   • Keep your devices and browsers updated
+
+NEED HELP?
+==========
+
+If you have any security concerns or need assistance:
+
+• Security Team: {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}
+• Emergency Security Hotline: {{ config.SECURITY_PHONE or "Available via email" }}
+• Support Center: {{ config.BASE_URL or request.host_url }}support
+• Live Chat: {{ config.BASE_URL or request.host_url }}chat (24/7 available)
+
+QUICK SECURITY LINKS
+=====================
+
+• Account Security Settings: {{ config.BASE_URL or request.host_url }}security
+• Active Sessions: {{ config.BASE_URL or request.host_url }}security/sessions
+• Login History: {{ config.BASE_URL or request.host_url }}security/activity
+• Two-Factor Authentication: {{ config.BASE_URL or request.host_url }}security/2fa
+• Change Password: {{ config.BASE_URL or request.host_url }}reset-password
+• Report Suspicious Activity: {{ config.BASE_URL or request.host_url }}security/report
+
+SECURITY TIPS
+=============
+
+Keep your account secure by following these guidelines:
+
+• Use a unique, strong password for your account
+• Enable two-factor authentication for an extra layer of security
+• Never share your login credentials with anyone
+• Always log out when using shared or public computers
+• Be cautious of phishing emails asking for your credentials
+• Regularly review your account activity and security settings
+
+If you notice any unusual activity, report it immediately to our security team.
+
+AUTHENTICATION DETAILS
+=======================
+
+Authentication Method: {{ auth_method or 'Password' }}
+{% if mfa_used %}
+Multi-Factor Authentication: Enabled ({{ mfa_method or 'Unknown method' }})
+{% else %}
+Multi-Factor Authentication: Not used for this login
+{% endif %}
+Auth0 User ID: {{ auth0_user_id or 'Not available' }}
+Login Attempt Number: {{ login_attempt_number or '1' }}
+
+{% if failed_attempts_count and failed_attempts_count > 0 %}
+Recent Failed Attempts: {{ failed_attempts_count }} in the last {{ failed_attempts_timeframe or '24 hours' }}
+{% endif %}
+
+STAY PROTECTED
+==============
+
+Your security is our top priority. We continuously monitor your account for suspicious activity and will notify you of any security-related events.
+
+For the latest security updates and best practices:
+• Security Blog: {{ config.BASE_URL or request.host_url }}blog/security
+• Security Documentation: {{ config.BASE_URL or request.host_url }}docs/security
+• Security Status Page: {{ config.BASE_URL or request.host_url }}status/security
+
+Thank you for using {{ config.COMPANY_NAME or "our platform" }} securely.
+
+Best regards,
+The {{ config.COMPANY_NAME or "Application" }} Security Team
+
+---
+
+TECHNICAL INFORMATION
+======================
+
+This security notification was automatically generated by the Flask Application Authentication System.
+Please do not reply directly to this email address.
+
+Notification ID: {{ notification_id or "LGN-" + session_id[:8] if session_id else "LGN-" + current_timestamp|string }}
+Account Reference: {{ user.id or "Not assigned" }}
+Login Event ID: {{ login_event_id or "Not available" }}
+Sent: {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') if current_timestamp else 'Just now' }}
+Authentication Provider: Auth0 ({{ config.AUTH0_DOMAIN or "Not configured" }})
+
+Risk Assessment: {{ risk_score or 'Low' }} ({{ risk_details or 'Normal login pattern' }})
+
+If you received this email by mistake or have security concerns, please contact our security team immediately at {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}.
+
+---
+
+{{ config.COMPANY_NAME or "Company Name" }}
+{{ config.COMPANY_ADDRESS or "Company Address" }}
+{{ config.COMPANY_WEBSITE or "www.example.com" }}
+
+Security Center: {{ config.BASE_URL or request.host_url }}security
+Incident Reporting: {{ config.BASE_URL or request.host_url }}security/report
+Privacy Policy: {{ config.BASE_URL or request.host_url }}privacy
+Terms of Service: {{ config.BASE_URL or request.host_url }}terms
+
+© {{ current_year|default(2024) }} {{ config.COMPANY_NAME or "Company Name" }}. All rights reserved.
+
+This security notification was sent to {{ user.email }}. Login notifications cannot be disabled for security reasons, but you can manage other notification preferences in your account settings.
+
+---
+
+SECURITY CONTACT INFORMATION
+=============================
+
+For immediate security assistance:
+• Email: {{ config.SECURITY_EMAIL or config.SUPPORT_EMAIL or "security@example.com" }}
+• Emergency Hotline: {{ config.SECURITY_PHONE or "Available via email" }}
+• Report Incidents: {{ config.BASE_URL or request.host_url }}security/report
+
+Available 24/7 for critical security issues.
