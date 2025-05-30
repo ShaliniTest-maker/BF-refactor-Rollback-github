@@ -1,404 +1,166 @@
-FLASK APPLICATION PERFORMANCE ALERT
+PERFORMANCE ALERT - {{ alert_severity|upper }} SEVERITY
+================================================================
 
-================================================================================
-CRITICAL PERFORMANCE THRESHOLD VIOLATION
-================================================================================
-
-Timestamp: {{ timestamp }}
-Alert ID: {{ alert_id }}
-Severity: {{ severity }}
-Environment: {{ environment }}
 Alert Type: {{ alert_type }}
+Timestamp: {{ timestamp }}
+Environment: {{ environment }}
+Application: Flask Backend ({{ app_version }})
 
-================================================================================
-PERFORMANCE VIOLATION DETAILS
-================================================================================
-
-Application: Flask Application (Node.js to Python Migration)
-Service Name: {{ service_name }}
-Instance/Container: {{ instance_id }}
-Alert Trigger: {{ alert_trigger }}
-
-Performance Metrics (Current vs SLA):
-{% if api_response_time %}
-- API Response Time: {{ api_response_time }}ms (SLA: <200ms) - {{ api_response_status }}
+PERFORMANCE VIOLATION SUMMARY
+-----------------------------
+{% if api_response_time_alert %}
+• API Response Time: {{ current_api_response_time }}ms (SLA: <200ms)
+  Threshold Exceeded: {{ (current_api_response_time - 200)|round(2) }}ms over limit
 {% endif %}
-{% if database_query_time %}
-- Database Query Time: {{ database_query_time }}ms (SLA: <100ms) - {{ database_query_status }}
+{% if db_query_time_alert %}
+• Database Query Time: {{ current_db_query_time }}ms (SLA: <100ms)
+  Threshold Exceeded: {{ (current_db_query_time - 100)|round(2) }}ms over limit
 {% endif %}
-{% if authentication_time %}
-- Authentication Response: {{ authentication_time }}ms (SLA: <150ms) - {{ authentication_status }}
+{% if auth_response_time_alert %}
+• Authentication Response: {{ current_auth_response_time }}ms (SLA: <150ms)
+  Threshold Exceeded: {{ (current_auth_response_time - 150)|round(2) }}ms over limit
 {% endif %}
-{% if system_availability %}
-- System Availability: {{ system_availability }}% (SLA: 99.9%) - {{ availability_status }}
+{% if error_rate_alert %}
+• Application Error Rate: {{ current_error_rate }}% (SLA: <1%)
+  Threshold Exceeded: {{ (current_error_rate - 1)|round(2) }}% over limit
 {% endif %}
 
-Threshold Violation Type:
-- Primary Metric: {{ primary_metric }}
-- Violation Duration: {{ violation_duration }}
-- Threshold Exceeded By: {{ threshold_exceeded_by }}
-- Consecutive Violations: {{ consecutive_violations }}
+DETAILED PERFORMANCE METRICS
+----------------------------
+Application Performance:
+  - API Endpoint Response Time: {{ current_api_response_time }}ms
+  - Database Query Response Time: {{ current_db_query_time }}ms
+  - Authentication Response Time: {{ current_auth_response_time }}ms
+  - Application Error Rate: {{ current_error_rate }}%
+  - Request Throughput: {{ current_throughput }} requests/minute
+  - Active Sessions: {{ active_sessions }}
 
-Affected Endpoints:
-{% for endpoint in affected_endpoints %}
-- {{ endpoint.path }} ({{ endpoint.method }}): {{ endpoint.response_time }}ms ({{ endpoint.status }})
-{% endfor %}
-
-================================================================================
-SYSTEM PERFORMANCE METRICS
-================================================================================
-
-Current Performance Status:
-- Request Rate: {{ request_rate }} req/min (Average: {{ avg_request_rate }} req/min)
-- Error Rate: {{ error_rate }}% (Threshold: <1%)
-- Throughput: {{ throughput }} req/sec
-- Active Sessions: {{ active_sessions }}
-
-Response Time Distribution:
-- P50 (Median): {{ p50_response_time }}ms
-- P95 (95th Percentile): {{ p95_response_time }}ms
-- P99 (99th Percentile): {{ p99_response_time }}ms
-- Maximum: {{ max_response_time }}ms
-
-Database Performance Metrics:
-- Active Connections: {{ active_db_connections }}/{{ max_db_connections }}
-- Connection Pool Utilization: {{ connection_pool_utilization }}%
-- Average Query Time: {{ avg_query_time }}ms
-- Slow Query Count (>100ms): {{ slow_query_count }}
-- SQLAlchemy Pool Status: {{ sqlalchemy_pool_status }}
-
-WSGI Server Performance:
-- Gunicorn Workers: {{ gunicorn_active_workers }}/{{ gunicorn_total_workers }}
-- Worker Utilization: {{ worker_utilization }}%
-- Request Queue Depth: {{ request_queue_depth }}
-- Worker Restart Count: {{ worker_restart_count }}
+WSGI Server Metrics:
+  - Gunicorn Worker Count: {{ worker_count }} active workers
+  - Worker Utilization: {{ worker_utilization }}%
+  - Request Queue Depth: {{ request_queue_depth }}
+  - Worker Restart Count: {{ worker_restart_count }} (last 24h)
+  - Average Request Processing Time: {{ avg_request_processing_time }}ms
 
 Container Resource Utilization:
-- CPU Usage: {{ cpu_usage }}% (Threshold: <80%)
-- Memory Usage: {{ memory_usage }}% (Threshold: <80%)
-- Disk I/O: {{ disk_io_rate }} MB/s
-- Network I/O: {{ network_io_rate }} MB/s
+  - CPU Usage: {{ cpu_usage }}% (across {{ container_count }} containers)
+  - Memory Usage: {{ memory_usage }}% ({{ memory_used_mb }}MB / {{ memory_total_mb }}MB)
+  - Network I/O: {{ network_io_mb }}MB/s
+  - Disk I/O: {{ disk_io_ops }}/s
+  - Container Health: {{ healthy_containers }}/{{ total_containers }} containers healthy
 
-================================================================================
-MIGRATION PERFORMANCE COMPARISON
-================================================================================
+Database Connection Pool:
+  - Active Connections: {{ active_connections }}/{{ max_connections }}
+  - Pool Utilization: {{ pool_utilization }}%
+  - Connection Acquisition Time: {{ connection_acquisition_time }}ms
+  - Pool Overflow Count: {{ pool_overflow_count }}
 
-Flask vs Node.js Performance Baseline:
-- Current Flask Response Time: {{ flask_response_time }}ms
-- Node.js Baseline: {{ nodejs_baseline_time }}ms
-- Performance Delta: {{ performance_delta }}% ({{ performance_trend }})
-- Migration Health Score: {{ migration_health_score }}/100
+Flask Application Metrics:
+  - Active Requests: {{ active_requests }}
+  - Request Rate: {{ request_rate }} requests/second
+  - Response Size Average: {{ avg_response_size }}KB
+  - Session Count: {{ session_count }}
+  - Cache Hit Rate: {{ cache_hit_rate }}%
 
-Performance Trend Analysis (Last 24 hours):
-{% for trend in performance_trends %}
-- {{ trend.timestamp }}: {{ trend.metric }} - {{ trend.value }} ({{ trend.change }})
+AFFECTED ENDPOINTS (if applicable)
+----------------------------------
+{% for endpoint in affected_endpoints %}
+• {{ endpoint.path }} ({{ endpoint.method }})
+  Response Time: {{ endpoint.response_time }}ms
+  Error Rate: {{ endpoint.error_rate }}%
+  Request Count: {{ endpoint.request_count }} (last 5 minutes)
 {% endfor %}
 
-SLA Compliance Status:
-- API Response Time SLA: {{ api_sla_compliance }}% compliance
-- Database Query SLA: {{ db_sla_compliance }}% compliance
-- Authentication SLA: {{ auth_sla_compliance }}% compliance
-- Overall SLA Score: {{ overall_sla_score }}%
+IMMEDIATE REMEDIATION STEPS
+---------------------------
+{% if alert_severity == 'critical' %}
+CRITICAL ALERT - Immediate Action Required:
+1. Check application health endpoints: /health/readiness and /health/detailed
+2. Verify database connectivity and connection pool status
+3. Monitor WSGI worker processes for failures or timeouts
+4. Check container resource limits and scaling triggers
+5. Review recent deployments or configuration changes
+6. Escalate to on-call engineer if not resolved within 15 minutes
 
-================================================================================
-ROOT CAUSE ANALYSIS
-================================================================================
+{% elif alert_severity == 'high' %}
+HIGH PRIORITY - Action Required within 15 minutes:
+1. Investigate specific performance bottlenecks in affected endpoints
+2. Check database query performance and connection pool health
+3. Verify container resource allocation is sufficient
+4. Review application logs for error patterns
+5. Consider scaling container instances if resource constrained
 
-Performance Issue Classification:
-- Issue Category: {{ issue_category }}
-- Probable Root Cause: {{ probable_root_cause }}
-- Contributing Factors: {{ contributing_factors }}
+{% elif alert_severity == 'medium' %}
+MEDIUM PRIORITY - Action Required within 1 hour:
+1. Analyze performance trends over last 24 hours
+2. Review database query optimization opportunities
+3. Check for memory leaks or resource accumulation
+4. Validate WSGI worker configuration is optimal
+5. Plan capacity adjustments if sustained load increase detected
 
-System Resource Analysis:
-- Memory Pressure: {{ memory_pressure_status }}
-- CPU Contention: {{ cpu_contention_status }}
-- I/O Bottlenecks: {{ io_bottleneck_status }}
-- Network Latency: {{ network_latency_status }}
+{% elif alert_severity == 'low' %}
+LOW PRIORITY - Monitor and Schedule Review:
+1. Document performance patterns for trend analysis
+2. Schedule performance optimization review
+3. Update monitoring thresholds if needed
+4. Plan proactive capacity scaling if growth trend confirmed
+{% endif %}
 
-Database Analysis:
-- Connection Pool Health: {{ connection_pool_health }}
-- Query Optimization Needed: {{ query_optimization_status }}
-- Index Performance: {{ index_performance_status }}
-- Lock Contention: {{ lock_contention_status }}
+MONITORING RESOURCES
+-------------------
+• CloudWatch Dashboard: {{ cloudwatch_dashboard_url }}
+• Grafana Performance Dashboard: {{ grafana_dashboard_url }}
+• Flask Monitoring Dashboard: {{ flask_monitoring_url }}
+• Sentry Error Tracking: {{ sentry_url }}
+• Container Insights: {{ container_insights_url }}
 
-External Dependencies:
-- Auth0 Performance: {{ auth0_performance_status }}
-- AWS Services: {{ aws_services_performance }}
-- Redis Cache: {{ redis_performance_status }}
-
-Recent System Events:
-{% for event in recent_system_events %}
-- {{ event.timestamp }}: {{ event.type }} - {{ event.description }}
-{% endfor %}
-
-================================================================================
-IMMEDIATE REMEDIATION PROCEDURES
-================================================================================
-
-LEVEL 1: IMMEDIATE RESPONSE (0-5 minutes)
-1. Check monitoring dashboards:
-   - Application Dashboard: {{ app_dashboard_url }}
-   - Infrastructure Dashboard: {{ infra_dashboard_url }}
-   - Container Metrics: {{ container_dashboard_url }}
-
-2. Quick resource checks:
-   Command: kubectl get pods -n {{ namespace }}
-   Check CPU/Memory: kubectl top pods -n {{ namespace }}
-   
-3. Database connection validation:
-   Command: flask db-pool-status
-   Check active connections: {{ db_connection_check_command }}
-
-LEVEL 2: PERFORMANCE OPTIMIZATION (5-15 minutes)
-1. Container resource optimization:
-   Scale up instances: kubectl scale deployment {{ deployment_name }} --replicas={{ suggested_replicas }}
-   
-2. Database optimization:
-   - Clear slow query log: {{ clear_slow_query_command }}
-   - Analyze query performance: {{ analyze_query_command }}
-   - Check for blocking queries: {{ check_blocking_queries_command }}
-
-3. WSGI worker management:
-   Restart workers: {{ restart_workers_command }}
-   Check worker health: {{ check_worker_health_command }}
-
-LEVEL 3: ADVANCED TROUBLESHOOTING (15-30 minutes)
-1. Flask application profiling:
-   Enable profiling: {{ enable_profiling_command }}
-   Review performance data: {{ review_profiling_command }}
-   
-2. Database performance tuning:
-   Run ANALYZE: {{ analyze_database_command }}
-   Check query plans: {{ explain_query_plans_command }}
-   Optimize indexes: {{ optimize_indexes_command }}
-
-3. Container orchestration optimization:
-   Check resource limits: {{ check_resource_limits_command }}
-   Review autoscaling: {{ review_autoscaling_command }}
-   Optimize load balancing: {{ optimize_load_balancing_command }}
-
-================================================================================
-PERFORMANCE OPTIMIZATION RECOMMENDATIONS
-================================================================================
-
-Immediate Actions Required:
-{% for action in immediate_actions %}
-- {{ action.priority }}: {{ action.description }}
-  Command: {{ action.command }}
-  Expected Impact: {{ action.expected_impact }}
-{% endfor %}
-
-Short-term Optimizations (Next 24 hours):
-{% for optimization in short_term_optimizations %}
-- {{ optimization.area }}: {{ optimization.recommendation }}
-  Implementation: {{ optimization.implementation }}
-  Performance Gain: {{ optimization.expected_gain }}
-{% endfor %}
-
-Long-term Performance Improvements:
-{% for improvement in long_term_improvements %}
-- {{ improvement.category }}: {{ improvement.description }}
-  Timeline: {{ improvement.timeline }}
-  Resources Required: {{ improvement.resources }}
-{% endfor %}
-
-Code Optimization Suggestions:
-- Database Query Optimization: {{ db_optimization_suggestions }}
-- Caching Implementation: {{ caching_recommendations }}
-- Connection Pooling Tuning: {{ connection_pool_tuning }}
-- WSGI Configuration: {{ wsgi_optimization }}
-
-================================================================================
 ESCALATION PROCEDURES
-================================================================================
+--------------------
+{% if alert_severity == 'critical' %}
+Immediate Escalation Path:
+1. On-Call Engineer: {{ oncall_engineer_contact }}
+2. Team Lead (if no response in 15 min): {{ team_lead_contact }}
+3. Engineering Manager (if no response in 30 min): {{ manager_contact }}
+4. CTO (for business-critical impacts): {{ cto_contact }}
 
-LEVEL 1 - PERFORMANCE TEAM (0-10 minutes)
-Contact: Performance Engineering Team
-Phone: {{ performance_team_phone }}
-Slack: #performance-alerts
-Email: {{ performance_team_email }}
+{% else %}
+Standard Escalation Path:
+1. Development Team: {{ dev_team_contact }}
+2. Team Lead: {{ team_lead_contact }}
+3. Engineering Manager: {{ manager_contact }}
+{% endif %}
 
-Action Required:
-- Acknowledge alert within 5 minutes
-- Begin immediate performance analysis
-- Implement quick optimization fixes
+ALERT CORRELATION
+-----------------
+Alert ID: {{ alert_id }}
+Correlation ID: {{ correlation_id }}
+Related Alerts: {{ related_alert_count }} similar alerts in last hour
+Previous Occurrence: {{ last_occurrence_time }}
 
-LEVEL 2 - TECHNICAL ESCALATION (10-20 minutes)
-Contact: Flask Migration Technical Lead
-Phone: {{ tech_lead_phone }}
-Slack: #flask-migration-performance
-Email: {{ tech_lead_email }}
+SYSTEM CONTEXT
+--------------
+Migration Status: Node.js to Flask migration ({{ migration_completion_percentage }}% complete)
+Deployment Version: {{ deployment_version }}
+Configuration Hash: {{ config_hash }}
+Infrastructure: {{ infrastructure_provider }} ({{ region }})
+Load Balancer Status: {{ load_balancer_status }}
 
-Action Required:
-- Deep performance analysis
-- Database optimization review
-- Container scaling decisions
+ADDITIONAL INFORMATION
+---------------------
+• This alert was generated by the Flask application monitoring system
+• Performance thresholds are set to ensure SLA compliance during migration
+• For immediate assistance, contact the on-call engineer listed above
+• Alert acknowledgment required within {{ acknowledgment_timeout }} minutes
+• Automatic escalation will occur if no response received
 
-LEVEL 3 - ARCHITECTURE REVIEW (20-45 minutes)
-Contact: Principal Software Architect
-Phone: {{ architect_phone }}
-Email: {{ architect_email }}
-
-Action Required:
-- Architectural performance review
-- Scaling strategy assessment
-- Resource allocation decisions
-
-LEVEL 4 - EXECUTIVE ESCALATION (45+ minutes)
-Contact: Engineering Manager
-Phone: {{ manager_phone }}
-Email: {{ manager_email }}
-
-Action Required:
-- Business impact assessment
-- Customer communication coordination
-- Emergency resource authorization
-
-================================================================================
-AUTOMATED REMEDIATION STATUS
-================================================================================
-
-Auto-Scaling Actions:
-{% for action in autoscaling_actions %}
-- {{ action.timestamp }}: {{ action.description }} - {{ action.status }}
+AUTOMATED ACTIONS TAKEN
+-----------------------
+{% for action in automated_actions %}
+• {{ action.timestamp }}: {{ action.description }}
 {% endfor %}
 
-Performance Optimization Applied:
-{% for optimization in applied_optimizations %}
-- {{ optimization.timestamp }}: {{ optimization.type }} - {{ optimization.result }}
-{% endfor %}
+To acknowledge this alert, reply to this email or update the alert status
+in the monitoring dashboard.
 
-Pending Automated Actions:
-{% for action in pending_auto_actions %}
-- {{ action.eta }}: {{ action.description }}
-{% endfor %}
-
-Resource Management:
-- Container Scaling Status: {{ container_scaling_status }}
-- Database Connection Scaling: {{ db_scaling_status }}
-- Load Balancer Adjustments: {{ lb_adjustment_status }}
-
-================================================================================
-MONITORING AND ALERTING CONFIGURATION
-================================================================================
-
-Performance Monitoring Links:
-- Real-time Performance Dashboard: {{ realtime_dashboard_url }}
-- Database Performance Monitor: {{ db_performance_url }}
-- Container Resource Monitor: {{ container_resource_url }}
-- API Response Time Monitor: {{ api_response_monitor_url }}
-
-Alert Thresholds Configuration:
-- API Response Time Alert: {{ api_alert_threshold }}ms
-- Database Query Alert: {{ db_query_alert_threshold }}ms
-- Authentication Alert: {{ auth_alert_threshold }}ms
-- Resource Utilization Alert: {{ resource_alert_threshold }}%
-
-Performance SLA Tracking:
-- Monthly SLA Target: {{ monthly_sla_target }}%
-- Current Month Performance: {{ current_month_performance }}%
-- SLA Risk Level: {{ sla_risk_level }}
-
-Additional Metrics to Monitor:
-- Flask request processing latency per endpoint
-- SQLAlchemy connection pool saturation
-- Gunicorn worker request handling efficiency
-- Container CPU and memory utilization trends
-- Database transaction commit/rollback ratios
-
-================================================================================
-BUSINESS IMPACT ASSESSMENT
-================================================================================
-
-Customer Impact:
-- Affected Users: {{ affected_users }}
-- Service Degradation Level: {{ service_degradation_level }}
-- Customer-Facing Impact: {{ customer_facing_impact }}
-
-Revenue Impact:
-- Estimated Revenue Impact: {{ revenue_impact }}
-- SLA Violation Penalties: {{ sla_penalties }}
-- Customer Satisfaction Risk: {{ customer_satisfaction_risk }}
-
-Performance vs Business Metrics:
-- Transaction Success Rate: {{ transaction_success_rate }}%
-- User Session Completion Rate: {{ session_completion_rate }}%
-- API Success Rate: {{ api_success_rate }}%
-
-Mitigation Timeline:
-- Time to Restore Normal Performance: {{ estimated_restoration_time }}
-- SLA Recovery Time: {{ sla_recovery_time }}
-- Full Service Restoration: {{ full_restoration_time }}
-
-================================================================================
-PERFORMANCE BENCHMARKING DATA
-================================================================================
-
-Historical Performance Baseline:
-- Node.js Average Response Time: {{ nodejs_avg_response }}ms
-- Flask Target Response Time: {{ flask_target_response }}ms
-- Current Performance Gap: {{ performance_gap }}%
-
-Performance Trend Analysis:
-- Last 1 Hour Average: {{ last_hour_avg }}ms
-- Last 24 Hours Average: {{ last_day_avg }}ms
-- Last 7 Days Average: {{ last_week_avg }}ms
-
-Comparative Analysis:
-- Best Performance (Last 30 days): {{ best_performance }}ms
-- Worst Performance (Last 30 days): {{ worst_performance }}ms
-- Performance Variance: {{ performance_variance }}%
-
-Capacity Planning Metrics:
-- Current Capacity Utilization: {{ capacity_utilization }}%
-- Predicted Time to Capacity: {{ time_to_capacity }}
-- Scaling Recommendation: {{ scaling_recommendation }}
-
-================================================================================
-REFERENCE INFORMATION
-================================================================================
-
-Technical Documentation:
-- Flask Performance Optimization Guide: {{ flask_optimization_guide }}
-- Database Performance Tuning: {{ db_tuning_guide }}
-- Container Scaling Documentation: {{ container_scaling_docs }}
-- Performance Monitoring Playbook: {{ performance_playbook_url }}
-
-Configuration Files:
-- Flask Configuration: config/performance.py
-- Gunicorn Configuration: gunicorn_performance.conf.py
-- Database Configuration: config/database_performance.py
-- Container Configuration: kubernetes/performance-config.yaml
-
-Performance Tools:
-- Flask-MonitoringDashboard: {{ monitoring_dashboard_access }}
-- Prometheus Metrics: {{ prometheus_metrics_url }}
-- Grafana Performance Dashboards: {{ grafana_dashboards_url }}
-- Database Performance Tools: {{ db_performance_tools }}
-
-Emergency Contacts:
-- 24/7 Performance Hotline: {{ performance_hotline }}
-- Database Team Lead: {{ db_team_lead_contact }}
-- Infrastructure Team: {{ infrastructure_team_contact }}
-- Flask Migration Team: {{ migration_team_contact }}
-
-Quick Reference Commands:
-- Check Flask app status: {{ check_app_status_command }}
-- Database health check: {{ db_health_check_command }}
-- Container resource check: {{ container_check_command }}
-- Performance metrics query: {{ metrics_query_command }}
-
-================================================================================
-
-This automated performance alert was generated by the Flask Application Monitoring System.
-Alert generation time: {{ alert_generation_time }}
-Next performance check in: {{ next_performance_check }}
-
-For immediate performance assistance, contact the Performance Engineering Team or join the performance incident response channel.
-
-CRITICAL: If performance degradation exceeds 50% for more than 15 minutes, immediately implement emergency scaling procedures and consider rollback to Node.js baseline if available.
-
-Performance SLA Status: {{ sla_status }}
-Migration Performance Score: {{ migration_performance_score }}/100
-
-================================================================================
+Alert generated at {{ generation_timestamp }}
+Monitoring System: Flask Performance Monitor v{{ monitor_version }}
