@@ -1,436 +1,590 @@
-{% extends "emails/base/email_base.html" if email_base_exists else None %}
+{% extends "templates/emails/base/email_base.html" %}
 
-{#
-Administrative User Status Change Notification Template
-Flask 3.1.1 + Jinja2 3.1.2+ Implementation
-Integrates with Service Layer pattern and Auth0 user profile management
-Supports comprehensive user account status changes and administrative workflows
-#}
+{% block title %}User Account Status Changed - Administrative Notification{% endblock %}
 
-{% if not email_base_exists %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Status Change Notification</title>
-    <style>
-        /* Inline CSS for email client compatibility */
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            line-height: 1.6; 
-            color: #333; 
-            margin: 0; 
-            padding: 20px; 
-            background-color: #f5f5f5; 
-        }
-        .email-container { 
-            max-width: 600px; 
-            margin: 0 auto; 
-            background: white; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
-            overflow: hidden;
-        }
-        .header { 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            color: white; 
-            padding: 30px 20px; 
-            text-align: center; 
-        }
-        .content { 
-            padding: 30px 20px; 
-        }
-        .status-badge { 
-            display: inline-block; 
-            padding: 8px 16px; 
-            border-radius: 20px; 
-            font-weight: bold; 
-            font-size: 14px; 
-            text-transform: uppercase; 
-            margin: 10px 0; 
-        }
-        .status-active { background-color: #d4edda; color: #155724; }
-        .status-suspended { background-color: #f8d7da; color: #721c24; }
-        .status-deactivated { background-color: #ffeaa7; color: #6c5300; }
-        .status-role-changed { background-color: #d1ecf1; color: #0c5460; }
-        .user-details { 
-            background: #f8f9fa; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin: 20px 0; 
-            border-left: 4px solid #667eea; 
-        }
-        .admin-info { 
-            background: #fff3cd; 
-            padding: 15px; 
-            border-radius: 6px; 
-            margin: 15px 0; 
-            border: 1px solid #ffeaa7; 
-        }
-        .action-required { 
-            background: #f8d7da; 
-            padding: 15px; 
-            border-radius: 6px; 
-            margin: 20px 0; 
-            border-left: 4px solid #dc3545; 
-        }
-        .next-actions { 
-            background: #d4edda; 
-            padding: 15px; 
-            border-radius: 6px; 
-            margin: 20px 0; 
-            border-left: 4px solid #28a745; 
-        }
-        .footer { 
-            background: #343a40; 
-            color: #adb5bd; 
-            padding: 20px; 
-            text-align: center; 
-            font-size: 12px; 
-        }
-        .timestamp { 
-            color: #6c757d; 
-            font-size: 14px; 
-            font-style: italic; 
-        }
-        .security-notice { 
-            background: #fff3cd; 
-            border: 1px solid #ffeaa7; 
-            padding: 15px; 
-            border-radius: 6px; 
-            margin: 20px 0; 
-        }
-        .auth0-profile { 
-            background: #e3f2fd; 
-            padding: 15px; 
-            border-radius: 6px; 
-            margin: 15px 0; 
-            border-left: 4px solid #2196f3; 
-        }
-        @media only screen and (max-width: 600px) {
-            .email-container { margin: 10px; }
-            .header, .content { padding: 20px 15px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="email-container">
-{% endif %}
+{% block header_title %}User Account Management{% endblock %}
+{% block header_subtitle %}Administrative Status Change Notification{% endblock %}
 
-{% if email_base_exists %}
-{% block title %}User Status Change Notification{% endblock %}
+{% block additional_styles %}
+<style>
+    /* Administrative email specific styles */
+    .admin-header {
+        background: linear-gradient(135deg, #dc3545 0%, #bd2130 100%);
+        color: #ffffff;
+    }
+
+    .status-change-container {
+        background-color: #f8f9fa;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .status-change-header {
+        font-size: 20px;
+        font-weight: 600;
+        color: #495057;
+        margin: 0 0 20px 0;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .status-icon {
+        width: 24px;
+        height: 24px;
+        margin-right: 10px;
+        fill: currentColor;
+    }
+
+    .user-details {
+        background-color: #ffffff;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #f1f3f4;
+    }
+
+    .detail-row:last-child {
+        border-bottom: none;
+    }
+
+    .detail-label {
+        font-weight: 600;
+        color: #495057;
+        min-width: 140px;
+    }
+
+    .detail-value {
+        color: #6c757d;
+        text-align: right;
+        flex: 1;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-active {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .status-inactive {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+
+    .status-suspended {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+    }
+
+    .status-pending {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+
+    .change-summary {
+        background-color: #e7f3ff;
+        border-left: 4px solid #007bff;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .change-summary-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #004085;
+        margin: 0 0 10px 0;
+    }
+
+    .change-summary-text {
+        font-size: 14px;
+        color: #004085;
+        line-height: 1.5;
+        margin: 0;
+    }
+
+    .auth0-integration {
+        background-color: #f0f0f0;
+        border: 1px solid #cccccc;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+
+    .auth0-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #333333;
+        margin: 0 0 8px 0;
+    }
+
+    .auth0-details {
+        font-size: 13px;
+        color: #666666;
+        margin: 0;
+    }
+
+    .rbac-changes {
+        background-color: #fff8e1;
+        border: 1px solid #ffcc02;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .rbac-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #f57c00;
+        margin: 0 0 15px 0;
+    }
+
+    .role-change {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #ffe082;
+    }
+
+    .role-change:last-child {
+        border-bottom: none;
+    }
+
+    .role-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .role-added {
+        background-color: #c8e6c9;
+        color: #2e7d2e;
+    }
+
+    .role-removed {
+        background-color: #ffcdd2;
+        color: #c62828;
+    }
+
+    .role-modified {
+        background-color: #e1bee7;
+        color: #6a1b9a;
+    }
+
+    .next-actions {
+        background-color: #e8f5e8;
+        border: 1px solid #4caf50;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .next-actions-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #2e7d2e;
+        margin: 0 0 15px 0;
+    }
+
+    .action-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .action-item {
+        padding: 8px 0;
+        font-size: 14px;
+        color: #2e7d2e;
+        position: relative;
+        padding-left: 20px;
+    }
+
+    .action-item:before {
+        content: "→";
+        position: absolute;
+        left: 0;
+        font-weight: bold;
+    }
+
+    .admin-signature {
+        background-color: #f8f9fa;
+        border-top: 2px solid #dee2e6;
+        padding: 20px;
+        margin: 30px 0 0 0;
+        text-align: center;
+    }
+
+    .admin-signature-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #495057;
+        margin: 0 0 10px 0;
+    }
+
+    .admin-signature-text {
+        font-size: 13px;
+        color: #6c757d;
+        margin: 0;
+    }
+
+    .security-alert {
+        background-color: #fff5f5;
+        border: 1px solid #feb2b2;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+
+    .security-alert-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #c53030;
+        margin: 0 0 8px 0;
+    }
+
+    .security-alert-text {
+        font-size: 13px;
+        color: #c53030;
+        margin: 0;
+    }
+
+    /* Mobile responsive adjustments */
+    @media only screen and (max-width: 600px) {
+        .detail-row {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .detail-label {
+            margin-bottom: 5px;
+            min-width: auto;
+        }
+
+        .detail-value {
+            text-align: left;
+        }
+
+        .role-change {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .status-change-header {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .status-icon {
+            margin-right: 0;
+            margin-bottom: 10px;
+        }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-{% else %}
-        <div class="header">
-            <h1>🔐 User Status Change Notification</h1>
-            <p>Administrative Alert - User Account Management</p>
-        </div>
-        
-        <div class="content">
-{% endif %}
+<!-- Status Change Header -->
+<div class="status-change-container">
+    <div class="status-change-header">
+        <svg class="status-icon" viewBox="0 0 24 24">
+            <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1L13.5 2.5L14.17 3.17L9.83 7.51C9.23 8.11 9.23 9.05 9.83 9.65L10.93 10.75L5 16.68V19C5 20.1 5.9 21 7 21H9.32L15.25 15.07L16.35 16.17C16.95 16.77 17.89 16.77 18.49 16.17L22.83 11.83L23.5 12.5L22 14L24 16V14L21 9Z"/>
+        </svg>
+        User Account Status Change
+    </div>
 
-{# Main notification content with Service Layer integration #}
-            <h2>User Account Status Update</h2>
-            
-            {# Dynamic status badge based on change type #}
-            {% set status_class = 'status-' + (change_type | replace('_', '-') | lower) %}
-            <div class="status-badge {{ status_class }}">
-                {{ change_type | replace('_', ' ') | title }}
-            </div>
-            
-            <p>This notification was generated by the Flask Service Layer administrative workflow system to inform you of a user account status change that requires administrative attention.</p>
-            
-            {# User profile information with Auth0 integration #}
-            <div class="user-details">
-                <h3>👤 User Information</h3>
-                <p><strong>User ID:</strong> {{ user.id }}</p>
-                <p><strong>Username:</strong> {{ user.username }}</p>
-                <p><strong>Email:</strong> {{ user.email }}</p>
-                {% if user.full_name %}
-                <p><strong>Full Name:</strong> {{ user.full_name }}</p>
-                {% endif %}
-                
-                {# Auth0 user profile integration data #}
-                {% if auth0_profile %}
-                <div class="auth0-profile">
-                    <h4>🔗 Auth0 Profile Information</h4>
-                    <p><strong>Auth0 User ID:</strong> {{ auth0_profile.user_id }}</p>
-                    <p><strong>Connection:</strong> {{ auth0_profile.connection | default('Unknown') }}</p>
-                    <p><strong>Provider:</strong> {{ auth0_profile.provider | default('auth0') }}</p>
-                    {% if auth0_profile.last_login %}
-                    <p><strong>Last Login:</strong> {{ auth0_profile.last_login.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
-                    {% endif %}
-                    {% if auth0_profile.login_count %}
-                    <p><strong>Login Count:</strong> {{ auth0_profile.login_count }}</p>
-                    {% endif %}
-                </div>
-                {% endif %}
-            </div>
-            
-            {# Status change details with comprehensive information #}
-            <div class="user-details">
-                <h3>📋 Change Details</h3>
-                <p><strong>Change Type:</strong> {{ change_type | replace('_', ' ') | title }}</p>
-                <p><strong>Previous Status:</strong> {{ previous_status | default('Active') }}</p>
-                <p><strong>New Status:</strong> {{ new_status }}</p>
-                <p><strong>Timestamp:</strong> <span class="timestamp">{{ timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span></p>
-                
-                {% if reason %}
-                <p><strong>Reason:</strong> {{ reason }}</p>
-                {% endif %}
-                
-                {% if change_details %}
-                <h4>Additional Details:</h4>
-                <ul>
-                    {% for detail_key, detail_value in change_details.items() %}
-                    <li><strong>{{ detail_key | replace('_', ' ') | title }}:</strong> {{ detail_value }}</li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-            </div>
-            
-            {# Role-based access control (RBAC) changes section #}
-            {% if change_type in ['role_changed', 'permissions_modified', 'access_level_updated'] %}
-            <div class="user-details">
-                <h3>🛡️ RBAC Changes</h3>
-                {% if role_changes %}
-                <h4>Role Modifications:</h4>
-                <ul>
-                    {% for role_change in role_changes %}
-                    <li>
-                        <strong>{{ role_change.action | title }}:</strong> {{ role_change.role_name }}
-                        {% if role_change.effective_date %}
-                        (Effective: {{ role_change.effective_date.strftime('%Y-%m-%d') }})
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                
-                {% if permission_changes %}
-                <h4>Permission Updates:</h4>
-                <ul>
-                    {% for perm_change in permission_changes %}
-                    <li>
-                        <strong>{{ perm_change.action | title }}:</strong> {{ perm_change.permission }}
-                        {% if perm_change.resource %}
-                        on {{ perm_change.resource }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-            </div>
+    <!-- Change Summary -->
+    <div class="change-summary">
+        <div class="change-summary-title">Change Summary</div>
+        <div class="change-summary-text">
+            {% if change_type == 'activation' %}
+                User account has been <strong>activated</strong> and granted access to the system.
+            {% elif change_type == 'deactivation' %}
+                User account has been <strong>deactivated</strong> and access has been revoked.
+            {% elif change_type == 'suspension' %}
+                User account has been <strong>suspended</strong> due to security or policy reasons.
+            {% elif change_type == 'role_modification' %}
+                User account roles and permissions have been <strong>modified</strong>.
+            {% elif change_type == 'profile_update' %}
+                User account profile information has been <strong>updated</strong> through administrative action.
+            {% else %}
+                User account status has been <strong>changed</strong> through administrative action.
             {% endif %}
-            
-            {# Administrative user information #}
-            <div class="admin-info">
-                <h3>👨‍💼 Administrative Action</h3>
-                <p><strong>Admin User:</strong> {{ admin_user.username }} ({{ admin_user.email }})</p>
-                <p><strong>Admin ID:</strong> {{ admin_user.id }}</p>
-                {% if admin_user.full_name %}
-                <p><strong>Admin Name:</strong> {{ admin_user.full_name }}</p>
-                {% endif %}
-                <p><strong>Action Timestamp:</strong> <span class="timestamp">{{ timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span></p>
-                
-                {% if admin_notes %}
-                <p><strong>Admin Notes:</strong></p>
-                <p style="font-style: italic; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 4px;">{{ admin_notes }}</p>
-                {% endif %}
-            </div>
-            
-            {# Security monitoring and incident tracking #}
-            {% if security_context %}
-            <div class="security-notice">
-                <h3>🚨 Security Monitoring Alert</h3>
-                <p><strong>Risk Level:</strong> {{ security_context.risk_level | default('Medium') }}</p>
-                {% if security_context.incident_id %}
-                <p><strong>Incident ID:</strong> {{ security_context.incident_id }}</p>
-                {% endif %}
-                {% if security_context.suspicious_activity %}
-                <p><strong>Suspicious Activity Detected:</strong> {{ security_context.suspicious_activity }}</p>
-                {% endif %}
-                {% if security_context.ip_address %}
-                <p><strong>Source IP:</strong> {{ security_context.ip_address }}</p>
-                {% endif %}
-                {% if security_context.user_agent %}
-                <p><strong>User Agent:</strong> {{ security_context.user_agent }}</p>
-                {% endif %}
-            </div>
-            {% endif %}
-            
-            {# Approval workflow section for administrative oversight #}
-            {% if approval_required %}
-            <div class="action-required">
-                <h3>⚠️ Administrative Approval Required</h3>
-                <p>This status change requires administrative review and approval before taking effect.</p>
-                
-                {% if approval_workflow %}
-                <h4>Approval Workflow:</h4>
-                <ul>
-                    {% for step in approval_workflow %}
-                    <li>
-                        <strong>Step {{ loop.index }}:</strong> {{ step.description }}
-                        {% if step.assigned_to %}
-                        (Assigned to: {{ step.assigned_to }})
-                        {% endif %}
-                        {% if step.deadline %}
-                        (Deadline: {{ step.deadline.strftime('%Y-%m-%d') }})
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                
-                {% if approval_url %}
-                <p><strong>Action Required:</strong> <a href="{{ approval_url }}" target="_blank" style="color: #dc3545; font-weight: bold;">Review and Approve</a></p>
-                {% endif %}
-            </div>
-            {% endif %}
-            
-            {# Next actions and recommendations #}
-            <div class="next-actions">
-                <h3>📋 Recommended Next Actions</h3>
-                
-                {% if next_actions %}
-                <ul>
-                    {% for action in next_actions %}
-                    <li>
-                        <strong>{{ action.priority | default('Normal') | title }} Priority:</strong> {{ action.description }}
-                        {% if action.deadline %}
-                        (By: {{ action.deadline.strftime('%Y-%m-%d') }})
-                        {% endif %}
-                        {% if action.assigned_to %}
-                        - Assigned to: {{ action.assigned_to }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                {# Default recommendations based on change type #}
-                {% if change_type == 'account_suspended' %}
-                <ul>
-                    <li><strong>High Priority:</strong> Review security logs for suspicious activity</li>
-                    <li><strong>Medium Priority:</strong> Contact user to verify account security</li>
-                    <li><strong>Normal Priority:</strong> Document incident in security system</li>
-                </ul>
-                {% elif change_type == 'role_changed' %}
-                <ul>
-                    <li><strong>High Priority:</strong> Verify user understands new permissions</li>
-                    <li><strong>Medium Priority:</strong> Update access documentation</li>
-                    <li><strong>Normal Priority:</strong> Schedule role effectiveness review</li>
-                </ul>
-                {% elif change_type == 'account_activated' %}
-                <ul>
-                    <li><strong>Medium Priority:</strong> Send welcome communication to user</li>
-                    <li><strong>Normal Priority:</strong> Verify onboarding checklist completion</li>
-                    <li><strong>Normal Priority:</strong> Schedule first login follow-up</li>
-                </ul>
-                {% elif change_type == 'account_deactivated' %}
-                <ul>
-                    <li><strong>High Priority:</strong> Verify data access revocation</li>
-                    <li><strong>Medium Priority:</strong> Update team access documentation</li>
-                    <li><strong>Normal Priority:</strong> Archive user data per retention policy</li>
-                </ul>
-                {% else %}
-                <ul>
-                    <li><strong>Medium Priority:</strong> Verify change was applied correctly</li>
-                    <li><strong>Normal Priority:</strong> Update user documentation</li>
-                    <li><strong>Normal Priority:</strong> Monitor for any access issues</li>
-                </ul>
-                {% endif %}
-                {% endif %}
-            </div>
-            
-            {# Service Layer pattern integration information #}
-            {% if service_context %}
-            <div class="user-details">
-                <h3>⚙️ Service Layer Information</h3>
-                <p><strong>Workflow ID:</strong> {{ service_context.workflow_id }}</p>
-                <p><strong>Service:</strong> {{ service_context.service_name | default('UserManagementService') }}</p>
-                {% if service_context.transaction_id %}
-                <p><strong>Transaction ID:</strong> {{ service_context.transaction_id }}</p>
-                {% endif %}
-                {% if service_context.validation_status %}
-                <p><strong>Validation Status:</strong> {{ service_context.validation_status }}</p>
-                {% endif %}
-                {% if service_context.rollback_available %}
-                <p><strong>Rollback Available:</strong> {{ 'Yes' if service_context.rollback_available else 'No' }}</p>
-                {% endif %}
-            </div>
-            {% endif %}
-            
-            {# System monitoring and links #}
-            <div class="user-details">
-                <h3>🔗 Administrative Links</h3>
-                {% if admin_panel_url %}
-                <p><a href="{{ admin_panel_url }}/users/{{ user.id }}" target="_blank" style="color: #667eea; text-decoration: none;">📊 View User Dashboard</a></p>
-                {% endif %}
-                {% if security_logs_url %}
-                <p><a href="{{ security_logs_url }}?user_id={{ user.id }}" target="_blank" style="color: #667eea; text-decoration: none;">🔍 Security Activity Logs</a></p>
-                {% endif %}
-                {% if audit_trail_url %}
-                <p><a href="{{ audit_trail_url }}?user_id={{ user.id }}" target="_blank" style="color: #667eea; text-decoration: none;">📋 Audit Trail</a></p>
-                {% endif %}
-                {% if auth0_dashboard_url %}
-                <p><a href="{{ auth0_dashboard_url }}" target="_blank" style="color: #667eea; text-decoration: none;">🔗 Auth0 User Management</a></p>
-                {% endif %}
-            </div>
-            
-            {# Important security and compliance notice #}
-            <div class="security-notice">
-                <h3>🛡️ Security Notice</h3>
-                <p><strong>Confidential Information:</strong> This notification contains sensitive user account information and should be handled according to your organization's data protection policies.</p>
-                <p><strong>Retention:</strong> This notification is automatically logged in the Flask application audit system with timestamp {{ timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}.</p>
-                <p><strong>Support:</strong> For questions about this notification or the user status change, contact the system administrator or security team.</p>
-            </div>
-
-{% if not email_base_exists %}
-        </div>
-        
-        <div class="footer">
-            <p>🏢 Administrative User Management System</p>
-            <p>Flask 3.1.1 Application • Service Layer Pattern</p>
-            <p>Generated at {{ timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
-            <p style="margin-top: 15px; font-size: 11px;">
-                This is an automated notification from the Flask administrative system.<br>
-                Please do not reply to this email. For support, contact your system administrator.
-            </p>
         </div>
     </div>
-</body>
-</html>
-{% else %}
-{% endblock %}
+</div>
+
+<!-- User Details Section -->
+<div class="user-details">
+    <h3 style="margin: 0 0 20px 0; color: #495057; font-size: 18px;">User Account Information</h3>
+    
+    <div class="detail-row">
+        <span class="detail-label">User ID:</span>
+        <span class="detail-value">{{ user_data.user_id if user_data.user_id else 'N/A' }}</span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Username:</span>
+        <span class="detail-value">{{ user_data.username if user_data.username else 'N/A' }}</span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Email:</span>
+        <span class="detail-value">{{ user_data.email if user_data.email else 'N/A' }}</span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Full Name:</span>
+        <span class="detail-value">{{ user_data.full_name if user_data.full_name else 'N/A' }}</span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Previous Status:</span>
+        <span class="detail-value">
+            {% if previous_status %}
+                <span class="status-badge status-{{ previous_status|lower }}">{{ previous_status|title }}</span>
+            {% else %}
+                N/A
+            {% endif %}
+        </span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Current Status:</span>
+        <span class="detail-value">
+            {% if current_status %}
+                <span class="status-badge status-{{ current_status|lower }}">{{ current_status|title }}</span>
+            {% else %}
+                N/A
+            {% endif %}
+        </span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Change Timestamp:</span>
+        <span class="detail-value">{{ change_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if change_timestamp else 'N/A' }}</span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">Performed By:</span>
+        <span class="detail-value">{{ admin_user.username if admin_user and admin_user.username else 'System Administrator' }}</span>
+    </div>
+</div>
+
+<!-- Auth0 Integration Details -->
+{% if auth0_profile %}
+<div class="auth0-integration">
+    <div class="auth0-title">Auth0 Identity Provider Integration</div>
+    <div class="auth0-details">
+        <strong>Auth0 User ID:</strong> {{ auth0_profile.user_id if auth0_profile.user_id else 'N/A' }}<br>
+        <strong>Identity Provider:</strong> {{ auth0_profile.provider if auth0_profile.provider else 'Auth0' }}<br>
+        <strong>Last Login:</strong> {{ auth0_profile.last_login.strftime('%Y-%m-%d %H:%M:%S UTC') if auth0_profile.last_login else 'Never' }}<br>
+        <strong>Profile Updated:</strong> {{ auth0_profile.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if auth0_profile.updated_at else 'N/A' }}
+    </div>
+</div>
 {% endif %}
 
-{#
-Template Usage Example:
-{{ render_template('emails/admin/user_status_changed.html',
-    user=user_object,
-    auth0_profile=auth0_data,
-    change_type='account_suspended',
-    previous_status='Active',
-    new_status='Suspended',
-    timestamp=datetime.utcnow(),
-    admin_user=admin_object,
-    reason='Security policy violation',
-    change_details={'violation_type': 'Unauthorized access attempt', 'attempts': 5},
-    security_context={'risk_level': 'High', 'incident_id': 'INC-2024-001'},
-    approval_required=True,
-    approval_workflow=[
-        {'description': 'Security team review', 'assigned_to': 'security@company.com'},
-        {'description': 'Management approval', 'assigned_to': 'manager@company.com'}
-    ],
-    next_actions=[
-        {'priority': 'High', 'description': 'Review security logs', 'deadline': datetime.now() + timedelta(days=1)},
-        {'priority': 'Medium', 'description': 'Contact user', 'assigned_to': 'support@company.com'}
-    ],
-    service_context={'workflow_id': 'WF-2024-001', 'service_name': 'UserManagementService'},
-    admin_panel_url='https://admin.company.com',
-    security_logs_url='https://security.company.com/logs',
-    email_base_exists=False
-) }}
-#}
+<!-- RBAC Changes Section -->
+{% if role_changes %}
+<div class="rbac-changes">
+    <div class="rbac-title">Role-Based Access Control (RBAC) Changes</div>
+    
+    {% for role_change in role_changes %}
+    <div class="role-change">
+        <span style="flex: 1;">
+            <strong>{{ role_change.role_name }}</strong>
+            {% if role_change.description %}
+                <br><small style="color: #666;">{{ role_change.description }}</small>
+            {% endif %}
+        </span>
+        <span class="role-badge role-{{ role_change.change_type }}">
+            {% if role_change.change_type == 'added' %}
+                Role Added
+            {% elif role_change.change_type == 'removed' %}
+                Role Removed
+            {% elif role_change.change_type == 'modified' %}
+                Permissions Modified
+            {% else %}
+                {{ role_change.change_type|title }}
+            {% endif %}
+        </span>
+    </div>
+    {% endfor %}
+    
+    {% if approval_required %}
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ffe082;">
+        <small style="color: #f57c00;">
+            <strong>Note:</strong> Some role changes may require additional approval before taking effect.
+        </small>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Security Alert -->
+{% if security_impact %}
+<div class="security-alert">
+    <div class="security-alert-title">Security Impact Assessment</div>
+    <div class="security-alert-text">
+        {% if security_impact == 'high' %}
+            This change has <strong>high security impact</strong>. Additional monitoring and verification procedures are recommended.
+        {% elif security_impact == 'medium' %}
+            This change has <strong>medium security impact</strong>. Standard monitoring procedures apply.
+        {% elif security_impact == 'low' %}
+            This change has <strong>low security impact</strong>. Routine monitoring is sufficient.
+        {% else %}
+            Security impact: {{ security_impact|title }}
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Service Layer Coordination Information -->
+{% if service_layer_info %}
+<div class="alert alert-info">
+    <strong>Service Layer Integration:</strong> This change has been coordinated through the Service Layer pattern to ensure consistency across all functional modules. Related services have been notified and updated accordingly.
+    {% if service_layer_info.workflow_id %}
+        <br><small><strong>Workflow ID:</strong> {{ service_layer_info.workflow_id }}</small>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Change Reason -->
+{% if change_reason %}
+<div class="alert alert-warning">
+    <strong>Reason for Change:</strong> {{ change_reason }}
+</div>
+{% endif %}
+
+<!-- Next Actions Section -->
+<div class="next-actions">
+    <div class="next-actions-title">Recommended Next Actions</div>
+    
+    <ul class="action-list">
+        {% if change_type == 'activation' %}
+            <li class="action-item">Verify user access to appropriate systems and resources</li>
+            <li class="action-item">Monitor initial user activity for the first 24 hours</li>
+            <li class="action-item">Ensure user receives welcome communication and training materials</li>
+            {% if role_changes %}
+                <li class="action-item">Confirm role-based permissions are correctly applied</li>
+            {% endif %}
+        {% elif change_type == 'deactivation' %}
+            <li class="action-item">Verify all system access has been properly revoked</li>
+            <li class="action-item">Review and secure any shared resources or documents</li>
+            <li class="action-item">Archive user data according to retention policies</li>
+            <li class="action-item">Update team assignments and redistribute responsibilities if needed</li>
+        {% elif change_type == 'suspension' %}
+            <li class="action-item">Monitor for any unauthorized access attempts</li>
+            <li class="action-item">Review security logs for the period leading up to suspension</li>
+            <li class="action-item">Document investigation findings and next steps</li>
+            <li class="action-item">Set review date for potential account reactivation</li>
+        {% elif change_type == 'role_modification' %}
+            <li class="action-item">Test user access with new role permissions</li>
+            <li class="action-item">Verify previous permissions have been properly removed</li>
+            <li class="action-item">Update user training records if additional training is required</li>
+            <li class="action-item">Monitor user activity with new permissions for 48 hours</li>
+        {% else %}
+            <li class="action-item">Review change impact on user workflow and system access</li>
+            <li class="action-item">Monitor user activity for any issues or access problems</li>
+            <li class="action-item">Update relevant documentation and audit trails</li>
+        {% endif %}
+        
+        <!-- Common actions for all change types -->
+        <li class="action-item">Update internal user management documentation</li>
+        <li class="action-item">Verify compliance with security and audit requirements</li>
+        
+        {% if next_review_date %}
+            <li class="action-item">Schedule follow-up review for {{ next_review_date.strftime('%Y-%m-%d') }}</li>
+        {% endif %}
+    </ul>
+</div>
+
+<!-- Administrative Approval Workflow -->
+{% if approval_workflow %}
+<div class="alert alert-info">
+    <strong>Approval Workflow Status:</strong>
+    {% if approval_workflow.status == 'pending' %}
+        This change is <strong>pending approval</strong> from {{ approval_workflow.approver_name if approval_workflow.approver_name else 'designated approver' }}.
+        {% if approval_workflow.deadline %}
+            <br><small>Approval deadline: {{ approval_workflow.deadline.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+        {% endif %}
+    {% elif approval_workflow.status == 'approved' %}
+        This change has been <strong>approved</strong> by {{ approval_workflow.approver_name if approval_workflow.approver_name else 'authorized approver' }}.
+        {% if approval_workflow.approved_at %}
+            <br><small>Approved on: {{ approval_workflow.approved_at.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+        {% endif %}
+    {% elif approval_workflow.status == 'rejected' %}
+        This change has been <strong>rejected</strong> by {{ approval_workflow.approver_name if approval_workflow.approver_name else 'authorized approver' }}.
+        {% if approval_workflow.rejection_reason %}
+            <br><small>Reason: {{ approval_workflow.rejection_reason }}</small>
+        {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Additional Notes -->
+{% if additional_notes %}
+<div class="alert alert-info">
+    <strong>Additional Notes:</strong> {{ additional_notes }}
+</div>
+{% endif %}
+
+<!-- Administrative Signature -->
+<div class="admin-signature">
+    <div class="admin-signature-title">Administrative Action Record</div>
+    <div class="admin-signature-text">
+        This notification was generated automatically by the Flask User Management System.<br>
+        Change performed by: {{ admin_user.full_name if admin_user and admin_user.full_name else admin_user.username if admin_user and admin_user.username else 'System Administrator' }}<br>
+        Action recorded at: {{ change_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if change_timestamp else 'N/A' }}<br>
+        {% if change_reference_id %}
+            Reference ID: {{ change_reference_id }}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This is an automated administrative notification from the Flask User Management System.
+    This email contains sensitive user account information and should be handled according to your organization's data protection policies.
+</p>
+
+<div class="footer-links">
+    <a href="#" class="footer-link">User Management Dashboard</a>
+    <a href="#" class="footer-link">Security Policies</a>
+    <a href="#" class="footer-link">Administrator Support</a>
+    <a href="#" class="footer-link">Audit Logs</a>
+</div>
+
+<p class="footer-copyright">
+    © {{ current_year if current_year else 2024 }} Flask User Management System. All rights reserved.<br>
+    <small style="color: #adb5bd;">This system implements Auth0 integration and Service Layer architecture patterns for secure user management.</small>
+</p>
+{% endblock %}
