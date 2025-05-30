@@ -1,185 +1,228 @@
-ACCESS ANOMALY DETECTION ALERT
-================================
+SECURITY ALERT: ACCESS PATTERN ANOMALY DETECTED
 
-SECURITY INCIDENT NOTIFICATION
-==============================
+================================================================================
+INCIDENT SUMMARY
+================================================================================
 
-Alert ID: {{ alert_id }}
-Timestamp: {{ timestamp }}
-Severity: {{ severity }}
+Incident ID: {{ incident_id }}
+Detection Time: {{ detection_timestamp }}
+Severity Level: {{ severity_level }}
 Risk Score: {{ risk_score }}/100
+Alert Type: Access Pattern Anomaly
 
-USER INFORMATION
-================
-User ID: {{ user_id }}
-Username: {{ username }}
-Email: {{ user_email }}
-Last Known Location: {{ last_known_location }}
+User Information:
+- User ID: {{ user_id }}
+- Username: {{ username }}
+- Email: {{ user_email }}
+- Account Status: {{ account_status }}
+- Last Known Location: {{ last_known_location }}
 
-ANOMALY DETAILS
-===============
-Anomaly Type: {{ anomaly_type }}
-Detection Method: {{ detection_method }}
-Confidence Level: {{ confidence_level }}%
+================================================================================
+ANOMALY DETECTION DETAILS
+================================================================================
 
-BEHAVIORAL ANALYSIS
-===================
+BEHAVIORAL ANALYSIS SUMMARY:
+- Anomaly Type: {{ anomaly_type }}
+- Confidence Level: {{ confidence_level }}%
+- Deviation Score: {{ deviation_score }}
+- Machine Learning Model: {{ ml_model_name }}
+- Training Baseline Period: {{ baseline_period }}
 
-Session Pattern Analysis:
-- Normal session duration: {{ normal_session_duration }}
-- Current session duration: {{ current_session_duration }}
-- Session frequency deviation: {{ session_frequency_deviation }}%
-- Unusual time pattern: {{ unusual_time_pattern }}
+UNUSUAL PATTERNS IDENTIFIED:
+{{ #each anomalous_patterns }}
+- {{ pattern_type }}: {{ pattern_description }}
+  Normal Range: {{ normal_range }}
+  Detected Value: {{ detected_value }}
+  Deviation: {{ deviation_percentage }}%
+{{ /each }}
 
-Geographic Analysis:
-- Typical access regions: {{ typical_regions }}
-- Current access location: {{ current_location }}
-- Geographic distance from norm: {{ distance_from_norm }} km
-- VPN/Proxy detection: {{ vpn_proxy_detected }}
+SESSION ANALYSIS:
+- Session Duration: {{ session_duration }} minutes
+- Actions Performed: {{ actions_count }}
+- Pages Accessed: {{ pages_accessed }}
+- Data Downloaded: {{ data_volume }}
+- Failed Authentication Attempts: {{ failed_auth_count }}
 
-Device and Browser Analysis:
-- Device fingerprint match: {{ device_fingerprint_match }}
-- Browser consistency: {{ browser_consistency }}
-- Operating system variance: {{ os_variance }}
-- User agent anomaly: {{ user_agent_anomaly }}
+GEOGRAPHIC ANALYSIS:
+- Current Location: {{ current_location }}
+- Previous Locations (30 days): {{ previous_locations }}
+- Geographic Deviation: {{ geo_deviation }}
+- VPN/Proxy Detection: {{ vpn_proxy_status }}
+- ISP Information: {{ isp_details }}
+- Time Zone Anomaly: {{ timezone_anomaly }}
 
-Access Pattern Analysis:
-- Typical access hours: {{ typical_access_hours }}
-- Current access time: {{ current_access_time }}
-- Resource access pattern: {{ resource_access_pattern }}
-- API endpoint deviation: {{ api_endpoint_deviation }}%
+DEVICE AND BROWSER ANALYSIS:
+- Device Type: {{ device_type }}
+- Operating System: {{ operating_system }}
+- Browser: {{ browser_details }}
+- New Device Flag: {{ new_device_flag }}
+- Device Fingerprint: {{ device_fingerprint }}
+- User Agent Anomaly: {{ user_agent_anomaly }}
 
+================================================================================
 RISK ASSESSMENT
-===============
-Overall Risk Score: {{ risk_score }}/100
+================================================================================
 
-Risk Factors Detected:
-{% for factor in risk_factors %}
-- {{ factor.name }}: {{ factor.weight }}/10 ({{ factor.description }})
-{% endfor %}
+RISK SCORE BREAKDOWN:
+- Geographic Risk: {{ geo_risk_score }}/25
+- Behavioral Risk: {{ behavioral_risk_score }}/25
+- Temporal Risk: {{ temporal_risk_score }}/25
+- Technical Risk: {{ technical_risk_score }}/25
 
-Machine Learning Analysis:
-- Anomaly detection model: {{ ml_model_name }}
-- Model confidence: {{ ml_confidence }}%
-- Training data reference period: {{ training_period }}
-- Deviation from baseline: {{ baseline_deviation }}%
+RISK FACTORS IDENTIFIED:
+{{ #each risk_factors }}
+- {{ factor_name }}: {{ factor_severity }} ({{ factor_description }})
+{{ /each }}
 
-SECURITY RECOMMENDATIONS
-=========================
+POTENTIAL THREAT INDICATORS:
+{{ #if credential_stuffing_detected }}
+- Possible credential stuffing attack detected
+{{ /if }}
+{{ #if account_takeover_risk }}
+- Account takeover risk indicators present
+{{ /if }}
+{{ #if data_exfiltration_risk }}
+- Potential data exfiltration patterns observed
+{{ /if }}
+{{ #if privilege_escalation_attempt }}
+- Privilege escalation attempt indicators
+{{ /if }}
+
+================================================================================
+INVESTIGATION PROCEDURES
+================================================================================
 
 IMMEDIATE ACTIONS REQUIRED:
-{% if risk_score >= 80 %}
-1. IMMEDIATE USER SESSION TERMINATION recommended
-2. Initiate account security review
-3. Contact user through verified communication channel
-4. Enable enhanced monitoring for this account
-{% elif risk_score >= 60 %}
-1. Monitor user session closely
-2. Require additional authentication if accessing sensitive data
-3. Log all user activities for review
-4. Consider session timeout reduction
-{% else %}
-1. Continue monitoring with increased vigilance
-2. Document anomaly for pattern analysis
-3. Review user access patterns over next 24 hours
-{% endif %}
+1. Review user activity logs for the time period: {{ investigation_time_window }}
+2. Verify user identity through out-of-band communication
+3. Check for concurrent sessions from multiple locations
+4. Examine recent privilege changes or access grants
+5. Review data access and download patterns
 
-INVESTIGATION PROCEDURES
-========================
+DETAILED INVESTIGATION STEPS:
 
-Step 1: Initial Verification
-- Verify user identity through secondary channel
-- Confirm legitimate access attempt
-- Check for compromised credentials
+1. USER VERIFICATION:
+   - Contact user at verified phone number: {{ verified_phone }}
+   - Verify recent login activities with user
+   - Confirm user's current location and device usage
+   - Check if user shared credentials or account access
 
-Step 2: Technical Analysis
-- Review system logs for {{ log_review_period }}
-- Analyze network traffic patterns
-- Check for concurrent sessions
-- Validate authentication tokens
+2. TECHNICAL ANALYSIS:
+   - Review full session logs in security monitoring dashboard
+   - Analyze network traffic patterns for anomalies
+   - Check authentication logs for failed attempts
+   - Examine API calls and data access patterns
 
-Step 3: Security Assessment
-- Evaluate potential data exposure
-- Assess system integrity
-- Review access control effectiveness
-- Document security impact
+3. CORRELATION ANALYSIS:
+   - Cross-reference with other user accounts showing similar patterns
+   - Check for related security incidents in the same time window
+   - Review GuardDuty findings for associated threats
+   - Analyze CloudWatch logs for system-level anomalies
 
-Step 4: Remediation Planning
-- Determine containment measures
-- Plan security hardening steps
-- Schedule security awareness training
-- Update monitoring rules if needed
+4. IMPACT ASSESSMENT:
+   - Identify all systems and data accessed during anomalous session
+   - Determine if sensitive data was viewed or downloaded
+   - Assess potential data exposure or system compromise
+   - Document all affected resources and access levels
 
-DETAILED LOG INFORMATION
-=========================
-Session ID: {{ session_id }}
-IP Address: {{ ip_address }}
-User Agent: {{ user_agent }}
-Referrer: {{ referrer }}
-Authentication Method: {{ auth_method }}
-MFA Status: {{ mfa_status }}
+================================================================================
+RESPONSE PROCEDURES
+================================================================================
 
-Access History (Last 5 attempts):
-{% for access in recent_access_history %}
-{{ access.timestamp }} | {{ access.ip_address }} | {{ access.location }} | {{ access.status }}
-{% endfor %}
+INCIDENT RESPONSE ACTIONS:
 
-SYSTEM CONTEXT
-===============
-Detection System: Flask Security Monitoring Framework
-Monitoring Infrastructure: AWS CloudWatch + GuardDuty Integration
-Alert Generation: Python Logging Framework
-Incident Response: Automated via Flask Security Services
+IMMEDIATE (0-15 minutes):
+- [ ] Acknowledge alert in security monitoring system
+- [ ] Review user session in real-time monitoring dashboard
+- [ ] Contact user for verification if session is active
+- [ ] Document initial findings in incident tracking system
 
-Related Systems:
-- Auth0 Authentication Service
-- Flask-SQLAlchemy Audit Logging
-- Sentry Error Tracking Integration
-- AWS Security Hub Correlation
+SHORT-TERM (15-60 minutes):
+- [ ] Complete technical analysis of session logs
+- [ ] Verify user identity and legitimacy of access
+- [ ] If confirmed malicious: initiate account lockdown procedures
+- [ ] Escalate to security team lead if risk score >75
 
-COMPLIANCE INFORMATION
-======================
-Data Privacy Notice: This alert contains personal information processed 
-in accordance with organizational privacy policies and applicable data 
-protection regulations.
+ESCALATION CRITERIA:
+- Risk Score >80: Immediate escalation to CISO
+- Data exfiltration detected: Immediate escalation to legal team
+- Multiple accounts affected: Escalate to incident response team
+- Confirmed account compromise: Activate breach response procedures
 
-Retention Policy: Security logs retained for {{ log_retention_days }} days
-Audit Trail: Complete activity log available in security dashboard
-Reporting: Incident automatically logged to compliance database
+CONTAINMENT ACTIONS (if compromise confirmed):
+1. Immediately suspend user account access
+2. Revoke all active authentication tokens
+3. Reset user password and require MFA re-enrollment
+4. Review and revoke any recently granted permissions
+5. Monitor for additional compromise indicators
 
+RECOVERY PROCEDURES:
+1. Conduct thorough security assessment of affected systems
+2. Implement additional monitoring for affected user account
+3. Provide security awareness training to affected user
+4. Update detection rules based on incident learnings
+
+================================================================================
+MONITORING AND FOLLOW-UP
+================================================================================
+
+CONTINUOUS MONITORING:
+- Enhanced monitoring enabled for user account: {{ enhanced_monitoring_duration }}
+- Additional alerting thresholds activated
+- Behavioral baseline re-training scheduled
+- Follow-up review scheduled: {{ follow_up_date }}
+
+DOCUMENTATION REQUIREMENTS:
+- Complete incident report within 24 hours
+- Update security playbook with lessons learned
+- Document any new detection patterns identified
+- Share findings with security team for threat intelligence
+
+COMPLIANCE CONSIDERATIONS:
+{{ #if gdpr_applicable }}
+- GDPR breach notification assessment required
+{{ /if }}
+{{ #if hipaa_applicable }}
+- HIPAA incident reporting procedures apply
+{{ /if }}
+{{ #if sox_applicable }}
+- SOX compliance documentation required
+{{ /if }}
+
+================================================================================
 CONTACT INFORMATION
-===================
-Security Team: {{ security_email }}
-Emergency Contact: {{ emergency_contact }}
-Incident Response: {{ incident_response_number }}
+================================================================================
 
-Security Operations Center (SOC):
-- Primary: {{ soc_primary_contact }}
-- Escalation: {{ soc_escalation_contact }}
-- Business Hours: {{ business_hours }}
+PRIMARY CONTACTS:
+- Security Operations Center: {{ soc_phone }} / {{ soc_email }}
+- Security Team Lead: {{ team_lead_phone }} / {{ team_lead_email }}
+- Incident Response Team: {{ ir_team_phone }} / {{ ir_team_email }}
 
-NEXT STEPS
-==========
-1. Security team will investigate within {{ investigation_sla }} minutes
-2. User will be contacted if verification required
-3. Additional monitoring enabled automatically
-4. Follow-up report will be generated within {{ report_sla }} hours
+ESCALATION CONTACTS:
+- CISO: {{ ciso_phone }} / {{ ciso_email }}
+- IT Manager: {{ it_manager_phone }} / {{ it_manager_email }}
+- Legal Team: {{ legal_team_phone }} / {{ legal_team_email }}
 
-AUTO-GENERATED ALERT
-====================
-This notification was automatically generated by the Flask Security 
-Monitoring System. Please do not reply to this message.
+EXTERNAL RESOURCES:
+- Threat Intelligence Provider: {{ threat_intel_contact }}
+- External Incident Response: {{ external_ir_contact }}
+- Law Enforcement Liaison: {{ law_enforcement_contact }}
 
-For urgent security matters, contact the Security Operations Center 
-directly at {{ soc_emergency_number }}.
+================================================================================
+SYSTEM INFORMATION
+================================================================================
 
-System Information:
-- Generated by: Flask Anomaly Detection Service
-- Alert Version: {{ alert_version }}
-- Configuration: {{ config_version }}
-- Processing Time: {{ processing_time }}ms
+Detection System: Flask Security Monitoring Framework
+Machine Learning Engine: {{ ml_engine_version }}
+Alert Generation Time: {{ alert_generation_time }}
+Monitoring Dashboard: {{ dashboard_url }}
+Incident Tracking System: {{ incident_tracking_url }}
 
----
-Flask Security Monitoring Framework
-Incident ID: {{ incident_id }}
-© {{ current_year }} - Automated Security Alert System
+This alert was generated automatically by the Flask application security 
+monitoring system. For technical support, contact the system administrators
+at {{ system_admin_email }}.
+
+CONFIDENTIAL: This communication contains security-sensitive information
+and should be handled according to organizational security policies.
+
+================================================================================
