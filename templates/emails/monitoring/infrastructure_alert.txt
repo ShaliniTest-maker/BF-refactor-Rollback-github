@@ -1,512 +1,288 @@
-{#
-Infrastructure Alert Email Template - Text Version
-==================================================
-
-Plain text email template for infrastructure monitoring alerts, providing text-only format
-for infrastructure health notifications. This template ensures reliable delivery across
-all email client types and provides comprehensive infrastructure information for immediate
-operational response by the operations team.
-
-Template Features:
-- Container metrics and health status reporting
-- WSGI server performance and status information
-- AWS service connectivity and health validation
-- Database connectivity and pool status
-- Server resource utilization metrics
-- Emergency response information in accessible text format
-- Clear formatting for text-only email clients
-
-Usage:
-{% extends "emails/monitoring/infrastructure_alert.txt" %}
-{% block alert_details %}
-[Specific alert information]
-{% endblock %}
-#}
-
-{% extends "emails/base/base.txt" %}
-
-{#- Alert Subject - Critical infrastructure notifications -#}
-{% block subject -%}
-{{ alert_severity|upper }} Infrastructure Alert: {{ alert_type }} - {{ system_component }}
-{%- endblock %}
-
-{#- Pre-header for immediate context -#}
-{% block preheader -%}
-{{ alert_severity|title }} alert detected at {{ alert_timestamp|datetime_format('%Y-%m-%d %H:%M:%S UTC') }} affecting {{ system_component }}
-{%- endblock %}
-
-{#- Main Alert Content -#}
-{% block content -%}
-===============================================================================
-INFRASTRUCTURE ALERT NOTIFICATION
-===============================================================================
-
-Alert Level:     {{ alert_severity|upper }}
-Component:       {{ system_component }}
-Alert Time:      {{ alert_timestamp|datetime_format('%Y-%m-%d %H:%M:%S UTC') }}
-Alert ID:        {{ alert_id }}
-
-{{ format_key_value('Alert Type', alert_type) }}
-{{ format_key_value('Environment', environment_name) }}
-{{ format_key_value('Region', aws_region) }}
-
-ALERT DESCRIPTION
-{{ create_section_divider('-', 78) }}
-{{ alert_description }}
-
-{% if alert_message -%}
-ALERT MESSAGE
-{{ create_section_divider('-', 78) }}
-{{ alert_message }}
-{% endif -%}
-
-{% if alert_details -%}
-{% block alert_details -%}
-TECHNICAL DETAILS
-{{ create_section_divider('-', 78) }}
-{{ alert_details }}
-{%- endblock %}
-{% endif -%}
-{%- endblock %}
-
-{#- Infrastructure Status Information -#}
-{% block additional_info -%}
-
-INFRASTRUCTURE STATUS OVERVIEW
-===============================================================================
-
-{% if container_metrics -%}
-CONTAINER HEALTH STATUS
-{{ create_section_divider('-', 40) }}
-{% for container in container_metrics -%}
-Container: {{ container.name }}
-{{ format_key_value('  Status', container.status) }}
-{{ format_key_value('  CPU Usage', container.cpu_usage + '%') }}
-{{ format_key_value('  Memory Usage', container.memory_usage + '%') }}
-{{ format_key_value('  Uptime', container.uptime) }}
-{{ format_key_value('  Restart Count', container.restart_count|string) }}
-{% if container.last_restart_time -%}
-{{ format_key_value('  Last Restart', container.last_restart_time|datetime_format('%Y-%m-%d %H:%M:%S UTC')) }}
-{% endif -%}
-
-{% endfor -%}
-{% endif -%}
-
-{% if wsgi_metrics -%}
-WSGI SERVER STATUS (GUNICORN)
-{{ create_section_divider('-', 40) }}
-{% for server in wsgi_metrics -%}
-Server Instance: {{ server.instance_id }}
-{{ format_key_value('  Server Status', server.status) }}
-{{ format_key_value('  Active Workers', server.active_workers|string + '/' + server.total_workers|string) }}
-{{ format_key_value('  Request Queue', server.request_queue_depth|string) }}
-{{ format_key_value('  Avg Response Time', server.avg_response_time + 'ms') }}
-{{ format_key_value('  Request Rate', server.request_rate + ' req/sec') }}
-{{ format_key_value('  Worker Utilization', server.worker_utilization + '%') }}
-{% if server.failed_workers > 0 -%}
-{{ format_key_value('  Failed Workers', server.failed_workers|string) }}
-{% endif -%}
-
-{% endfor -%}
-{% endif -%}
-
-{% if aws_services -%}
-AWS SERVICES STATUS
-{{ create_section_divider('-', 40) }}
-{% for service in aws_services -%}
-Service: {{ service.name }}
-{{ format_key_value('  Status', service.status) }}
-{{ format_key_value('  Health Check', service.health_check) }}
-{% if service.last_check_time -%}
-{{ format_key_value('  Last Check', service.last_check_time|datetime_format('%Y-%m-%d %H:%M:%S UTC')) }}
-{% endif -%}
-{% if service.error_message -%}
-{{ format_key_value('  Error', service.error_message) }}
-{% endif -%}
-
-{% endfor -%}
-{% endif -%}
-
-{% if database_status -%}
-DATABASE CONNECTIVITY STATUS
-{{ create_section_divider('-', 40) }}
-Database Type: {{ database_status.type }}
-{{ format_key_value('Connection Status', database_status.connection_status) }}
-{{ format_key_value('Active Connections', database_status.active_connections|string + '/' + database_status.max_connections|string) }}
-{{ format_key_value('Pool Utilization', database_status.pool_utilization + '%') }}
-{{ format_key_value('Avg Query Time', database_status.avg_query_time + 'ms') }}
-{% if database_status.connection_errors > 0 -%}
-{{ format_key_value('Connection Errors', database_status.connection_errors|string + ' (last hour)') }}
-{% endif -%}
-{% if database_status.last_successful_connection -%}
-{{ format_key_value('Last Successful Connection', database_status.last_successful_connection|datetime_format('%Y-%m-%d %H:%M:%S UTC')) }}
-{% endif -%}
-
-{% endif -%}
-
-{% if server_metrics -%}
-SERVER RESOURCE UTILIZATION
-{{ create_section_divider('-', 40) }}
-{% for server in server_metrics -%}
-Server: {{ server.hostname }} ({{ server.instance_id }})
-{{ format_key_value('  CPU Usage', server.cpu_usage + '%') }}
-{{ format_key_value('  Memory Usage', server.memory_usage + '%') }}
-{{ format_key_value('  Disk Usage', server.disk_usage + '%') }}
-{{ format_key_value('  Network I/O', server.network_io) }}
-{{ format_key_value('  Load Average', server.load_average) }}
-{{ format_key_value('  Uptime', server.uptime) }}
-
-{% endfor -%}
-{% endif -%}
-
-{% if application_metrics -%}
-APPLICATION PERFORMANCE METRICS
-{{ create_section_divider('-', 40) }}
-{{ format_key_value('Application Status', application_metrics.status) }}
-{{ format_key_value('Response Time (avg)', application_metrics.avg_response_time + 'ms') }}
-{{ format_key_value('Error Rate', application_metrics.error_rate + '%') }}
-{{ format_key_value('Request Rate', application_metrics.request_rate + ' req/min') }}
-{% if application_metrics.active_sessions -%}
-{{ format_key_value('Active Sessions', application_metrics.active_sessions|string) }}
-{% endif -%}
-{% if application_metrics.last_deployment -%}
-{{ format_key_value('Last Deployment', application_metrics.last_deployment|datetime_format('%Y-%m-%d %H:%M:%S UTC')) }}
-{% endif -%}
-
-{% endif -%}
-
-{% if network_status -%}
-NETWORK CONNECTIVITY STATUS
-{{ create_section_divider('-', 40) }}
-{% for endpoint in network_status -%}
-Endpoint: {{ endpoint.name }}
-{{ format_key_value('  URL/Address', endpoint.url) }}
-{{ format_key_value('  Status', endpoint.status) }}
-{{ format_key_value('  Response Time', endpoint.response_time + 'ms') }}
-{{ format_key_value('  Last Check', endpoint.last_check|datetime_format('%Y-%m-%d %H:%M:%S UTC')) }}
-
-{% endfor -%}
-{% endif -%}
-{%- endblock %}
-
-{#- Emergency Response Information -#}
-{% block action_items -%}
-IMMEDIATE ACTION REQUIRED
-===============================================================================
-
-{% if alert_severity == 'CRITICAL' -%}
-CRITICAL ALERT - IMMEDIATE RESPONSE REQUIRED:
-{{ format_list_item('Acknowledge this alert within 15 minutes') }}
-{{ format_list_item('Begin incident response procedures immediately') }}
-{{ format_list_item('Notify on-call engineering manager if issue persists') }}
-{{ format_list_item('Document all troubleshooting steps taken') }}
-
-{% elif alert_severity == 'HIGH' -%}
-HIGH PRIORITY ALERT - RESPONSE REQUIRED:
-{{ format_list_item('Acknowledge this alert within 30 minutes') }}
-{{ format_list_item('Investigate root cause and begin resolution') }}
-{{ format_list_item('Update incident tracking system with findings') }}
-{{ format_list_item('Escalate to team lead if unresolved within 1 hour') }}
-
-{% elif alert_severity == 'MEDIUM' -%}
-MEDIUM PRIORITY ALERT - SCHEDULED RESPONSE:
-{{ format_list_item('Acknowledge this alert within 1 hour') }}
-{{ format_list_item('Schedule investigation during business hours') }}
-{{ format_list_item('Monitor for escalation to higher severity') }}
-{{ format_list_item('Update monitoring thresholds if false positive') }}
-
-{% else -%}
-INFORMATIONAL ALERT - AWARENESS REQUIRED:
-{{ format_list_item('Review alert details for trending patterns') }}
-{{ format_list_item('Consider preventive maintenance if applicable') }}
-{{ format_list_item('Update documentation or runbooks as needed') }}
-{{ format_list_item('No immediate action required unless pattern emerges') }}
-{% endif -%}
-
-STANDARD TROUBLESHOOTING STEPS:
-{{ format_list_item('Check system status dashboard: https://status.company.com') }}
-{{ format_list_item('Review application logs in CloudWatch for errors') }}
-{{ format_list_item('Verify database connectivity and performance') }}
-{{ format_list_item('Check AWS service health status') }}
-{{ format_list_item('Validate container and WSGI server status') }}
-
-{% if runbook_url -%}
-RUNBOOK REFERENCE:
-{{ format_url_for_text(runbook_url, 'Incident Response Runbook') }}
-{% endif -%}
-
-{% if escalation_contact -%}
-ESCALATION CONTACT:
-{{ format_key_value('Primary', escalation_contact.primary) }}
-{% if escalation_contact.secondary -%}
-{{ format_key_value('Secondary', escalation_contact.secondary) }}
-{% endif -%}
-{% if escalation_contact.manager -%}
-{{ format_key_value('Manager', escalation_contact.manager) }}
-{% endif -%}
-{% endif -%}
-{%- endblock %}
-
-{#- Contact Information for Operations Team -#}
-{% block contact_info -%}
-OPERATIONS TEAM EMERGENCY CONTACTS
-===============================================================================
-
-24/7 EMERGENCY SUPPORT:
-- On-Call Pager: +1-800-ONCALL-1 (1-800-662-2551)
-- Emergency Slack: #critical-alerts
-- Incident Hotline: +1-800-INCIDENT (1-800-462-4336)
-
-TECHNICAL SUPPORT:
-- Infrastructure Team: infrastructure@company.com
-- Database Team: dba@company.com  
-- Security Team: security@company.com
-- DevOps Team: devops@company.com
-
-MONITORING SYSTEMS:
-- Primary Dashboard: https://monitoring.company.com
-- CloudWatch Console: https://console.aws.amazon.com/cloudwatch
-- Application Monitoring: https://app-monitoring.company.com
-- Container Health: https://container-health.company.com
-
-BUSINESS HOURS: 24/7 Critical Support | Monday-Friday 8:00 AM - 6:00 PM EST Standard Support
-{%- endblock %}
-
-{#- Alert Footer with Additional Context -#}
-{% block footer -%}
-
-===============================================================================
-Infrastructure Monitoring System | Real-time Operations Support
-===============================================================================
-
-This infrastructure alert was generated by automated monitoring systems and
-requires operational team attention. Alert details have been logged for
-audit and compliance purposes.
-
-{% block alert_metadata -%}
-ALERT METADATA:
-{{ format_key_value('Monitor Source', monitor_source|default('AWS CloudWatch')) }}
-{{ format_key_value('Alert Rule', alert_rule|default('Infrastructure Health Check')) }}
-{{ format_key_value('Threshold', alert_threshold|default('System defined threshold')) }}
-{% if correlation_id -%}
-{{ format_key_value('Correlation ID', correlation_id) }}
-{% endif -%}
-{% if related_alerts -%}
-{{ format_key_value('Related Alerts', related_alerts|length|string + ' active alerts') }}
-{% endif -%}
-
-{%- endblock %}
-
-{% block unsubscribe_info -%}
-Alert Notification Preferences:
-https://monitoring.company.com/preferences
-
-IMPORTANT: Infrastructure alerts cannot be disabled for operations team members.
-Contact your manager to discuss role-based alert routing changes.
-
-{%- endblock %}
-
-{% block legal_info -%}
-© {% now 'Y' %} Company Name. All rights reserved.
-
-This infrastructure alert contains sensitive operational information and is
-intended only for authorized operations team members. If you have received
-this alert in error, please contact security@company.com immediately.
-
-Unauthorized disclosure of infrastructure monitoring data is prohibited.
-
-{%- endblock %}
-
-{% block compliance_info -%}
-Operations Team
-Infrastructure Monitoring Division
-123 Business Street
-City, State 12345
-United States
-
-Alert System Compliance: SOC 2 Type II, ISO 27001
-Monitoring Infrastructure: AWS GovCloud Ready
-
-{%- endblock %}
-{%- endblock %}
-
-{#- Utility Macros for Infrastructure Alerts -#}
-{%- macro format_metric_status(metric_name, current_value, threshold_value, status='NORMAL') -%}
-{{ format_key_value(metric_name, current_value + ' (threshold: ' + threshold_value + ') [' + status + ']') }}
-{%- endmacro -%}
-
-{%- macro format_service_status(service_name, status, last_check) -%}
-{{ format_key_value(service_name, status + ' (checked: ' + last_check + ')') }}
-{%- endmacro -%}
-
-{%- macro format_resource_usage(resource_type, usage_percent, warning_threshold=80, critical_threshold=90) -%}
-{% set status = 'NORMAL' -%}
-{% if usage_percent|int >= critical_threshold -%}
-  {% set status = 'CRITICAL' -%}
-{% elif usage_percent|int >= warning_threshold -%}
-  {% set status = 'WARNING' -%}
-{% endif -%}
-{{ format_key_value(resource_type + ' Usage', usage_percent + '% [' + status + ']') }}
-{%- endmacro -%}
-
-{%- macro format_connection_pool_status(active, max_connections, utilization_percent) -%}
-{% set status = 'NORMAL' -%}
-{% if utilization_percent|int >= 90 -%}
-  {% set status = 'CRITICAL' -%}
-{% elif utilization_percent|int >= 80 -%}
-  {% set status = 'WARNING' -%}
-{% endif -%}
-{{ format_key_value('Connection Pool', active|string + '/' + max_connections|string + ' (' + utilization_percent + '%) [' + status + ']') }}
-{%- endmacro -%}
-
-{%- macro format_container_health(container_name, status, cpu_usage, memory_usage, restart_count) -%}
-Container: {{ container_name }}
-{{ format_key_value('  Status', status) }}
-{{ format_resource_usage('  CPU', cpu_usage) }}
-{{ format_resource_usage('  Memory', memory_usage) }}
-{{ format_key_value('  Restarts', restart_count|string) }}
-{%- endmacro -%}
-
-{%- macro format_alert_severity_banner(severity) -%}
-{% if severity == 'CRITICAL' -%}
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!                          CRITICAL INFRASTRUCTURE ALERT                        !!
-!!                        IMMEDIATE RESPONSE REQUIRED                           !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-{% elif severity == 'HIGH' -%}
-##############################################################################
-#                         HIGH PRIORITY INFRASTRUCTURE ALERT                        #
-#                           URGENT RESPONSE REQUIRED                          #
-##############################################################################
-{% elif severity == 'MEDIUM' -%}
-------------------------------------------------------------------------------
-                    MEDIUM PRIORITY INFRASTRUCTURE ALERT
-                         SCHEDULED RESPONSE REQUIRED  
-------------------------------------------------------------------------------
-{% else -%}
-......................................................................
-                 INFORMATIONAL INFRASTRUCTURE ALERT
-                       AWARENESS NOTIFICATION
-......................................................................
-{% endif -%}
-{%- endmacro -%}
-
-{%- macro format_escalation_timeline(severity) -%}
-{% if severity == 'CRITICAL' -%}
-ESCALATION TIMELINE:
-{{ format_list_item('0-15 min: On-call engineer acknowledgment required') }}
-{{ format_list_item('15-30 min: Team lead notification if unacknowledged') }}
-{{ format_list_item('30-60 min: Engineering manager escalation') }}
-{{ format_list_item('60+ min: Executive team notification') }}
-{% elif severity == 'HIGH' -%}
-ESCALATION TIMELINE:
-{{ format_list_item('0-30 min: Primary responder acknowledgment') }}
-{{ format_list_item('30-60 min: Team lead notification') }}
-{{ format_list_item('1-2 hours: Manager escalation if unresolved') }}
-{{ format_list_item('2+ hours: Executive team awareness') }}
-{% elif severity == 'MEDIUM' -%}
-RESPONSE TIMELINE:
-{{ format_list_item('0-1 hour: Acknowledgment expected') }}
-{{ format_list_item('1-4 hours: Investigation and initial response') }}
-{{ format_list_item('4-24 hours: Resolution or escalation') }}
-{% else -%}
-REVIEW TIMELINE:
-{{ format_list_item('Next business day: Review and acknowledge') }}
-{{ format_list_item('Weekly: Pattern analysis if recurring') }}
-{% endif -%}
-{%- endmacro -%}
-
-{#-
-Template Usage Examples for Infrastructure Alerts:
-==================================================
-
-1. Critical Container Failure Alert:
-{% set container_metrics = [
-    {
-        'name': 'flask-app-1',
-        'status': 'FAILED',
-        'cpu_usage': '0',
-        'memory_usage': '0',
-        'uptime': '0m',
-        'restart_count': 5,
-        'last_restart_time': '2024-01-15T14:30:00Z'
-    }
-] %}
-{% set alert_severity = 'CRITICAL' %}
-{% set alert_type = 'Container Health Failure' %}
-{% set system_component = 'Flask Application Container' %}
-
-2. High Database Connection Pool Alert:
-{% set database_status = {
-    'type': 'PostgreSQL',
-    'connection_status': 'DEGRADED',
-    'active_connections': 95,
-    'max_connections': 100,
-    'pool_utilization': '95',
-    'avg_query_time': '250',
-    'connection_errors': 12
-} %}
-{% set alert_severity = 'HIGH' %}
-{% set alert_type = 'Database Connection Pool Near Capacity' %}
-
-3. WSGI Server Performance Alert:
-{% set wsgi_metrics = [
-    {
-        'instance_id': 'i-0123456789abcdef0',
-        'status': 'DEGRADED',
-        'active_workers': 6,
-        'total_workers': 8,
-        'request_queue_depth': 45,
-        'avg_response_time': '350',
-        'request_rate': '125',
-        'worker_utilization': '87',
-        'failed_workers': 2
-    }
-] %}
-{% set alert_severity = 'MEDIUM' %}
-{% set alert_type = 'WSGI Server Performance Degradation' %}
-
-4. AWS Service Health Alert:
-{% set aws_services = [
-    {
-        'name': 'AWS RDS',
-        'status': 'DEGRADED',
-        'health_check': 'FAILING',
-        'last_check_time': '2024-01-15T14:35:00Z',
-        'error_message': 'Connection timeout after 30 seconds'
-    },
-    {
-        'name': 'AWS CloudWatch',
-        'status': 'HEALTHY',
-        'health_check': 'PASSING',
-        'last_check_time': '2024-01-15T14:35:00Z'
-    }
-] %}
-
-5. Server Resource Utilization Alert:
-{% set server_metrics = [
-    {
-        'hostname': 'flask-prod-01',
-        'instance_id': 'i-0123456789abcdef0',
-        'cpu_usage': '92',
-        'memory_usage': '87',
-        'disk_usage': '76',
-        'network_io': '1.2 Gbps',
-        'load_average': '15.2',
-        'uptime': '45 days'
-    }
-] %}
-
-Design Principles for Infrastructure Alerts:
-=============================================
-1. Clear severity indication with visual text formatting
-2. Comprehensive infrastructure component status
-3. Actionable information for immediate response
-4. Structured format for easy parsing in text-only clients
-5. Complete contact information for emergency escalation
-6. Escalation timelines based on alert severity
-7. Audit trail information for compliance requirements
-8. Integration with existing monitoring and alerting systems
-9. Support for complex multi-component infrastructure scenarios
-10. Accessibility compliance for screen readers and text clients
--#}
+============================================================
+INFRASTRUCTURE ALERT - {{alert_severity|upper}}
+============================================================
+
+Alert ID: {{alert_id}}
+Timestamp: {{timestamp|strftime('%Y-%m-%d %H:%M:%S UTC')}}
+Environment: {{environment|upper}}
+Alert Type: INFRASTRUCTURE MONITORING
+Severity: {{alert_severity|upper}}
+
+{% if alert_severity == 'CRITICAL' %}
+!!! IMMEDIATE ACTION REQUIRED !!!
+{% elif alert_severity == 'HIGH' %}
+*** URGENT ATTENTION NEEDED ***
+{% endif %}
+
+============================================================
+ALERT SUMMARY
+============================================================
+
+Component: {{component_name}}
+Issue: {{alert_message}}
+Duration: {{alert_duration}}
+Status: {{current_status|upper}}
+
+{% if alert_severity in ['CRITICAL', 'HIGH'] %}
+Escalation: {{escalation_path}}
+Response Required: {{response_time_requirement}}
+{% endif %}
+
+============================================================
+INFRASTRUCTURE HEALTH OVERVIEW
+============================================================
+
+FLASK APPLICATION STATUS:
+- Application Instances: {{app_instances_total}} total, {{app_instances_healthy}} healthy
+- Response Time: {{avg_response_time}}ms (SLA: <200ms)
+- Error Rate: {{error_rate}}% (SLA: <1%)
+- Active Requests: {{active_requests}}
+- Request Queue Depth: {{request_queue_depth}}
+
+CONTAINER ORCHESTRATION STATUS:
+- Container Platform: {{container_platform}} ({{container_orchestration}})
+- Total Containers: {{container_count_total}}
+- Running Containers: {{container_count_running}}
+- Failed Containers: {{container_count_failed}}
+- Pending Restarts: {{container_restarts_pending}}
+
+CONTAINER RESOURCE UTILIZATION:
+{% for container in container_metrics %}
+Container {{container.name}}:
+  - CPU Usage: {{container.cpu_percent}}% (Threshold: 80%)
+  - Memory Usage: {{container.memory_percent}}% ({{container.memory_used}}/{{container.memory_total}})
+  - Network I/O: {{container.network_in}}/{{container.network_out}} MB/s
+  - Disk Usage: {{container.disk_percent}}%
+  - Status: {{container.status|upper}}
+{% endfor %}
+
+WSGI SERVER PERFORMANCE:
+- Gunicorn Workers: {{wsgi_workers_active}}/{{wsgi_workers_total}} active
+- Worker Memory: {{wsgi_memory_usage}}MB average per worker
+- Request Latency: {{wsgi_request_latency}}ms average
+- Worker Restarts: {{wsgi_worker_restarts}} in last hour
+- Request Timeout Rate: {{wsgi_timeout_rate}}%
+
+DATABASE CONNECTIVITY:
+- Database Status: {{database_status|upper}}
+- Connection Pool: {{db_connections_active}}/{{db_connections_max}} connections
+- Pool Utilization: {{db_pool_utilization}}% (Alert: >90%)
+- Query Response Time: {{db_avg_query_time}}ms (SLA: <100ms)
+- Failed Connections: {{db_failed_connections}} in last hour
+- Active Transactions: {{db_active_transactions}}
+
+============================================================
+AWS SERVICE STATUS
+============================================================
+
+EC2 INSTANCES:
+{% for instance in ec2_instances %}
+Instance {{instance.id}} ({{instance.type}}):
+  - Status: {{instance.status|upper}}
+  - CPU: {{instance.cpu_percent}}%
+  - Memory: {{instance.memory_percent}}%
+  - Network: {{instance.network_status}}
+  - Health Check: {{instance.health_check|upper}}
+{% endfor %}
+
+RDS POSTGRESQL:
+- Database Instance: {{rds_instance_id}}
+- Status: {{rds_status|upper}}
+- Multi-AZ: {{rds_multi_az|yesno}}
+- CPU Utilization: {{rds_cpu_percent}}%
+- Available Memory: {{rds_free_memory}}MB
+- Storage Space: {{rds_storage_used}}/{{rds_storage_total}}GB
+- Backup Status: {{rds_backup_status}}
+
+LOAD BALANCER:
+- ALB Status: {{alb_status|upper}}
+- Target Health: {{alb_healthy_targets}}/{{alb_total_targets}} healthy
+- Request Count: {{alb_request_count}}/minute
+- Response Time: {{alb_response_time}}ms
+- HTTP 5xx Errors: {{alb_5xx_errors}}/hour
+
+ECR CONTAINER REGISTRY:
+- Registry Status: {{ecr_status|upper}}
+- Last Image Push: {{ecr_last_push|timesince}} ago
+- Image Vulnerabilities: {{ecr_vulnerabilities_critical}} critical, {{ecr_vulnerabilities_high}} high
+- Storage Used: {{ecr_storage_used}}GB
+
+CLOUDWATCH MONITORING:
+- Metrics Collection: {{cloudwatch_metrics_status|upper}}
+- Log Ingestion: {{cloudwatch_logs_status|upper}}
+- Failed Metrics: {{cloudwatch_failed_metrics}} in last hour
+- Alert Rules Active: {{cloudwatch_active_alarms}}
+
+============================================================
+AFFECTED SYSTEMS AND IMPACT
+============================================================
+
+Primary Impact:
+{{primary_impact}}
+
+Secondary Systems:
+{% for system in affected_systems %}
+- {{system.name}}: {{system.impact_level}} impact
+{% endfor %}
+
+User Impact Assessment:
+- Estimated Affected Users: {{affected_users_count}}
+- Service Degradation Level: {{service_degradation_level}}
+- Business Function Impact: {{business_impact}}
+
+============================================================
+DIAGNOSTIC INFORMATION
+============================================================
+
+Error Details:
+{{error_details}}
+
+Recent Events:
+{% for event in recent_events %}
+{{event.timestamp|strftime('%H:%M:%S')}} - {{event.message}}
+{% endfor %}
+
+Resource Thresholds Exceeded:
+{% for threshold in exceeded_thresholds %}
+- {{threshold.metric}}: {{threshold.current_value}} (Threshold: {{threshold.limit}})
+{% endfor %}
+
+Container Events (Last 30 minutes):
+{% for event in container_events %}
+{{event.timestamp|strftime('%H:%M:%S')}} [{{event.container_name}}] {{event.event_type}}: {{event.message}}
+{% endfor %}
+
+WSGI Server Diagnostics:
+- Last Worker Failure: {{wsgi_last_failure|default('None')|timesince}}
+- Worker Error Log: {{wsgi_error_summary}}
+- Performance Degradation: {{wsgi_performance_degradation|yesno}}
+
+Database Diagnostics:
+- Long Running Queries: {{db_long_queries_count}}
+- Lock Contention: {{db_lock_contention|yesno}}
+- Connection Errors: {{db_connection_errors}}
+- Last Backup: {{db_last_backup|timesince}} ago
+
+============================================================
+RECOMMENDED ACTIONS
+============================================================
+
+Immediate Actions Required:
+{% for action in immediate_actions %}
+{{loop.index}}. {{action}}
+{% endfor %}
+
+Investigation Steps:
+{% for step in investigation_steps %}
+{{loop.index}}. {{step}}
+{% endfor %}
+
+{% if alert_severity == 'CRITICAL' %}
+EMERGENCY PROCEDURES:
+{% for procedure in emergency_procedures %}
+- {{procedure}}
+{% endfor %}
+
+ROLLBACK OPTIONS:
+{% for rollback in rollback_options %}
+- {{rollback.name}}: {{rollback.description}}
+  Estimated Time: {{rollback.estimated_time}}
+  Risk Level: {{rollback.risk_level}}
+{% endfor %}
+{% endif %}
+
+============================================================
+ESCALATION AND CONTACT INFORMATION
+============================================================
+
+{% if alert_severity == 'CRITICAL' %}
+PRIMARY CONTACT: On-Call Engineer ({{oncall_engineer_contact}})
+ESCALATION PATH: 
+  15 min -> Team Lead ({{team_lead_contact}})
+  30 min -> Engineering Manager ({{engineering_manager_contact}})
+  45 min -> CTO ({{cto_contact}})
+{% elif alert_severity == 'HIGH' %}
+PRIMARY CONTACT: Development Team Lead ({{team_lead_contact}})
+ESCALATION PATH:
+  1 hour -> Engineering Manager ({{engineering_manager_contact}})
+{% else %}
+PRIMARY CONTACT: Development Team ({{dev_team_contact}})
+{% endif %}
+
+Incident Response Runbook: {{runbook_url}}
+Monitoring Dashboard: {{dashboard_url}}
+Log Analysis: {{log_analysis_url}}
+
+============================================================
+MONITORING LINKS (Text Only)
+============================================================
+
+CloudWatch Dashboard:
+{{cloudwatch_dashboard_url}}
+
+Container Metrics:
+{{container_metrics_url}}
+
+Application Performance:
+{{app_performance_url}}
+
+Database Monitoring:
+{{database_monitoring_url}}
+
+Infrastructure Health:
+{{infrastructure_health_url}}
+
+AWS Service Health:
+{{aws_service_health_url}}
+
+============================================================
+ALERT DETAILS
+============================================================
+
+Alert Rule: {{alert_rule_name}}
+Metric Query: {{metric_query}}
+Threshold Condition: {{threshold_condition}}
+Evaluation Period: {{evaluation_period}}
+Data Points: {{data_points_to_alarm}}/{{evaluation_periods}}
+
+Historical Context:
+- Similar alerts in last 24h: {{similar_alerts_24h}}
+- Last occurrence: {{last_occurrence|default('None')|timesince}}
+- Average resolution time: {{avg_resolution_time}}
+
+Performance Baseline Comparison:
+- Current vs Baseline CPU: {{cpu_vs_baseline}}%
+- Current vs Baseline Memory: {{memory_vs_baseline}}%
+- Current vs Baseline Response Time: {{response_time_vs_baseline}}%
+
+============================================================
+SYSTEM RECOVERY STATUS
+============================================================
+
+Auto-Recovery Actions Attempted:
+{% for recovery_action in auto_recovery_actions %}
+- {{recovery_action.action}}: {{recovery_action.status}} ({{recovery_action.timestamp|strftime('%H:%M:%S')}})
+{% endfor %}
+
+Container Orchestration Response:
+- Auto-scaling triggered: {{autoscaling_triggered|yesno}}
+- New containers spawned: {{new_containers_count}}
+- Failed containers terminated: {{terminated_containers_count}}
+- Load balancer health checks: {{lb_health_check_status}}
+
+Database Failover Status:
+- Multi-AZ failover initiated: {{rds_failover_initiated|yesno}}
+- Connection pool recovery: {{connection_pool_recovery_status}}
+- Read replica status: {{read_replica_status}}
+
+============================================================
+
+This alert was generated by the Flask Infrastructure Monitoring System.
+For urgent issues, contact the on-call engineer immediately.
+Do not reply to this email - use the contact information above.
+
+System Time: {{system_timestamp|strftime('%Y-%m-%d %H:%M:%S UTC')}}
+Alert Generator: {{alert_generator_version}}
+Monitoring Node: {{monitoring_node_id}}
+
+============================================================
