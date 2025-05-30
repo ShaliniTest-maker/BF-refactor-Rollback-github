@@ -1,0 +1,96 @@
+{
+  "status": "accepted",
+  "code": 202,
+  "success": true,
+  "timestamp": "{{ timestamp or moment().utc().isoformat() }}",
+  "request_id": "{{ request_id or g.request_id or request.headers.get('X-Request-ID', uuid.uuid4().hex) }}",
+  "message": "{{ message or 'Request accepted for asynchronous processing' }}",
+  
+  "async_processing": {
+    "task_id": "{{ task_id or async_task.id if async_task else uuid.uuid4().hex }}",
+    "task_type": "{{ task_type or operation_type or 'async_operation' }}",
+    "status": "{{ processing_status or 'queued' }}",
+    "created_at": "{{ task_created_at or timestamp or moment().utc().isoformat() }}",
+    "estimated_completion": "{{ estimated_completion or (moment().utc() + timedelta(minutes=5)).isoformat() if estimated_duration else null }}",
+    "priority": "{{ task_priority or 'normal' }}"
+  },
+
+  "polling": {
+    "status_url": "{{ status_url or url_for('api.task_status', task_id=task_id or async_task.id if async_task else uuid.uuid4().hex, _external=True) }}",
+    "poll_interval_seconds": {{ poll_interval or 5 }},
+    "max_poll_attempts": {{ max_attempts or 120 }},
+    "timeout_seconds": {{ timeout or 600 }},
+    "expires_at": "{{ expires_at or (moment().utc() + timedelta(seconds=timeout or 600)).isoformat() }}"
+  },
+
+  "operation": {
+    "type": "{{ operation_type or 'async_operation' }}",
+    "description": "{{ operation_description or 'Asynchronous operation in progress' }}",
+    "resource_type": "{{ resource_type or 'resource' }}",
+    "resource_id": "{{ resource_id or target_id or null }}",
+    "initiated_by": "{{ user_id or current_user.id if current_user and current_user.is_authenticated else 'system' }}"
+  },
+
+  "progress": {
+    "percentage": {{ progress_percentage or 0 }},
+    "current_step": "{{ current_step or 'queued' }}",
+    "total_steps": {{ total_steps or null }},
+    "steps_completed": {{ steps_completed or 0 }},
+    "current_step_description": "{{ step_description or 'Task queued for processing' }}"
+  },
+
+  "links": {
+    "self": "{{ self_url or request.url }}",
+    "status": "{{ status_url or url_for('api.task_status', task_id=task_id or async_task.id if async_task else uuid.uuid4().hex, _external=True) }}",
+    {% if resource_type and resource_id %}
+    "resource": "{{ resource_url or url_for('api.' + resource_type + '_detail', id=resource_id, _external=True) }}",
+    {% endif %}
+    "cancel": "{{ cancel_url or url_for('api.task_cancel', task_id=task_id or async_task.id if async_task else uuid.uuid4().hex, _external=True) if cancellable else null }}",
+    "api_root": "{{ url_for('api.root', _external=True) }}"
+  },
+
+  "metadata": {
+    "processing_mode": "asynchronous",
+    "async_framework": "Flask{{ ' + Celery' if use_celery else ' + Background Tasks' }}",
+    "queue_name": "{{ queue_name or 'default' }}",
+    "retry_policy": {
+      "enabled": {{ retry_enabled or true }},
+      "max_retries": {{ max_retries or 3 }},
+      "retry_delay_seconds": {{ retry_delay or 30 }}
+    },
+    "notification": {
+      "webhook_url": "{{ webhook_url or callback_url or null }}",
+      "email_notification": {{ email_notification or false }},
+      "push_notification": {{ push_notification or false }}
+    }
+  },
+
+  {% if error_context %}
+  "warnings": [
+    {% for warning in warnings or [] %}
+    {
+      "code": "{{ warning.code }}",
+      "message": "{{ warning.message }}",
+      "field": "{{ warning.field or null }}"
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ],
+  {% endif %}
+
+  "response_time_ms": {{ response_time or ((moment().utc() - request_start_time).total_seconds() * 1000) if request_start_time else null }},
+
+  {% if debug_mode or config.DEBUG %}
+  "debug": {
+    "blueprint": "{{ request.blueprint }}",
+    "endpoint": "{{ request.endpoint }}",
+    "method": "{{ request.method }}",
+    "view_function": "{{ request.endpoint.split('.')[-1] if request.endpoint else null }}",
+    "processing_node": "{{ processing_node or 'primary' }}",
+    "queue_depth": {{ queue_depth or null }},
+    "worker_id": "{{ worker_id or null }}"
+  },
+  {% endif %}
+
+  "api_version": "{{ api_version or config.API_VERSION or '1.0' }}",
+  "server_time": "{{ server_time or moment().utc().isoformat() }}"
+}
