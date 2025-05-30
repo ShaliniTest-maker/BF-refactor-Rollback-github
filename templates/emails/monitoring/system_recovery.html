@@ -1,0 +1,616 @@
+{% extends "templates/emails/base/base.html" %}
+
+{% block title %}System Recovery Complete - {{ incident_id }}{% endblock %}
+
+{% block email_label %}System Recovery Notification Email{% endblock %}
+
+{% block header_title %}System Recovery Notification{% endblock %}
+
+{% block email_styles %}
+/* System Recovery Email Specific Styles */
+.recovery-status {
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 6px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.recovery-status.partial {
+    background-color: #fff3cd;
+    border-color: #ffeaa7;
+}
+
+.recovery-status.in-progress {
+    background-color: #d1ecf1;
+    border-color: #bee5eb;
+}
+
+.incident-header {
+    background-color: #f8f9fa;
+    border-left: 4px solid #28a745;
+    padding: 15px 20px;
+    margin: 20px 0;
+    border-radius: 0 6px 6px 0;
+}
+
+.incident-header.partial {
+    border-left-color: #ffc107;
+}
+
+.incident-header.in-progress {
+    border-left-color: #17a2b8;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.metric-card {
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+    text-align: center;
+}
+
+.metric-value {
+    font-size: 24px;
+    font-weight: 600;
+    color: #28a745;
+    margin-bottom: 5px;
+}
+
+.metric-value.warning {
+    color: #ffc107;
+}
+
+.metric-value.error {
+    color: #dc3545;
+}
+
+.metric-label {
+    font-size: 14px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.timeline-item {
+    border-left: 2px solid #28a745;
+    padding-left: 20px;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 5px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #28a745;
+}
+
+.timeline-item.warning::before {
+    background-color: #ffc107;
+}
+
+.timeline-item.error::before {
+    background-color: #dc3545;
+}
+
+.timeline-time {
+    font-size: 12px;
+    color: #6c757d;
+    font-weight: 500;
+}
+
+.timeline-content {
+    margin-top: 5px;
+}
+
+.service-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    margin: 5px 0;
+    border-radius: 4px;
+    border: 1px solid #dee2e6;
+}
+
+.service-name {
+    font-weight: 500;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-healthy {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-degraded {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.status-down {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.container-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.container-status {
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+}
+
+.container-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.container-name {
+    font-weight: 600;
+    color: #495057;
+}
+
+.action-items {
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.action-items h3 {
+    color: #495057;
+    margin-bottom: 15px;
+}
+
+.action-item {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    padding: 8px 0;
+}
+
+.action-status {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    margin-right: 10px;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.action-complete {
+    background-color: #28a745;
+}
+
+.action-pending {
+    background-color: #ffc107;
+}
+
+.action-failed {
+    background-color: #dc3545;
+}
+
+.stakeholder-info {
+    background-color: #e9ecef;
+    border-radius: 6px;
+    padding: 15px;
+    margin: 20px 0;
+    font-size: 14px;
+    color: #495057;
+}
+
+/* Responsive Design */
+@media screen and (max-width: 600px) {
+    .metrics-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .container-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .service-status {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .recovery-status {
+        background-color: #2d5a3d !important;
+        border-color: #4a7c59 !important;
+    }
+    
+    .incident-header {
+        background-color: #2d2d2d !important;
+    }
+    
+    .metric-card {
+        background-color: #2d2d2d !important;
+        border-color: #404040 !important;
+    }
+    
+    .action-items {
+        background-color: #2d2d2d !important;
+    }
+    
+    .stakeholder-info {
+        background-color: #404040 !important;
+        color: #cccccc !important;
+    }
+}
+{% endblock %}
+
+{% block email_content %}
+<div class="incident-header{% if recovery_status == 'partial' %} partial{% elif recovery_status == 'in-progress' %} in-progress{% endif %}">
+    <h2 style="margin: 0; color: #495057;">System Recovery Complete</h2>
+    <p style="margin: 5px 0 0 0; color: #6c757d;">
+        Incident ID: <strong>{{ incident_id or 'INC-UNKNOWN' }}</strong> | 
+        Recovery Time: <strong>{{ recovery_completion_time or 'Unknown' }}</strong>
+    </p>
+</div>
+
+<div class="recovery-status{% if recovery_status == 'partial' %} partial{% elif recovery_status == 'in-progress' %} in-progress{% endif %}">
+    <h3 style="margin-top: 0; color: #495057;">
+        {% if recovery_status == 'complete' %}
+            ✅ System Fully Recovered
+        {% elif recovery_status == 'partial' %}
+            ⚠️ Partial Recovery Complete
+        {% elif recovery_status == 'in-progress' %}
+            🔄 Recovery In Progress
+        {% else %}
+            📋 Recovery Status Update
+        {% endif %}
+    </h3>
+    <p style="margin-bottom: 0;">
+        {% if recovery_description %}
+            {{ recovery_description }}
+        {% else %}
+            All critical systems have been restored to operational status. Service functionality has been validated and performance metrics have returned to normal levels.
+        {% endif %}
+    </p>
+</div>
+
+<!-- System Health Metrics -->
+<h3 style="color: #495057; margin-bottom: 15px;">Recovery Metrics & Validation</h3>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-value{% if service_availability < 99.0 %} warning{% elif service_availability < 95.0 %} error{% endif %}">
+            {{ "%.2f"|format(service_availability or 99.95) }}%
+        </div>
+        <div class="metric-label">Service Availability</div>
+    </div>
+    
+    <div class="metric-card">
+        <div class="metric-value{% if avg_response_time > 200 %} warning{% elif avg_response_time > 500 %} error{% endif %}">
+            {{ avg_response_time or 145 }}ms
+        </div>
+        <div class="metric-label">Avg Response Time</div>
+    </div>
+    
+    <div class="metric-card">
+        <div class="metric-value{% if error_rate > 1.0 %} warning{% elif error_rate > 5.0 %} error{% endif %}">
+            {{ "%.2f"|format(error_rate or 0.12) }}%
+        </div>
+        <div class="metric-label">Error Rate</div>
+    </div>
+    
+    <div class="metric-card">
+        <div class="metric-value{% if total_recovery_time > 60 %} warning{% elif total_recovery_time > 120 %} error{% endif %}">
+            {{ total_recovery_time or 32 }}min
+        </div>
+        <div class="metric-label">Total Recovery Time</div>
+    </div>
+</div>
+
+<!-- Container & Service Status -->
+<h3 style="color: #495057; margin-bottom: 15px;">Service & Container Status</h3>
+{% if services %}
+    {% for service in services %}
+    <div class="service-status">
+        <span class="service-name">{{ service.name }}</span>
+        <span class="status-badge status-{{ service.status }}">{{ service.status }}</span>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="service-status">
+        <span class="service-name">Flask Application (ECS/EKS)</span>
+        <span class="status-badge status-healthy">healthy</span>
+    </div>
+    <div class="service-status">
+        <span class="service-name">Gunicorn WSGI Server</span>
+        <span class="status-badge status-healthy">healthy</span>
+    </div>
+    <div class="service-status">
+        <span class="service-name">PostgreSQL Database</span>
+        <span class="status-badge status-healthy">healthy</span>
+    </div>
+    <div class="service-status">
+        <span class="service-name">Auth0 Authentication</span>
+        <span class="status-badge status-healthy">healthy</span>
+    </div>
+    <div class="service-status">
+        <span class="service-name">CloudWatch Monitoring</span>
+        <span class="status-badge status-healthy">healthy</span>
+    </div>
+{% endif %}
+
+<!-- Container Orchestration Status -->
+<h3 style="color: #495057; margin-bottom: 15px;">Container Orchestration Recovery</h3>
+<div class="container-grid">
+    {% if containers %}
+        {% for container in containers %}
+        <div class="container-status">
+            <div class="container-header">
+                <span class="container-name">{{ container.name }}</span>
+                <span class="status-badge status-{{ container.status }}">{{ container.status }}</span>
+            </div>
+            <div style="font-size: 14px; color: #6c757d;">
+                <div>CPU: {{ container.cpu_usage or 'N/A' }}%</div>
+                <div>Memory: {{ container.memory_usage or 'N/A' }}MB</div>
+                <div>Uptime: {{ container.uptime or 'N/A' }}</div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="container-status">
+            <div class="container-header">
+                <span class="container-name">flask-app-1</span>
+                <span class="status-badge status-healthy">healthy</span>
+            </div>
+            <div style="font-size: 14px; color: #6c757d;">
+                <div>CPU: 15.2%</div>
+                <div>Memory: 412MB</div>
+                <div>Uptime: 2h 15m</div>
+            </div>
+        </div>
+        
+        <div class="container-status">
+            <div class="container-header">
+                <span class="container-name">flask-app-2</span>
+                <span class="status-badge status-healthy">healthy</span>
+            </div>
+            <div style="font-size: 14px; color: #6c757d;">
+                <div>CPU: 18.7%</div>
+                <div>Memory: 438MB</div>
+                <div>Uptime: 2h 15m</div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Recovery Timeline -->
+<h3 style="color: #495057; margin-bottom: 15px;">Recovery Timeline</h3>
+{% if timeline %}
+    {% for event in timeline %}
+    <div class="timeline-item{% if event.severity == 'warning' %} warning{% elif event.severity == 'error' %} error{% endif %}">
+        <div class="timeline-time">{{ event.timestamp }}</div>
+        <div class="timeline-content">
+            <strong>{{ event.title }}</strong>
+            {% if event.description %}
+            <div style="margin-top: 5px; color: #6c757d;">{{ event.description }}</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="timeline-item">
+        <div class="timeline-time">{{ incident_detected_time or '10:15 AM UTC' }}</div>
+        <div class="timeline-content">
+            <strong>Incident Detected</strong>
+            <div style="margin-top: 5px; color: #6c757d;">Automated monitoring system detected service degradation</div>
+        </div>
+    </div>
+    
+    <div class="timeline-item">
+        <div class="timeline-time">{{ isolation_started_time or '10:17 AM UTC' }}</div>
+        <div class="timeline-content">
+            <strong>Container Isolation Initiated</strong>
+            <div style="margin-top: 5px; color: #6c757d;">Compromised containers isolated, traffic redirected to healthy instances</div>
+        </div>
+    </div>
+    
+    <div class="timeline-item">
+        <div class="timeline-time">{{ recovery_started_time or '10:22 AM UTC' }}</div>
+        <div class="timeline-content">
+            <strong>Recovery Process Started</strong>
+            <div style="margin-top: 5px; color: #6c757d;">New container instances deployed, health checks initiated</div>
+        </div>
+    </div>
+    
+    <div class="timeline-item">
+        <div class="timeline-time">{{ validation_completed_time or '10:45 AM UTC' }}</div>
+        <div class="timeline-content">
+            <strong>Service Validation Complete</strong>
+            <div style="margin-top: 5px; color: #6c757d;">All services validated, performance metrics confirmed normal</div>
+        </div>
+    </div>
+    
+    <div class="timeline-item">
+        <div class="timeline-time">{{ recovery_completion_time or '10:47 AM UTC' }}</div>
+        <div class="timeline-content">
+            <strong>Recovery Complete</strong>
+            <div style="margin-top: 5px; color: #6c757d;">System fully operational, stakeholder notifications sent</div>
+        </div>
+    </div>
+{% endif %}
+
+<!-- Post-Incident Analysis Summary -->
+<h3 style="color: #495057; margin-bottom: 15px;">Post-Incident Analysis Summary</h3>
+<div style="background-color: #f8f9fa; border-radius: 6px; padding: 20px; margin: 20px 0;">
+    <div style="margin-bottom: 15px;">
+        <strong>Root Cause:</strong>
+        <div style="margin-top: 5px;">
+            {{ root_cause or 'Container resource exhaustion due to memory leak in third-party dependency. Issue has been identified and patched.' }}
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>Impact Assessment:</strong>
+        <div style="margin-top: 5px;">
+            {{ impact_assessment or 'Partial service degradation affecting approximately 2.3% of user requests during 32-minute incident window. No data loss occurred.' }}
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>Security Posture Validation:</strong>
+        <div style="margin-top: 5px;">
+            {{ security_validation or 'All security systems maintained integrity throughout incident. No unauthorized access detected. Authentication services remained fully operational.' }}
+        </div>
+    </div>
+    
+    <div>
+        <strong>Performance Validation:</strong>
+        <div style="margin-top: 5px;">
+            {{ performance_validation or 'System performance has returned to baseline levels. Response times averaging 145ms (target: <200ms). Error rates at 0.12% (target: <1%).' }}
+        </div>
+    </div>
+</div>
+
+<!-- Preventive Measures -->
+<div class="action-items">
+    <h3>Preventive Measures Implementation</h3>
+    {% if preventive_measures %}
+        {% for measure in preventive_measures %}
+        <div class="action-item">
+            <div class="action-status action-{{ measure.status }}"></div>
+            <div>
+                <strong>{{ measure.title }}</strong>
+                {% if measure.description %}
+                <div style="margin-top: 3px; font-size: 14px; color: #6c757d;">{{ measure.description }}</div>
+                {% endif %}
+                {% if measure.due_date %}
+                <div style="margin-top: 3px; font-size: 12px; color: #6c757d;">Due: {{ measure.due_date }}</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="action-item">
+            <div class="action-status action-complete"></div>
+            <div>
+                <strong>Enhanced Container Resource Monitoring</strong>
+                <div style="margin-top: 3px; font-size: 14px; color: #6c757d;">Implemented improved memory usage alerting with 15-minute thresholds</div>
+            </div>
+        </div>
+        
+        <div class="action-item">
+            <div class="action-status action-complete"></div>
+            <div>
+                <strong>Dependency Update Protocol</strong>
+                <div style="margin-top: 3px; font-size: 14px; color: #6c757d;">Updated third-party dependency to version 2.1.4 with memory leak fix</div>
+            </div>
+        </div>
+        
+        <div class="action-item">
+            <div class="action-status action-pending"></div>
+            <div>
+                <strong>Automated Container Recycling</strong>
+                <div style="margin-top: 3px; font-size: 14px; color: #6c757d;">Implement proactive container recycling every 8 hours</div>
+                <div style="margin-top: 3px; font-size: 12px; color: #6c757d;">Due: Within 72 hours</div>
+            </div>
+        </div>
+        
+        <div class="action-item">
+            <div class="action-status action-pending"></div>
+            <div>
+                <strong>Enhanced Load Testing</strong>
+                <div style="margin-top: 3px; font-size: 14px; color: #6c757d;">Expand load testing scenarios to include memory exhaustion patterns</div>
+                <div style="margin-top: 3px; font-size: 12px; color: #6c757d;">Due: Next sprint cycle</div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Next Steps & Contact Information -->
+<h3 style="color: #495057; margin-bottom: 15px;">Next Steps & Contact Information</h3>
+<div style="background-color: #f8f9fa; border-radius: 6px; padding: 20px; margin: 20px 0;">
+    <div style="margin-bottom: 15px;">
+        <strong>Immediate Actions:</strong>
+        <ul style="margin: 10px 0; padding-left: 20px;">
+            <li>Continue monitoring system performance for 24 hours</li>
+            <li>Complete post-incident review meeting within 48 hours</li>
+            <li>Update incident documentation and runbooks</li>
+            <li>Validate backup and disaster recovery procedures</li>
+        </ul>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <strong>Monitoring Dashboard:</strong>
+        <div style="margin-top: 5px;">
+            {% if monitoring_dashboard_url %}
+                <a href="{{ monitoring_dashboard_url }}" style="color: #007bff;">{{ monitoring_dashboard_url }}</a>
+            {% else %}
+                <a href="https://monitoring.company.com/dashboards/system-health" style="color: #007bff;">System Health Dashboard</a>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div>
+        <strong>Questions or Concerns:</strong>
+        <div style="margin-top: 5px;">
+            For any questions regarding this incident or recovery process, please contact:<br>
+            • Primary: <a href="mailto:{{ primary_contact_email or 'incident-response@company.com' }}" style="color: #007bff;">{{ primary_contact_email or 'incident-response@company.com' }}</a><br>
+            • Secondary: <a href="mailto:{{ secondary_contact_email or 'engineering-team@company.com' }}" style="color: #007bff;">{{ secondary_contact_email or 'engineering-team@company.com' }}</a><br>
+            • Emergency: {{ emergency_contact_phone or '+1-555-123-4567' }}
+        </div>
+    </div>
+</div>
+
+<!-- Stakeholder Communication -->
+<div class="stakeholder-info">
+    <strong>Stakeholder Communication:</strong> This recovery notification has been automatically sent to all relevant stakeholders including engineering teams, operations staff, and management. A detailed post-incident report will be distributed within 24 hours.
+    
+    {% if additional_stakeholder_info %}
+    <div style="margin-top: 10px;">{{ additional_stakeholder_info }}</div>
+    {% endif %}
+</div>
+
+<!-- Footer Note -->
+<p style="margin-top: 30px; font-size: 14px; color: #6c757d; text-align: center;">
+    This is an automated system recovery notification from the Flask Application Monitoring System.<br>
+    Generated at {{ notification_timestamp or 'timestamp unavailable' }} | Incident ID: {{ incident_id or 'INC-UNKNOWN' }}
+</p>
+{% endblock %}
+
+{% block company_name %}System Recovery Team{% endblock %}
+
+{% block footer_links %}
+<a href="{{ monitoring_dashboard_url or 'https://monitoring.company.com' }}">Monitoring Dashboard</a> |
+<a href="{{ incident_management_url or 'https://incidents.company.com' }}">Incident Management</a> |
+<a href="{{ status_page_url or 'https://status.company.com' }}">Service Status</a> |
+<a href="mailto:{{ primary_contact_email or 'incident-response@company.com' }}">Contact Support</a>
+{% endblock %}
+
+{% block footer_address %}System Operations Center | {{ company_address or 'Location not specified' }}{% endblock %}
