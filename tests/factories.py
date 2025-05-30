@@ -1,676 +1,1485 @@
 """
-Factory Boy test data generation module providing SQLAlchemy model factories with realistic test data patterns and relationship management for comprehensive test coverage.
+Factory Boy Test Data Generation Module
 
-This module implements Django-style factory patterns for SQLAlchemy model instances, replacing Node.js test data arrangements with Python Factory Boy patterns per Section 4.7.3.2. It provides comprehensive factory definitions for realistic test data generation with relationship management and data consistency validation across test execution cycles.
+This module provides comprehensive SQLAlchemy model factories using Factory Boy for
+realistic test data generation with proper relationship management and data consistency
+validation. Replaces Node.js test data patterns with Python Factory Boy patterns 
+following Django-style factory patterns for SQLAlchemy model instances.
 
-Factories included:
-- UserFactory: User authentication and profile data with Auth0 integration
-- RoleFactory: Role-based access control roles
-- PermissionFactory: Granular permission definitions
-- BusinessEntityFactory: Core business objects
-- EntityRelationshipFactory: Business entity relationships
-- UserSessionFactory: Flask session management data
-- AuditLogFactory: Comprehensive audit trail records
-- SecurityEventFactory: Security monitoring events
+The factory system supports:
+- Realistic test data patterns with localization support
+- Complex relationship management across all models
+- Data consistency validation across test execution cycles
+- Performance-optimized factory configurations for test speed
+- Extensible factory inheritance for specialized test scenarios
+
+Features:
+- Factory Boy 3.3.0+ integration with SQLAlchemy session management
+- Comprehensive factories for all entity models (User, Role, Business, Audit)
+- Realistic data generation using Faker library integration
+- Relationship factories with proper foreign key management
+- Sequence-based unique field generation for conflict prevention
+- Trait-based factory variations for different test scenarios
+- Performance optimizations for large test data set generation
 
 Dependencies:
-- factory_boy: Django-style factory patterns for SQLAlchemy models
-- Faker: Realistic test data generation
-- SQLAlchemy: Database model integration
+- factory-boy: Django-style factory patterns for SQLAlchemy
+- faker: Realistic fake data generation with localization
+- sqlalchemy: Database session management and model integration
+- flask-sqlalchemy: Flask-specific SQLAlchemy configuration
 """
 
-import factory
-import factory.fuzzy
-from faker import Faker
-from datetime import datetime, timedelta
-from sqlalchemy.orm import sessionmaker
-from typing import Any, Dict, List, Optional
-import uuid
+import os
+import secrets
 import json
-import random
-import string
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional, Union
 
-# Import SQLAlchemy models (will be available when models are created)
-# These imports follow the model structure documented in the technical specification
-from models.base import BaseModel, AuditMixin, EncryptedMixin
-from models.user import User, UserSession
-from models.rbac import Role, Permission
+import factory
+from factory import fuzzy
+from factory.alchemy import SQLAlchemyModelFactory
+from faker import Faker
+from faker.providers import internet, person, company, phone_number, address, date_time
+
+# Import models - use dest_file paths since we're in the destination repository
+from models.base import db, BaseModel, AuditMixin, EncryptedMixin
+from models.user import User, UserSession, UserUtils
+from models.rbac import Role, Permission, UserRole, RolePermission
 from models.business import BusinessEntity, EntityRelationship
 from models.audit import AuditLog, SecurityEvent
 
-# Initialize Faker instance for realistic data generation
-fake = Faker()
+# Initialize Faker instance with localization support
+fake = Faker(['en_US', 'en_GB', 'es_ES', 'fr_FR', 'de_DE'])
+
+# Add additional providers for comprehensive test data
+fake.add_provider(internet)
+fake.add_provider(person)
+fake.add_provider(company)
+fake.add_provider(phone_number)
+fake.add_provider(address)
+fake.add_provider(date_time)
 
 
-class SQLAlchemyModelFactory(factory.alchemy.SQLAlchemyModelFactory):
+class FactorySessionManager:
     """
-    Base factory class providing common functionality for all SQLAlchemy model factories.
+    SQLAlchemy session management for Factory Boy integration.
     
-    This base class implements the Factory Boy SQLAlchemy integration pattern and provides
-    common utilities for test data generation, relationship management, and data consistency
-    validation across all model factories.
+    Provides thread-safe database session handling with proper transaction
+    boundaries and rollback capabilities for isolated test execution.
     
     Features:
-    - SQLAlchemy session management for test isolation
-    - Common data generation utilities
-    - Relationship handling patterns
-    - Data consistency validation methods
+    - Automatic session cleanup between test runs
+    - Transaction isolation for test data integrity
+    - Performance optimizations for bulk factory operations
+    - Database state validation and consistency checks
+    """
+    
+    @staticmethod
+    def get_session():
+        """
+        Get SQLAlchemy session for factory operations.
+        
+        Returns:
+            SQLAlchemy session instance
+        """
+        return db.session
+    
+    @staticmethod
+    def commit_session():
+        """
+        Safely commit current session with error handling.
+        
+        Returns:
+            Boolean indicating commit success
+        """
+        try:
+            db.session.commit()
+            return True
+        except Exception as e:
+            db.session.rollback()
+            raise e
+    
+    @staticmethod
+    def rollback_session():
+        """
+        Safely rollback current session.
+        
+        Returns:
+            Boolean indicating rollback success
+        """
+        try:
+            db.session.rollback()
+            return True
+        except Exception:
+            return False
+    
+    @staticmethod
+    def cleanup_session():
+        """
+        Clean up session state for fresh test execution.
+        """
+        try:
+            db.session.expunge_all()
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+class BaseModelFactory(SQLAlchemyModelFactory):
+    """
+    Abstract base factory for all SQLAlchemy model factories.
+    
+    Provides common configuration, session management, and audit field
+    population for consistent factory behavior across all models.
+    
+    Features:
+    - Automatic SQLAlchemy session management
+    - Common audit field population with realistic data
+    - Extensible trait system for factory variations
+    - Performance optimization configuration
     """
     
     class Meta:
-        # SQLAlchemy session will be injected by test fixtures
-        sqlalchemy_session_persistence = "commit"
         abstract = True
+        sqlalchemy_session = None  # Will be set during factory setup
+        sqlalchemy_session_persistence = 'commit'
+    
+    # Common audit fields for all models inheriting from AuditMixin
+    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-30d', end_date='now'))
+    updated_at = factory.LazyAttribute(lambda obj: obj.created_at + timedelta(
+        seconds=fake.random_int(min=0, max=86400)  # Up to 24 hours after creation
+    ))
+    created_by = factory.LazyFunction(lambda: fake.random_element(elements=('system', 'admin', 'test_user', 'migration')))
+    updated_by = factory.LazyAttribute(lambda obj: fake.random_element(elements=(obj.created_by, 'admin', 'system')))
     
     @classmethod
-    def _setup_next_sequence(cls):
-        """Override to ensure proper sequence management for test data consistency."""
-        return getattr(cls, '_next_sequence', 0) + 1
+    def _setup_session(cls):
+        """Set up SQLAlchemy session for factory operations."""
+        if cls._meta.sqlalchemy_session is None:
+            cls._meta.sqlalchemy_session = FactorySessionManager.get_session()
+    
+    @classmethod
+    def _create(cls, model_class, *args, **kwargs):
+        """
+        Create model instance with proper session management.
+        
+        Args:
+            model_class: SQLAlchemy model class
+            *args: Positional arguments for model creation
+            **kwargs: Keyword arguments for model creation
+            
+        Returns:
+            Created model instance
+        """
+        cls._setup_session()
+        instance = super()._create(model_class, *args, **kwargs)
+        # Flush to assign ID but don't commit yet
+        cls._meta.sqlalchemy_session.flush()
+        return instance
+    
+    @classmethod
+    def create_batch(cls, size, **kwargs):
+        """
+        Create multiple instances with optimized batch processing.
+        
+        Args:
+            size: Number of instances to create
+            **kwargs: Keyword arguments for all instances
+            
+        Returns:
+            List of created instances
+        """
+        cls._setup_session()
+        instances = super().create_batch(size, **kwargs)
+        # Bulk flush for performance
+        cls._meta.sqlalchemy_session.flush()
+        return instances
 
 
-class UserFactory(SQLAlchemyModelFactory):
+class UserFactory(BaseModelFactory):
     """
-    User model factory providing realistic test data for authentication and profile management.
+    Factory for User model instances with comprehensive authentication data.
     
-    Generates comprehensive user test data including Auth0 integration fields, encrypted
-    sensitive information, and proper relationship management for RBAC integration.
-    Features realistic email addresses, usernames, and authentication metadata.
+    Generates realistic user profiles with proper authentication setup,
+    encrypted sensitive data, and relationship configurations for testing
+    user management workflows.
     
-    Usage:
-        user = UserFactory()
-        admin_user = UserFactory(email='admin@test.com', is_active=True)
-        user_with_roles = UserFactory(roles__size=2)
+    Features:
+    - Realistic username and email generation with uniqueness
+    - Secure password hashing using Werkzeug
+    - Auth0 integration fields with realistic external IDs
+    - Encrypted sensitive data using proper encryption configuration
+    - Configurable user status and verification states
+    - Role assignment through relationship factories
     """
     
     class Meta:
         model = User
+        sqlalchemy_session_persistence = 'commit'
     
-    # Auth0 integration fields per Section 0 authentication migration requirements
-    auth0_user_id = factory.LazyFunction(lambda: f"auth0|{uuid.uuid4().hex[:24]}")
+    # Core identification fields with uniqueness constraints
+    username = factory.LazyFunction(lambda: fake.unique.user_name()[:100])
+    email = factory.LazyFunction(lambda: fake.unique.email())
     
-    # Core user fields with realistic data patterns
-    email = factory.LazyAttribute(lambda obj: fake.email())
-    username = factory.LazyAttribute(lambda obj: fake.user_name())
-    first_name = factory.LazyAttribute(lambda obj: fake.first_name())
-    last_name = factory.LazyAttribute(lambda obj: fake.last_name())
+    # Authentication fields
+    password_hash = factory.LazyFunction(lambda: UserUtils.create_user(
+        username='temp', email='temp@example.com', password=fake.password(length=12)
+    ).password_hash)
     
-    # Account status and verification
-    is_active = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.1 else c[1])
-    email_verified = factory.LazyAttribute(lambda obj: obj.is_active and random.random() > 0.2)
-    phone_verified = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.3 else c[1])
+    # Auth0 integration fields
+    auth0_user_id = factory.LazyFunction(lambda: f"auth0|{secrets.token_hex(12)}")
     
-    # Encrypted sensitive fields using SQLAlchemy-Utils EncryptedType
-    phone_number = factory.LazyFunction(lambda: fake.phone_number() if random.random() > 0.3 else None)
-    date_of_birth = factory.LazyFunction(lambda: fake.date_of_birth(minimum_age=18, maximum_age=80) if random.random() > 0.4 else None)
+    # Encrypted personal information
+    first_name = factory.LazyFunction(lambda: fake.first_name())
+    last_name = factory.LazyFunction(lambda: fake.last_name())
     
-    # Profile metadata
-    profile_picture_url = factory.LazyFunction(lambda: fake.image_url() if random.random() > 0.5 else None)
-    bio = factory.LazyFunction(lambda: fake.text(max_nb_chars=200) if random.random() > 0.6 else None)
-    timezone = factory.fuzzy.FuzzyChoice([
-        'UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 
+    # User status fields
+    is_active = True
+    is_verified = factory.LazyFunction(lambda: fake.boolean(chance_of_getting_true=75))
+    is_admin = factory.LazyFunction(lambda: fake.boolean(chance_of_getting_true=10))
+    
+    # Profile and preferences
+    timezone = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London',
         'Europe/Paris', 'Asia/Tokyo', 'Australia/Sydney'
-    ])
-    locale = factory.fuzzy.FuzzyChoice(['en-US', 'en-GB', 'fr-FR', 'es-ES', 'de-DE', 'ja-JP'])
+    )))
+    locale = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'en', 'es', 'fr', 'de', 'it', 'pt', 'ja', 'ko', 'zh'
+    )))
+    avatar_url = factory.LazyFunction(lambda: fake.image_url(width=200, height=200))
     
-    # Authentication metadata
-    last_login_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-30d', end_date='now'))
-    last_login_ip = factory.LazyFunction(lambda: fake.ipv4())
-    failed_login_attempts = factory.fuzzy.FuzzyInteger(0, 3)
-    account_locked_until = None  # Default unlocked
+    # Authentication tracking
+    last_login_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-7d', end_date='now'))
+    login_count = factory.LazyFunction(lambda: fake.random_int(min=1, max=500))
+    failed_login_count = 0
+    locked_until = None
     
-    # Audit fields (handled by AuditMixin)
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-1y', end_date='now'))
-    updated_at = factory.LazyAttribute(lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now'))
+    # Terms and privacy acceptance
+    terms_accepted_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-365d', end_date='-1d'))
+    privacy_accepted_at = factory.LazyAttribute(lambda obj: obj.terms_accepted_at)
     
-    @factory.post_generation
-    def roles(self, create, extracted, **kwargs):
-        """
-        Handle role relationships for RBAC integration.
-        
-        Args:
-            create: Whether to save the object
-            extracted: Number of roles to create or specific role list
-            **kwargs: Additional role parameters
-        """
-        if not create:
-            return
-        
-        if extracted is not None:
-            if isinstance(extracted, int):
-                # Create specified number of roles
-                roles = RoleFactory.create_batch(extracted, **kwargs)
-                self.roles.extend(roles)
-            elif isinstance(extracted, list):
-                # Use provided roles
-                self.roles.extend(extracted)
+    # Auth0 metadata (JSON strings)
+    auth0_metadata = factory.LazyFunction(lambda: json.dumps({
+        'preferences': {
+            'newsletter': fake.boolean(),
+            'notifications': fake.boolean()
+        },
+        'profile_completion': fake.random_int(min=25, max=100)
+    }))
     
-    @factory.post_generation
-    def sessions(self, create, extracted, **kwargs):
-        """
-        Generate user sessions for Flask session management testing.
+    auth0_app_metadata = factory.LazyFunction(lambda: json.dumps({
+        'app_version': fake.random_element(elements=('1.0.0', '1.1.0', '1.2.0')),
+        'signup_source': fake.random_element(elements=('web', 'mobile', 'api')),
+        'customer_tier': fake.random_element(elements=('free', 'premium', 'enterprise'))
+    }))
+    
+    class Params:
+        """Trait parameters for factory variations"""
+        admin_user = factory.Trait(
+            is_admin=True,
+            is_verified=True,
+            login_count=factory.LazyFunction(lambda: fake.random_int(min=100, max=1000))
+        )
         
-        Args:
-            create: Whether to save the object
-            extracted: Number of sessions to create
-            **kwargs: Additional session parameters
-        """
-        if not create:
-            return
+        unverified_user = factory.Trait(
+            is_verified=False,
+            terms_accepted_at=None,
+            privacy_accepted_at=None
+        )
         
-        if extracted is not None:
-            sessions = UserSessionFactory.create_batch(
-                extracted, 
-                user=self, 
-                **kwargs
-            )
+        locked_user = factory.Trait(
+            failed_login_count=5,
+            locked_until=factory.LazyFunction(lambda: datetime.utcnow() + timedelta(minutes=30))
+        )
+        
+        auth0_user = factory.Trait(
+            password_hash=None,  # Auth0 users don't have local passwords
+            auth0_user_id=factory.LazyFunction(lambda: f"auth0|{secrets.token_hex(16)}")
+        )
+        
+        new_user = factory.Trait(
+            login_count=0,
+            last_login_at=None,
+            created_at=factory.LazyFunction(lambda: datetime.utcnow() - timedelta(hours=1))
+        )
 
 
-class RoleFactory(SQLAlchemyModelFactory):
+class RoleFactory(BaseModelFactory):
     """
-    Role model factory for RBAC system testing.
+    Factory for Role model instances with comprehensive authorization data.
     
-    Generates realistic role data for testing role-based access control functionality,
-    including predefined system roles and custom role patterns.
+    Generates realistic role definitions with proper naming conventions,
+    permission relationships, and hierarchical structures for testing
+    role-based access control (RBAC) workflows.
     
-    Usage:
-        admin_role = RoleFactory(name='admin')
-        roles = RoleFactory.create_batch(3)
+    Features:
+    - Realistic role naming with organizational conventions
+    - Role hierarchy support with parent-child relationships
+    - Permission assignment through association factories
+    - Configurable role status and activation states
+    - Department and organizational unit alignment
     """
     
     class Meta:
         model = Role
+        sqlalchemy_session_persistence = 'commit'
     
-    name = factory.fuzzy.FuzzyChoice([
-        'admin', 'moderator', 'user', 'viewer', 'editor',
-        'manager', 'analyst', 'developer', 'support', 'guest'
-    ])
-    description = factory.LazyAttribute(lambda obj: f"Role for {obj.name} level access with appropriate permissions")
-    is_active = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.05 else c[1])
+    # Core role identification
+    name = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'admin', 'user', 'manager', 'analyst', 'operator', 'viewer',
+        'developer', 'tester', 'support', 'hr_manager', 'finance_admin',
+        'marketing_user', 'sales_rep', 'content_editor', 'data_analyst'
+    )))
     
-    # Audit fields
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-1y', end_date='now'))
-    updated_at = factory.LazyAttribute(lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now'))
+    display_name = factory.LazyAttribute(lambda obj: obj.name.replace('_', ' ').title())
     
-    @factory.post_generation
-    def permissions(self, create, extracted, **kwargs):
-        """
-        Handle permission relationships for comprehensive RBAC testing.
+    description = factory.LazyFunction(lambda: fake.text(max_nb_chars=200))
+    
+    # Role status and hierarchy
+    is_active = True
+    is_system_role = factory.LazyFunction(lambda: fake.boolean(chance_of_getting_true=20))
+    role_level = factory.LazyFunction(lambda: fake.random_int(min=1, max=5))
+    
+    # Organizational alignment
+    department = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'IT', 'HR', 'Finance', 'Marketing', 'Sales', 'Operations',
+        'Legal', 'Engineering', 'Product', 'Customer Success'
+    )))
+    
+    # Role metadata
+    max_users = factory.LazyFunction(lambda: fake.random_element(elements=(
+        None, 5, 10, 25, 50, 100, 500  # None means unlimited
+    )))
+    
+    role_metadata = factory.LazyFunction(lambda: json.dumps({
+        'created_by_system': fake.boolean(),
+        'auto_assign': fake.boolean(chance_of_getting_true=10),
+        'requires_approval': fake.boolean(chance_of_getting_true=30)
+    }))
+    
+    class Params:
+        """Trait parameters for factory variations"""
+        system_role = factory.Trait(
+            is_system_role=True,
+            name=factory.LazyFunction(lambda: fake.random_element(elements=(
+                'system_admin', 'super_user', 'api_user', 'service_account'
+            )))
+        )
         
-        Args:
-            create: Whether to save the object
-            extracted: Number of permissions to create or specific permission list
-            **kwargs: Additional permission parameters
-        """
-        if not create:
-            return
+        department_role = factory.Trait(
+            name=factory.LazyAttribute(lambda obj: f"{obj.department.lower()}_user"),
+            display_name=factory.LazyAttribute(lambda obj: f"{obj.department} User")
+        )
         
-        if extracted is not None:
-            if isinstance(extracted, int):
-                permissions = PermissionFactory.create_batch(extracted, **kwargs)
-                self.permissions.extend(permissions)
-            elif isinstance(extracted, list):
-                self.permissions.extend(extracted)
+        admin_role = factory.Trait(
+            name='admin',
+            display_name='Administrator',
+            description='Full system administration access',
+            role_level=5,
+            max_users=5
+        )
+        
+        viewer_role = factory.Trait(
+            name='viewer',
+            display_name='Viewer',
+            description='Read-only access to system resources',
+            role_level=1,
+            max_users=None
+        )
 
 
-class PermissionFactory(SQLAlchemyModelFactory):
+class PermissionFactory(BaseModelFactory):
     """
-    Permission model factory for granular access control testing.
+    Factory for Permission model instances with resource-action patterns.
     
-    Generates realistic permission data following resource-action patterns for
-    Flask endpoint protection and business operation authorization.
+    Generates realistic permission definitions following RESTful patterns
+    and Flask blueprint route protection for comprehensive authorization
+    testing scenarios.
     
-    Usage:
-        read_permission = PermissionFactory(resource='users', action='read')
-        permissions = PermissionFactory.create_batch(5)
+    Features:
+    - Resource-action permission patterns (resource.action)
+    - Flask blueprint and route alignment
+    - RESTful operation coverage (CRUD operations)
+    - System and business permission classifications
+    - Permission hierarchy and dependency management
     """
     
     class Meta:
         model = Permission
+        sqlalchemy_session_persistence = 'commit'
     
-    resource = factory.fuzzy.FuzzyChoice([
+    # Resource-action pattern implementation
+    resource = factory.LazyFunction(lambda: fake.random_element(elements=(
         'users', 'roles', 'permissions', 'business_entities', 'audit_logs',
-        'security_events', 'sessions', 'reports', 'settings', 'api'
-    ])
-    action = factory.fuzzy.FuzzyChoice([
-        'create', 'read', 'update', 'delete', 'list', 'export', 'import', 'execute'
-    ])
-    description = factory.LazyAttribute(
-        lambda obj: f"Permission to {obj.action} {obj.resource} resources"
-    )
-    is_active = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.05 else c[1])
+        'sessions', 'reports', 'settings', 'notifications', 'files',
+        'api', 'admin', 'dashboard', 'profile', 'billing'
+    )))
     
-    # Audit fields
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-1y', end_date='now'))
-    updated_at = factory.LazyAttribute(lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now'))
-
-
-class BusinessEntityFactory(SQLAlchemyModelFactory):
-    """
-    Business entity factory for core business object testing.
+    action = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'read', 'create', 'update', 'delete', 'list', 'view',
+        'manage', 'admin', 'export', 'import', 'approve', 'publish'
+    )))
     
-    Generates realistic business entity data for testing business logic operations,
-    entity management, and relationship tracking throughout the application.
+    # Computed permission name using resource.action pattern
+    name = factory.LazyAttribute(lambda obj: f"{obj.resource}.{obj.action}")
     
-    Usage:
-        entity = BusinessEntityFactory()
-        company = BusinessEntityFactory(entity_type='company')
-        entities_with_owner = BusinessEntityFactory.create_batch(3, owner=user)
-    """
+    display_name = factory.LazyAttribute(lambda obj: f"{obj.action.title()} {obj.resource.title()}")
     
-    class Meta:
-        model = BusinessEntity
+    description = factory.LazyFunction(lambda: fake.sentence(nb_words=8))
     
-    name = factory.LazyAttribute(lambda obj: fake.company())
-    description = factory.LazyAttribute(lambda obj: fake.text(max_nb_chars=500))
-    entity_type = factory.fuzzy.FuzzyChoice([
-        'company', 'department', 'project', 'team', 'product', 
-        'service', 'location', 'asset', 'contract', 'vendor'
-    ])
+    # Permission classification
+    is_active = True
+    is_system_permission = factory.LazyFunction(lambda: fake.boolean(chance_of_getting_true=25))
+    permission_level = factory.LazyFunction(lambda: fake.random_int(min=1, max=5))
     
-    # Status management
-    status = factory.fuzzy.FuzzyChoice(['active', 'inactive', 'pending', 'archived'])
+    # Flask integration fields
+    blueprint_name = factory.LazyAttribute(lambda obj: obj.resource)
+    endpoint_pattern = factory.LazyAttribute(lambda obj: f"/{obj.resource}")
+    http_methods = factory.LazyFunction(lambda: json.dumps(
+        fake.random_elements(elements=('GET', 'POST', 'PUT', 'PATCH', 'DELETE'), 
+                           length=fake.random_int(min=1, max=3), unique=True)
+    ))
     
-    # Business metadata
-    external_id = factory.LazyFunction(lambda: f"EXT-{uuid.uuid4().hex[:12].upper()}")
-    tags = factory.LazyFunction(lambda: json.dumps(fake.words(nb=random.randint(1, 5))))
-    metadata = factory.LazyFunction(lambda: json.dumps({
-        'industry': fake.company_suffix(),
-        'size': random.choice(['small', 'medium', 'large', 'enterprise']),
-        'location': fake.city(),
-        'founded': fake.year()
+    # Permission metadata
+    permission_metadata = factory.LazyFunction(lambda: json.dumps({
+        'requires_mfa': fake.boolean(chance_of_getting_true=20),
+        'audit_level': fake.random_element(elements=('low', 'medium', 'high')),
+        'business_impact': fake.random_element(elements=('low', 'medium', 'high', 'critical'))
     }))
     
-    # Ownership relationship
-    owner = factory.SubFactory(UserFactory)
-    
-    # Audit fields
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-2y', end_date='now'))
-    updated_at = factory.LazyAttribute(lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now'))
+    class Params:
+        """Trait parameters for factory variations"""
+        crud_permission = factory.Trait(
+            action=factory.LazyFunction(lambda: fake.random_element(elements=(
+                'create', 'read', 'update', 'delete'
+            )))
+        )
+        
+        admin_permission = factory.Trait(
+            action='admin',
+            permission_level=5,
+            is_system_permission=True,
+            permission_metadata=factory.LazyFunction(lambda: json.dumps({
+                'requires_mfa': True,
+                'audit_level': 'high',
+                'business_impact': 'critical'
+            }))
+        )
+        
+        read_permission = factory.Trait(
+            action='read',
+            permission_level=1,
+            http_methods=factory.LazyFunction(lambda: json.dumps(['GET']))
+        )
+        
+        write_permission = factory.Trait(
+            action=factory.LazyFunction(lambda: fake.random_element(elements=(
+                'create', 'update', 'delete'
+            ))),
+            permission_level=3,
+            http_methods=factory.LazyFunction(lambda: json.dumps(['POST', 'PUT', 'PATCH', 'DELETE']))
+        )
 
 
-class EntityRelationshipFactory(SQLAlchemyModelFactory):
+class UserRoleFactory(BaseModelFactory):
     """
-    Entity relationship factory for testing business entity interconnections.
+    Factory for UserRole association instances with audit trail.
     
-    Generates realistic relationship data for testing complex business object
-    relationships, hierarchy management, and entity navigation patterns.
+    Generates realistic user-role assignments with proper audit tracking,
+    assignment context, and status management for testing RBAC workflows
+    and permission inheritance scenarios.
     
-    Usage:
-        rel = EntityRelationshipFactory()
-        parent_child = EntityRelationshipFactory(relationship_type='parent_child')
+    Features:
+    - Realistic user-role assignment patterns
+    - Comprehensive audit trail with assignment context
+    - Status management for active/inactive assignments
+    - Assignment metadata for approval workflows
+    - Bulk assignment support for organizational testing
     """
     
     class Meta:
-        model = EntityRelationship
+        model = UserRole
+        sqlalchemy_session_persistence = 'commit'
     
-    source_entity = factory.SubFactory(BusinessEntityFactory)
-    target_entity = factory.SubFactory(BusinessEntityFactory)
+    # Foreign key relationships - will be set by SubFactory or manual assignment
+    user = factory.SubFactory(UserFactory)
+    role = factory.SubFactory(RoleFactory)
     
-    relationship_type = factory.fuzzy.FuzzyChoice([
-        'parent_child', 'owns', 'manages', 'depends_on', 'collaborates_with',
-        'reports_to', 'provides_service_to', 'is_part_of', 'contracts_with'
-    ])
+    # Assignment audit fields
+    assigned_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-90d', end_date='now'))
+    assigned_by = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'system', 'admin', 'hr_manager', 'department_head', 'auto_assignment'
+    )))
     
-    description = factory.LazyAttribute(
-        lambda obj: f"{obj.source_entity.name} {obj.relationship_type.replace('_', ' ')} {obj.target_entity.name}"
-    )
+    # Assignment status
+    is_active = True
+    expires_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='now', end_date='+365d')
+                                     if fake.boolean(chance_of_getting_true=30) else None)
     
-    is_active = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.1 else c[1])
+    # Assignment context
+    assignment_reason = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'new_hire', 'promotion', 'transfer', 'project_assignment',
+        'temporary_access', 'role_change', 'system_migration'
+    )))
     
-    # Relationship metadata
-    strength = factory.fuzzy.FuzzyInteger(1, 10)  # Relationship strength score
-    start_date = factory.LazyFunction(lambda: fake.date_between(start_date='-2y', end_date='now'))
-    end_date = factory.LazyFunction(lambda: fake.date_between(start_date='now', end_date='+1y') if random.random() > 0.7 else None)
+    assignment_metadata = factory.LazyFunction(lambda: json.dumps({
+        'approved_by': fake.name(),
+        'approval_date': fake.date_time_this_year().isoformat(),
+        'assignment_type': fake.random_element(elements=('permanent', 'temporary', 'conditional')),
+        'notification_sent': fake.boolean()
+    }))
     
-    # Audit fields
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-2y', end_date='now'))
-    updated_at = factory.LazyAttribute(lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now'))
+    class Params:
+        """Trait parameters for factory variations"""
+        expired_assignment = factory.Trait(
+            is_active=False,
+            expires_at=factory.LazyFunction(lambda: fake.date_time_between(start_date='-30d', end_date='-1d'))
+        )
+        
+        temporary_assignment = factory.Trait(
+            expires_at=factory.LazyFunction(lambda: fake.date_time_between(start_date='now', end_date='+30d')),
+            assignment_reason='temporary_access'
+        )
+        
+        system_assignment = factory.Trait(
+            assigned_by='system',
+            assignment_reason='system_migration',
+            assignment_metadata=factory.LazyFunction(lambda: json.dumps({
+                'auto_assigned': True,
+                'migration_batch': fake.uuid4(),
+                'system_role': True
+            }))
+        )
 
 
-class UserSessionFactory(SQLAlchemyModelFactory):
+class RolePermissionFactory(BaseModelFactory):
     """
-    User session factory for Flask session management testing.
+    Factory for RolePermission association instances with grant tracking.
     
-    Generates realistic session data for testing Flask session handling, security
-    token management, and user authentication flows.
+    Generates realistic role-permission grants with comprehensive audit
+    trails, grant context, and permission inheritance patterns for testing
+    authorization workflows and access control scenarios.
     
-    Usage:
-        session = UserSessionFactory()
-        active_session = UserSessionFactory(is_active=True)
+    Features:
+    - Realistic role-permission grant patterns
+    - Comprehensive grant audit trail with context
+    - Permission inheritance and hierarchy testing
+    - Grant metadata for approval and compliance workflows
+    - Bulk grant support for role template testing
+    """
+    
+    class Meta:
+        model = RolePermission
+        sqlalchemy_session_persistence = 'commit'
+    
+    # Foreign key relationships
+    role = factory.SubFactory(RoleFactory)
+    permission = factory.SubFactory(PermissionFactory)
+    
+    # Grant audit fields
+    granted_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-180d', end_date='now'))
+    granted_by = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'system', 'security_admin', 'role_admin', 'department_head', 'auto_grant'
+    )))
+    
+    # Grant status
+    is_active = True
+    
+    # Grant context
+    grant_reason = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'role_creation', 'permission_update', 'security_review',
+        'compliance_requirement', 'business_need', 'system_migration'
+    )))
+    
+    grant_metadata = factory.LazyFunction(lambda: json.dumps({
+        'approved_by': fake.name(),
+        'approval_date': fake.date_time_this_year().isoformat(),
+        'compliance_check': fake.boolean(),
+        'business_justification': fake.sentence(),
+        'review_required': fake.boolean(chance_of_getting_true=25)
+    }))
+    
+    class Params:
+        """Trait parameters for factory variations"""
+        system_grant = factory.Trait(
+            granted_by='system',
+            grant_reason='system_migration',
+            grant_metadata=factory.LazyFunction(lambda: json.dumps({
+                'auto_granted': True,
+                'migration_batch': fake.uuid4(),
+                'system_permission': True
+            }))
+        )
+        
+        compliance_grant = factory.Trait(
+            grant_reason='compliance_requirement',
+            grant_metadata=factory.LazyFunction(lambda: json.dumps({
+                'compliance_framework': fake.random_element(elements=('SOX', 'GDPR', 'HIPAA', 'PCI')),
+                'review_required': True,
+                'review_frequency': fake.random_element(elements=('quarterly', 'annually'))
+            }))
+        )
+
+
+class UserSessionFactory(BaseModelFactory):
+    """
+    Factory for UserSession instances with realistic session data.
+    
+    Generates authentic session instances with proper token management,
+    security tracking, and session lifecycle data for testing authentication
+    and session management workflows.
+    
+    Features:
+    - Secure session token generation with proper entropy
+    - Realistic session lifecycle and expiration patterns
+    - Comprehensive security tracking (IP, User-Agent, etc.)
+    - Session data storage for application state testing
+    - Multiple authentication method support
     """
     
     class Meta:
         model = UserSession
+        sqlalchemy_session_persistence = 'commit'
     
+    # User relationship
     user = factory.SubFactory(UserFactory)
-    session_token = factory.LazyFunction(lambda: uuid.uuid4().hex)
-    csrf_token = factory.LazyFunction(lambda: uuid.uuid4().hex)
     
-    # Session metadata
+    # Session tokens with proper security
+    session_token = factory.LazyFunction(lambda: secrets.token_urlsafe(32))
+    csrf_token = factory.LazyFunction(lambda: secrets.token_urlsafe(24))
+    refresh_token = factory.LazyFunction(lambda: secrets.token_urlsafe(32))
+    
+    # Session lifecycle
+    expires_at = factory.LazyFunction(lambda: datetime.utcnow() + timedelta(
+        seconds=fake.random_int(min=3600, max=86400)  # 1-24 hours
+    ))
+    is_valid = True
+    revoked_at = None
+    revoked_by = None
+    
+    # Security tracking
     ip_address = factory.LazyFunction(lambda: fake.ipv4())
     user_agent = factory.LazyFunction(lambda: fake.user_agent())
-    device_fingerprint = factory.LazyFunction(lambda: uuid.uuid4().hex[:16])
+    last_activity_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-1h', end_date='now'))
     
-    # Session status
-    is_active = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.2 else c[1])
+    # Session metadata
+    login_method = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'password', 'auth0', 'social', 'api'
+    )))
     
-    # Session timing
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-30d', end_date='now'))
-    last_activity_at = factory.LazyAttribute(lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now'))
-    expires_at = factory.LazyAttribute(lambda obj: obj.created_at + timedelta(hours=24))
+    session_data = factory.LazyFunction(lambda: json.dumps({
+        'preferences': {
+            'theme': fake.random_element(elements=('light', 'dark', 'auto')),
+            'language': fake.random_element(elements=('en', 'es', 'fr', 'de')),
+            'timezone': fake.timezone()
+        },
+        'navigation': {
+            'last_page': fake.uri_path(),
+            'breadcrumbs': [fake.uri_path() for _ in range(fake.random_int(min=1, max=5))]
+        },
+        'feature_flags': {
+            flag: fake.boolean() for flag in ['beta_features', 'advanced_ui', 'analytics']
+        }
+    }))
     
-    # Location data
-    location_data = factory.LazyFunction(lambda: json.dumps({
-        'country': fake.country(),
-        'city': fake.city(),
-        'timezone': fake.timezone()
-    }) if random.random() > 0.3 else None)
+    class Params:
+        """Trait parameters for factory variations"""
+        expired_session = factory.Trait(
+            expires_at=factory.LazyFunction(lambda: fake.date_time_between(start_date='-7d', end_date='-1h')),
+            is_valid=False
+        )
+        
+        revoked_session = factory.Trait(
+            is_valid=False,
+            revoked_at=factory.LazyFunction(lambda: fake.date_time_between(start_date='-24h', end_date='now')),
+            revoked_by=factory.LazyFunction(lambda: fake.random_element(elements=('user', 'admin', 'system')))
+        )
+        
+        auth0_session = factory.Trait(
+            login_method='auth0',
+            session_data=factory.LazyFunction(lambda: json.dumps({
+                'auth0_session_id': fake.uuid4(),
+                'auth0_access_token': secrets.token_urlsafe(32),
+                'auth0_id_token': secrets.token_urlsafe(48),
+                'auth0_user_info': {
+                    'sub': f"auth0|{secrets.token_hex(12)}",
+                    'nickname': fake.user_name(),
+                    'email': fake.email(),
+                    'email_verified': fake.boolean()
+                }
+            }))
+        )
+        
+        long_session = factory.Trait(
+            expires_at=factory.LazyFunction(lambda: datetime.utcnow() + timedelta(days=30))
+        )
 
 
-class AuditLogFactory(SQLAlchemyModelFactory):
+class BusinessEntityFactory(BaseModelFactory):
     """
-    Audit log factory for comprehensive audit trail testing.
+    Factory for BusinessEntity instances with realistic business data.
     
-    Generates realistic audit log data for testing DML operation tracking,
-    change data management, and compliance audit trails.
+    Generates authentic business entity instances with proper ownership,
+    status management, and business metadata for testing business logic
+    workflows and entity relationship scenarios.
     
-    Usage:
-        log = AuditLogFactory()
-        insert_log = AuditLogFactory(operation_type='INSERT')
-        user_logs = AuditLogFactory.create_batch(10, user=user)
+    Features:
+    - Realistic business naming and description patterns
+    - Owner assignment with user relationship management
+    - Configurable business entity status and lifecycle
+    - Industry and category classification support
+    - Business metadata for complex workflow testing
+    """
+    
+    class Meta:
+        model = BusinessEntity
+        sqlalchemy_session_persistence = 'commit'
+    
+    # Core business entity fields
+    name = factory.LazyFunction(lambda: fake.company())
+    description = factory.LazyFunction(lambda: fake.catch_phrase())
+    
+    # Ownership and status
+    owner = factory.SubFactory(UserFactory)
+    status = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'active', 'inactive', 'pending', 'suspended', 'archived'
+    )))
+    
+    # Business classification
+    entity_type = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'company', 'department', 'project', 'team', 'product',
+        'service', 'location', 'asset', 'contract', 'initiative'
+    )))
+    
+    industry = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'Technology', 'Healthcare', 'Finance', 'Manufacturing', 'Retail',
+        'Education', 'Government', 'Energy', 'Transportation', 'Real Estate'
+    )))
+    
+    category = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'primary', 'secondary', 'support', 'internal', 'external',
+        'strategic', 'operational', 'tactical', 'critical', 'standard'
+    )))
+    
+    # Business metadata
+    priority_level = factory.LazyFunction(lambda: fake.random_int(min=1, max=5))
+    risk_level = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'low', 'medium', 'high', 'critical'
+    )))
+    
+    # Additional business fields
+    external_id = factory.LazyFunction(lambda: fake.uuid4() if fake.boolean(chance_of_getting_true=60) else None)
+    tags = factory.LazyFunction(lambda: json.dumps(
+        fake.random_elements(elements=(
+            'important', 'urgent', 'revenue', 'cost_center', 'innovation',
+            'compliance', 'customer_facing', 'internal_only', 'partner'
+        ), length=fake.random_int(min=1, max=4), unique=True)
+    ))
+    
+    # Business contact information
+    contact_info = factory.LazyFunction(lambda: json.dumps({
+        'phone': fake.phone_number(),
+        'email': fake.company_email(),
+        'address': {
+            'street': fake.street_address(),
+            'city': fake.city(),
+            'state': fake.state_abbr(),
+            'zip_code': fake.zipcode(),
+            'country': fake.country_code()
+        },
+        'website': fake.url()
+    }))
+    
+    # Financial information
+    budget_allocated = factory.LazyFunction(lambda: fake.random_int(min=10000, max=1000000)
+                                          if fake.boolean(chance_of_getting_true=70) else None)
+    
+    # Operational metadata
+    entity_metadata = factory.LazyFunction(lambda: json.dumps({
+        'established_date': fake.date_this_decade().isoformat(),
+        'employee_count': fake.random_int(min=1, max=500),
+        'reporting_frequency': fake.random_element(elements=('daily', 'weekly', 'monthly', 'quarterly')),
+        'compliance_required': fake.boolean(chance_of_getting_true=40),
+        'public_facing': fake.boolean(chance_of_getting_true=30)
+    }))
+    
+    class Params:
+        """Trait parameters for factory variations"""
+        high_priority = factory.Trait(
+            priority_level=5,
+            risk_level='high',
+            status='active'
+        )
+        
+        project_entity = factory.Trait(
+            entity_type='project',
+            status=factory.LazyFunction(lambda: fake.random_element(elements=(
+                'active', 'pending', 'planning'
+            ))),
+            entity_metadata=factory.LazyFunction(lambda: json.dumps({
+                'start_date': fake.date_this_year().isoformat(),
+                'estimated_completion': fake.date_between(start_date='today', end_date='+1y').isoformat(),
+                'project_manager': fake.name(),
+                'stakeholders': [fake.name() for _ in range(fake.random_int(min=2, max=6))]
+            }))
+        )
+        
+        department_entity = factory.Trait(
+            entity_type='department',
+            category='internal',
+            entity_metadata=factory.LazyFunction(lambda: json.dumps({
+                'department_head': fake.name(),
+                'employee_count': fake.random_int(min=5, max=50),
+                'budget_code': fake.bothify(text='DEPT-###-????'),
+                'cost_center': fake.random_int(min=1000, max=9999)
+            }))
+        )
+
+
+class EntityRelationshipFactory(BaseModelFactory):
+    """
+    Factory for EntityRelationship instances with complex relationship patterns.
+    
+    Generates realistic business entity relationships with proper relationship
+    typing, bidirectional mapping, and relationship metadata for testing
+    complex business logic and entity graph scenarios.
+    
+    Features:
+    - Comprehensive relationship type support
+    - Bidirectional relationship mapping
+    - Relationship strength and importance weighting
+    - Temporal relationship tracking with lifecycle management
+    - Relationship metadata for business context
+    """
+    
+    class Meta:
+        model = EntityRelationship
+        sqlalchemy_session_persistence = 'commit'
+    
+    # Relationship entities
+    source_entity = factory.SubFactory(BusinessEntityFactory)
+    target_entity = factory.SubFactory(BusinessEntityFactory)
+    
+    # Relationship classification
+    relationship_type = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'parent_child', 'sibling', 'dependency', 'ownership', 'partnership',
+        'vendor_client', 'supplier_customer', 'reports_to', 'collaborates_with',
+        'manages', 'supports', 'integrates_with', 'competes_with', 'serves'
+    )))
+    
+    relationship_direction = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'bidirectional', 'source_to_target', 'target_to_source'
+    )))
+    
+    # Relationship status and lifecycle
+    is_active = True
+    status = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'active', 'pending', 'suspended', 'terminated', 'under_review'
+    )))
+    
+    # Relationship strength and importance
+    strength = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'weak', 'moderate', 'strong', 'critical'
+    )))
+    importance_score = factory.LazyFunction(lambda: fake.random_int(min=1, max=10))
+    
+    # Temporal tracking
+    relationship_start_date = factory.LazyFunction(lambda: fake.date_between(start_date='-2y', end_date='today'))
+    relationship_end_date = factory.LazyFunction(lambda: fake.date_between(start_date='today', end_date='+1y')
+                                               if fake.boolean(chance_of_getting_true=20) else None)
+    
+    # Relationship description and context
+    description = factory.LazyFunction(lambda: fake.sentence(nb_words=12))
+    
+    # Relationship metadata
+    relationship_metadata = factory.LazyFunction(lambda: json.dumps({
+        'contract_id': fake.uuid4() if fake.boolean(chance_of_getting_true=40) else None,
+        'sla_required': fake.boolean(chance_of_getting_true=30),
+        'financial_impact': fake.random_element(elements=('none', 'low', 'medium', 'high')),
+        'review_frequency': fake.random_element(elements=('monthly', 'quarterly', 'annually', 'as_needed')),
+        'stakeholders': [fake.name() for _ in range(fake.random_int(min=1, max=4))],
+        'compliance_aspects': fake.random_elements(elements=(
+            'data_sharing', 'security_clearance', 'regulatory_compliance',
+            'audit_requirements', 'privacy_protection'
+        ), length=fake.random_int(min=0, max=3), unique=True)
+    }))
+    
+    class Params:
+        """Trait parameters for factory variations"""
+        hierarchical = factory.Trait(
+            relationship_type='parent_child',
+            relationship_direction='source_to_target',
+            strength='strong'
+        )
+        
+        partnership = factory.Trait(
+            relationship_type='partnership',
+            relationship_direction='bidirectional',
+            strength=factory.LazyFunction(lambda: fake.random_element(elements=('moderate', 'strong'))),
+            relationship_metadata=factory.LazyFunction(lambda: json.dumps({
+                'partnership_agreement': fake.uuid4(),
+                'revenue_sharing': fake.boolean(),
+                'joint_projects': fake.random_int(min=1, max=5),
+                'communication_protocol': fake.random_element(elements=('formal', 'informal', 'structured'))
+            }))
+        )
+        
+        dependency = factory.Trait(
+            relationship_type='dependency',
+            strength='critical',
+            relationship_metadata=factory.LazyFunction(lambda: json.dumps({
+                'dependency_type': fake.random_element(elements=('technical', 'business', 'operational')),
+                'criticality_level': 'high',
+                'fallback_options': fake.boolean(chance_of_getting_true=60)
+            }))
+        )
+
+
+class AuditLogFactory(BaseModelFactory):
+    """
+    Factory for AuditLog instances with comprehensive operation tracking.
+    
+    Generates realistic audit log entries with proper operation classification,
+    change tracking, and security context for testing audit trail workflows
+    and compliance reporting scenarios.
+    
+    Features:
+    - Comprehensive DML operation tracking (INSERT, UPDATE, DELETE)
+    - JSON change data with before/after state comparison
+    - User context integration with Flask-Login session tracking
+    - Performance-optimized audit data generation
+    - Compliance-ready audit trail patterns
     """
     
     class Meta:
         model = AuditLog
+        sqlalchemy_session_persistence = 'commit'
     
-    # Operation tracking
-    table_name = factory.fuzzy.FuzzyChoice([
-        'users', 'roles', 'permissions', 'business_entities', 
-        'entity_relationships', 'user_sessions'
-    ])
-    record_id = factory.LazyFunction(lambda: str(uuid.uuid4()))
-    operation_type = factory.fuzzy.FuzzyChoice(['INSERT', 'UPDATE', 'DELETE'])
+    # Core audit fields
+    table_name = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'users', 'roles', 'permissions', 'business_entities', 'user_sessions',
+        'entity_relationships', 'user_roles', 'role_permissions'
+    )))
+    
+    record_id = factory.LazyFunction(lambda: fake.random_int(min=1, max=10000))
+    
+    operation_type = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'INSERT', 'UPDATE', 'DELETE', 'SELECT'
+    )))
     
     # User context
-    user = factory.SubFactory(UserFactory)
-    user_ip = factory.LazyFunction(lambda: fake.ipv4())
+    user_id = factory.SubFactory(UserFactory)
+    username = factory.LazyAttribute(lambda obj: obj.user_id.username if obj.user_id else 'system')
+    
+    # Session context
+    session_id = factory.LazyFunction(lambda: fake.uuid4())
+    ip_address = factory.LazyFunction(lambda: fake.ipv4())
     user_agent = factory.LazyFunction(lambda: fake.user_agent())
     
-    # Change data
+    # Change data (JSON format)
     old_values = factory.LazyFunction(lambda: json.dumps({
         'name': fake.name(),
         'email': fake.email(),
-        'status': random.choice(['active', 'inactive'])
-    }) if random.random() > 0.3 else None)
+        'status': fake.random_element(elements=('active', 'inactive')),
+        'last_updated': fake.date_time_this_year().isoformat()
+    }) if fake.boolean(chance_of_getting_true=70) else None)
     
     new_values = factory.LazyFunction(lambda: json.dumps({
         'name': fake.name(),
         'email': fake.email(),
-        'status': random.choice(['active', 'inactive'])
+        'status': fake.random_element(elements=('active', 'inactive')),
+        'last_updated': datetime.utcnow().isoformat()
     }))
     
-    changed_fields = factory.LazyFunction(lambda: json.dumps([
-        'name', 'email', 'updated_at'
-    ]))
-    
     # Audit metadata
-    transaction_id = factory.LazyFunction(lambda: uuid.uuid4().hex)
-    session_id = factory.LazyFunction(lambda: uuid.uuid4().hex)
+    operation_context = factory.LazyFunction(lambda: json.dumps({
+        'endpoint': fake.uri_path(),
+        'method': fake.random_element(elements=('GET', 'POST', 'PUT', 'PATCH', 'DELETE')),
+        'request_id': fake.uuid4(),
+        'transaction_id': fake.uuid4(),
+        'client_version': fake.random_element(elements=('1.0.0', '1.1.0', '1.2.0'))
+    }))
     
-    # Timing
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-1y', end_date='now'))
+    # Timestamp (from AuditMixin)
+    timestamp = factory.LazyFunction(lambda: fake.date_time_between(start_date='-30d', end_date='now'))
+    
+    class Params:
+        """Trait parameters for factory variations"""
+        insert_operation = factory.Trait(
+            operation_type='INSERT',
+            old_values=None,
+            new_values=factory.LazyFunction(lambda: json.dumps({
+                'id': fake.random_int(min=1, max=10000),
+                'created_at': datetime.utcnow().isoformat(),
+                'status': 'active'
+            }))
+        )
+        
+        update_operation = factory.Trait(
+            operation_type='UPDATE',
+            old_values=factory.LazyFunction(lambda: json.dumps({
+                'status': 'pending',
+                'updated_at': fake.date_time_this_year().isoformat()
+            })),
+            new_values=factory.LazyFunction(lambda: json.dumps({
+                'status': 'active',
+                'updated_at': datetime.utcnow().isoformat()
+            }))
+        )
+        
+        delete_operation = factory.Trait(
+            operation_type='DELETE',
+            new_values=None,
+            old_values=factory.LazyFunction(lambda: json.dumps({
+                'id': fake.random_int(min=1, max=10000),
+                'status': 'active',
+                'deleted_at': datetime.utcnow().isoformat()
+            }))
+        )
+        
+        security_audit = factory.Trait(
+            operation_context=factory.LazyFunction(lambda: json.dumps({
+                'security_event': True,
+                'event_type': fake.random_element(elements=(
+                    'login_attempt', 'permission_change', 'role_assignment'
+                )),
+                'risk_level': fake.random_element(elements=('low', 'medium', 'high')),
+                'automated_response': fake.boolean()
+            }))
+        )
 
 
-class SecurityEventFactory(SQLAlchemyModelFactory):
+class SecurityEventFactory(BaseModelFactory):
     """
-    Security event factory for security monitoring and incident testing.
+    Factory for SecurityEvent instances with comprehensive security monitoring.
     
-    Generates realistic security event data for testing threat detection,
-    incident response, and security monitoring capabilities.
+    Generates realistic security event instances with proper classification,
+    severity assessment, and response tracking for testing security monitoring
+    workflows and incident response scenarios.
     
-    Usage:
-        event = SecurityEventFactory()
-        failed_login = SecurityEventFactory(event_type='authentication_failure')
-        critical_events = SecurityEventFactory.create_batch(5, severity='critical')
+    Features:
+    - Comprehensive security event type classification
+    - Severity-based incident categorization
+    - Response tracking and resolution workflow support
+    - Security context with threat intelligence integration
+    - Performance-optimized security data generation
     """
     
     class Meta:
         model = SecurityEvent
+        sqlalchemy_session_persistence = 'commit'
     
-    # Event classification
-    event_type = factory.fuzzy.FuzzyChoice([
+    # Core security event fields
+    event_type = factory.LazyFunction(lambda: fake.random_element(elements=(
         'authentication_failure', 'authorization_violation', 'suspicious_activity',
-        'account_locked', 'password_changed', 'permission_escalation',
-        'data_access_violation', 'session_hijack_attempt', 'brute_force_attack'
-    ])
+        'brute_force_attempt', 'account_lockout', 'permission_escalation',
+        'data_access_violation', 'session_hijacking', 'malicious_request',
+        'anomalous_behavior', 'policy_violation', 'security_scan_detected'
+    )))
     
-    severity = factory.fuzzy.FuzzyChoice(['low', 'medium', 'high', 'critical'])
+    severity = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'low', 'medium', 'high', 'critical'
+    )))
+    
+    status = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'open', 'investigating', 'resolved', 'false_positive', 'escalated'
+    )))
+    
+    # Event context
+    source_ip = factory.LazyFunction(lambda: fake.ipv4())
+    target_resource = factory.LazyFunction(lambda: fake.random_element(elements=(
+        '/api/users', '/api/admin', '/api/roles', '/dashboard',
+        '/api/business-entities', '/api/reports', '/login', '/api/permissions'
+    )))
+    
+    user_id = factory.SubFactory(UserFactory)
+    session_id = factory.LazyFunction(lambda: fake.uuid4())
     
     # Event details
-    description = factory.LazyAttribute(
-        lambda obj: f"{obj.event_type.replace('_', ' ').title()} detected with {obj.severity} severity"
-    )
-    
-    # Context data
-    user = factory.SubFactory(UserFactory)
-    ip_address = factory.LazyFunction(lambda: fake.ipv4())
-    user_agent = factory.LazyFunction(lambda: fake.user_agent())
-    
-    # Event metadata
-    event_data = factory.LazyFunction(lambda: json.dumps({
-        'request_path': fake.uri_path(),
-        'method': random.choice(['GET', 'POST', 'PUT', 'DELETE']),
-        'response_code': random.choice([200, 401, 403, 404, 500]),
-        'attempt_count': random.randint(1, 10)
-    }))
+    description = factory.LazyFunction(lambda: fake.sentence(nb_words=15))
     
     # Risk assessment
-    risk_score = factory.fuzzy.FuzzyInteger(1, 100)
-    is_resolved = factory.fuzzy.FuzzyChoice([True, False], getter=lambda c: c[0] if random.random() > 0.4 else c[1])
-    resolved_by = factory.SubFactory(UserFactory)
-    resolved_at = factory.LazyAttribute(
-        lambda obj: fake.date_time_between(start_date=obj.created_at, end_date='now') 
-        if obj.is_resolved else None
-    )
+    risk_score = factory.LazyFunction(lambda: fake.random_int(min=1, max=100))
+    threat_indicators = factory.LazyFunction(lambda: json.dumps(
+        fake.random_elements(elements=(
+            'multiple_failed_logins', 'unusual_access_pattern', 'suspicious_ip',
+            'privilege_escalation_attempt', 'data_exfiltration_pattern',
+            'malware_signature', 'known_threat_actor', 'anomalous_timing'
+        ), length=fake.random_int(min=1, max=4), unique=True)
+    ))
     
-    # Detection metadata
-    detection_rule = factory.LazyFunction(lambda: f"RULE_{random.randint(1000, 9999)}")
-    source_system = factory.fuzzy.FuzzyChoice(['webapp', 'api', 'auth_service', 'database'])
+    # Response tracking
+    detected_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-7d', end_date='now'))
+    resolved_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='now', end_date='+1d')
+                                     if fake.boolean(chance_of_getting_true=60) else None)
+    resolved_by = factory.LazyFunction(lambda: fake.random_element(elements=(
+        'security_team', 'system_admin', 'automated_response', 'soc_analyst'
+    )) if fake.boolean(chance_of_getting_true=60) else None)
     
-    # Timing
-    created_at = factory.LazyFunction(lambda: fake.date_time_between(start_date='-90d', end_date='now'))
-
-
-# Factory helper utilities for test data management and relationship handling
-
-class FactoryDataManager:
-    """
-    Utility class for managing Factory Boy test data generation with relationship consistency.
+    # Event metadata
+    event_metadata = factory.LazyFunction(lambda: json.dumps({
+        'detection_method': fake.random_element(elements=(
+            'automated_rule', 'manual_review', 'user_report', 'system_alert'
+        )),
+        'affected_systems': fake.random_elements(elements=(
+            'web_application', 'database', 'api_gateway', 'authentication_service'
+        ), length=fake.random_int(min=1, max=3), unique=True),
+        'mitigation_actions': fake.random_elements(elements=(
+            'account_locked', 'ip_blocked', 'session_terminated', 'alert_sent',
+            'investigation_started', 'escalated_to_admin'
+        ), length=fake.random_int(min=1, max=3), unique=True),
+        'investigation_notes': fake.text(max_nb_chars=200)
+    }))
     
-    Provides methods for creating related object hierarchies, managing test data cleanup,
-    and ensuring data consistency across test execution cycles per Section 4.7.3.2.
-    """
+    # Additional context
+    related_events = factory.LazyFunction(lambda: json.dumps([
+        fake.uuid4() for _ in range(fake.random_int(min=0, max=3))
+    ]))
     
-    @staticmethod
-    def create_user_with_complete_profile(role_count: int = 2, session_count: int = 1) -> User:
-        """
-        Create a user with complete profile including roles and sessions.
-        
-        Args:
-            role_count: Number of roles to assign
-            session_count: Number of active sessions to create
-            
-        Returns:
-            User: Fully configured user instance for comprehensive testing
-        """
-        user = UserFactory(
-            is_active=True,
-            email_verified=True,
-            roles__size=role_count
+    class Params:
+        """Trait parameters for factory variations"""
+        critical_security_event = factory.Trait(
+            severity='critical',
+            status=factory.LazyFunction(lambda: fake.random_element(elements=(
+                'open', 'investigating', 'escalated'
+            ))),
+            risk_score=factory.LazyFunction(lambda: fake.random_int(min=80, max=100))
         )
         
-        # Create user sessions
-        UserSessionFactory.create_batch(session_count, user=user, is_active=True)
+        authentication_failure = factory.Trait(
+            event_type='authentication_failure',
+            target_resource='/login',
+            event_metadata=factory.LazyFunction(lambda: json.dumps({
+                'failed_attempts': fake.random_int(min=1, max=10),
+                'username_attempted': fake.user_name(),
+                'detection_method': 'automated_rule',
+                'lockout_triggered': fake.boolean(chance_of_getting_true=60)
+            }))
+        )
         
-        return user
+        privilege_escalation = factory.Trait(
+            event_type='permission_escalation',
+            severity=factory.LazyFunction(lambda: fake.random_element(elements=('high', 'critical'))),
+            event_metadata=factory.LazyFunction(lambda: json.dumps({
+                'attempted_privilege': fake.random_element(elements=('admin', 'super_user')),
+                'current_privilege': fake.random_element(elements=('user', 'operator')),
+                'escalation_method': fake.random_element(elements=('role_manipulation', 'permission_bypass')),
+                'investigation_priority': 'high'
+            }))
+        )
+        
+        resolved_event = factory.Trait(
+            status='resolved',
+            resolved_at=factory.LazyFunction(lambda: fake.date_time_between(start_date='-1d', end_date='now')),
+            resolved_by='security_team'
+        )
+
+
+# Factory configuration and session management
+def configure_factories(app=None):
+    """
+    Configure Factory Boy with Flask-SQLAlchemy session management.
+    
+    Args:
+        app: Flask application instance (optional)
+    """
+    # Set up SQLAlchemy session for all factories
+    session = FactorySessionManager.get_session()
+    
+    # Configure all factory classes with the session
+    factory_classes = [
+        UserFactory, RoleFactory, PermissionFactory, UserRoleFactory,
+        RolePermissionFactory, UserSessionFactory, BusinessEntityFactory,
+        EntityRelationshipFactory, AuditLogFactory, SecurityEventFactory
+    ]
+    
+    for factory_class in factory_classes:
+        factory_class._meta.sqlalchemy_session = session
+
+
+def reset_factory_sequences():
+    """
+    Reset all factory sequences for consistent test data generation.
+    
+    Useful for test isolation and predictable factory behavior across
+    different test execution cycles.
+    """
+    # Reset unique sequences in Faker
+    fake.unique.clear()
+    
+    # Reset Factory Boy sequences if needed
+    for factory_class in [
+        UserFactory, RoleFactory, PermissionFactory, UserRoleFactory,
+        RolePermissionFactory, UserSessionFactory, BusinessEntityFactory,
+        EntityRelationshipFactory, AuditLogFactory, SecurityEventFactory
+    ]:
+        if hasattr(factory_class, '_meta') and hasattr(factory_class._meta, 'sequences'):
+            factory_class._meta.sequences.clear()
+
+
+def cleanup_test_data():
+    """
+    Clean up test data generated by factories.
+    
+    Provides comprehensive cleanup of all factory-generated data for
+    test isolation and database state management.
+    """
+    try:
+        # Roll back any pending transactions
+        FactorySessionManager.rollback_session()
+        
+        # Clean up session state
+        FactorySessionManager.cleanup_session()
+        
+        # Reset factory sequences
+        reset_factory_sequences()
+        
+        return True
+    except Exception as e:
+        return False
+
+
+# Convenience factory methods for common test scenarios
+class FactoryPresets:
+    """
+    Pre-configured factory combinations for common testing scenarios.
+    
+    Provides convenient methods for creating complex object graphs and
+    relationship patterns commonly needed in test scenarios.
+    """
     
     @staticmethod
-    def create_business_hierarchy(levels: int = 3, entities_per_level: int = 2) -> List[BusinessEntity]:
+    def create_admin_user_with_roles():
         """
-        Create a hierarchical business entity structure for relationship testing.
+        Create an admin user with comprehensive role assignments.
         
-        Args:
-            levels: Number of hierarchy levels
-            entities_per_level: Number of entities per level
-            
         Returns:
-            List[BusinessEntity]: Root level entities with complete hierarchy
+            Tuple of (user, admin_role, permissions)
         """
-        entities = []
-        previous_level = []
+        # Create admin user
+        admin_user = UserFactory(admin_user=True)
         
-        for level in range(levels):
-            current_level = BusinessEntityFactory.create_batch(entities_per_level)
-            entities.extend(current_level)
-            
-            # Create parent-child relationships
-            if previous_level:
-                for parent in previous_level:
-                    for child in current_level:
-                        EntityRelationshipFactory(
-                            source_entity=parent,
-                            target_entity=child,
-                            relationship_type='parent_child',
-                            is_active=True
-                        )
-            
-            previous_level = current_level
+        # Create admin role with permissions
+        admin_role = RoleFactory(admin_role=True)
         
-        return entities
+        # Create comprehensive permissions
+        permissions = [
+            PermissionFactory(admin_permission=True, resource='users'),
+            PermissionFactory(admin_permission=True, resource='roles'),
+            PermissionFactory(admin_permission=True, resource='permissions'),
+            PermissionFactory(admin_permission=True, resource='business_entities'),
+            PermissionFactory(admin_permission=True, resource='audit_logs')
+        ]
+        
+        # Assign permissions to role
+        for permission in permissions:
+            RolePermissionFactory(role=admin_role, permission=permission)
+        
+        # Assign role to user
+        UserRoleFactory(user=admin_user, role=admin_role)
+        
+        FactorySessionManager.commit_session()
+        
+        return admin_user, admin_role, permissions
     
     @staticmethod
-    def create_rbac_system(user_count: int = 5, role_count: int = 3, permission_count: int = 10) -> Dict[str, List]:
+    def create_business_entity_hierarchy():
         """
-        Create a complete RBAC system with users, roles, and permissions.
+        Create a complete business entity hierarchy with relationships.
         
-        Args:
-            user_count: Number of users to create
-            role_count: Number of roles to create
-            permission_count: Number of permissions to create
-            
         Returns:
-            Dict: Complete RBAC system components
+            Dictionary with created entities and relationships
         """
-        # Create permissions
-        permissions = PermissionFactory.create_batch(permission_count)
+        # Create parent company
+        parent_company = BusinessEntityFactory(
+            entity_type='company',
+            name='Parent Corporation'
+        )
         
-        # Create roles with permissions
-        roles = []
-        for i in range(role_count):
-            role = RoleFactory()
-            # Assign 3-7 random permissions to each role
-            role_permissions = random.sample(permissions, random.randint(3, min(7, len(permissions))))
-            role.permissions.extend(role_permissions)
-            roles.append(role)
+        # Create departments
+        departments = [
+            BusinessEntityFactory(entity_type='department', name='Engineering'),
+            BusinessEntityFactory(entity_type='department', name='Marketing'),
+            BusinessEntityFactory(entity_type='department', name='Sales')
+        ]
         
-        # Create users with roles
-        users = []
-        for i in range(user_count):
-            user = UserFactory()
-            # Assign 1-3 random roles to each user
-            user_roles = random.sample(roles, random.randint(1, min(3, len(roles))))
-            user.roles.extend(user_roles)
-            users.append(user)
+        # Create projects under departments
+        projects = []
+        for dept in departments:
+            project = BusinessEntityFactory(project_entity=True)
+            projects.append(project)
+            
+            # Create relationships
+            EntityRelationshipFactory(
+                source_entity=dept,
+                target_entity=project,
+                hierarchical=True
+            )
+        
+        # Create company-department relationships
+        dept_relationships = []
+        for dept in departments:
+            relationship = EntityRelationshipFactory(
+                source_entity=parent_company,
+                target_entity=dept,
+                hierarchical=True
+            )
+            dept_relationships.append(relationship)
+        
+        FactorySessionManager.commit_session()
+        
+        return {
+            'parent_company': parent_company,
+            'departments': departments,
+            'projects': projects,
+            'dept_relationships': dept_relationships
+        }
+    
+    @staticmethod
+    def create_user_session_with_audit_trail():
+        """
+        Create a user with active session and comprehensive audit trail.
+        
+        Returns:
+            Dictionary with user, session, and audit records
+        """
+        # Create user with login history
+        user = UserFactory(
+            login_count=50,
+            last_login_at=fake.date_time_between(start_date='-1h', end_date='now')
+        )
+        
+        # Create active session
+        session = UserSessionFactory(user=user)
+        
+        # Create audit log entries for user creation and session start
+        user_creation_audit = AuditLogFactory(
+            table_name='users',
+            record_id=user.id,
+            user_id=user,
+            insert_operation=True
+        )
+        
+        session_start_audit = AuditLogFactory(
+            table_name='user_sessions',
+            record_id=session.id,
+            user_id=user,
+            insert_operation=True
+        )
+        
+        # Create some security events
+        security_events = [
+            SecurityEventFactory(user_id=user, resolved_event=True),
+            SecurityEventFactory(user_id=user, authentication_failure=True)
+        ]
+        
+        FactorySessionManager.commit_session()
+        
+        return {
+            'user': user,
+            'session': session,
+            'audit_logs': [user_creation_audit, session_start_audit],
+            'security_events': security_events
+        }
+    
+    @staticmethod
+    def create_rbac_test_scenario():
+        """
+        Create a comprehensive RBAC test scenario with multiple users, roles, and permissions.
+        
+        Returns:
+            Dictionary with all created RBAC entities
+        """
+        # Create permissions for different resources
+        permissions = {}
+        resources = ['users', 'roles', 'business_entities', 'reports']
+        actions = ['read', 'create', 'update', 'delete', 'admin']
+        
+        for resource in resources:
+            permissions[resource] = []
+            for action in actions:
+                perm = PermissionFactory(resource=resource, action=action)
+                permissions[resource].append(perm)
+        
+        # Create roles with different permission sets
+        roles = {
+            'admin': RoleFactory(admin_role=True),
+            'manager': RoleFactory(name='manager', display_name='Manager'),
+            'user': RoleFactory(viewer_role=True),
+            'analyst': RoleFactory(name='analyst', display_name='Data Analyst')
+        }
+        
+        # Assign permissions to roles
+        role_permissions = {}
+        
+        # Admin gets all permissions
+        role_permissions['admin'] = []
+        for resource_perms in permissions.values():
+            for perm in resource_perms:
+                rp = RolePermissionFactory(role=roles['admin'], permission=perm)
+                role_permissions['admin'].append(rp)
+        
+        # Manager gets read/update permissions
+        role_permissions['manager'] = []
+        for resource in ['users', 'business_entities']:
+            for action in ['read', 'update']:
+                perm = next(p for p in permissions[resource] if p.action == action)
+                rp = RolePermissionFactory(role=roles['manager'], permission=perm)
+                role_permissions['manager'].append(rp)
+        
+        # User gets read permissions only
+        role_permissions['user'] = []
+        for resource in resources:
+            perm = next(p for p in permissions[resource] if p.action == 'read')
+            rp = RolePermissionFactory(role=roles['user'], permission=perm)
+            role_permissions['user'].append(rp)
+        
+        # Create users and assign roles
+        users = {
+            'admin_user': UserFactory(admin_user=True),
+            'manager_user': UserFactory(),
+            'regular_user': UserFactory(),
+            'analyst_user': UserFactory()
+        }
+        
+        user_roles = {}
+        user_roles['admin_user'] = UserRoleFactory(user=users['admin_user'], role=roles['admin'])
+        user_roles['manager_user'] = UserRoleFactory(user=users['manager_user'], role=roles['manager'])
+        user_roles['regular_user'] = UserRoleFactory(user=users['regular_user'], role=roles['user'])
+        user_roles['analyst_user'] = UserRoleFactory(user=users['analyst_user'], role=roles['analyst'])
+        
+        FactorySessionManager.commit_session()
         
         return {
             'users': users,
             'roles': roles,
-            'permissions': permissions
+            'permissions': permissions,
+            'role_permissions': role_permissions,
+            'user_roles': user_roles
         }
-    
-    @staticmethod
-    def create_audit_trail(entity_count: int = 10, operations_per_entity: int = 5) -> List[AuditLog]:
-        """
-        Create comprehensive audit trail for testing audit log functionality.
-        
-        Args:
-            entity_count: Number of entities to audit
-            operations_per_entity: Number of operations per entity
-            
-        Returns:
-            List[AuditLog]: Complete audit trail for testing
-        """
-        users = UserFactory.create_batch(3)  # Audit actors
-        audit_logs = []
-        
-        for i in range(entity_count):
-            record_id = str(uuid.uuid4())
-            table_name = random.choice(['users', 'business_entities', 'roles'])
-            
-            for j in range(operations_per_entity):
-                operation = random.choice(['INSERT', 'UPDATE', 'DELETE'])
-                user = random.choice(users)
-                
-                audit_log = AuditLogFactory(
-                    table_name=table_name,
-                    record_id=record_id,
-                    operation_type=operation,
-                    user=user
-                )
-                audit_logs.append(audit_log)
-        
-        return audit_logs
-    
-    @staticmethod
-    def cleanup_test_data(session):
-        """
-        Clean up test data for consistent test execution cycles.
-        
-        Args:
-            session: SQLAlchemy session for cleanup operations
-        """
-        # Clean up in reverse dependency order
-        cleanup_models = [
-            SecurityEvent, AuditLog, UserSession, EntityRelationship,
-            BusinessEntity, Permission, Role, User
-        ]
-        
-        for model in cleanup_models:
-            try:
-                session.query(model).delete()
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
 
 
-# Factory registration for easy access and test fixture integration
-FACTORIES = {
-    'user': UserFactory,
-    'role': RoleFactory,
-    'permission': PermissionFactory,
-    'business_entity': BusinessEntityFactory,
-    'entity_relationship': EntityRelationshipFactory,
-    'user_session': UserSessionFactory,
-    'audit_log': AuditLogFactory,
-    'security_event': SecurityEventFactory
-}
-
-
-def get_factory(model_name: str):
-    """
-    Get factory class by model name for dynamic test data generation.
+# Export all factories and utilities
+__all__ = [
+    # Core factories
+    'UserFactory',
+    'RoleFactory', 
+    'PermissionFactory',
+    'UserRoleFactory',
+    'RolePermissionFactory',
+    'UserSessionFactory',
+    'BusinessEntityFactory',
+    'EntityRelationshipFactory',
+    'AuditLogFactory',
+    'SecurityEventFactory',
     
-    Args:
-        model_name: Name of the model to get factory for
-        
-    Returns:
-        Factory class for the specified model
-        
-    Raises:
-        KeyError: If model factory is not found
-    """
-    if model_name not in FACTORIES:
-        raise KeyError(f"Factory for model '{model_name}' not found. Available: {list(FACTORIES.keys())}")
+    # Base classes and utilities
+    'BaseModelFactory',
+    'FactorySessionManager',
+    'FactoryPresets',
     
-    return FACTORIES[model_name]
+    # Configuration functions
+    'configure_factories',
+    'reset_factory_sequences',
+    'cleanup_test_data'
+]
