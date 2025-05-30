@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New User Account Created - Admin Notification</title>
+    <style>
+        /* Email-safe CSS styles inline for maximum compatibility */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .email-header {
+            background: linear-gradient(135deg, #5B39F3 0%, #7B68EE 100%);
+            color: #ffffff;
+            padding: 30px 25px;
+            text-align: center;
+        }
+        
+        .email-header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .email-header p {
+            margin: 8px 0 0 0;
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        
+        .email-content {
+            padding: 30px 25px;
+        }
+        
+        .alert-banner {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px 16px;
+            margin-bottom: 25px;
+            border-radius: 4px;
+        }
+        
+        .alert-banner .alert-icon {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        
+        .user-details {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .user-details h2 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            color: #495057;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 8px;
+        }
+        
+        .detail-row {
+            display: flex;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #6c757d;
+            width: 140px;
+            flex-shrink: 0;
+        }
+        
+        .detail-value {
+            color: #333333;
+            flex-grow: 1;
+        }
+        
+        .detail-value code {
+            background-color: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-pending {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-verified {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+        
+        .status-unverified {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        
+        .action-section {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+        
+        .action-section h3 {
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            color: #495057;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            text-align: center;
+            transition: all 0.2s ease;
+            min-width: 120px;
+        }
+        
+        .btn-primary {
+            background-color: #5B39F3;
+            color: #ffffff;
+            border: 2px solid #5B39F3;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+            color: #ffffff;
+            border: 2px solid #28a745;
+        }
+        
+        .btn-warning {
+            background-color: #ffc107;
+            color: #212529;
+            border: 2px solid #ffc107;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            color: #ffffff;
+            border: 2px solid #dc3545;
+        }
+        
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        
+        .system-info {
+            background-color: #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .system-info h4 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        
+        .metadata-item {
+            font-size: 13px;
+        }
+        
+        .metadata-label {
+            font-weight: 600;
+            color: #6c757d;
+        }
+        
+        .metadata-value {
+            color: #495057;
+        }
+        
+        .email-footer {
+            background-color: #f8f9fa;
+            padding: 20px 25px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .email-footer p {
+            margin: 0;
+            font-size: 13px;
+            color: #6c757d;
+        }
+        
+        .email-footer a {
+            color: #5B39F3;
+            text-decoration: none;
+        }
+        
+        .security-notice {
+            background-color: #d1ecf1;
+            border-left: 4px solid #bee5eb;
+            padding: 12px 16px;
+            margin-top: 20px;
+            border-radius: 4px;
+        }
+        
+        .security-notice p {
+            margin: 0;
+            font-size: 13px;
+            color: #0c5460;
+        }
+        
+        /* Responsive design for mobile devices */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                margin: 0;
+                border-radius: 0;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                margin-bottom: 8px;
+            }
+            
+            .detail-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .detail-label {
+                width: auto;
+                margin-bottom: 4px;
+            }
+            
+            .metadata-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Email Header -->
+        <div class="email-header">
+            <h1>🚨 New User Account Created</h1>
+            <p>Administrative Review Required</p>
+        </div>
+        
+        <!-- Email Content -->
+        <div class="email-content">
+            <!-- Alert Banner -->
+            <div class="alert-banner">
+                <span class="alert-icon">⚠️</span>
+                <strong>Action Required:</strong> A new user account has been created and requires administrative review.
+            </div>
+            
+            <!-- User Details Section -->
+            <div class="user-details">
+                <h2>👤 User Account Information</h2>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Full Name:</span>
+                    <span class="detail-value">{{ user.name or user.nickname or 'Not provided' }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Username:</span>
+                    <span class="detail-value"><code>{{ user.username or user.preferred_username or 'Not set' }}</code></span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Email Address:</span>
+                    <span class="detail-value"><strong>{{ user.email }}</strong></span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Email Verified:</span>
+                    <span class="detail-value">
+                        {% if user.email_verified %}
+                            <span class="status-badge status-verified">✓ Verified</span>
+                        {% else %}
+                            <span class="status-badge status-unverified">✗ Unverified</span>
+                        {% endif %}
+                    </span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Auth0 User ID:</span>
+                    <span class="detail-value"><code>{{ user.user_id }}</code></span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Account Status:</span>
+                    <span class="detail-value">
+                        {% if user.blocked %}
+                            <span class="status-badge status-unverified">🚫 Blocked</span>
+                        {% else %}
+                            <span class="status-badge status-pending">⏳ Pending Review</span>
+                        {% endif %}
+                    </span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Registration Date:</span>
+                    <span class="detail-value">{{ registration_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') if registration_timestamp else 'Unknown' }}</span>
+                </div>
+                
+                {% if user.last_login %}
+                <div class="detail-row">
+                    <span class="detail-label">Last Login:</span>
+                    <span class="detail-value">{{ user.last_login.strftime('%B %d, %Y at %I:%M %p UTC') }}</span>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Administrative Action Section -->
+            <div class="action-section">
+                <h3>🔧 Administrative Actions</h3>
+                <p>Review the user account and take appropriate action:</p>
+                
+                <div class="action-buttons">
+                    <a href="{{ url_for('admin.approve_user', user_id=user.user_id, _external=True) }}" class="btn btn-success">
+                        ✅ Approve User
+                    </a>
+                    
+                    <a href="{{ url_for('admin.review_user', user_id=user.user_id, _external=True) }}" class="btn btn-primary">
+                        👁️ Review Details
+                    </a>
+                    
+                    <a href="{{ url_for('admin.flag_user', user_id=user.user_id, _external=True) }}" class="btn btn-warning">
+                        🏃 Flag for Review
+                    </a>
+                    
+                    <a href="{{ url_for('admin.block_user', user_id=user.user_id, _external=True) }}" class="btn btn-danger">
+                        🚫 Block Account
+                    </a>
+                </div>
+            </div>
+            
+            <!-- System Information -->
+            <div class="system-info">
+                <h4>📊 System Information</h4>
+                <div class="metadata-grid">
+                    <div class="metadata-item">
+                        <div class="metadata-label">Registration Source:</div>
+                        <div class="metadata-value">{{ registration_source or 'Web Application' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">Auth0 Connection:</div>
+                        <div class="metadata-value">{{ user.identities[0].connection if user.identities else 'Username-Password-Authentication' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">User Agent:</div>
+                        <div class="metadata-value">{{ request_metadata.user_agent[:50] + '...' if request_metadata.user_agent and request_metadata.user_agent|length > 50 else request_metadata.user_agent or 'Unknown' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">IP Address:</div>
+                        <div class="metadata-value">{{ request_metadata.ip_address or 'Unknown' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">Locale:</div>
+                        <div class="metadata-value">{{ user.locale or 'en' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">App Metadata:</div>
+                        <div class="metadata-value">{{ user.app_metadata.roles|join(', ') if user.app_metadata and user.app_metadata.roles else 'No roles assigned' }}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Auth0 User Profile Link -->
+            {% if auth0_management_url %}
+            <div class="action-section">
+                <h3>🔗 Auth0 Management</h3>
+                <p>Access the full user profile in Auth0 Management Dashboard:</p>
+                <a href="{{ auth0_management_url }}/users/{{ user.user_id }}" class="btn btn-primary" target="_blank">
+                    🔧 Open in Auth0 Dashboard
+                </a>
+            </div>
+            {% endif %}
+            
+            <!-- Service Layer Integration Information -->
+            {% if service_context %}
+            <div class="system-info">
+                <h4>🔄 Service Layer Context</h4>
+                <div class="metadata-grid">
+                    <div class="metadata-item">
+                        <div class="metadata-label">Workflow ID:</div>
+                        <div class="metadata-value">{{ service_context.workflow_id or 'N/A' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">Processing Status:</div>
+                        <div class="metadata-value">{{ service_context.status or 'Completed' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">Service Version:</div>
+                        <div class="metadata-value">{{ service_context.version or '1.0.0' }}</div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <div class="metadata-label">Notification ID:</div>
+                        <div class="metadata-value">{{ service_context.notification_id or 'N/A' }}</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Security Notice -->
+            <div class="security-notice">
+                <p><strong>🔒 Security Notice:</strong> This notification was generated automatically by the Flask User Management Service. 
+                Please verify the authenticity of this email and user account before taking any administrative actions. 
+                If you suspect fraudulent activity, immediately block the account and investigate further.</p>
+            </div>
+        </div>
+        
+        <!-- Email Footer -->
+        <div class="email-footer">
+            <p>
+                This administrative notification was sent from 
+                <strong>{{ app_name or 'Flask Application' }}</strong> 
+                on {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') if current_timestamp else 'Unknown Date' }}.
+            </p>
+            <p>
+                For technical support, contact 
+                <a href="mailto:{{ admin_email or 'admin@example.com' }}">{{ admin_email or 'admin@example.com' }}</a>
+            </p>
+            <p>
+                <a href="{{ url_for('admin.notification_settings', _external=True) if url_for else '#' }}">Manage Email Preferences</a> | 
+                <a href="{{ url_for('admin.dashboard', _external=True) if url_for else '#' }}">Admin Dashboard</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
