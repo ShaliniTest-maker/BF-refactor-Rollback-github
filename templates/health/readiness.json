@@ -1,212 +1,126 @@
-{# 
-Readiness Health Check Template
-=====================================
-Comprehensive system readiness validation template for Flask application health monitoring.
-Generates JSON responses for deployment health validation and container orchestration.
+{% extends "health/base_health.json" %}
 
-Performance Requirements:
-- Response time: <100ms (per Section 6.5.2.1)
-- ALB health check compatibility (per Section 8.5.1)  
-- EC2 instance readiness validation (per Section 8.5.1)
+{% block status %}{{ "healthy" if readiness_status == "ready" else "unhealthy" }}{% endblock %}
 
-Integration Points:
-- Database connectivity validation via SQLAlchemy
-- Auth0 authentication service health verification
-- Container orchestration health monitoring
-- Deployment workflow validation
+{% block check_type %}readiness{% endblock %}
 
-HTTP Status Codes:
-- 200: All systems ready and operational
-- 503: System not ready (database/auth failures)
-#}
-{
-  "status": "{{ health_status.overall_status }}",
-  "timestamp": "{{ health_status.timestamp }}",
-  "service": "{{ health_status.service_name }}",
-  "version": "{{ health_status.version }}",
-  "environment": "{{ health_status.environment }}",
-  "instance_id": "{{ health_status.instance_id }}",
-  "deployment_stage": "{{ health_status.deployment_stage }}",
-  "checks": {
-    "database": {
-      "status": "{{ health_status.database.status }}",
-      "name": "{{ health_status.database.name }}",
-      "connection_pool": {
-        "active_connections": {{ health_status.database.connection_pool.active_connections }},
-        "pool_size": {{ health_status.database.connection_pool.pool_size }},
-        "overflow_size": {{ health_status.database.connection_pool.overflow_size }},
-        "checked_in": {{ health_status.database.connection_pool.checked_in }},
-        "checked_out": {{ health_status.database.connection_pool.checked_out }},
-        "utilization_percentage": {{ health_status.database.connection_pool.utilization_percentage }}
-      },
-      "last_check": "{{ health_status.database.last_check }}",
-      "response_time_ms": {{ health_status.database.response_time_ms }},
-      {% if health_status.database.status == "unhealthy" %}
-      "error": "{{ health_status.database.error }}",
-      "error_code": "{{ health_status.database.error_code }}",
-      {% endif %}
-      "connectivity_test": "{{ health_status.database.connectivity_test }}",
-      "migration_status": "{{ health_status.database.migration_status }}"
-    },
-    "authentication": {
-      "status": "{{ health_status.auth0.status }}",
-      "provider": "{{ health_status.auth0.provider }}",
-      "domain": "{{ health_status.auth0.domain }}",
-      "management_api": {
-        "status": "{{ health_status.auth0.management_api.status }}",
-        "response_time_ms": {{ health_status.auth0.management_api.response_time_ms }},
-        {% if health_status.auth0.management_api.status == "unhealthy" %}
-        "error": "{{ health_status.auth0.management_api.error }}",
-        {% endif %}
-        "last_token_refresh": "{{ health_status.auth0.management_api.last_token_refresh }}"
-      },
-      "jwks": {
-        "status": "{{ health_status.auth0.jwks.status }}",
-        "endpoint": "{{ health_status.auth0.jwks.endpoint }}",
-        "response_time_ms": {{ health_status.auth0.jwks.response_time_ms }},
-        {% if health_status.auth0.jwks.status == "unhealthy" %}
-        "error": "{{ health_status.auth0.jwks.error }}",
-        {% endif %}
-        "keys_count": {{ health_status.auth0.jwks.keys_count }},
-        "last_updated": "{{ health_status.auth0.jwks.last_updated }}"
-      },
-      "token_validation": {
-        "status": "{{ health_status.auth0.token_validation.status }}",
-        "last_validation": "{{ health_status.auth0.token_validation.last_validation }}",
-        "validation_count": {{ health_status.auth0.token_validation.validation_count }},
-        "average_response_time_ms": {{ health_status.auth0.token_validation.average_response_time_ms }}
-      }
-    },
-    "application": {
-      "status": "{{ health_status.application.status }}",
-      "uptime_seconds": {{ health_status.application.uptime_seconds }},
-      "memory_usage": {
-        "used_mb": {{ health_status.application.memory_usage.used_mb }},
-        "available_mb": {{ health_status.application.memory_usage.available_mb }},
-        "percentage": {{ health_status.application.memory_usage.percentage }}
-      },
-      "flask_app": {
-        "status": "{{ health_status.application.flask_app.status }}",
-        "debug_mode": {{ health_status.application.flask_app.debug_mode | lower }},
-        "testing_mode": {{ health_status.application.flask_app.testing_mode | lower }},
-        "request_handling": "{{ health_status.application.flask_app.request_handling }}"
-      },
-      "wsgi_server": {
-        "status": "{{ health_status.application.wsgi_server.status }}",
-        "worker_count": {{ health_status.application.wsgi_server.worker_count }},
-        "active_requests": {{ health_status.application.wsgi_server.active_requests }},
-        "average_response_time_ms": {{ health_status.application.wsgi_server.average_response_time_ms }}
-      }
-    },
-    "external_services": {
-      {% if health_status.external_services %}
-      {% for service_name, service_info in health_status.external_services.items() %}
-      "{{ service_name }}": {
-        "status": "{{ service_info.status }}",
-        "endpoint": "{{ service_info.endpoint }}",
-        "response_time_ms": {{ service_info.response_time_ms }},
-        "last_check": "{{ service_info.last_check }}",
-        {% if service_info.status == "unhealthy" %}
-        "error": "{{ service_info.error }}",
-        {% endif %}
-        "retry_count": {{ service_info.retry_count }}
-      }{% if not loop.last %},{% endif %}
-      {% endfor %}
-      {% endif %}
-    },
-    "migration": {
-      "status": "{{ health_status.migration.status }}",
-      "from_technology": "{{ health_status.migration.from_technology }}",
-      "to_technology": "{{ health_status.migration.to_technology }}",
-      "performance_comparison": {
-        "flask_response_time_ms": {{ health_status.migration.performance_comparison.flask_response_time_ms }},
-        "nodejs_baseline_ms": {{ health_status.migration.performance_comparison.nodejs_baseline_ms }},
-        "performance_ratio": {{ health_status.migration.performance_comparison.performance_ratio }},
-        "sla_compliance": "{{ health_status.migration.performance_comparison.sla_compliance }}"
-      },
-      "feature_parity": {
-        "endpoints_migrated": {{ health_status.migration.feature_parity.endpoints_migrated }},
-        "total_endpoints": {{ health_status.migration.feature_parity.total_endpoints }},
-        "completion_percentage": {{ health_status.migration.feature_parity.completion_percentage }}
-      }
-    }
+{% block health_checks %}
+"database": {
+  "status": "{{ database_status | default('unknown') }}",
+  "details": "{{ database_details | default('Database connectivity not checked') }}",
+  "connection_pool": {
+    "active_connections": {{ active_connections | default(0) }},
+    "pool_size": {{ pool_size | default(0) }},
+    "pool_utilization_percent": {{ pool_utilization_percent | default(0) }}
   },
-  "readiness_validation": {
-    "deployment_ready": {{ health_status.readiness_validation.deployment_ready | lower }},
-    "traffic_routing_ready": {{ health_status.readiness_validation.traffic_routing_ready | lower }},
-    "database_ready": {{ health_status.readiness_validation.database_ready | lower }},
-    "authentication_ready": {{ health_status.readiness_validation.authentication_ready | lower }},
-    "external_dependencies_ready": {{ health_status.readiness_validation.external_dependencies_ready | lower }},
-    "migration_validation": {{ health_status.readiness_validation.migration_validation | lower }},
-    "container_orchestration_ready": {{ health_status.readiness_validation.container_orchestration_ready | lower }}
+  "query_performance": {
+    "last_query_time_ms": {{ last_query_time_ms | default(0) }},
+    "average_query_time_ms": {{ average_query_time_ms | default(0) }}
+  }
+},
+"auth0_integration": {
+  "status": "{{ auth0_status | default('unknown') }}",
+  "details": "{{ auth0_details | default('Auth0 integration not checked') }}",
+  "token_validation": {
+    "last_validation_time_ms": {{ auth0_validation_time_ms | default(0) }},
+    "jwks_cache_status": "{{ jwks_cache_status | default('unknown') }}"
   },
-  "performance_metrics": {
-    "response_time_ms": {{ health_status.performance_metrics.response_time_ms }},
-    "sla_requirement_ms": {{ health_status.performance_metrics.sla_requirement_ms }},
-    "sla_compliance": "{{ health_status.performance_metrics.sla_compliance }}",
-    "check_duration_ms": {{ health_status.performance_metrics.check_duration_ms }},
-    "last_performance_test": "{{ health_status.performance_metrics.last_performance_test }}"
+  "management_api": {
+    "status": "{{ auth0_mgmt_api_status | default('unknown') }}",
+    "last_check_time_ms": {{ auth0_mgmt_api_time_ms | default(0) }}
+  }
+},
+"application": {
+  "status": "{{ application_status | default('healthy') }}",
+  "details": "Flask application running and ready to serve requests",
+  "wsgi_server": {
+    "status": "{{ wsgi_status | default('healthy') }}",
+    "worker_count": {{ worker_count | default(1) }},
+    "active_requests": {{ active_requests | default(0) }}
   },
-  "container_info": {
-    "container_id": "{{ health_status.container_info.container_id }}",
-    "image_version": "{{ health_status.container_info.image_version }}",
-    "orchestration_platform": "{{ health_status.container_info.orchestration_platform }}",
-    "resource_limits": {
-      "cpu_limit": "{{ health_status.container_info.resource_limits.cpu_limit }}",
-      "memory_limit": "{{ health_status.container_info.resource_limits.memory_limit }}"
-    },
-    "health_check_config": {
-      "interval": "{{ health_status.container_info.health_check_config.interval }}",
-      "timeout": "{{ health_status.container_info.health_check_config.timeout }}",
-      "retries": {{ health_status.container_info.health_check_config.retries }}
-    }
+  "service_layer": {
+    "status": "{{ service_layer_status | default('healthy') }}",
+    "initialized_services": {{ initialized_services | default([]) | tojson }}
+  }
+},
+"external_dependencies": {
+  "status": "{{ external_deps_status | default('unknown') }}",
+  "aws_services": {
+    "cloudwatch": "{{ cloudwatch_status | default('unknown') }}",
+    "rds": "{{ rds_status | default('unknown') }}"
   },
-  "aws_integration": {
-    "region": "{{ health_status.aws_integration.region }}",
-    "availability_zone": "{{ health_status.aws_integration.availability_zone }}",
-    "instance_type": "{{ health_status.aws_integration.instance_type }}",
-    "ecs_service": {
-      {% if health_status.aws_integration.ecs_service %}
-      "cluster": "{{ health_status.aws_integration.ecs_service.cluster }}",
-      "service_name": "{{ health_status.aws_integration.ecs_service.service_name }}",
-      "task_definition": "{{ health_status.aws_integration.ecs_service.task_definition }}",
-      "desired_count": {{ health_status.aws_integration.ecs_service.desired_count }},
-      "running_count": {{ health_status.aws_integration.ecs_service.running_count }}
-      {% else %}
-      "enabled": false
-      {% endif %}
-    },
-    "load_balancer": {
-      "target_group": "{{ health_status.aws_integration.load_balancer.target_group }}",
-      "health_check_path": "{{ health_status.aws_integration.load_balancer.health_check_path }}",
-      "healthy_threshold": {{ health_status.aws_integration.load_balancer.healthy_threshold }},
-      "unhealthy_threshold": {{ health_status.aws_integration.load_balancer.unhealthy_threshold }}
-    }
-  },
-  {% if health_status.overall_status == "unhealthy" %}
-  "failure_reasons": [
-    {% for reason in health_status.failure_reasons %}
-    "{{ reason }}"{% if not loop.last %},{% endif %}
-    {% endfor %}
-  ],
-  "remediation_steps": [
-    {% for step in health_status.remediation_steps %}
-    "{{ step }}"{% if not loop.last %},{% endif %}
-    {% endfor %}
-  ],
-  {% endif %}
-  "monitoring": {
-    "alert_manager_status": "{{ health_status.monitoring.alert_manager_status }}",
-    "prometheus_integration": "{{ health_status.monitoring.prometheus_integration }}",
-    "cloudwatch_logging": "{{ health_status.monitoring.cloudwatch_logging }}",
-    "structured_logging": {{ health_status.monitoring.structured_logging | lower }},
-    "sentry_error_tracking": "{{ health_status.monitoring.sentry_error_tracking }}"
-  },
-  "next_check": "{{ health_status.next_check }}",
-  "documentation": {
-    "health_check_spec": "Section 6.5.2.1 - Multi-Tier Health Check Implementation",
-    "performance_requirements": "Section 8.5.1 - <100ms readiness validation",
-    "monitoring_integration": "Section 8.5.1 - ALB and EC2 health check integration",
-    "container_orchestration": "Section 6.5.4 - Container monitoring architecture"
+  "third_party_apis": {
+    "auth0": "{{ auth0_api_status | default('unknown') }}"
   }
 }
+{% endblock %}
+
+{% block additional_metadata %}
+"readiness": {
+  "deployment_ready": {{ deployment_ready | default(false) | tojson }},
+  "migration_status": "{{ migration_status | default('unknown') }}",
+  "container_orchestration": {
+    "platform": "{{ orchestration_platform | default('docker') }}",
+    "instance_ready": {{ instance_ready | default(false) | tojson }},
+    "scaling_group": "{{ scaling_group | default('') }}",
+    "availability_zone": "{{ availability_zone | default('') }}"
+  },
+  "performance_validation": {
+    "response_time_sla_met": {{ response_time_sla_met | default(false) | tojson }},
+    "database_sla_met": {{ database_sla_met | default(false) | tojson }},
+    "auth0_sla_met": {{ auth0_sla_met | default(false) | tojson }}
+  },
+  "health_check_timing": {
+    "total_check_duration_ms": {{ total_check_duration_ms | default(0) }},
+    "database_check_duration_ms": {{ database_check_duration_ms | default(0) }},
+    "auth0_check_duration_ms": {{ auth0_check_duration_ms | default(0) }},
+    "sla_compliance": {{ (total_check_duration_ms | default(0)) < 100 | tojson }}
+  }
+},
+{% endblock %}
+
+{% block custom_fields %}
+"deployment": {
+  "environment": "{{ config.FLASK_ENV | default('development') }}",
+  "deployment_id": "{{ deployment_id | default('') }}",
+  "build_version": "{{ build_version | default('') }}",
+  "deployment_timestamp": "{{ deployment_timestamp | default('') }}",
+  "rollback_available": {{ rollback_available | default(false) | tojson }}
+},
+"migration": {
+  "phase": "{{ migration_phase | default('completed') }}",
+  "node_js_baseline": {
+    "performance_ratio": {{ nodejs_performance_ratio | default(1.0) }},
+    "feature_parity": {{ feature_parity_percent | default(100) }}
+  },
+  "validation_results": {
+    "api_endpoints_validated": {{ api_endpoints_validated | default(0) }},
+    "database_migration_status": "{{ db_migration_status | default('completed') }}",
+    "business_logic_validated": {{ business_logic_validated | default(false) | tojson }}
+  }
+},
+"aws_integration": {
+  "region": "{{ aws_region | default('') }}",
+  "instance_id": "{{ ec2_instance_id | default('') }}",
+  "load_balancer": {
+    "target_group": "{{ target_group | default('') }}",
+    "health_check_grace_period": {{ health_check_grace_period | default(300) }}
+  },
+  "auto_scaling": {
+    "group_name": "{{ auto_scaling_group | default('') }}",
+    "min_capacity": {{ min_capacity | default(1) }},
+    "max_capacity": {{ max_capacity | default(10) }},
+    "desired_capacity": {{ desired_capacity | default(2) }}
+  }
+},
+{% endblock %}
+
+{% block related_links %}
+"liveness": "/health/liveness",
+"readiness": "/health/readiness",
+"detailed": "/health/detailed",
+"metrics": "/metrics",
+"migration_status": "/health/migration",
+"database_status": "/health/database",
+"auth0_status": "/health/auth0"
+{% endblock %}
