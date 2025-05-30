@@ -1,0 +1,195 @@
+{
+  "error": {
+    "code": 422,
+    "type": "validation_error",
+    "message": "{{ error_message | default('The request data is malformed or contains invalid values') }}",
+    "timestamp": "{{ timestamp | default(moment().utc().isoformat()) }}",
+    "request_id": "{{ request_id | default(g.request_id if g.request_id else '') }}",
+    "path": "{{ request.path if request else '' }}",
+    "method": "{{ request.method if request else '' }}"
+  },
+  "details": {
+    "validation_framework": "{{ validation_framework | default('unknown') }}",
+    {% if validation_errors %}
+    "validation_errors": {
+      {% if validation_framework == 'marshmallow' %}
+      {# Marshmallow schema validation errors #}
+      {% for field, errors in validation_errors.items() %}
+      "{{ field }}": {
+        "errors": {% if errors is iterable and errors is not string %}{{ errors | tojson }}{% else %}["{{ errors }}"]{% endif %},
+        "type": "field_validation",
+        "field_name": "{{ field }}",
+        "field_type": "{{ field_types.get(field, 'unknown') if field_types else 'unknown' }}",
+        {% if field_constraints and field_constraints.get(field) %}
+        "constraints": {{ field_constraints[field] | tojson }},
+        {% endif %}
+        "message": "{% if errors is iterable and errors is not string %}{{ errors | join('; ') }}{% else %}{{ errors }}{% endif %}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+      {% elif validation_framework == 'flask-inputs' %}
+      {# Flask-Inputs validation errors #}
+      {% for field, errors in validation_errors.items() %}
+      "{{ field }}": {
+        "errors": {% if errors is iterable and errors is not string %}{{ errors | tojson }}{% else %}["{{ errors }}"]{% endif %},
+        "type": "input_validation",
+        "field_name": "{{ field }}",
+        "input_type": "{{ input_types.get(field, 'unknown') if input_types else 'unknown' }}",
+        {% if input_rules and input_rules.get(field) %}
+        "rules": {{ input_rules[field] | tojson }},
+        {% endif %}
+        "message": "{% if errors is iterable and errors is not string %}{{ errors | join('; ') }}{% else %}{{ errors }}{% endif %}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+      {% else %}
+      {# Generic validation errors #}
+      {% for field, errors in validation_errors.items() %}
+      "{{ field }}": {
+        "errors": {% if errors is iterable and errors is not string %}{{ errors | tojson }}{% else %}["{{ errors }}"]{% endif %},
+        "type": "validation",
+        "field_name": "{{ field }}",
+        "message": "{% if errors is iterable and errors is not string %}{{ errors | join('; ') }}{% else %}{{ errors }}{% endif %}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+      {% endif %}
+    },
+    {% endif %}
+    {% if schema_errors %}
+    "schema_errors": {
+      {% for schema_field, schema_error in schema_errors.items() %}
+      "{{ schema_field }}": {
+        "error": "{{ schema_error.message if schema_error.message else schema_error }}",
+        "schema_type": "{{ schema_error.schema_type if schema_error.schema_type else 'unknown' }}",
+        {% if schema_error.expected_type %}
+        "expected_type": "{{ schema_error.expected_type }}",
+        {% endif %}
+        {% if schema_error.received_value %}
+        "received_value": {{ schema_error.received_value | tojson }},
+        {% endif %}
+        {% if schema_error.allowed_values %}
+        "allowed_values": {{ schema_error.allowed_values | tojson }},
+        {% endif %}
+        "field_path": "{{ schema_field }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    },
+    {% endif %}
+    {% if missing_fields %}
+    "missing_required_fields": {{ missing_fields | tojson }},
+    {% endif %}
+    {% if invalid_fields %}
+    "invalid_fields": {{ invalid_fields | tojson }},
+    {% endif %}
+    {% if validation_context %}
+    "validation_context": {
+      {% if validation_context.get('request_content_type') %}
+      "content_type": "{{ validation_context.request_content_type }}",
+      {% endif %}
+      {% if validation_context.get('schema_name') %}
+      "schema": "{{ validation_context.schema_name }}",
+      {% endif %}
+      {% if validation_context.get('validation_method') %}
+      "method": "{{ validation_context.validation_method }}",
+      {% endif %}
+      {% if validation_context.get('strict_mode') %}
+      "strict_mode": {{ validation_context.strict_mode | tojson }},
+      {% endif %}
+      {% if validation_context.get('partial_validation') %}
+      "partial": {{ validation_context.partial_validation | tojson }},
+      {% endif %}
+      {% if validation_context.get('unknown_fields') %}
+      "unknown_fields": {{ validation_context.unknown_fields | tojson }},
+      {% endif %}
+      "timestamp": "{{ validation_context.get('timestamp', timestamp) }}"
+    },
+    {% endif %}
+    "error_count": {{ error_count | default((validation_errors | length) if validation_errors else 0) }},
+    "validation_summary": {
+      "total_errors": {{ error_count | default((validation_errors | length) if validation_errors else 0) }},
+      {% if validation_errors %}
+      "fields_with_errors": {{ validation_errors.keys() | list | tojson }},
+      {% endif %}
+      "framework_used": "{{ validation_framework | default('unknown') }}",
+      "strict_validation": {{ strict_validation | default(true) | tojson }}
+    }
+  },
+  {% if suggestions %}
+  "suggestions": {
+    "corrective_actions": [
+      {% for suggestion in suggestions %}
+      {
+        "action": "{{ suggestion.action }}",
+        "description": "{{ suggestion.description }}",
+        {% if suggestion.field %}
+        "field": "{{ suggestion.field }}",
+        {% endif %}
+        {% if suggestion.example %}
+        "example": {{ suggestion.example | tojson }},
+        {% endif %}
+        "priority": "{{ suggestion.priority | default('medium') }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ],
+    {% if schema_documentation_url %}
+    "documentation": "{{ schema_documentation_url }}",
+    {% endif %}
+    "general_guidance": [
+      "Ensure all required fields are provided",
+      "Verify field data types match schema requirements",
+      "Check field value constraints and formats",
+      {% if validation_framework == 'marshmallow' %}
+      "Review Marshmallow schema definition for field specifications",
+      {% elif validation_framework == 'flask-inputs' %}
+      "Review Flask-Inputs validation rules for input requirements",
+      {% endif %}
+      "Validate JSON structure and syntax if applicable"
+    ]
+  },
+  {% endif %}
+  {% if debug_info and (config.get('FLASK_ENV') == 'development' or config.get('DEBUG')) %}
+  "debug": {
+    "validation_framework_version": "{{ debug_info.get('framework_version', 'unknown') }}",
+    {% if debug_info.get('schema_definition') %}
+    "schema_definition": {{ debug_info.schema_definition | tojson }},
+    {% endif %}
+    {% if debug_info.get('received_data') %}
+    "received_data": {{ debug_info.received_data | tojson }},
+    {% endif %}
+    {% if debug_info.get('validation_steps') %}
+    "validation_steps": {{ debug_info.validation_steps | tojson }},
+    {% endif %}
+    {% if debug_info.get('stack_trace') %}
+    "validation_stack_trace": {{ debug_info.stack_trace | tojson }},
+    {% endif %}
+    "request_headers": {
+      {% if request and request.headers %}
+      {% for header, value in request.headers.items() %}
+      {% if header.lower() not in ['authorization', 'cookie', 'x-api-key'] %}
+      "{{ header }}": "{{ value }}"{% if not loop.last %},{% endif %}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+    }
+  },
+  {% endif %}
+  "links": {
+    {% if schema_documentation_url %}
+    "schema_documentation": "{{ schema_documentation_url }}",
+    {% endif %}
+    {% if api_documentation_url %}
+    "api_documentation": "{{ api_documentation_url }}",
+    {% endif %}
+    "support": "{{ support_url | default('/api/help') }}"
+  },
+  "meta": {
+    "api_version": "{{ api_version | default('v1') }}",
+    "service": "{{ service_name | default('flask-application') }}",
+    "environment": "{{ config.get('FLASK_ENV', 'production') }}",
+    {% if correlation_id %}
+    "correlation_id": "{{ correlation_id }}",
+    {% endif %}
+    {% if user_context and user_context.get('user_id') %}
+    "user_id": "{{ user_context.user_id }}",
+    {% endif %}
+    "response_time": "{{ response_time_ms | default(0) }}ms"
+  }
+}
