@@ -1,80 +1,207 @@
 """
-Base model classes and mixin utilities for Flask-SQLAlchemy models.
+Base Model Classes and Mixin Utilities for Flask-SQLAlchemy
 
-This module provides foundational model architecture including:
-- AuditMixin for automatic timestamp and user attribution tracking
-- EncryptedMixin for sensitive data field encryption with FernetEngine
-- BaseModel with common functionality across all entity models
-- SQLAlchemy event hooks for automatic audit field population
+This module provides foundational model architecture for the Flask migration, including
+audit trail mixins, encryption support, and common database functionality. These
+base classes ensure consistent behavior across all entity models in the system.
 
-The architecture ensures comprehensive audit trails, data encryption capabilities,
-and consistent model behavior across the Flask application while maintaining
-functional parity with the original Node.js implementation.
+Key Components:
+- AuditMixin: Automatic timestamp and user attribution tracking
+- EncryptedMixin: SQLAlchemy-Utils EncryptedType for sensitive data protection  
+- BaseModel: Common model functionality and serialization methods
+- SQLAlchemy event hooks: Automatic audit field population with user context
+
+Dependencies:
+- Flask-SQLAlchemy 3.1.1: Database ORM integration
+- SQLAlchemy-Utils: EncryptedType implementation with FernetEngine
+- python-dotenv: Environment variable management for encryption keys
+- ItsDangerous 2.2+: Session security and cryptographic operations
+
+Author: Flask Migration System
+Version: 1.0.0
+Compatibility: Flask 3.1.1, Flask-SQLAlchemy 3.1.1, PostgreSQL 14.12+
 """
 
 import os
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
-from contextlib import contextmanager
+from decimal import Decimal
 
-from flask import current_app, g
+# Core Flask and SQLAlchemy imports
+from flask import current_app, g, request
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event, Column, DateTime, String, Integer, Boolean, inspect
+from sqlalchemy import Column, DateTime, String, Boolean, Integer, event, text
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy_utils import EncryptedType, FernetEngine
-from werkzeug.exceptions import ValidationError
+from sqlalchemy.inspection import inspect
+from sqlalchemy.orm import Session, class_mapper
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
-# Initialize SQLAlchemy instance
-db = SQLAlchemy()
+# SQLAlchemy-Utils for encryption support
+try:
+    from sqlalchemy_utils import EncryptedType
+    from sqlalchemy_utils.types.encrypted.encrypted_type import AesEngine, FernetEngine
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    # Graceful degradation if SQLAlchemy-Utils is not available
+    EncryptedType = None
+    FernetEngine = None
+    AesEngine = None
+    ENCRYPTION_AVAILABLE = False
+
+# Environment variable management
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging for base model operations
 logger = logging.getLogger(__name__)
 
+# Global SQLAlchemy instance (will be initialized by Flask app)
+db = SQLAlchemy()
+
+
+class DatabaseError(Exception):
+    """Custom exception for database-related errors in base model operations."""
+    pass
+
+
+class EncryptionError(Exception):
+    """Custom exception for encryption-related errors in model operations."""
+    pass
+
+
+class ValidationError(Exception):
+    """Custom exception for model validation errors."""
+    pass
+
+
+def get_encryption_key() -> str:
+    """
+    Retrieve encryption key from environment variables with validation.
+    
+    Returns:
+        str: Base64-encoded encryption key for FernetEngine
+        
+    Raises:
+        EncryptionError: If encryption key is not configured or invalid
+    """
+    encryption_key = os.environ.get('FIELD_ENCRYPTION_KEY')
+    
+    if not encryption_key:
+        if current_app:
+            current_app.logger.error("FIELD_ENCRYPTION_KEY not configured in environment")
+        raise EncryptionError("Encryption key not configured. Set FIELD_ENCRYPTION_KEY environment variable.")
+    
+    # Validate key length for Fernet compatibility (must be 32 url-safe base64-encoded bytes)
+    try:
+        import base64
+        key_bytes = base64.urlsafe_b64decode(encryption_key)
+        if len(key_bytes) != 32:
+            raise EncryptionError("Encryption key must be 32 bytes when base64 decoded")
+    except Exception as e:
+        raise EncryptionError(f"Invalid encryption key format: {str(e)}")
+    
+    return encryption_key
+
+
+def get_current_user_id() -> Optional[str]:
+    """
+    Extract current user ID from Flask application context.
+    
+    This function attempts to retrieve the current user ID from various sources
+    in the Flask application context, including Flask-Login current_user,
+    request context, and Flask's g object.
+    
+    Returns:
+        Optional[str]: Current user ID if available, None otherwise
+    """
+    user_id = None
+    
+    try:
+        # Try to get user ID from Flask-Login current_user
+        try:
+            from flask_login import current_user
+            if hasattr(current_user, 'id') and current_user.is_authenticated:
+                user_id = str(current_user.id)
+        except ImportError:
+            # Flask-Login not available, continue with other methods
+            pass
+        
+        # Fallback to Flask's g object
+        if not user_id and hasattr(g, 'current_user_id'):
+            user_id = str(g.current_user_id)
+        
+        # Fallback to request context (for API authentication)
+        if not user_id and request and hasattr(request, 'user_id'):
+            user_id = str(request.user_id)
+        
+        # Final fallback to g.user_id (custom user tracking)
+        if not user_id and hasattr(g, 'user_id'):
+            user_id = str(g.user_id)
+            
+    except RuntimeError:
+        # Outside application context, return None
+        pass
+    except Exception as e:
+        # Log unexpected errors but don't fail the operation
+        if current_app:
+            current_app.logger.warning(f"Error retrieving current user ID: {str(e)}")
+    
+    return user_id or 'system'
+
 
 class AuditMixin:
     """
-    Mixin providing automated audit trail functionality for all database models.
+    Mixin providing automated audit fields for all database models.
     
-    Automatically tracks creation and modification timestamps along with user
-    attribution through SQLAlchemy event hooks. Integrates with Flask-Login
-    for user context capture during database operations.
+    This mixin adds standard audit columns to track record creation and modification:
+    - created_at: Timestamp of record creation
+    - updated_at: Timestamp of last modification (auto-updated)
+    - created_by: User who created the record
+    - updated_by: User who last modified the record
     
-    Features:
-    - Automatic created_at and updated_at timestamp management
-    - User attribution for created_by and updated_by fields
-    - Integration with Flask-Login sessions for user context
-    - Thread-safe operation in multi-worker WSGI environments
+    The audit fields are automatically populated through SQLAlchemy event hooks
+    that capture user context from Flask-Login sessions or application context.
+    
+    Usage:
+        class User(BaseModel, AuditMixin):
+            __tablename__ = 'users'
+            id = db.Column(db.Integer, primary_key=True)
+            username = db.Column(db.String(100), nullable=False)
     """
     
     @declared_attr
     def created_at(cls):
-        """Timestamp when the record was created."""
-        return Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+        """Timestamp when the record was created (auto-populated)."""
+        return Column(DateTime, default=datetime.utcnow, nullable=False, 
+                     comment="Timestamp when the record was created")
     
     @declared_attr
     def updated_at(cls):
-        """Timestamp when the record was last updated."""
-        return Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+        """Timestamp when the record was last updated (auto-populated on changes)."""
+        return Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, 
+                     nullable=False, comment="Timestamp when the record was last updated")
     
     @declared_attr
     def created_by(cls):
-        """User identifier who created the record."""
-        return Column(String(255), nullable=True)
+        """User ID who created the record (auto-populated from Flask context)."""
+        return Column(String(255), nullable=True, 
+                     comment="User ID who created the record")
     
     @declared_attr
     def updated_by(cls):
-        """User identifier who last updated the record."""
-        return Column(String(255), nullable=True)
+        """User ID who last updated the record (auto-populated from Flask context)."""
+        return Column(String(255), nullable=True, 
+                     comment="User ID who last updated the record")
     
     def get_audit_info(self) -> Dict[str, Any]:
         """
-        Return audit information for the current record.
+        Retrieve audit information for this record.
         
         Returns:
-            Dict containing audit timestamps and user attribution
+            Dict[str, Any]: Dictionary containing audit trail information
         """
         return {
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -86,499 +213,603 @@ class AuditMixin:
 
 class EncryptedMixin:
     """
-    Mixin providing field-level encryption capabilities for sensitive data.
+    Mixin providing SQLAlchemy-Utils EncryptedType integration for sensitive data fields.
     
-    Utilizes SQLAlchemy-Utils EncryptedType with FernetEngine for cryptographically
-    secure encryption of personally identifiable information (PII) and other
-    sensitive data fields. Supports transparent encryption/decryption during
-    database operations.
+    This mixin provides utility methods and configuration for field-level encryption
+    using FernetEngine cryptographic security. It offers both static methods for
+    creating encrypted columns and instance methods for encryption operations.
     
-    Features:
+    Key Features:
     - FernetEngine encryption for maximum security
-    - Automatic encryption/decryption during ORM operations
-    - Configurable encryption keys via environment variables
-    - Support for multiple encrypted fields per model
+    - Environment variable-based key management
+    - Graceful degradation when encryption is not available
+    - Support for PII field encryption (emails, phone numbers, personal data)
+    
+    Usage:
+        class UserProfile(BaseModel, EncryptedMixin):
+            __tablename__ = 'user_profiles'
+            id = db.Column(db.Integer, primary_key=True)
+            
+            # Create encrypted email field
+            email = EncryptedMixin.create_encrypted_field(String(255), unique=True)
+            
+            # Create encrypted phone number field
+            phone = EncryptedMixin.create_encrypted_field(String(50))
     """
     
     @staticmethod
-    def get_encryption_key() -> bytes:
+    def create_encrypted_field(column_type, unique=False, nullable=True, **kwargs):
         """
-        Retrieve encryption key from environment variables.
+        Create an encrypted database column using SQLAlchemy-Utils EncryptedType.
         
+        Args:
+            column_type: SQLAlchemy column type (e.g., String(255), Text)
+            unique (bool): Whether the column should have a unique constraint
+            nullable (bool): Whether the column can be NULL
+            **kwargs: Additional column arguments
+            
         Returns:
-            Encryption key for FernetEngine
+            Column: SQLAlchemy Column with EncryptedType or fallback to regular type
             
         Raises:
-            ValueError: If encryption key is not configured
+            EncryptionError: If encryption is required but not available
         """
-        key = os.environ.get('FIELD_ENCRYPTION_KEY')
-        if not key:
-            raise ValueError(
-                "FIELD_ENCRYPTION_KEY environment variable is required for encrypted fields"
-            )
-        return key.encode('utf-8')
+        if not ENCRYPTION_AVAILABLE:
+            logger.warning("SQLAlchemy-Utils not available, creating unencrypted field")
+            # Graceful degradation to regular column type
+            return Column(column_type, unique=unique, nullable=nullable, **kwargs)
+        
+        try:
+            encryption_key = get_encryption_key()
+            
+            # Create encrypted column using FernetEngine for maximum security
+            encrypted_type = EncryptedType(column_type, encryption_key, FernetEngine)
+            
+            return Column(encrypted_type, unique=unique, nullable=nullable, **kwargs)
+            
+        except EncryptionError as e:
+            logger.error(f"Failed to create encrypted field: {str(e)}")
+            if os.environ.get('FLASK_ENV') == 'production':
+                # In production, fail fast if encryption is not properly configured
+                raise e
+            else:
+                # In development, warn and create unencrypted field
+                logger.warning("Creating unencrypted field due to encryption configuration issue")
+                return Column(column_type, unique=unique, nullable=nullable, **kwargs)
     
-    @classmethod
-    def create_encrypted_field(cls, field_type, length: Optional[int] = None) -> Column:
+    @staticmethod
+    def create_encrypted_text_field(unique=False, nullable=True, **kwargs):
         """
-        Create an encrypted column using FernetEngine.
+        Create an encrypted text field for larger sensitive data.
         
         Args:
-            field_type: SQLAlchemy column type (e.g., String, Text)
-            length: Optional field length for String types
+            unique (bool): Whether the field should be unique
+            nullable (bool): Whether the field can be NULL
+            **kwargs: Additional column arguments
             
         Returns:
-            Encrypted column definition
+            Column: Encrypted text column
         """
-        if length:
-            column_type = field_type(length)
-        else:
-            column_type = field_type
-            
-        return Column(
-            EncryptedType(column_type, cls.get_encryption_key(), FernetEngine),
-            nullable=True
+        from sqlalchemy import Text
+        return EncryptedMixin.create_encrypted_field(
+            Text, unique=unique, nullable=nullable, **kwargs
         )
     
-    def encrypt_sensitive_data(self, data: str) -> str:
+    @staticmethod
+    def create_encrypted_string_field(length=255, unique=False, nullable=True, **kwargs):
         """
-        Manually encrypt sensitive data using the configured encryption key.
+        Create an encrypted string field with specified length.
         
         Args:
-            data: Plain text data to encrypt
+            length (int): Maximum string length
+            unique (bool): Whether the field should be unique
+            nullable (bool): Whether the field can be NULL
+            **kwargs: Additional column arguments
             
         Returns:
-            Encrypted data string
+            Column: Encrypted string column
         """
-        from cryptography.fernet import Fernet
-        fernet = Fernet(self.get_encryption_key())
-        return fernet.encrypt(data.encode()).decode()
+        return EncryptedMixin.create_encrypted_field(
+            String(length), unique=unique, nullable=nullable, **kwargs
+        )
     
-    def decrypt_sensitive_data(self, encrypted_data: str) -> str:
+    def encrypt_value(self, value: str) -> str:
         """
-        Manually decrypt sensitive data using the configured encryption key.
+        Manually encrypt a value using the configured encryption engine.
         
         Args:
-            encrypted_data: Encrypted data string
+            value (str): Plain text value to encrypt
             
         Returns:
-            Decrypted plain text data
+            str: Encrypted value
+            
+        Raises:
+            EncryptionError: If encryption fails or is not available
         """
-        from cryptography.fernet import Fernet
-        fernet = Fernet(self.get_encryption_key())
-        return fernet.decrypt(encrypted_data.encode()).decode()
+        if not ENCRYPTION_AVAILABLE:
+            raise EncryptionError("Encryption not available - SQLAlchemy-Utils not installed")
+        
+        try:
+            encryption_key = get_encryption_key()
+            from cryptography.fernet import Fernet
+            
+            fernet = Fernet(encryption_key.encode())
+            encrypted_bytes = fernet.encrypt(value.encode())
+            return encrypted_bytes.decode()
+            
+        except Exception as e:
+            raise EncryptionError(f"Failed to encrypt value: {str(e)}")
+    
+    def decrypt_value(self, encrypted_value: str) -> str:
+        """
+        Manually decrypt a value using the configured encryption engine.
+        
+        Args:
+            encrypted_value (str): Encrypted value to decrypt
+            
+        Returns:
+            str: Decrypted plain text value
+            
+        Raises:
+            EncryptionError: If decryption fails or is not available
+        """
+        if not ENCRYPTION_AVAILABLE:
+            raise EncryptionError("Encryption not available - SQLAlchemy-Utils not installed")
+        
+        try:
+            encryption_key = get_encryption_key()
+            from cryptography.fernet import Fernet
+            
+            fernet = Fernet(encryption_key.encode())
+            decrypted_bytes = fernet.decrypt(encrypted_value.encode())
+            return decrypted_bytes.decode()
+            
+        except Exception as e:
+            raise EncryptionError(f"Failed to decrypt value: {str(e)}")
 
 
-class BaseModel(db.Model, AuditMixin):
+class BaseModel(db.Model):
     """
-    Abstract base model providing common functionality for all entity models.
+    Base model class providing common functionality for all Flask-SQLAlchemy models.
     
-    Includes audit trail capabilities, serialization methods, query helpers,
-    and validation utilities. Provides consistent behavior across all models
-    while maintaining performance and security standards.
+    This abstract base class provides essential functionality that all models inherit:
+    - Consistent data serialization through to_dict() method
+    - Query helper methods for common operations
+    - Validation framework for data integrity
+    - Error handling and logging integration
+    - Session management utilities
     
-    Features:
-    - Automatic audit trail tracking via AuditMixin
-    - JSON serialization with sensitive data protection
-    - Common query methods and utilities
-    - Validation framework integration
-    - Thread-safe database operations
+    All application models should inherit from this class along with appropriate mixins:
+    
+    Usage:
+        class User(BaseModel, AuditMixin):
+            __tablename__ = 'users'
+            id = db.Column(db.Integer, primary_key=True)
+            username = db.Column(db.String(100), nullable=False)
+            
+            def validate(self):
+                super().validate()
+                if not self.username or len(self.username) < 3:
+                    raise ValidationError("Username must be at least 3 characters")
     """
     
+    # Mark as abstract so SQLAlchemy doesn't create a table for this class
     __abstract__ = True
     
-    # Primary key column - all models should have an integer primary key
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    
-    def to_dict(self, include_sensitive: bool = False, exclude_fields: Optional[List[str]] = None) -> Dict[str, Any]:
+    def to_dict(self, include_relationships=False, exclude_fields=None, 
+                include_audit=True) -> Dict[str, Any]:
         """
-        Convert model instance to dictionary representation.
+        Convert model instance to dictionary for JSON serialization.
+        
+        This method provides comprehensive serialization with support for:
+        - Relationship inclusion/exclusion
+        - Field filtering for sensitive data
+        - Automatic type conversion for JSON compatibility
+        - Audit field inclusion control
         
         Args:
-            include_sensitive: Whether to include sensitive/encrypted fields
-            exclude_fields: List of field names to exclude from output
+            include_relationships (bool): Whether to include relationship data
+            exclude_fields (List[str]): Field names to exclude from output
+            include_audit (bool): Whether to include audit fields
             
         Returns:
-            Dictionary representation of the model
+            Dict[str, Any]: Dictionary representation of the model
         """
         exclude_fields = exclude_fields or []
         result = {}
         
-        # Get model columns using SQLAlchemy inspection
-        mapper = inspect(self.__class__)
-        
-        for column in mapper.columns:
-            column_name = column.name
+        try:
+            # Get model columns
+            mapper = class_mapper(self.__class__)
             
-            # Skip excluded fields
-            if column_name in exclude_fields:
-                continue
+            for column in mapper.columns:
+                column_name = column.name
                 
-            # Get column value
-            value = getattr(self, column_name, None)
+                # Skip excluded fields
+                if column_name in exclude_fields:
+                    continue
+                
+                # Skip audit fields if not requested
+                if not include_audit and column_name in ['created_at', 'updated_at', 'created_by', 'updated_by']:
+                    continue
+                
+                # Get column value
+                value = getattr(self, column_name, None)
+                
+                # Convert value for JSON serialization
+                if value is not None:
+                    result[column_name] = self._serialize_value(value)
+                else:
+                    result[column_name] = None
             
-            # Handle encrypted fields
-            if isinstance(column.type, EncryptedType) and not include_sensitive:
-                result[column_name] = '[ENCRYPTED]'
-                continue
+            # Include relationships if requested
+            if include_relationships:
+                for relationship in mapper.relationships:
+                    relationship_name = relationship.key
+                    
+                    # Skip excluded relationships
+                    if relationship_name in exclude_fields:
+                        continue
+                    
+                    relationship_value = getattr(self, relationship_name, None)
+                    
+                    if relationship_value is not None:
+                        if hasattr(relationship_value, '__iter__') and not isinstance(relationship_value, str):
+                            # Collection relationship
+                            result[relationship_name] = [
+                                item.to_dict(include_relationships=False, exclude_fields=exclude_fields)
+                                if hasattr(item, 'to_dict') else str(item)
+                                for item in relationship_value
+                            ]
+                        else:
+                            # Single relationship
+                            if hasattr(relationship_value, 'to_dict'):
+                                result[relationship_name] = relationship_value.to_dict(
+                                    include_relationships=False, exclude_fields=exclude_fields
+                                )
+                            else:
+                                result[relationship_name] = str(relationship_value)
             
-            # Handle datetime serialization
-            if isinstance(value, datetime):
-                result[column_name] = value.isoformat()
-            else:
-                result[column_name] = value
-        
-        # Include audit information
-        result.update(self.get_audit_info())
-        
-        return result
-    
-    def to_json(self, include_sensitive: bool = False, exclude_fields: Optional[List[str]] = None) -> str:
-        """
-        Convert model instance to JSON string.
-        
-        Args:
-            include_sensitive: Whether to include sensitive/encrypted fields
-            exclude_fields: List of field names to exclude from output
+            return result
             
-        Returns:
-            JSON string representation of the model
-        """
-        import json
-        return json.dumps(self.to_dict(include_sensitive, exclude_fields), default=str)
-    
-    @classmethod
-    def create(cls, **kwargs) -> 'BaseModel':
-        """
-        Create a new model instance with validation.
-        
-        Args:
-            **kwargs: Model field values
-            
-        Returns:
-            Created model instance
-            
-        Raises:
-            ValidationError: If validation fails
-        """
-        try:
-            instance = cls(**kwargs)
-            instance.validate()
-            db.session.add(instance)
-            return instance
         except Exception as e:
-            db.session.rollback()
-            logger.error(f"Failed to create {cls.__name__}: {e}")
-            raise ValidationError(f"Failed to create {cls.__name__}: {str(e)}")
+            logger.error(f"Error serializing {self.__class__.__name__}: {str(e)}")
+            # Return basic serialization on error
+            return {'id': getattr(self, 'id', None), 'error': 'Serialization failed'}
     
-    def update(self, **kwargs) -> 'BaseModel':
+    def _serialize_value(self, value: Any) -> Any:
         """
-        Update model instance with validation.
+        Convert individual values for JSON serialization.
         
         Args:
-            **kwargs: Fields to update
+            value: Value to serialize
             
         Returns:
-            Updated model instance
+            Any: JSON-compatible value
+        """
+        if isinstance(value, datetime):
+            return value.isoformat()
+        elif isinstance(value, Decimal):
+            return float(value)
+        elif hasattr(value, '__dict__'):
+            # Complex object - try to serialize if it has to_dict method
+            if hasattr(value, 'to_dict'):
+                return value.to_dict()
+            else:
+                return str(value)
+        else:
+            return value
+    
+    def update_from_dict(self, data: Dict[str, Any], exclude_fields=None, 
+                        validate_after_update=True) -> None:
+        """
+        Update model instance from dictionary data.
+        
+        Args:
+            data (Dict[str, Any]): Dictionary containing update data
+            exclude_fields (List[str]): Field names to exclude from update
+            validate_after_update (bool): Whether to validate after updating
             
         Raises:
-            ValidationError: If validation fails
+            ValidationError: If validation fails after update
+            AttributeError: If trying to update non-existent field
         """
+        exclude_fields = exclude_fields or ['id', 'created_at', 'created_by']
+        
         try:
-            for key, value in kwargs.items():
+            for key, value in data.items():
+                # Skip excluded fields
+                if key in exclude_fields:
+                    continue
+                
+                # Only update if attribute exists
                 if hasattr(self, key):
                     setattr(self, key, value)
+                else:
+                    logger.warning(f"Attempted to update non-existent field '{key}' on {self.__class__.__name__}")
             
-            self.validate()
-            return self
+            # Run validation if requested
+            if validate_after_update:
+                self.validate()
+                
         except Exception as e:
-            db.session.rollback()
-            logger.error(f"Failed to update {self.__class__.__name__} {self.id}: {e}")
-            raise ValidationError(f"Failed to update {self.__class__.__name__}: {str(e)}")
+            logger.error(f"Error updating {self.__class__.__name__} from dict: {str(e)}")
+            raise ValidationError(f"Failed to update model: {str(e)}")
     
-    def delete(self) -> bool:
-        """
-        Delete model instance with audit trail.
-        
-        Returns:
-            True if deletion was successful
-            
-        Raises:
-            SQLAlchemyError: If deletion fails
-        """
-        try:
-            db.session.delete(self)
-            logger.info(f"Deleted {self.__class__.__name__} {self.id}")
-            return True
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Failed to delete {self.__class__.__name__} {self.id}: {e}")
-            raise SQLAlchemyError(f"Failed to delete record: {str(e)}")
-    
-    def validate(self) -> bool:
+    def validate(self) -> None:
         """
         Validate model instance data.
         
-        Override this method in subclasses to implement model-specific validation.
+        This method should be overridden by subclasses to implement
+        model-specific validation logic. The base implementation
+        performs basic validation checks.
         
-        Returns:
-            True if validation passes
-            
         Raises:
             ValidationError: If validation fails
         """
-        # Base validation - ensure required fields are present
-        mapper = inspect(self.__class__)
-        
-        for column in mapper.columns:
-            if not column.nullable and column.default is None:
-                value = getattr(self, column.name, None)
-                if value is None:
-                    raise ValidationError(f"Required field '{column.name}' cannot be null")
-        
-        return True
+        try:
+            # Basic validation - check for required fields
+            mapper = class_mapper(self.__class__)
+            
+            for column in mapper.columns:
+                if not column.nullable and not column.default and not column.server_default:
+                    value = getattr(self, column.name, None)
+                    if value is None:
+                        raise ValidationError(f"Required field '{column.name}' cannot be None")
+            
+        except Exception as e:
+            if isinstance(e, ValidationError):
+                raise
+            else:
+                logger.error(f"Error during validation of {self.__class__.__name__}: {str(e)}")
+                raise ValidationError(f"Validation error: {str(e)}")
     
-    @classmethod
-    def get_by_id(cls, record_id: int) -> Optional['BaseModel']:
+    def save(self, commit=True) -> 'BaseModel':
         """
-        Retrieve model instance by ID.
+        Save the model instance to the database.
         
         Args:
-            record_id: Primary key value
+            commit (bool): Whether to commit the transaction
             
         Returns:
-            Model instance or None if not found
+            BaseModel: The saved model instance
+            
+        Raises:
+            DatabaseError: If save operation fails
         """
         try:
-            return cls.query.get(record_id)
+            # Validate before saving
+            self.validate()
+            
+            # Add to session
+            db.session.add(self)
+            
+            # Commit if requested
+            if commit:
+                db.session.commit()
+            
+            return self
+            
+        except IntegrityError as e:
+            db.session.rollback()
+            logger.error(f"Integrity error saving {self.__class__.__name__}: {str(e)}")
+            raise DatabaseError(f"Data integrity violation: {str(e)}")
+        except ValidationError:
+            db.session.rollback()
+            raise
         except Exception as e:
-            logger.error(f"Error retrieving {cls.__name__} {record_id}: {e}")
+            db.session.rollback()
+            logger.error(f"Error saving {self.__class__.__name__}: {str(e)}")
+            raise DatabaseError(f"Failed to save model: {str(e)}")
+    
+    def delete(self, commit=True) -> None:
+        """
+        Delete the model instance from the database.
+        
+        Args:
+            commit (bool): Whether to commit the transaction
+            
+        Raises:
+            DatabaseError: If delete operation fails
+        """
+        try:
+            db.session.delete(self)
+            
+            if commit:
+                db.session.commit()
+                
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error deleting {self.__class__.__name__}: {str(e)}")
+            raise DatabaseError(f"Failed to delete model: {str(e)}")
+    
+    @classmethod
+    def get_by_id(cls, model_id: Union[int, str]) -> Optional['BaseModel']:
+        """
+        Retrieve a model instance by ID.
+        
+        Args:
+            model_id: The ID of the model to retrieve
+            
+        Returns:
+            Optional[BaseModel]: Model instance if found, None otherwise
+        """
+        try:
+            return cls.query.get(model_id)
+        except Exception as e:
+            logger.error(f"Error retrieving {cls.__name__} by ID {model_id}: {str(e)}")
             return None
     
     @classmethod
-    def get_all(cls, limit: Optional[int] = None, offset: Optional[int] = None) -> List['BaseModel']:
+    def get_all(cls, limit=None, offset=None) -> List['BaseModel']:
         """
-        Retrieve all model instances with optional pagination.
+        Retrieve all instances of the model with optional pagination.
         
         Args:
-            limit: Maximum number of records to return
-            offset: Number of records to skip
+            limit (int): Maximum number of records to return
+            offset (int): Number of records to skip
             
         Returns:
-            List of model instances
+            List[BaseModel]: List of model instances
         """
         try:
             query = cls.query
             
             if offset:
                 query = query.offset(offset)
+            
             if limit:
                 query = query.limit(limit)
-                
+            
             return query.all()
+            
         except Exception as e:
-            logger.error(f"Error retrieving {cls.__name__} records: {e}")
+            logger.error(f"Error retrieving all {cls.__name__}: {str(e)}")
             return []
     
     @classmethod
     def count(cls) -> int:
         """
-        Get total count of records for this model.
+        Get the total count of records for this model.
         
         Returns:
-            Total number of records
+            int: Total number of records
         """
         try:
             return cls.query.count()
         except Exception as e:
-            logger.error(f"Error counting {cls.__name__} records: {e}")
+            logger.error(f"Error counting {cls.__name__}: {str(e)}")
             return 0
     
     def __repr__(self) -> str:
-        """String representation of the model instance."""
-        return f"<{self.__class__.__name__}(id={self.id})>"
-
-
-# Database session management utilities
-class DatabaseManager:
-    """
-    Database session and transaction management utilities.
-    
-    Provides thread-safe session management, transaction boundaries,
-    and connection handling for Flask-SQLAlchemy integration.
-    """
-    
-    @staticmethod
-    @contextmanager
-    def transaction():
         """
-        Context manager for explicit transaction boundary control.
-        
-        Ensures proper commit/rollback behavior for complex operations
-        spanning multiple database entities.
-        
-        Example:
-            with DatabaseManager.transaction():
-                user = User.create(username='test')
-                profile = UserProfile.create(user_id=user.id)
-        """
-        try:
-            db.session.begin()
-            yield db.session
-            db.session.commit()
-            logger.debug("Transaction committed successfully")
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Transaction failed, rolled back: {e}")
-            raise
-    
-    @staticmethod
-    def safe_commit() -> bool:
-        """
-        Safely commit current transaction with error handling.
+        String representation of the model instance.
         
         Returns:
-            True if commit was successful, False otherwise
+            str: Human-readable representation
         """
-        try:
-            db.session.commit()
-            return True
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Commit failed: {e}")
-            return False
-    
-    @staticmethod
-    def safe_rollback() -> bool:
-        """
-        Safely rollback current transaction.
-        
-        Returns:
-            True if rollback was successful, False otherwise
-        """
-        try:
-            db.session.rollback()
-            return True
-        except Exception as e:
-            logger.error(f"Rollback failed: {e}")
-            return False
+        model_id = getattr(self, 'id', 'unknown')
+        return f"<{self.__class__.__name__}(id={model_id})>"
 
 
-# SQLAlchemy event listeners for automatic audit field population
-def get_current_user_context() -> Optional[str]:
-    """
-    Retrieve current user context from Flask-Login session.
-    
-    Returns:
-        User identifier string or None if not authenticated
-    """
-    try:
-        # Try to get user from Flask-Login current_user
-        from flask_login import current_user
-        if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
-            # Return username or user ID based on available attributes
-            if hasattr(current_user, 'username'):
-                return current_user.username
-            elif hasattr(current_user, 'id'):
-                return str(current_user.id)
-    except ImportError:
-        # Flask-Login not available, try to get from Flask g object
-        pass
-    
-    # Fallback to Flask g object for user context
-    if hasattr(g, 'current_user_id'):
-        return str(g.current_user_id)
-    elif hasattr(g, 'current_user'):
-        return str(g.current_user)
-    
-    # Return system user for background operations
-    return 'system'
-
+# SQLAlchemy Event Hooks for Audit Trail Management
 
 @event.listens_for(db.session, 'before_commit')
-def before_commit_audit_handler(session):
+def before_commit_audit_hook(session: Session) -> None:
     """
-    SQLAlchemy event handler for automatic audit field population.
+    SQLAlchemy event hook to automatically populate audit fields before commit.
     
-    Captures user context from Flask-Login sessions and populates
-    created_by and updated_by fields for all new and modified records.
+    This event listener captures user context from Flask-Login sessions and
+    populates audit fields (created_by, updated_by) for all models that
+    inherit from AuditMixin.
     
     Args:
-        session: SQLAlchemy session about to commit
+        session (Session): SQLAlchemy session about to be committed
     """
     try:
-        user_context = get_current_user_context()
+        # Get current user ID from Flask context
+        current_user_id = get_current_user_id()
         
-        # Handle new records
+        # Process new records (INSERT operations)
         for obj in session.new:
             if hasattr(obj, 'created_by') and obj.created_by is None:
-                obj.created_by = user_context
-                logger.debug(f"Set created_by={user_context} for new {obj.__class__.__name__}")
+                obj.created_by = current_user_id
+            if hasattr(obj, 'updated_by') and obj.updated_by is None:
+                obj.updated_by = current_user_id
         
-        # Handle modified records
+        # Process modified records (UPDATE operations)
         for obj in session.dirty:
             if hasattr(obj, 'updated_by'):
-                obj.updated_by = user_context
-                logger.debug(f"Set updated_by={user_context} for modified {obj.__class__.__name__}")
+                obj.updated_by = current_user_id
                 
     except Exception as e:
-        logger.error(f"Error in audit field population: {e}")
-        # Don't raise exception to avoid breaking the transaction
+        # Log error but don't fail the transaction
+        logger.error(f"Error in audit hook: {str(e)}")
 
 
 @event.listens_for(db.session, 'after_commit')
-def after_commit_audit_handler(session):
+def after_commit_logging_hook(session: Session) -> None:
     """
-    SQLAlchemy event handler for post-commit audit logging.
+    SQLAlchemy event hook for logging database operations after successful commit.
     
-    Logs successful database operations for audit trail and monitoring purposes.
+    This event listener logs successful database operations for audit trail
+    and monitoring purposes.
     
     Args:
-        session: SQLAlchemy session that was committed
+        session (Session): SQLAlchemy session that was committed
     """
     try:
-        # Log successful operations for monitoring
-        if hasattr(session, 'info') and session.info.get('audit_operations'):
-            operations = session.info['audit_operations']
-            logger.info(f"Audit trail: {len(operations)} operations committed successfully")
+        if current_app:
+            # Log successful commit operations
+            total_operations = len(session.identity_map) if hasattr(session, 'identity_map') else 0
+            current_app.logger.info(f"Database commit successful with {total_operations} operations")
+            
     except Exception as e:
-        logger.error(f"Error in post-commit audit logging: {e}")
+        # Log error but don't fail since transaction is already committed
+        logger.error(f"Error in post-commit logging: {str(e)}")
 
 
-def initialize_database(app):
+@event.listens_for(db.session, 'after_rollback')
+def after_rollback_logging_hook(session: Session) -> None:
     """
-    Initialize database configuration and event listeners for Flask application.
+    SQLAlchemy event hook for logging database rollback operations.
+    
+    This event listener logs rollback operations for debugging and
+    monitoring purposes.
+    
+    Args:
+        session (Session): SQLAlchemy session that was rolled back
+    """
+    try:
+        if current_app:
+            current_app.logger.warning("Database transaction rolled back")
+            
+    except Exception as e:
+        logger.error(f"Error in rollback logging: {str(e)}")
+
+
+def init_base_models(app) -> None:
+    """
+    Initialize base model functionality with Flask application.
+    
+    This function sets up the base model system including database
+    initialization, event listeners, and configuration validation.
     
     Args:
         app: Flask application instance
     """
-    # Initialize SQLAlchemy with the Flask app
-    db.init_app(app)
-    
-    # Configure database engine options for optimal performance
-    engine_options = {
-        'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 20)),
-        'max_overflow': int(os.environ.get('SQLALCHEMY_MAX_OVERFLOW', 30)),
-        'pool_timeout': int(os.environ.get('SQLALCHEMY_POOL_TIMEOUT', 30)),
-        'pool_recycle': int(os.environ.get('SQLALCHEMY_POOL_RECYCLE', 3600)),
-        'pool_pre_ping': os.environ.get('SQLALCHEMY_POOL_PRE_PING', 'true').lower() == 'true'
-    }
-    
-    # Apply engine configuration
-    app.config.setdefault('SQLALCHEMY_ENGINE_OPTIONS', engine_options)
-    
-    # Disable modification tracking for performance
-    app.config.setdefault('SQLALCHEMY_TRACK_MODIFICATIONS', False)
-    
-    logger.info("Database configuration initialized successfully")
+    try:
+        # Initialize SQLAlchemy with the app
+        db.init_app(app)
+        
+        # Validate encryption configuration if models use encryption
+        if ENCRYPTION_AVAILABLE:
+            try:
+                get_encryption_key()
+                app.logger.info("Encryption key configuration validated successfully")
+            except EncryptionError as e:
+                app.logger.warning(f"Encryption configuration issue: {str(e)}")
+        else:
+            app.logger.warning("SQLAlchemy-Utils not available - encryption features disabled")
+        
+        # Register additional event listeners if needed
+        app.logger.info("Base model system initialized successfully")
+        
+    except Exception as e:
+        app.logger.error(f"Failed to initialize base model system: {str(e)}")
+        raise
 
 
-# Export main components for easy importing
+# Export main classes and functions
 __all__ = [
     'db',
-    'AuditMixin',
-    'EncryptedMixin', 
     'BaseModel',
-    'DatabaseManager',
-    'initialize_database'
+    'AuditMixin', 
+    'EncryptedMixin',
+    'DatabaseError',
+    'EncryptionError',
+    'ValidationError',
+    'init_base_models',
+    'get_current_user_id',
+    'get_encryption_key'
 ]
