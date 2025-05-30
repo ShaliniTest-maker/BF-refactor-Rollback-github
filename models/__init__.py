@@ -2,533 +2,635 @@
 Flask-SQLAlchemy Database Initialization Module
 
 This module provides centralized database configuration, model imports, and Flask application
-integration for the Flask 3.1.1 application architecture. Implements comprehensive database
-initialization with production-ready connection pooling, PostgreSQL backend support, and
-Flask-Migrate 4.1.0 integration for Alembic-based schema management.
+integration for the Flask 3.1.1 migration. Implements Flask-SQLAlchemy 3.1.1 with PostgreSQL
+14.12+ backend support, enterprise-grade connection pooling, and comprehensive model access.
 
 Key Features:
-- Flask-SQLAlchemy 3.1.1 database instance with PostgreSQL 14.12+ backend support
-- Connection pooling configuration (pool_size=20, max_overflow=30, pool_timeout=30)
-- Centralized model import structure for Flask application factory pattern
-- Comprehensive audit trail and encryption capabilities via base mixins
-- Support for enterprise-grade concurrent connection management
+- Flask-SQLAlchemy 3.1.1 database instance with PostgreSQL connection configuration
+- Enterprise-grade connection pooling (pool_size=20, max_overflow=30, pool_timeout=30)
+- Centralized model imports for Flask application factory pattern integration
+- Database initialization functions with comprehensive error handling
+- Environment variable configuration management for production deployment
+- Connection validation and health check utilities
+- Performance monitoring and metrics integration support
 
 Database Configuration:
-- PostgreSQL connection with SSL/TLS encryption enforcement
-- Environment variable-driven configuration for deployment flexibility
-- Performance optimization through SQLAlchemy engine tuning
-- Connection pool validation and lifecycle management
+- Primary Database: PostgreSQL 14.12+ with SSL/TLS encryption enforcement
+- Connection Pooling: pgbouncer-compatible settings for enterprise scalability
+- Connection Pool: 20 base connections + 30 overflow (50 total concurrent connections)
+- Pool Timeout: 30 seconds for connection acquisition with automatic retry
+- Pool Recycle: 3600 seconds (1 hour) for connection lifecycle management
+- Pre-ping Validation: Automatic connection validation before query execution
 
 Model Architecture:
-- BaseModel with AuditMixin for comprehensive audit trails
-- EncryptedMixin for PII protection using SQLAlchemy-Utils FernetEngine
-- User authentication and session management models
-- Role-Based Access Control (RBAC) with comprehensive permission system
-- Business entity management with relationship tracking
-- Security event logging and audit trail management
+- BaseModel: Common functionality and audit field support through AuditMixin
+- User Models: User, UserSession with Flask-Login integration and RBAC support
+- RBAC Models: Role, Permission, UserRole, RolePermission with comprehensive authorization
+- Business Models: BusinessEntity, EntityRelationship for business logic operations
+- Audit Models: AuditLog, SecurityEvent for compliance and security monitoring
 
 Dependencies:
-- Flask-SQLAlchemy 3.1.1: Primary ORM functionality
-- Flask-Migrate 4.1.0: Database schema management
-- PostgreSQL 14.12+: Production database backend
-- SQLAlchemy-Utils: Extended functionality including encryption
-- python-dotenv: Environment variable management
+- Flask-SQLAlchemy 3.1.1: ORM functionality and declarative models
+- PostgreSQL 14.12+: Primary database with JSONB, SSL, and advanced indexing
+- psycopg2-binary: PostgreSQL Python adapter with connection pooling
+- python-dotenv: Environment variable management for configuration
+- SQLAlchemy-Utils: EncryptedType and additional utilities for enhanced functionality
 """
 
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Optional, Union
 from contextlib import contextmanager
 
+# Core Flask and SQLAlchemy imports
 from flask import Flask, current_app
 from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from sqlalchemy import event, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import text, create_engine, inspect
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, IntegrityError
 from sqlalchemy.pool import QueuePool
+from sqlalchemy.engine import Engine
+
+# Environment variable management
+from dotenv import load_dotenv
+
+# Load environment variables for database configuration
+load_dotenv()
 
 # Configure logging for database operations
 logger = logging.getLogger(__name__)
 
-# Initialize Flask-SQLAlchemy instance with optimized configuration
+# Global SQLAlchemy instance - initialized by Flask application factory
 db = SQLAlchemy()
 
-# Initialize Flask-Migrate for Alembic-based migration management
-migrate = Migrate()
+
+class DatabaseError(Exception):
+    """Custom exception for database initialization and configuration errors."""
+    pass
 
 
-def get_database_config() -> Dict[str, Any]:
+class DatabaseManager:
     """
-    Get database configuration from environment variables with production defaults.
+    Database management utility class for configuration, monitoring, and maintenance.
     
-    Returns:
-        Dictionary containing database configuration parameters
-        
-    Environment Variables:
-        SQLALCHEMY_DATABASE_URI: PostgreSQL connection string
-        SQLALCHEMY_POOL_SIZE: Base connection pool size (default: 20)
-        SQLALCHEMY_MAX_OVERFLOW: Additional connections beyond pool_size (default: 30)
-        SQLALCHEMY_POOL_TIMEOUT: Connection acquisition timeout in seconds (default: 30)
-        SQLALCHEMY_POOL_RECYCLE: Connection lifetime in seconds (default: 3600)
-        SQLALCHEMY_POOL_PRE_PING: Enable connection validation (default: true)
-        SQLALCHEMY_TRACK_MODIFICATIONS: SQLAlchemy modification tracking (default: false)
+    Provides high-level database operations including:
+    - Connection validation and health checks
+    - Performance monitoring and metrics collection
+    - Database initialization and migration support
+    - Configuration validation and environment management
+    - Transaction management utilities for service layer integration
     """
-    return {
-        # Core database connection configuration
-        'SQLALCHEMY_DATABASE_URI': os.environ.get(
-            'SQLALCHEMY_DATABASE_URI',
-            'postgresql://localhost:5432/flask_app'
-        ),
+    
+    @staticmethod
+    def get_database_config() -> Dict[str, Any]:
+        """
+        Retrieve comprehensive database configuration from environment variables.
         
-        # Connection pooling configuration for enterprise-grade performance
-        'SQLALCHEMY_ENGINE_OPTIONS': {
-            'poolclass': QueuePool,
-            'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 20)),
-            'max_overflow': int(os.environ.get('SQLALCHEMY_MAX_OVERFLOW', 30)),
-            'pool_timeout': int(os.environ.get('SQLALCHEMY_POOL_TIMEOUT', 30)),
-            'pool_recycle': int(os.environ.get('SQLALCHEMY_POOL_RECYCLE', 3600)),
-            'pool_pre_ping': os.environ.get('SQLALCHEMY_POOL_PRE_PING', 'true').lower() == 'true',
-            'pool_reset_on_return': 'commit',
+        Returns:
+            Dict containing database configuration parameters
             
-            # PostgreSQL-specific connection parameters
-            'connect_args': {
-                'sslmode': 'require',  # Enforce SSL/TLS encryption
-                'connect_timeout': 10,
-                'statement_timeout': 30000,  # 30 seconds
-                'application_name': 'flask_app'
+        Raises:
+            DatabaseError: If required configuration is missing or invalid
+        """
+        try:
+            # Primary database URI configuration
+            database_uri = os.environ.get(
+                'SQLALCHEMY_DATABASE_URI',
+                os.environ.get('DATABASE_URL', '')
+            )
+            
+            if not database_uri:
+                raise DatabaseError(
+                    "Database URI not configured. Set SQLALCHEMY_DATABASE_URI or DATABASE_URL environment variable."
+                )
+            
+            # Validate PostgreSQL URI format
+            if not database_uri.startswith(('postgresql://', 'postgresql+psycopg2://')):
+                raise DatabaseError(
+                    "Database URI must be PostgreSQL format: postgresql://user:password@host:port/database"
+                )
+            
+            # Connection pool configuration with production defaults
+            pool_config = {
+                'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 20)),
+                'max_overflow': int(os.environ.get('SQLALCHEMY_MAX_OVERFLOW', 30)),
+                'pool_timeout': int(os.environ.get('SQLALCHEMY_POOL_TIMEOUT', 30)),
+                'pool_recycle': int(os.environ.get('SQLALCHEMY_POOL_RECYCLE', 3600)),
+                'pool_pre_ping': os.environ.get('SQLALCHEMY_POOL_PRE_PING', 'true').lower() == 'true'
             }
-        },
-        
-        # Performance optimization settings
-        'SQLALCHEMY_TRACK_MODIFICATIONS': os.environ.get(
-            'SQLALCHEMY_TRACK_MODIFICATIONS', 'false'
-        ).lower() == 'true',
-        
-        # SQL query echo configuration (disabled in production)
-        'SQLALCHEMY_ECHO': os.environ.get('SQLALCHEMY_ECHO', 'false').lower() == 'true',
-        'SQLALCHEMY_ECHO_POOL': os.environ.get('SQLALCHEMY_ECHO_POOL', 'false').lower() == 'true',
-        
-        # Connection pool monitoring and health checks
-        'SQLALCHEMY_RECORD_QUERIES': os.environ.get(
-            'SQLALCHEMY_RECORD_QUERIES', 'false'
-        ).lower() == 'true',
-    }
-
-
-def configure_database_events():
-    """
-    Configure SQLAlchemy event listeners for monitoring, logging, and optimization.
+            
+            # Validate pool configuration ranges
+            if pool_config['pool_size'] < 1 or pool_config['pool_size'] > 100:
+                raise DatabaseError("SQLALCHEMY_POOL_SIZE must be between 1 and 100")
+            
+            if pool_config['max_overflow'] < 0 or pool_config['max_overflow'] > 200:
+                raise DatabaseError("SQLALCHEMY_MAX_OVERFLOW must be between 0 and 200")
+            
+            if pool_config['pool_timeout'] < 1 or pool_config['pool_timeout'] > 300:
+                raise DatabaseError("SQLALCHEMY_POOL_TIMEOUT must be between 1 and 300 seconds")
+            
+            # Performance and optimization configuration
+            engine_config = {
+                'echo': os.environ.get('SQLALCHEMY_ENGINE_ECHO', 'false').lower() == 'true',
+                'echo_pool': os.environ.get('SQLALCHEMY_ENGINE_ECHO_POOL', 'false').lower() == 'true',
+                'track_modifications': os.environ.get('SQLALCHEMY_TRACK_MODIFICATIONS', 'false').lower() == 'true',
+                'isolation_level': os.environ.get('SQLALCHEMY_ENGINE_ISOLATION_LEVEL', 'READ_COMMITTED')
+            }
+            
+            # SSL and security configuration
+            ssl_config = {
+                'sslmode': os.environ.get('DATABASE_SSLMODE', 'require'),
+                'sslcert': os.environ.get('DATABASE_SSLCERT'),
+                'sslkey': os.environ.get('DATABASE_SSLKEY'),
+                'sslrootcert': os.environ.get('DATABASE_SSLROOTCERT')
+            }
+            
+            return {
+                'database_uri': database_uri,
+                'pool_config': pool_config,
+                'engine_config': engine_config,
+                'ssl_config': ssl_config
+            }
+            
+        except (ValueError, TypeError) as e:
+            raise DatabaseError(f"Invalid database configuration: {str(e)}")
     
-    Implements:
-    - Connection pool monitoring for performance tracking
-    - Query performance logging for optimization
-    - SSL connection validation
-    - Error handling and logging
-    """
+    @staticmethod
+    def create_engine_options(config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create SQLAlchemy engine options from configuration dictionary.
+        
+        Args:
+            config: Database configuration dictionary
+            
+        Returns:
+            Dict containing SQLAlchemy engine options
+        """
+        pool_config = config['pool_config']
+        engine_config = config['engine_config']
+        
+        engine_options = {
+            'poolclass': QueuePool,
+            'pool_size': pool_config['pool_size'],
+            'max_overflow': pool_config['max_overflow'],
+            'pool_timeout': pool_config['pool_timeout'],
+            'pool_recycle': pool_config['pool_recycle'],
+            'pool_pre_ping': pool_config['pool_pre_ping'],
+            'echo': engine_config['echo'],
+            'echo_pool': engine_config['echo_pool'],
+            'isolation_level': engine_config['isolation_level']
+        }
+        
+        # Add SSL connect_args if configured
+        connect_args = {}
+        ssl_config = config['ssl_config']
+        
+        if ssl_config['sslmode']:
+            connect_args['sslmode'] = ssl_config['sslmode']
+        
+        if ssl_config['sslcert']:
+            connect_args['sslcert'] = ssl_config['sslcert']
+        
+        if ssl_config['sslkey']:
+            connect_args['sslkey'] = ssl_config['sslkey']
+        
+        if ssl_config['sslrootcert']:
+            connect_args['sslrootcert'] = ssl_config['sslrootcert']
+        
+        if connect_args:
+            engine_options['connect_args'] = connect_args
+        
+        return engine_options
     
-    @event.listens_for(Engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        """Set SQLite pragmas for development environments."""
-        # Only applies to SQLite connections (development)
-        if 'sqlite' in str(dbapi_connection):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-    
-    @event.listens_for(Engine, "connect")
-    def validate_postgresql_connection(dbapi_connection, connection_record):
-        """Validate PostgreSQL connection and SSL encryption."""
-        # Only applies to PostgreSQL connections
-        if hasattr(dbapi_connection, 'get_backend_pid'):
-            try:
-                # Verify SSL connection for security compliance
-                cursor = dbapi_connection.cursor()
-                cursor.execute("SELECT ssl_is_used()")
-                ssl_enabled = cursor.fetchone()[0]
-                cursor.close()
+    @staticmethod
+    def validate_database_connection(app: Flask) -> bool:
+        """
+        Validate database connection and configuration.
+        
+        Args:
+            app: Flask application instance
+            
+        Returns:
+            True if connection is valid, False otherwise
+            
+        Raises:
+            DatabaseError: If connection validation fails
+        """
+        try:
+            with app.app_context():
+                # Test basic connection
+                result = db.session.execute(text('SELECT 1')).scalar()
+                if result != 1:
+                    raise DatabaseError("Database connection test failed")
                 
-                if not ssl_enabled:
-                    logger.warning("PostgreSQL connection established without SSL encryption")
-                else:
-                    logger.debug("PostgreSQL SSL connection validated successfully")
-                    
-            except Exception as e:
-                logger.error(f"Failed to validate PostgreSQL connection: {e}")
+                # Validate PostgreSQL version
+                version_result = db.session.execute(text('SELECT version()')).scalar()
+                if 'PostgreSQL' not in version_result:
+                    raise DatabaseError("Database is not PostgreSQL")
+                
+                # Extract version number for validation
+                import re
+                version_match = re.search(r'PostgreSQL (\d+)\.(\d+)', version_result)
+                if version_match:
+                    major_version = int(version_match.group(1))
+                    if major_version < 14:
+                        app.logger.warning(f"PostgreSQL version {major_version} is below recommended 14.12+")
+                
+                # Test connection pool
+                pool = db.engine.pool
+                pool_status = {
+                    'size': pool.size(),
+                    'checked_in': pool.checkedin(),
+                    'checked_out': pool.checkedout(),
+                    'overflow': pool.overflow(),
+                    'invalid': pool.invalid()
+                }
+                
+                app.logger.info(f"Database connection validated successfully. Pool status: {pool_status}")
+                return True
+                
+        except OperationalError as e:
+            raise DatabaseError(f"Database connection failed: {str(e)}")
+        except Exception as e:
+            raise DatabaseError(f"Database validation error: {str(e)}")
     
-    @event.listens_for(Engine, "checkout")
-    def log_connection_checkout(dbapi_connection, connection_record, connection_proxy):
-        """Log connection pool checkout events for monitoring."""
-        logger.debug(f"Connection checked out from pool: {id(dbapi_connection)}")
+    @staticmethod
+    def get_connection_pool_status() -> Dict[str, int]:
+        """
+        Get current connection pool status for monitoring.
+        
+        Returns:
+            Dict containing pool metrics
+        """
+        try:
+            pool = db.engine.pool
+            return {
+                'pool_size': pool.size(),
+                'checked_in': pool.checkedin(),
+                'checked_out': pool.checkedout(),
+                'overflow': pool.overflow(),
+                'invalid': pool.invalid(),
+                'total_connections': pool.checkedout() + pool.checkedin() + pool.overflow()
+            }
+        except Exception as e:
+            logger.error(f"Error getting pool status: {str(e)}")
+            return {}
     
-    @event.listens_for(Engine, "checkin")
-    def log_connection_checkin(dbapi_connection, connection_record):
-        """Log connection pool checkin events for monitoring."""
-        logger.debug(f"Connection returned to pool: {id(dbapi_connection)}")
+    @staticmethod
+    @contextmanager
+    def transaction():
+        """
+        Context manager for explicit transaction boundary control.
+        
+        Yields:
+            Database session for transaction operations
+            
+        Raises:
+            DatabaseError: If transaction fails
+        """
+        try:
+            db.session.begin()
+            yield db.session
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Transaction rolled back: {str(e)}")
+            raise DatabaseError(f"Transaction failed: {str(e)}")
     
-    @event.listens_for(Engine, "invalidate")
-    def log_connection_invalidate(dbapi_connection, connection_record, exception):
-        """Log connection invalidation events for debugging."""
-        logger.warning(f"Connection invalidated: {exception}")
+    @staticmethod
+    def check_database_health() -> Dict[str, Any]:
+        """
+        Comprehensive database health check for monitoring.
+        
+        Returns:
+            Dict containing health check results
+        """
+        health_status = {
+            'status': 'unknown',
+            'database_accessible': False,
+            'pool_healthy': False,
+            'version_compatible': False,
+            'ssl_enabled': False,
+            'metrics': {},
+            'errors': []
+        }
+        
+        try:
+            # Test basic connectivity
+            result = db.session.execute(text('SELECT 1')).scalar()
+            health_status['database_accessible'] = (result == 1)
+            
+            # Check PostgreSQL version
+            version_result = db.session.execute(text('SELECT version()')).scalar()
+            health_status['version_compatible'] = 'PostgreSQL' in version_result
+            
+            # Check SSL status
+            ssl_result = db.session.execute(text('SELECT ssl_is_used()')).scalar()
+            health_status['ssl_enabled'] = ssl_result is True
+            
+            # Check connection pool status
+            pool_status = DatabaseManager.get_connection_pool_status()
+            health_status['pool_healthy'] = (
+                pool_status.get('invalid', 0) == 0 and 
+                pool_status.get('total_connections', 0) > 0
+            )
+            health_status['metrics'] = pool_status
+            
+            # Determine overall status
+            if all([
+                health_status['database_accessible'],
+                health_status['pool_healthy'],
+                health_status['version_compatible']
+            ]):
+                health_status['status'] = 'healthy'
+            else:
+                health_status['status'] = 'degraded'
+                
+        except Exception as e:
+            health_status['status'] = 'unhealthy'
+            health_status['errors'].append(str(e))
+            logger.error(f"Database health check failed: {str(e)}")
+        
+        return health_status
 
 
 def init_database(app: Flask) -> None:
     """
-    Initialize database configuration for Flask application factory pattern.
+    Initialize Flask-SQLAlchemy database with comprehensive configuration.
     
-    Configures Flask-SQLAlchemy with production-ready settings including
-    connection pooling, SSL enforcement, and performance optimization.
+    This function configures the Flask application with PostgreSQL database
+    support, connection pooling, and all necessary SQLAlchemy settings for
+    production deployment.
     
     Args:
         app: Flask application instance
         
-    Features:
-        - PostgreSQL backend with SSL/TLS encryption
-        - Connection pooling (pool_size=20, max_overflow=30, pool_timeout=30)
-        - Flask-Migrate integration for schema management
-        - SQLAlchemy event listeners for monitoring
-        - Environment-specific configuration management
-    """
-    
-    # Load database configuration from environment
-    db_config = get_database_config()
-    
-    # Apply configuration to Flask app
-    for key, value in db_config.items():
-        app.config[key] = value
-    
-    # Initialize Flask-SQLAlchemy with the app
-    db.init_app(app)
-    
-    # Initialize Flask-Migrate for Alembic-based migrations
-    migrate.init_app(app, db)
-    
-    # Configure database event listeners
-    configure_database_events()
-    
-    # Log successful initialization
-    logger.info(
-        f"Database initialized successfully: "
-        f"pool_size={db_config['SQLALCHEMY_ENGINE_OPTIONS']['pool_size']}, "
-        f"max_overflow={db_config['SQLALCHEMY_ENGINE_OPTIONS']['max_overflow']}, "
-        f"pool_timeout={db_config['SQLALCHEMY_ENGINE_OPTIONS']['pool_timeout']}"
-    )
-
-
-def create_all_tables() -> None:
-    """
-    Create all database tables based on model definitions.
-    
-    Should be called within Flask application context for proper execution.
-    Used primarily for development and testing environments.
-    
     Raises:
-        RuntimeError: If called outside Flask application context
+        DatabaseError: If database initialization fails
     """
-    if not current_app:
-        raise RuntimeError("create_all_tables() must be called within Flask application context")
-    
     try:
-        db.create_all()
-        logger.info("All database tables created successfully")
+        # Get database configuration from environment
+        config = DatabaseManager.get_database_config()
+        
+        # Configure Flask-SQLAlchemy settings
+        app.config['SQLALCHEMY_DATABASE_URI'] = config['database_uri']
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = config['engine_config']['track_modifications']
+        app.config['SQLALCHEMY_RECORD_QUERIES'] = True  # Enable query recording for monitoring
+        
+        # Configure engine options for PostgreSQL optimization
+        engine_options = DatabaseManager.create_engine_options(config)
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
+        
+        # Initialize Flask-SQLAlchemy with the application
+        db.init_app(app)
+        
+        # Log successful configuration
+        pool_config = config['pool_config']
+        app.logger.info(
+            f"Database initialized: PostgreSQL with pool_size={pool_config['pool_size']}, "
+            f"max_overflow={pool_config['max_overflow']}, pool_timeout={pool_config['pool_timeout']}"
+        )
+        
+        # Validate database connection
+        DatabaseManager.validate_database_connection(app)
+        
+        # Initialize base model system
+        from .base import init_base_models
+        init_base_models(app)
+        
+        app.logger.info("Flask-SQLAlchemy database initialization completed successfully")
+        
     except Exception as e:
-        logger.error(f"Failed to create database tables: {e}")
-        raise
+        error_msg = f"Database initialization failed: {str(e)}"
+        app.logger.error(error_msg)
+        raise DatabaseError(error_msg)
 
 
-def drop_all_tables() -> None:
+def create_all_tables(app: Flask) -> None:
     """
-    Drop all database tables. USE WITH EXTREME CAUTION.
+    Create all database tables defined in models.
     
-    Should only be used in development/testing environments.
-    
+    Args:
+        app: Flask application instance
+        
     Raises:
-        RuntimeError: If called outside Flask application context
-    """
-    if not current_app:
-        raise RuntimeError("drop_all_tables() must be called within Flask application context")
-    
-    try:
-        db.drop_all()
-        logger.warning("All database tables dropped")
-    except Exception as e:
-        logger.error(f"Failed to drop database tables: {e}")
-        raise
-
-
-@contextmanager
-def database_transaction():
-    """
-    Context manager for explicit database transaction control.
-    
-    Provides commit/rollback semantics for complex operations
-    spanning multiple database entities.
-    
-    Example:
-        with database_transaction():
-            user = User.create(username='test')
-            profile = UserProfile.create(user_id=user.id)
-            # Automatic commit on success, rollback on exception
+        DatabaseError: If table creation fails
     """
     try:
-        db.session.begin()
-        yield db.session
-        db.session.commit()
-        logger.debug("Database transaction committed successfully")
+        with app.app_context():
+            # Import all models to ensure they are registered
+            from . import user, rbac, business, audit
+            
+            # Create all tables
+            db.create_all()
+            
+            app.logger.info("All database tables created successfully")
+            
     except Exception as e:
-        db.session.rollback()
-        logger.error(f"Database transaction failed, rolled back: {e}")
-        raise
+        error_msg = f"Table creation failed: {str(e)}"
+        app.logger.error(error_msg)
+        raise DatabaseError(error_msg)
 
 
-def get_database_health() -> Dict[str, Any]:
+def drop_all_tables(app: Flask) -> None:
     """
-    Get database connection health and performance metrics.
+    Drop all database tables. Use with caution!
     
-    Returns:
-        Dictionary containing database health information
+    Args:
+        app: Flask application instance
         
-    Metrics:
-        - Connection pool status
-        - Active connections count
-        - Database connectivity test
-        - SSL encryption status
+    Raises:
+        DatabaseError: If table dropping fails
     """
-    health_info = {
-        'status': 'unknown',
-        'pool_size': None,
-        'active_connections': None,
-        'ssl_enabled': None,
-        'error': None
-    }
-    
     try:
-        # Test basic database connectivity
-        result = db.session.execute(text('SELECT 1')).scalar()
-        if result == 1:
-            health_info['status'] = 'healthy'
-        
-        # Get connection pool information
-        engine = db.engine
-        pool = engine.pool
-        
-        health_info['pool_size'] = pool.size()
-        health_info['active_connections'] = pool.checkedout()
-        
-        # Check SSL encryption status for PostgreSQL
-        if 'postgresql' in str(engine.url):
-            ssl_result = db.session.execute(text('SELECT ssl_is_used()')).scalar()
-            health_info['ssl_enabled'] = bool(ssl_result)
-        
-        logger.debug("Database health check completed successfully")
-        
+        with app.app_context():
+            db.drop_all()
+            app.logger.warning("All database tables dropped")
+            
     except Exception as e:
-        health_info['status'] = 'unhealthy'
-        health_info['error'] = str(e)
-        logger.error(f"Database health check failed: {e}")
-    
-    return health_info
+        error_msg = f"Table dropping failed: {str(e)}"
+        app.logger.error(error_msg)
+        raise DatabaseError(error_msg)
 
 
 # Import all model classes for centralized access
-# Base model components
-from .base import (
-    AuditMixin,
-    EncryptedMixin,
-    BaseModel,
-    DatabaseManager,
-    initialize_database
-)
+try:
+    # Base model components
+    from .base import (
+        BaseModel, 
+        AuditMixin, 
+        EncryptedMixin,
+        DatabaseError as BaseModelError,
+        EncryptionError,
+        ValidationError,
+        get_current_user_id,
+        get_encryption_key
+    )
+    
+    # User authentication and session models
+    from .user import (
+        User,
+        UserSession,
+        load_user
+    )
+    
+    # RBAC (Role-Based Access Control) models
+    from .rbac import (
+        Role,
+        Permission,
+        UserRole,
+        RolePermission,
+        RBACManager,
+        require_permission,
+        require_role
+    )
+    
+    # Business entity and relationship models
+    from .business import (
+        BusinessEntity,
+        EntityRelationship
+    )
+    
+    # Audit and security models
+    from .audit import (
+        AuditLog,
+        SecurityEvent,
+        AuditOperationType,
+        SecurityEventSeverity,
+        SecurityEventType,
+        AuditManager
+    )
+    
+    logger.info("All model classes imported successfully")
+    
+except ImportError as e:
+    logger.error(f"Model import failed: {str(e)}")
+    raise DatabaseError(f"Failed to import model classes: {str(e)}")
 
-# User authentication and session management
-from .user import (
-    User,
-    UserSession,
-    UserUtils,
-    load_user
-)
 
-# Role-Based Access Control (RBAC)
-from .rbac import (
-    Role,
-    Permission,
-    user_roles,
-    role_permissions
-)
-
-# Business entity management
-from .business import (
-    BusinessEntity,
-    EntityRelationship
-)
-
-# Audit logging and security events
-from .audit import (
-    AuditLog,
-    SecurityEvent
-)
-
-
-# Comprehensive model export for application-wide access
+# Export all models and utilities for application-wide access
 __all__ = [
-    # Database instances and configuration
+    # Database configuration and management
     'db',
-    'migrate',
     'init_database',
     'create_all_tables',
     'drop_all_tables',
-    'database_transaction',
-    'get_database_health',
-    'get_database_config',
+    'DatabaseManager',
+    'DatabaseError',
     
     # Base model components
-    'AuditMixin',
-    'EncryptedMixin', 
     'BaseModel',
-    'DatabaseManager',
-    'initialize_database',
+    'AuditMixin',
+    'EncryptedMixin',
+    'EncryptionError',
+    'ValidationError',
+    'get_current_user_id',
+    'get_encryption_key',
     
-    # User management models
+    # User models
     'User',
     'UserSession',
-    'UserUtils',
     'load_user',
     
     # RBAC models
     'Role',
     'Permission',
-    'user_roles',
-    'role_permissions',
+    'UserRole',
+    'RolePermission',
+    'RBACManager',
+    'require_permission',
+    'require_role',
     
-    # Business entity models
+    # Business models
     'BusinessEntity',
     'EntityRelationship',
     
-    # Audit and security models
+    # Audit models
     'AuditLog',
-    'SecurityEvent'
+    'SecurityEvent',
+    'AuditOperationType',
+    'SecurityEventSeverity',
+    'SecurityEventType',
+    'AuditManager'
 ]
 
 
-def validate_model_relationships():
+def get_model_info() -> Dict[str, Any]:
     """
-    Validate all model relationships and foreign key constraints.
-    
-    Performs comprehensive validation of:
-    - Foreign key relationships
-    - Association table configurations
-    - Cascade deletion settings
-    - Index definitions
+    Get comprehensive information about all registered models.
     
     Returns:
-        Boolean indicating if all relationships are valid
-        
-    Raises:
-        ValueError: If relationship validation fails
+        Dict containing model metadata and statistics
     """
-    try:
-        # Validate User model relationships
-        assert hasattr(User, 'sessions'), "User model missing sessions relationship"
-        assert hasattr(User, 'roles'), "User model missing roles relationship"
-        
-        # Validate RBAC relationships
-        assert hasattr(Role, 'permissions'), "Role model missing permissions relationship"
-        assert hasattr(Permission, 'roles'), "Permission model missing roles relationship"
-        
-        # Validate business entity relationships
-        assert hasattr(BusinessEntity, 'owner'), "BusinessEntity model missing owner relationship"
-        assert hasattr(BusinessEntity, 'source_relationships'), "BusinessEntity model missing source_relationships"
-        assert hasattr(BusinessEntity, 'target_relationships'), "BusinessEntity model missing target_relationships"
-        
-        # Validate session relationships
-        assert hasattr(UserSession, 'user'), "UserSession model missing user relationship"
-        
-        logger.info("All model relationships validated successfully")
-        return True
-        
-    except AssertionError as e:
-        logger.error(f"Model relationship validation failed: {e}")
-        raise ValueError(f"Model relationship validation failed: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error during model validation: {e}")
-        raise
-
-
-def get_model_registry() -> Dict[str, Any]:
-    """
-    Get registry of all available models with metadata.
-    
-    Returns:
-        Dictionary mapping model names to model classes with metadata
-        
-    Useful for:
-    - Dynamic model access
-    - API introspection
-    - Administrative interfaces
-    - Testing and validation
-    """
-    registry = {
-        # User management
-        'User': {
-            'class': User,
-            'table_name': User.__tablename__,
-            'description': 'User authentication and profile management'
-        },
-        'UserSession': {
-            'class': UserSession,
-            'table_name': UserSession.__tablename__,
-            'description': 'User session management and tracking'
-        },
-        
-        # RBAC system
-        'Role': {
-            'class': Role,
-            'table_name': Role.__tablename__,
-            'description': 'Role-based access control roles'
-        },
-        'Permission': {
-            'class': Permission,
-            'table_name': Permission.__tablename__,
-            'description': 'System permissions for authorization'
-        },
-        
-        # Business entities
-        'BusinessEntity': {
-            'class': BusinessEntity,
-            'table_name': BusinessEntity.__tablename__,
-            'description': 'Core business entity management'
-        },
-        'EntityRelationship': {
-            'class': EntityRelationship,
-            'table_name': EntityRelationship.__tablename__,
-            'description': 'Business entity relationship tracking'
-        },
-        
-        # Audit and logging
-        'AuditLog': {
-            'class': AuditLog,
-            'table_name': AuditLog.__tablename__,
-            'description': 'Comprehensive audit trail logging'
-        },
-        'SecurityEvent': {
-            'class': SecurityEvent,
-            'table_name': SecurityEvent.__tablename__,
-            'description': 'Security event tracking and monitoring'
-        }
+    model_info = {
+        'total_models': len(__all__) - 6,  # Subtract non-model exports
+        'base_models': ['BaseModel', 'AuditMixin', 'EncryptedMixin'],
+        'user_models': ['User', 'UserSession'],
+        'rbac_models': ['Role', 'Permission', 'UserRole', 'RolePermission'],
+        'business_models': ['BusinessEntity', 'EntityRelationship'],
+        'audit_models': ['AuditLog', 'SecurityEvent'],
+        'utility_classes': ['DatabaseManager', 'RBACManager', 'AuditManager'],
+        'decorators': ['require_permission', 'require_role'],
+        'exceptions': ['DatabaseError', 'EncryptionError', 'ValidationError'],
+        'enums': ['AuditOperationType', 'SecurityEventSeverity', 'SecurityEventType']
     }
     
-    return registry
+    return model_info
 
 
-# Initialize model relationship validation on import
-try:
-    # Only validate if we're in an application context
-    if current_app:
-        validate_model_relationships()
-except RuntimeError:
-    # No application context available during import - validation will occur during app initialization
-    pass
-except Exception as e:
-    logger.warning(f"Model relationship validation skipped during import: {e}")
+def validate_model_integrity() -> Dict[str, Any]:
+    """
+    Validate model integrity and relationships.
+    
+    Returns:
+        Dict containing validation results
+    """
+    validation_results = {
+        'status': 'unknown',
+        'models_validated': 0,
+        'relationships_validated': 0,
+        'errors': [],
+        'warnings': []
+    }
+    
+    try:
+        # Validate that all models are properly imported
+        core_models = [User, Role, Permission, BusinessEntity, AuditLog]
+        validation_results['models_validated'] = len(core_models)
+        
+        # Check for required relationships
+        relationships_to_check = [
+            (User, 'user_roles'),
+            (Role, 'user_roles'),
+            (User, 'user_sessions'),
+            (BusinessEntity, 'source_relationships'),
+            (BusinessEntity, 'target_relationships')
+        ]
+        
+        for model, relationship_name in relationships_to_check:
+            if hasattr(model, relationship_name):
+                validation_results['relationships_validated'] += 1
+            else:
+                validation_results['errors'].append(
+                    f"Missing relationship {relationship_name} on {model.__name__}"
+                )
+        
+        # Determine overall status
+        if not validation_results['errors']:
+            validation_results['status'] = 'valid'
+        else:
+            validation_results['status'] = 'invalid'
+            
+    except Exception as e:
+        validation_results['status'] = 'error'
+        validation_results['errors'].append(str(e))
+    
+    return validation_results
 
 
-logger.info("Flask-SQLAlchemy models module initialized successfully")
+# Initialize logging for the models module
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+logger.info(f"Models module initialized with {len(__all__)} exports")
