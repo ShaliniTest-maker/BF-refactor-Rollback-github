@@ -1,0 +1,176 @@
+{
+  "status": "success",
+  "timestamp": "{{ current_timestamp or moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+  "request_id": "{{ request_id or g.get('request_id', 'req_' + (moment().valueOf() | string)) }}",
+  "api": {
+    "name": "{{ config.get('API_NAME', 'Flask API') }}",
+    "description": "{{ config.get('API_DESCRIPTION', 'RESTful API built with Flask framework for Node.js to Python migration') }}",
+    "version": {
+      "api": "{{ api_version or config.get('API_VERSION', 'v1.0.0') }}",
+      "framework": "Flask {{ config.get('FLASK_VERSION', '3.1.1') }}",
+      "python": "{{ python_version or '3.13.3' }}",
+      "build": "{{ build_version or config.get('BUILD_VERSION', 'dev') }}",
+      "deployment": "{{ deployment_env or config.get('FLASK_ENV', 'development') }}"
+    },
+    "capabilities": {
+      "authentication": {
+        "supported": {{ auth_enabled | default(true) | tojson }},
+        "methods": {{ auth_methods | default(['session', 'bearer', 'api_key']) | tojson }},
+        "providers": {{ auth_providers | default(['local', 'auth0']) | tojson }}
+      },
+      "database": {
+        "orm": "SQLAlchemy {{ config.get('SQLALCHEMY_VERSION', '2.0+') }}",
+        "migration": "Flask-Migrate {{ config.get('FLASK_MIGRATE_VERSION', '4.1.0') }}",
+        "connection_pooling": {{ db_pooling_enabled | default(true) | tojson }}
+      },
+      "features": {
+        "pagination": {{ pagination_enabled | default(true) | tojson }},
+        "filtering": {{ filtering_enabled | default(true) | tojson }},
+        "sorting": {{ sorting_enabled | default(true) | tojson }},
+        "validation": {{ validation_enabled | default(true) | tojson }},
+        "caching": {{ caching_enabled | default(false) | tojson }},
+        "rate_limiting": {{ rate_limiting_enabled | default(false) | tojson }}
+      },
+      "response_formats": {{ supported_formats | default(['json', 'xml']) | tojson }},
+      "request_methods": {{ supported_methods | default(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']) | tojson }}
+    },
+    "blueprints": {
+      {% if blueprints -%}
+      {% for blueprint in blueprints -%}
+      "{{ blueprint.name }}": {
+        "name": "{{ blueprint.name }}",
+        "description": "{{ blueprint.description or 'Blueprint for ' + blueprint.name + ' operations' }}",
+        "url_prefix": "{{ blueprint.url_prefix or '/' + blueprint.name }}",
+        "endpoints": {{ blueprint.endpoints | length }},
+        "routes": [
+          {% for route in blueprint.routes -%}
+          {
+            "endpoint": "{{ route.endpoint }}",
+            "methods": {{ route.methods | list | tojson }},
+            "path": "{{ route.rule }}",
+            "description": "{{ route.description or '' }}"
+          }{% if not loop.last %},{% endif %}
+          {% endfor -%}
+        ]
+      }{% if not loop.last %},{% endif %}
+      {% endfor -%}
+      {% else -%}
+      "main": {
+        "name": "main",
+        "description": "Main application blueprint",
+        "url_prefix": "/",
+        "endpoints": {{ total_endpoints | default(0) }},
+        "routes": []
+      }
+      {% endif -%}
+    },
+    "endpoints": {
+      "total": {{ total_endpoints | default(0) }},
+      "by_method": {
+        {% for method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] -%}
+        "{{ method }}": {{ endpoints_by_method.get(method, 0) }}{% if not loop.last %},{% endif %}
+        {% endfor -%}
+      },
+      "discovery": {
+        "self": "{{ url_for('api.metadata', _external=True) if url_for else request.url }}",
+        "documentation": "{{ docs_url or config.get('API_DOCS_URL', '/docs') }}",
+        "health": "{{ health_url or url_for('health.check', _external=True) if url_for else '/health' }}",
+        "version": "{{ version_url or url_for('api.version', _external=True) if url_for else '/api/version' }}"
+      }
+    },
+    "configuration": {
+      "debug": {{ config.get('DEBUG', false) | tojson }},
+      "testing": {{ config.get('TESTING', false) | tojson }},
+      "timezone": "{{ config.get('TIMEZONE', 'UTC') }}",
+      "pagination": {
+        "default_page_size": {{ config.get('DEFAULT_PAGE_SIZE', 20) }},
+        "max_page_size": {{ config.get('MAX_PAGE_SIZE', 100) }}
+      },
+      "request_limits": {
+        "max_content_length": {{ config.get('MAX_CONTENT_LENGTH', 16777216) }},
+        "timeout": {{ config.get('REQUEST_TIMEOUT', 30) }}
+      }
+    },
+    "schema": {
+      "openapi": "{{ openapi_version or '3.0.3' }}",
+      "specification_url": "{{ spec_url or config.get('OPENAPI_SPEC_URL', '/api/spec') }}",
+      "interactive_docs": "{{ interactive_docs_url or config.get('SWAGGER_UI_URL', '/api/docs') }}"
+    },
+    "migration": {
+      "source_platform": "Node.js/Express.js",
+      "target_platform": "Python/Flask",
+      "migration_status": "{{ migration_status or 'completed' }}",
+      "compatibility_mode": {{ compatibility_mode | default(true) | tojson }},
+      "api_contract_preserved": {{ api_contract_preserved | default(true) | tojson }}
+    }
+  },
+  "server": {
+    "hostname": "{{ server_hostname or request.host if request else 'localhost' }}",
+    "url": "{{ server_url or request.host_url if request else 'http://localhost:5000' }}",
+    "protocol": "{{ request.scheme if request else 'http' }}",
+    "environment": "{{ config.get('FLASK_ENV', 'development') }}",
+    "wsgi_server": "{{ wsgi_server or 'Werkzeug' }}",
+    "uptime": {{ uptime_seconds | default(0) }},
+    "start_time": "{{ start_time or '' }}"
+  },
+  "security": {
+    "https_required": {{ https_required | default(false) | tojson }},
+    "session_protection": {{ session_protection | default(true) | tojson }},
+    "csrf_protection": {{ csrf_protection | default(false) | tojson }},
+    "cors_enabled": {{ cors_enabled | default(false) | tojson }},
+    "headers": {
+      "x_frame_options": "{{ security_headers.get('X-Frame-Options', 'DENY') }}",
+      "x_content_type_options": "{{ security_headers.get('X-Content-Type-Options', 'nosniff') }}",
+      "x_xss_protection": "{{ security_headers.get('X-XSS-Protection', '1; mode=block') }}"
+    }
+  },
+  "performance": {
+    "caching": {
+      "enabled": {{ caching_enabled | default(false) | tojson }},
+      "backend": "{{ cache_backend or 'SimpleCache' }}",
+      "default_timeout": {{ cache_timeout | default(300) }}
+    },
+    "database_pool": {
+      "size": {{ db_pool_size | default(10) }},
+      "max_overflow": {{ db_max_overflow | default(20) }},
+      "timeout": {{ db_pool_timeout | default(30) }}
+    },
+    "response_times": {
+      "target_p95": {{ target_p95_ms | default(200) }},
+      "current_avg": {{ current_avg_ms | default(null) | tojson }}
+    }
+  },
+  "monitoring": {
+    "health_check": "{{ health_url or '/health' }}",
+    "metrics": "{{ metrics_url or '/metrics' }}",
+    "logging_level": "{{ config.get('LOG_LEVEL', 'INFO') }}",
+    "error_tracking": {{ error_tracking_enabled | default(false) | tojson }}
+  },
+  "links": {
+    "self": {
+      "href": "{{ request.url if request else '/api/metadata' }}",
+      "method": "GET"
+    },
+    "documentation": {
+      "href": "{{ docs_url or '/docs' }}",
+      "method": "GET",
+      "type": "text/html"
+    },
+    "health": {
+      "href": "{{ health_url or '/health' }}",
+      "method": "GET"
+    },
+    "version": {
+      "href": "{{ version_url or '/api/version' }}",
+      "method": "GET"
+    }
+  },
+  "meta": {
+    "response_type": "api_metadata",
+    "generated_at": "{{ current_timestamp or moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "template_version": "1.0.0",
+    "flask_blueprint": "{{ blueprint_name or 'api' }}",
+    "route_endpoint": "{{ endpoint_name or 'metadata' }}",
+    "processing_time_ms": {{ processing_time_ms | default(null) | tojson }}
+  }
+}
