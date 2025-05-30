@@ -1,0 +1,326 @@
+Subject: Scheduled Maintenance Window - {{ maintenance_type }}: {{ maintenance_title }}
+
+================================================================
+SCHEDULED MAINTENANCE NOTIFICATION
+================================================================
+
+Dear {{ recipient_name or 'Valued User' }},
+
+We are writing to inform you about a scheduled maintenance window that may temporarily affect your access to our services. This maintenance is essential for ensuring optimal system performance, security, and reliability.
+
+MAINTENANCE WINDOW DETAILS:
+================================================================
+
+Maintenance Type: {{ maintenance_type }}
+Window Title: {{ maintenance_title }}
+Scheduled Start: {{ start_time }}
+Scheduled End: {{ end_time }}
+Expected Duration: {{ duration }}
+Impact Level: {{ impact_level or 'Standard' }}
+Maintenance ID: {{ maintenance_id }}
+
+MAINTENANCE DESCRIPTION:
+{{ maintenance_description }}
+
+{% if maintenance_scope %}
+SCOPE OF WORK:
+================================================================
+{% for scope_item in maintenance_scope %}
+• {{ scope_item.component }}: {{ scope_item.description }}
+  Purpose: {{ scope_item.purpose }}
+{% if scope_item.risk_level %}
+  Risk Level: {{ scope_item.risk_level }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+SERVICE IMPACT ASSESSMENT:
+================================================================
+
+{% if affected_services %}
+Affected Services:
+{% for service in affected_services %}
+• {{ service.name }}: {{ service.impact_description }}
+  Downtime: {{ service.downtime_duration }}
+  Impact Level: {{ service.impact_level }}
+{% endfor %}
+{% endif %}
+
+{% if unaffected_services %}
+Services Remaining Available:
+{% for service in unaffected_services %}
+• {{ service }}: Full functionality maintained
+{% endfor %}
+{% endif %}
+
+{% if performance_impact %}
+Expected Performance Impact:
+{% for impact in performance_impact %}
+• {{ impact.service }}: {{ impact.description }}
+  Duration: {{ impact.duration }}
+  Mitigation: {{ impact.mitigation_steps }}
+{% endfor %}
+{% endif %}
+
+{% if database_maintenance %}
+DATABASE MAINTENANCE OPERATIONS:
+================================================================
+{% for db_operation in database_maintenance %}
+• Operation: {{ db_operation.type }}
+  Target: {{ db_operation.target_database or 'Primary Database' }}
+  Description: {{ db_operation.description }}
+  Expected Duration: {{ db_operation.duration }}
+{% if db_operation.migration_details %}
+  Migration Details: {{ db_operation.migration_details }}
+{% endif %}
+{% if db_operation.rollback_plan %}
+  Rollback Plan: {{ db_operation.rollback_plan }}
+{% endif %}
+{% endfor %}
+
+Data Integrity: All data will be preserved and backed up before maintenance begins.
+{% endif %}
+
+{% if infrastructure_updates %}
+INFRASTRUCTURE UPDATES:
+================================================================
+{% for update in infrastructure_updates %}
+• Component: {{ update.component }}
+  Update Type: {{ update.type }}
+  Description: {{ update.description }}
+  Expected Benefit: {{ update.benefit }}
+{% if update.container_changes %}
+  Container Changes: {{ update.container_changes }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if security_patches %}
+SECURITY ENHANCEMENTS:
+================================================================
+{% for patch in security_patches %}
+• Security Update: {{ patch.type }}
+  Severity: {{ patch.severity }}
+  Description: {{ patch.description }}
+  Components Affected: {{ patch.affected_components|join(', ') }}
+{% endfor %}
+
+These security updates are critical for maintaining system integrity and protecting your data.
+{% endif %}
+
+TIMELINE AND PHASES:
+================================================================
+
+{% if maintenance_phases %}
+{% for phase in maintenance_phases %}
+Phase {{ loop.index }}: {{ phase.name }}
+Time: {{ phase.start_time }} - {{ phase.end_time }}
+Description: {{ phase.description }}
+Services Affected: {{ phase.affected_services|join(', ') }}
+Expected Impact: {{ phase.impact_level }}
+
+{% endfor %}
+{% endif %}
+
+PREPARATION CHECKLIST:
+================================================================
+
+Before Maintenance Window:
+{% if pre_maintenance_actions %}
+{% for action in pre_maintenance_actions %}
+• {{ action.description }}
+{% if action.deadline %}
+  Deadline: {{ action.deadline }}
+{% endif %}
+{% if action.responsibility %}
+  Responsibility: {{ action.responsibility }}
+{% endif %}
+{% endfor %}
+{% else %}
+• Save any unsaved work before the maintenance window begins
+• Download any critical reports or data you may need during downtime
+• Plan alternative workflows for affected services
+• Ensure critical communications are completed before the window starts
+{% endif %}
+
+During Maintenance Window:
+• System access may be limited or unavailable
+• Avoid initiating new transactions or uploads
+• Monitor our status page for real-time updates
+• Use alternative services where available
+
+After Maintenance Window:
+• Clear browser cache and cookies if experiencing issues
+• Test critical functions to ensure they work as expected
+• Report any problems immediately to our support team
+• Update bookmarks if any URLs have changed
+
+{% if alternative_services %}
+ALTERNATIVE SERVICES AND WORKAROUNDS:
+================================================================
+{% for alternative in alternative_services %}
+• {{ alternative.primary_service }}: 
+  Alternative: {{ alternative.alternative_method }}
+  Access: {{ alternative.access_instructions }}
+  Limitations: {{ alternative.limitations }}
+{% endfor %}
+{% endif %}
+
+COMMUNICATION AND MONITORING:
+================================================================
+
+Real-Time Status Updates:
+• Status Page: {{ status_page_url or 'Available in your account dashboard' }}
+• Progress Updates: {{ progress_update_frequency or 'Every 30 minutes during maintenance' }}
+• Emergency Notifications: Immediate alerts for any critical issues
+
+Live Communication Channels:
+{% if communication_channels %}
+{% for channel in communication_channels %}
+• {{ channel.type }}: {{ channel.details }}
+  Availability: {{ channel.availability }}
+{% endfor %}
+{% else %}
+• Email Updates: Sent to this address for critical updates
+• Support Portal: {{ support_url or 'Available for urgent issues' }}
+• Emergency Hotline: {{ emergency_phone or 'Contact your administrator' }}
+{% endif %}
+
+{% if rollback_procedures %}
+CONTINGENCY AND ROLLBACK PROCEDURES:
+================================================================
+
+{% for procedure in rollback_procedures %}
+Scenario: {{ procedure.scenario }}
+Trigger Conditions: {{ procedure.trigger_conditions }}
+Rollback Process: {{ procedure.rollback_steps }}
+Recovery Time: {{ procedure.recovery_time }}
+Data Impact: {{ procedure.data_impact }}
+
+{% endfor %}
+
+Emergency Contact Escalation:
+1. Level 1 Support: {{ support_contact or 'support@company.com' }}
+2. Technical Operations: {{ technical_contact or 'operations@company.com' }}
+3. Emergency Escalation: {{ emergency_contact or 'emergency@company.com' }}
+{% endif %}
+
+SUPPORT AND ASSISTANCE:
+================================================================
+
+During Maintenance Window:
+• Limited Support: Available for critical issues only
+• Response Time: {{ maintenance_support_sla or 'Within 2 hours for critical issues' }}
+• Support Channels: {{ support_channels or 'Email and emergency phone only' }}
+
+Primary Support Contact:
+• Email: {{ support_email or 'support@company.com' }}
+• Phone: {{ support_phone or 'Contact your administrator' }}
+• Hours: {{ support_hours or '24/7 for critical issues during maintenance' }}
+
+Technical Support:
+• Email: {{ technical_support_email or 'technical@company.com' }}
+• Escalation: {{ escalation_contact or 'Available for critical issues' }}
+• Documentation: {{ documentation_url or 'Available in support portal' }}
+
+{% if post_maintenance_validation %}
+POST-MAINTENANCE VALIDATION:
+================================================================
+
+System Validation Checklist:
+{% for validation in post_maintenance_validation %}
+• {{ validation.check_name }}: {{ validation.description }}
+  Expected Result: {{ validation.expected_result }}
+  Validation Method: {{ validation.method }}
+{% endfor %}
+
+Performance Verification:
+• Response Time Targets: {{ performance_targets.response_time or '< 200ms' }}
+• Availability Target: {{ performance_targets.availability or '99.9%' }}
+• Validation Period: {{ validation_period or '2 hours post-completion' }}
+{% endif %}
+
+{% if known_issues %}
+KNOWN ISSUES AND WORKAROUNDS:
+================================================================
+{% for issue in known_issues %}
+Issue: {{ issue.description }}
+Affected Components: {{ issue.affected_components|join(', ') }}
+Workaround: {{ issue.workaround }}
+Expected Resolution: {{ issue.resolution_timeline }}
+
+{% endfor %}
+{% endif %}
+
+IMPORTANT REMINDERS:
+================================================================
+
+• This maintenance is essential for system security and performance
+• All user data will be preserved and protected during the process
+• Services will be restored as quickly and safely as possible
+• Any changes to the schedule will be communicated immediately
+
+• If you experience issues after maintenance completion:
+  1. Clear your browser cache and cookies
+  2. Try logging out and back in
+  3. Contact support if problems persist
+
+• This maintenance supports our ongoing commitment to:
+  - Enhanced system security and stability
+  - Improved performance and reliability
+  - Compliance with security standards
+  - Better user experience and features
+
+CONTACT INFORMATION:
+================================================================
+
+Maintenance Coordination Team:
+Email: {{ maintenance_team_email or 'maintenance@company.com' }}
+Phone: {{ maintenance_team_phone or 'Available during maintenance window' }}
+
+Business Continuity Support:
+Email: {{ business_continuity_email or 'continuity@company.com' }}
+Phone: {{ business_continuity_phone or 'Available 24/7' }}
+
+Customer Success Team:
+Email: {{ customer_success_email or 'success@company.com' }}
+Hours: {{ customer_success_hours or 'Monday-Friday, 9 AM - 5 PM EST' }}
+
+{% if additional_contacts %}
+Additional Contacts:
+{% for contact in additional_contacts %}
+• {{ contact.role }}: {{ contact.email }}
+  Availability: {{ contact.availability }}
+  Scope: {{ contact.scope }}
+{% endfor %}
+{% endif %}
+
+================================================================
+THANK YOU FOR YOUR PATIENCE
+================================================================
+
+We appreciate your understanding and patience during this necessary maintenance window. These improvements will enhance your overall experience and ensure the security and reliability of our services.
+
+We are committed to completing this maintenance efficiently and safely. Should you have any questions or concerns, please don't hesitate to contact our support team using the information provided above.
+
+Thank you for choosing our services.
+
+Best regards,
+{{ sender_name or 'Operations Team' }}
+{{ sender_title or 'System Maintenance Coordinator' }}
+{{ company_name or 'Your Service Provider' }}
+
+================================================================
+
+This is an automated maintenance notification. Please do not reply directly to this email. For immediate assistance during the maintenance window, please use the emergency contact methods listed above.
+
+Maintenance Reference: {{ maintenance_reference_id }}
+Notification Date: {{ notification_date }}
+Scheduled By: {{ scheduled_by or 'Operations Team' }}
+Approval ID: {{ approval_id }}
+
+For detailed maintenance procedures and policies, please visit our operations documentation or contact our support team.
+
+© {{ current_year }} {{ company_name or 'Your Service Provider' }}. All rights reserved.
+
+This notification was sent to ensure you are informed about scheduled maintenance that may affect your service experience. Maintenance windows are scheduled to minimize impact while ensuring optimal system performance and security.
