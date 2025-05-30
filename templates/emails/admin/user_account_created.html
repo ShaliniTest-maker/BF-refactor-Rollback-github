@@ -1,493 +1,463 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>New User Account Created - Admin Notification</title>
-    <style>
-        /* Email-safe CSS styles inline for maximum compatibility */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333333;
-            background-color: #f5f5f5;
-            margin: 0;
-            padding: 20px;
-        }
-        
-        .email-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-        }
-        
-        .email-header {
-            background: linear-gradient(135deg, #5B39F3 0%, #7B68EE 100%);
-            color: #ffffff;
-            padding: 30px 25px;
-            text-align: center;
-        }
-        
-        .email-header h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-        }
-        
-        .email-header p {
-            margin: 8px 0 0 0;
-            font-size: 16px;
-            opacity: 0.9;
-        }
-        
-        .email-content {
-            padding: 30px 25px;
-        }
-        
-        .alert-banner {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 12px 16px;
-            margin-bottom: 25px;
-            border-radius: 4px;
-        }
-        
-        .alert-banner .alert-icon {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            vertical-align: middle;
-            margin-right: 8px;
-        }
-        
-        .user-details {
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 25px;
-        }
-        
-        .user-details h2 {
-            margin: 0 0 15px 0;
-            font-size: 18px;
-            color: #495057;
-            border-bottom: 2px solid #e9ecef;
-            padding-bottom: 8px;
-        }
-        
-        .detail-row {
-            display: flex;
-            margin-bottom: 12px;
-            align-items: center;
-        }
-        
-        .detail-label {
-            font-weight: 600;
-            color: #6c757d;
-            width: 140px;
-            flex-shrink: 0;
-        }
-        
-        .detail-value {
-            color: #333333;
-            flex-grow: 1;
-        }
-        
-        .detail-value code {
-            background-color: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 13px;
-        }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        
-        .status-pending {
-            background-color: #fff3cd;
-            color: #856404;
-        }
-        
-        .status-verified {
-            background-color: #d1e7dd;
-            color: #0f5132;
-        }
-        
-        .status-unverified {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-        
-        .action-section {
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 25px;
-            text-align: center;
-        }
-        
-        .action-section h3 {
-            margin: 0 0 15px 0;
-            font-size: 16px;
-            color: #495057;
-        }
-        
+{% extends "emails/base/email_base.html" %}
+
+{% block title %}New User Account Created - Administrative Review Required{% endblock %}
+
+{% block header_title %}User Account Created{% endblock %}
+{% block header_subtitle %}Administrative Notification & Review Required{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Administrative notification specific styles */
+    .admin-notification-badge {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        color: #ffffff;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+
+    .user-details-card {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 25px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .user-details-header {
+        font-size: 18px;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+    }
+
+    .user-icon {
+        width: 24px;
+        height: 24px;
+        margin-right: 10px;
+        fill: #6c757d;
+    }
+
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .detail-row:last-child {
+        border-bottom: none;
+    }
+
+    .detail-label {
+        font-weight: 600;
+        color: #495057;
+        min-width: 120px;
+    }
+
+    .detail-value {
+        color: #6c757d;
+        text-align: right;
+        flex: 1;
+        margin-left: 20px;
+    }
+
+    .status-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .status-pending {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+    }
+
+    .status-verified {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .status-auth0 {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+
+    .admin-actions-section {
+        background-color: #ffffff;
+        border: 2px solid #667eea;
+        border-radius: 8px;
+        padding: 30px;
+        margin: 30px 0;
+        text-align: center;
+    }
+
+    .admin-actions-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: #333333;
+        margin-bottom: 15px;
+    }
+
+    .admin-actions-subtitle {
+        font-size: 14px;
+        color: #6c757d;
+        margin-bottom: 25px;
+        line-height: 1.5;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+        margin: 25px 0;
+    }
+
+    .action-button {
+        display: inline-block;
+        padding: 14px 28px;
+        text-decoration: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        text-align: center;
+        transition: all 0.3s ease;
+        border: 2px solid;
+        min-width: 140px;
+    }
+
+    .btn-approve {
+        background: linear-gradient(135deg, #00b894 0%, #00a085 100%);
+        color: #ffffff !important;
+        border-color: #00b894;
+    }
+
+    .btn-approve:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 184, 148, 0.3);
+    }
+
+    .btn-review {
+        background: #ffffff;
+        color: #667eea !important;
+        border-color: #667eea;
+    }
+
+    .btn-review:hover {
+        background: #667eea;
+        color: #ffffff !important;
+    }
+
+    .btn-reject {
+        background: #ffffff;
+        color: #e74c3c !important;
+        border-color: #e74c3c;
+    }
+
+    .btn-reject:hover {
+        background: #e74c3c;
+        color: #ffffff !important;
+    }
+
+    .auth0-integration-info {
+        background-color: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        border-radius: 4px;
+        padding: 20px;
+        margin: 25px 0;
+    }
+
+    .auth0-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1565c0;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+    }
+
+    .auth0-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 8px;
+        fill: #1565c0;
+    }
+
+    .auth0-text {
+        font-size: 14px;
+        color: #1976d2;
+        line-height: 1.5;
+        margin: 0;
+    }
+
+    .timestamp-info {
+        background-color: #f1f3f4;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+        text-align: center;
+    }
+
+    .timestamp-label {
+        font-size: 12px;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+    }
+
+    .timestamp-value {
+        font-size: 16px;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    /* Responsive design for mobile */
+    @media only screen and (max-width: 600px) {
         .action-buttons {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-top: 15px;
-        }
-        
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            text-align: center;
-            transition: all 0.2s ease;
-            min-width: 120px;
-        }
-        
-        .btn-primary {
-            background-color: #5B39F3;
-            color: #ffffff;
-            border: 2px solid #5B39F3;
-        }
-        
-        .btn-success {
-            background-color: #28a745;
-            color: #ffffff;
-            border: 2px solid #28a745;
-        }
-        
-        .btn-warning {
-            background-color: #ffc107;
-            color: #212529;
-            border: 2px solid #ffc107;
-        }
-        
-        .btn-danger {
-            background-color: #dc3545;
-            color: #ffffff;
-            border: 2px solid #dc3545;
-        }
-        
-        .btn:hover {
-            opacity: 0.9;
-            transform: translateY(-1px);
-        }
-        
-        .system-info {
-            background-color: #e9ecef;
-            border-radius: 6px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .system-info h4 {
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            color: #6c757d;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .metadata-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
+            flex-direction: column;
             gap: 10px;
         }
-        
-        .metadata-item {
-            font-size: 13px;
+
+        .action-button {
+            width: 100%;
+            margin: 5px 0;
         }
-        
-        .metadata-label {
-            font-weight: 600;
-            color: #6c757d;
+
+        .detail-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 5px;
         }
-        
-        .metadata-value {
-            color: #495057;
+
+        .detail-value {
+            text-align: left;
+            margin-left: 0;
         }
-        
-        .email-footer {
-            background-color: #f8f9fa;
-            padding: 20px 25px;
-            text-align: center;
-            border-top: 1px solid #e9ecef;
+
+        .user-details-card {
+            padding: 20px 15px;
         }
-        
-        .email-footer p {
-            margin: 0;
-            font-size: 13px;
-            color: #6c757d;
+
+        .admin-actions-section {
+            padding: 25px 20px;
         }
-        
-        .email-footer a {
-            color: #5B39F3;
-            text-decoration: none;
+    }
+
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .user-details-card {
+            background-color: #4a5568 !important;
+            border-color: #718096 !important;
         }
-        
-        .security-notice {
-            background-color: #d1ecf1;
-            border-left: 4px solid #bee5eb;
-            padding: 12px 16px;
-            margin-top: 20px;
-            border-radius: 4px;
+
+        .detail-label, .detail-value {
+            color: #e2e8f0 !important;
         }
-        
-        .security-notice p {
-            margin: 0;
-            font-size: 13px;
-            color: #0c5460;
+
+        .admin-actions-section {
+            background-color: #2d3748 !important;
+            border-color: #667eea !important;
         }
-        
-        /* Responsive design for mobile devices */
-        @media only screen and (max-width: 600px) {
-            .email-container {
-                margin: 0;
-                border-radius: 0;
-            }
-            
-            .action-buttons {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            .btn {
-                width: 100%;
-                margin-bottom: 8px;
-            }
-            
-            .detail-row {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .detail-label {
-                width: auto;
-                margin-bottom: 4px;
-            }
-            
-            .metadata-grid {
-                grid-template-columns: 1fr;
-            }
+
+        .admin-actions-title {
+            color: #e2e8f0 !important;
         }
-    </style>
-</head>
-<body>
-    <div class="email-container">
-        <!-- Email Header -->
-        <div class="email-header">
-            <h1>🚨 New User Account Created</h1>
-            <p>Administrative Review Required</p>
-        </div>
-        
-        <!-- Email Content -->
-        <div class="email-content">
-            <!-- Alert Banner -->
-            <div class="alert-banner">
-                <span class="alert-icon">⚠️</span>
-                <strong>Action Required:</strong> A new user account has been created and requires administrative review.
-            </div>
-            
-            <!-- User Details Section -->
-            <div class="user-details">
-                <h2>👤 User Account Information</h2>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Full Name:</span>
-                    <span class="detail-value">{{ user.name or user.nickname or 'Not provided' }}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Username:</span>
-                    <span class="detail-value"><code>{{ user.username or user.preferred_username or 'Not set' }}</code></span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Email Address:</span>
-                    <span class="detail-value"><strong>{{ user.email }}</strong></span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Email Verified:</span>
-                    <span class="detail-value">
-                        {% if user.email_verified %}
-                            <span class="status-badge status-verified">✓ Verified</span>
-                        {% else %}
-                            <span class="status-badge status-unverified">✗ Unverified</span>
-                        {% endif %}
-                    </span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Auth0 User ID:</span>
-                    <span class="detail-value"><code>{{ user.user_id }}</code></span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Account Status:</span>
-                    <span class="detail-value">
-                        {% if user.blocked %}
-                            <span class="status-badge status-unverified">🚫 Blocked</span>
-                        {% else %}
-                            <span class="status-badge status-pending">⏳ Pending Review</span>
-                        {% endif %}
-                    </span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Registration Date:</span>
-                    <span class="detail-value">{{ registration_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') if registration_timestamp else 'Unknown' }}</span>
-                </div>
-                
-                {% if user.last_login %}
-                <div class="detail-row">
-                    <span class="detail-label">Last Login:</span>
-                    <span class="detail-value">{{ user.last_login.strftime('%B %d, %Y at %I:%M %p UTC') }}</span>
-                </div>
-                {% endif %}
-            </div>
-            
-            <!-- Administrative Action Section -->
-            <div class="action-section">
-                <h3>🔧 Administrative Actions</h3>
-                <p>Review the user account and take appropriate action:</p>
-                
-                <div class="action-buttons">
-                    <a href="{{ url_for('admin.approve_user', user_id=user.user_id, _external=True) }}" class="btn btn-success">
-                        ✅ Approve User
-                    </a>
-                    
-                    <a href="{{ url_for('admin.review_user', user_id=user.user_id, _external=True) }}" class="btn btn-primary">
-                        👁️ Review Details
-                    </a>
-                    
-                    <a href="{{ url_for('admin.flag_user', user_id=user.user_id, _external=True) }}" class="btn btn-warning">
-                        🏃 Flag for Review
-                    </a>
-                    
-                    <a href="{{ url_for('admin.block_user', user_id=user.user_id, _external=True) }}" class="btn btn-danger">
-                        🚫 Block Account
-                    </a>
-                </div>
-            </div>
-            
-            <!-- System Information -->
-            <div class="system-info">
-                <h4>📊 System Information</h4>
-                <div class="metadata-grid">
-                    <div class="metadata-item">
-                        <div class="metadata-label">Registration Source:</div>
-                        <div class="metadata-value">{{ registration_source or 'Web Application' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">Auth0 Connection:</div>
-                        <div class="metadata-value">{{ user.identities[0].connection if user.identities else 'Username-Password-Authentication' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">User Agent:</div>
-                        <div class="metadata-value">{{ request_metadata.user_agent[:50] + '...' if request_metadata.user_agent and request_metadata.user_agent|length > 50 else request_metadata.user_agent or 'Unknown' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">IP Address:</div>
-                        <div class="metadata-value">{{ request_metadata.ip_address or 'Unknown' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">Locale:</div>
-                        <div class="metadata-value">{{ user.locale or 'en' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">App Metadata:</div>
-                        <div class="metadata-value">{{ user.app_metadata.roles|join(', ') if user.app_metadata and user.app_metadata.roles else 'No roles assigned' }}</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Auth0 User Profile Link -->
-            {% if auth0_management_url %}
-            <div class="action-section">
-                <h3>🔗 Auth0 Management</h3>
-                <p>Access the full user profile in Auth0 Management Dashboard:</p>
-                <a href="{{ auth0_management_url }}/users/{{ user.user_id }}" class="btn btn-primary" target="_blank">
-                    🔧 Open in Auth0 Dashboard
-                </a>
-            </div>
-            {% endif %}
-            
-            <!-- Service Layer Integration Information -->
-            {% if service_context %}
-            <div class="system-info">
-                <h4>🔄 Service Layer Context</h4>
-                <div class="metadata-grid">
-                    <div class="metadata-item">
-                        <div class="metadata-label">Workflow ID:</div>
-                        <div class="metadata-value">{{ service_context.workflow_id or 'N/A' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">Processing Status:</div>
-                        <div class="metadata-value">{{ service_context.status or 'Completed' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">Service Version:</div>
-                        <div class="metadata-value">{{ service_context.version or '1.0.0' }}</div>
-                    </div>
-                    
-                    <div class="metadata-item">
-                        <div class="metadata-label">Notification ID:</div>
-                        <div class="metadata-value">{{ service_context.notification_id or 'N/A' }}</div>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-            
-            <!-- Security Notice -->
-            <div class="security-notice">
-                <p><strong>🔒 Security Notice:</strong> This notification was generated automatically by the Flask User Management Service. 
-                Please verify the authenticity of this email and user account before taking any administrative actions. 
-                If you suspect fraudulent activity, immediately block the account and investigate further.</p>
-            </div>
-        </div>
-        
-        <!-- Email Footer -->
-        <div class="email-footer">
-            <p>
-                This administrative notification was sent from 
-                <strong>{{ app_name or 'Flask Application' }}</strong> 
-                on {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') if current_timestamp else 'Unknown Date' }}.
-            </p>
-            <p>
-                For technical support, contact 
-                <a href="mailto:{{ admin_email or 'admin@example.com' }}">{{ admin_email or 'admin@example.com' }}</a>
-            </p>
-            <p>
-                <a href="{{ url_for('admin.notification_settings', _external=True) if url_for else '#' }}">Manage Email Preferences</a> | 
-                <a href="{{ url_for('admin.dashboard', _external=True) if url_for else '#' }}">Admin Dashboard</a>
-            </p>
-        </div>
+
+        .timestamp-info {
+            background-color: #4a5568 !important;
+        }
+
+        .timestamp-value {
+            color: #e2e8f0 !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Administrative notification badge -->
+<div class="text-center">
+    <div class="admin-notification-badge">
+        🔔 Administrative Review Required
     </div>
-</body>
-</html>
+</div>
+
+<!-- Main notification message -->
+<h2 class="content-title">New User Account Registration</h2>
+
+<p class="content-text">
+    A new user account has been created and requires administrative review. Please examine the user details below and take appropriate action based on your organization's user approval policies.
+</p>
+
+<!-- Timestamp Information -->
+<div class="timestamp-info">
+    <div class="timestamp-label">Registration Timestamp</div>
+    <div class="timestamp-value">
+        {% if user.created_at %}
+            {{ user.created_at.strftime('%B %d, %Y at %I:%M %p UTC') }}
+        {% else %}
+            {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p UTC') }}
+        {% endif %}
+    </div>
+</div>
+
+<!-- User Details Card -->
+<div class="user-details-card">
+    <div class="user-details-header">
+        <svg class="user-icon" viewBox="0 0 24 24">
+            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+        </svg>
+        User Account Information
+    </div>
+
+    <div class="detail-row">
+        <span class="detail-label">Username:</span>
+        <span class="detail-value">{{ user.username or 'Not provided' }}</span>
+    </div>
+
+    <div class="detail-row">
+        <span class="detail-label">Email Address:</span>
+        <span class="detail-value">{{ user.email or 'Not provided' }}</span>
+    </div>
+
+    <div class="detail-row">
+        <span class="detail-label">Display Name:</span>
+        <span class="detail-value">
+            {% if user.display_name %}
+                {{ user.display_name }}
+            {% elif user.first_name or user.last_name %}
+                {{ (user.first_name or '') + ' ' + (user.last_name or '') }}
+            {% else %}
+                Not provided
+            {% endif %}
+        </span>
+    </div>
+
+    <div class="detail-row">
+        <span class="detail-label">Account Status:</span>
+        <span class="detail-value">
+            {% if user.is_active %}
+                <span class="status-badge status-pending">Pending Review</span>
+            {% else %}
+                <span class="status-badge status-pending">Inactive</span>
+            {% endif %}
+        </span>
+    </div>
+
+    <div class="detail-row">
+        <span class="detail-label">Email Verification:</span>
+        <span class="detail-value">
+            {% if user.is_verified or user.auth0_email_verified %}
+                <span class="status-badge status-verified">Verified</span>
+            {% else %}
+                <span class="status-badge status-pending">Pending</span>
+            {% endif %}
+        </span>
+    </div>
+
+    <div class="detail-row">
+        <span class="detail-label">User ID:</span>
+        <span class="detail-value">{{ user.id }}</span>
+    </div>
+</div>
+
+<!-- Auth0 Integration Information -->
+{% if user.auth0_user_id %}
+<div class="auth0-integration-info">
+    <div class="auth0-title">
+        <svg class="auth0-icon" viewBox="0 0 24 24">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        Auth0 Identity Provider Integration
+    </div>
+    <p class="auth0-text">
+        This user account was created through Auth0 external authentication provider.
+        <br><strong>Auth0 User ID:</strong> {{ user.auth0_user_id }}
+        {% if user.auth0_nickname %}
+        <br><strong>Auth0 Nickname:</strong> {{ user.auth0_nickname }}
+        {% endif %}
+        {% if user.auth0_last_login %}
+        <br><strong>Last Auth0 Login:</strong> {{ user.auth0_last_login.strftime('%B %d, %Y at %I:%M %p UTC') }}
+        {% endif %}
+        {% if user.auth0_login_count %}
+        <br><strong>Login Count:</strong> {{ user.auth0_login_count }}
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+<!-- Administrative Actions Section -->
+<div class="admin-actions-section">
+    <h3 class="admin-actions-title">Administrative Actions Required</h3>
+    <p class="admin-actions-subtitle">
+        Please review the user account details above and select the appropriate action. Your decision will determine the user's access level and account status within the system.
+    </p>
+
+    <div class="action-buttons">
+        <a href="{{ approve_url or '#' }}" class="action-button btn-approve">
+            ✓ Approve Account
+        </a>
+        <a href="{{ review_url or '#' }}" class="action-button btn-review">
+            👁 Review Details
+        </a>
+        <a href="{{ reject_url or '#' }}" class="action-button btn-reject">
+            ✗ Reject Account
+        </a>
+    </div>
+
+    <p class="auth0-text" style="margin-top: 20px; font-size: 12px;">
+        <strong>Note:</strong> All administrative actions are logged for audit and compliance purposes. 
+        The Service Layer will coordinate workflow execution and notification updates.
+    </p>
+</div>
+
+<!-- Security and Audit Information -->
+<div class="security-info">
+    <div class="security-title">
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M10,17L6,13L7.41,11.59L10,14.17L16.59,7.58L18,9L10,17Z"/>
+        </svg>
+        Security & Audit Information
+    </div>
+    <p class="security-text">
+        • User registration event has been logged for audit trail compliance<br>
+        • Account creation timestamp: {{ user.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if user.created_at else 'Current timestamp' }}<br>
+        • Administrative review required per organizational security policies<br>
+        • Service Layer pattern coordination enabled for workflow management<br>
+        {% if user.auth0_user_id %}
+        • Auth0 identity provider integration active and validated<br>
+        {% endif %}
+        • Flask-Login session management and ItsDangerous security protocols applied
+    </p>
+</div>
+
+<!-- Additional context information -->
+<div class="alert alert-info">
+    <strong>Service Layer Integration:</strong> This notification is generated through the Flask Service Layer pattern, 
+    coordinating user management workflows with Auth0 integration and administrative oversight capabilities. 
+    All user actions and administrative decisions are tracked through comprehensive audit logging.
+</div>
+{% endblock %}
+
+{% block footer_links %}
+<a href="{{ admin_dashboard_url or '#' }}" class="footer-link">Admin Dashboard</a>
+<a href="{{ user_management_url or '#' }}" class="footer-link">User Management</a>
+<a href="{{ audit_logs_url or '#' }}" class="footer-link">Audit Logs</a>
+<a href="{{ security_settings_url or '#' }}" class="footer-link">Security Settings</a>
+{% endblock %}
