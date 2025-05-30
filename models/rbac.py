@@ -1,895 +1,972 @@
 """
-Role-Based Access Control (RBAC) Models
+Role-Based Access Control (RBAC) models for comprehensive authorization system.
 
-This module implements comprehensive authorization system models using Flask-SQLAlchemy
-declarative classes. Provides complete RBAC infrastructure including many-to-many 
-relationships between users, roles, and permissions with proper constraint definitions
-and comprehensive audit trail capabilities.
+This module implements a complete RBAC infrastructure using Flask-SQLAlchemy 3.1.1
+with comprehensive audit trails, many-to-many relationships with association objects,
+and support for Flask blueprint route protection. The implementation provides
+granular access control through resource-action permission patterns and role hierarchy
+management with dynamic permission system administration.
 
-The RBAC system supports:
-- Granular permission management with resource-action patterns
-- Role hierarchy with active status management
-- Comprehensive audit trails for all authorization changes
-- Flask blueprint route protection and business operation authorization
-- Dynamic permission evaluation and caching integration
+Key Components:
+- Role model: Hierarchical role management with active status control
+- Permission model: Resource-action based granular access control  
+- Association tables: user_roles and role_permissions with audit metadata
+- Permission checking utilities: Flask decorator integration support
+- Audit trail support: Comprehensive logging of all authorization changes
 
-Dependencies:
-- Flask-SQLAlchemy 3.1.1: ORM functionality and declarative models
-- SQLAlchemy event system: Automatic audit field population
-- PostgreSQL: Advanced indexing and constraint support
+Security Features:
+- Association object audit trails for role and permission assignments
+- Resource-action permission model supporting Flask endpoint protection
+- Role hierarchy with inheritance and active status management
+- Comprehensive authorization change logging and audit trails
 """
 
+import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Optional, Set, Union, Any
+from flask import current_app, g, request
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, ForeignKey, 
-    Table, Index, UniqueConstraint, CheckConstraint, text
+    UniqueConstraint, Index, Text, event
 )
-from sqlalchemy.orm import relationship, backref, validates
+from sqlalchemy.orm import relationship, validates, Session
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy import event
-from flask_sqlalchemy import SQLAlchemy
+from werkzeug.exceptions import Forbidden
 
-# Initialize SQLAlchemy instance
-db = SQLAlchemy()
+# Import base model and database instance
+from models.base import BaseModel, db, AuditMixin
+
+# Configure logging for RBAC operations
+logger = logging.getLogger(__name__)
 
 
-class AuditMixin:
+class UserRole(db.Model, AuditMixin):
     """
-    Audit mixin providing standardized audit fields for all RBAC models.
+    Association table for User-Role many-to-many relationship with audit metadata.
     
-    Implements automatic timestamp tracking and user attribution for comprehensive
-    audit trails required by security and compliance frameworks.
+    Provides comprehensive audit trail for role assignments including timestamp
+    tracking and user attribution. Supports dynamic role assignment and revocation
+    with full accountability and traceability for security compliance.
+    
+    Features:
+    - Audit trail for role assignment changes with user attribution
+    - Timestamp tracking for assignment and modification events
+    - Soft deletion support for maintaining audit history
+    - Index optimization for efficient role lookup queries
     """
     
-    @declared_attr
-    def created_at(cls):
-        """Timestamp when record was created"""
-        return Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    __tablename__ = 'user_roles'
     
-    @declared_attr
-    def updated_at(cls):
-        """Timestamp when record was last updated"""
-        return Column(
-            DateTime, 
-            default=datetime.utcnow, 
-            onupdate=datetime.utcnow, 
-            nullable=False,
-            index=True
-        )
+    # Composite primary key for many-to-many relationship
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), 
+                     primary_key=True, nullable=False, index=True)
+    role_id = Column(Integer, ForeignKey('roles.id', ondelete='CASCADE'), 
+                     primary_key=True, nullable=False, index=True)
     
-    @declared_attr
-    def created_by(cls):
-        """User ID or system identifier who created the record"""
-        return Column(String(100), nullable=True)
+    # Audit metadata for role assignment tracking
+    assigned_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    assigned_by = Column(String(255), nullable=True)  # User who assigned the role
+    revoked_at = Column(DateTime, nullable=True, index=True)  # Soft deletion timestamp
+    revoked_by = Column(String(255), nullable=True)  # User who revoked the role
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
     
-    @declared_attr
-    def updated_by(cls):
-        """User ID or system identifier who last updated the record"""
-        return Column(String(100), nullable=True)
-
-
-# Association table for many-to-many user-role relationships with audit metadata
-user_roles = Table(
-    'user_roles',
-    db.Model.metadata,
-    Column('id', Integer, primary_key=True),
-    Column('user_id', Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
-    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), nullable=False),
-    Column('assigned_at', DateTime, default=datetime.utcnow, nullable=False),
-    Column('assigned_by', String(100), nullable=True),
-    Column('expires_at', DateTime, nullable=True),
-    Column('is_active', Boolean, default=True, nullable=False),
+    # Additional metadata for advanced role management
+    assignment_reason = Column(Text, nullable=True)  # Reason for role assignment
+    temporary_until = Column(DateTime, nullable=True, index=True)  # Temporary role expiration
     
-    # Constraints and indexes for data integrity and performance
-    UniqueConstraint('user_id', 'role_id', name='uq_user_role_assignment'),
-    Index('idx_user_roles_user_id', 'user_id'),
-    Index('idx_user_roles_role_id', 'role_id'),
-    Index('idx_user_roles_active', 'is_active'),
-    Index('idx_user_roles_assigned_at', 'assigned_at'),
+    # Relationships for navigation
+    user = relationship("User", back_populates="user_roles")
+    role = relationship("Role", back_populates="user_roles")
     
-    # PostgreSQL partial index for active assignments only
-    Index('idx_user_roles_active_assignments', 'user_id', 'role_id', 
-          postgresql_where=text('is_active = true'))
-)
-
-
-# Association table for many-to-many role-permission relationships with audit metadata
-role_permissions = Table(
-    'role_permissions',
-    db.Model.metadata,
-    Column('id', Integer, primary_key=True),
-    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), nullable=False),
-    Column('permission_id', Integer, ForeignKey('permissions.id', ondelete='CASCADE'), nullable=False),
-    Column('granted_at', DateTime, default=datetime.utcnow, nullable=False),
-    Column('granted_by', String(100), nullable=True),
-    Column('expires_at', DateTime, nullable=True),
-    Column('is_active', Boolean, default=True, nullable=False),
+    # Database constraints and indexes
+    __table_args__ = (
+        UniqueConstraint('user_id', 'role_id', name='uq_user_role_active'),
+        Index('idx_user_roles_active', 'user_id', 'role_id', 'is_active'),
+        Index('idx_user_roles_temporal', 'assigned_at', 'revoked_at'),
+        Index('idx_user_roles_temporary', 'temporary_until'),
+    )
     
-    # Constraints and indexes for data integrity and performance
-    UniqueConstraint('role_id', 'permission_id', name='uq_role_permission_grant'),
-    Index('idx_role_permissions_role_id', 'role_id'),
-    Index('idx_role_permissions_permission_id', 'permission_id'),
-    Index('idx_role_permissions_active', 'is_active'),
-    Index('idx_role_permissions_granted_at', 'granted_at'),
+    def __repr__(self) -> str:
+        """String representation for debugging and logging."""
+        return f"<UserRole(user_id={self.user_id}, role_id={self.role_id}, active={self.is_active})>"
     
-    # PostgreSQL partial index for active grants only
-    Index('idx_role_permissions_active_grants', 'role_id', 'permission_id',
-          postgresql_where=text('is_active = true'))
-)
-
-
-class Role(db.Model, AuditMixin):
-    """
-    Role model implementing comprehensive role management for RBAC system.
-    
-    Supports role hierarchy, active status management, and flexible role assignment
-    patterns with full audit trail capabilities. Integrates with Flask blueprint
-    route protection and business operation authorization.
-    
-    Attributes:
-        id: Primary key for role identification
-        name: Unique role name for identification and lookup
-        description: Human-readable role description
-        is_active: Status flag for role availability
-        is_system: Flag indicating system-defined roles that cannot be deleted
-        priority: Role hierarchy priority (higher numbers = higher priority)
-        permissions: Many-to-many relationship with Permission model
+    def revoke_role(self, revoked_by: str = None, reason: str = None) -> bool:
+        """
+        Revoke role assignment with audit trail.
         
-    Database Indexes:
-        - Primary key index on id
-        - Unique index on name
-        - Index on is_active for filtering
-        - Index on priority for hierarchy queries
-        - Composite index on (is_active, priority) for optimized queries
+        Args:
+            revoked_by: User identifier who is revoking the role
+            reason: Reason for role revocation
+            
+        Returns:
+            True if revocation was successful, False otherwise
+        """
+        try:
+            self.is_active = False
+            self.revoked_at = datetime.utcnow()
+            self.revoked_by = revoked_by or getattr(g, 'current_user_id', 'system')
+            if reason:
+                self.assignment_reason = f"{self.assignment_reason or ''}\nRevoked: {reason}"
+            
+            logger.info(f"Role {self.role_id} revoked from user {self.user_id} by {self.revoked_by}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to revoke role {self.role_id} from user {self.user_id}: {e}")
+            return False
+    
+    def is_expired(self) -> bool:
+        """Check if temporary role assignment has expired."""
+        if self.temporary_until is None:
+            return False
+        return datetime.utcnow() > self.temporary_until
+    
+    @validates('user_id', 'role_id')
+    def validate_ids(self, key: str, value: int) -> int:
+        """Validate foreign key references."""
+        if value is None or value <= 0:
+            raise ValueError(f"{key} must be a positive integer")
+        return value
+
+
+class RolePermission(db.Model, AuditMixin):
+    """
+    Association table for Role-Permission many-to-many relationship with grant tracking.
+    
+    Provides detailed audit trail for permission grants including comprehensive
+    metadata tracking and temporal grant management. Supports permission inheritance
+    and dynamic permission assignment with full accountability.
+    
+    Features:
+    - Grant tracking with user attribution and timestamp accuracy
+    - Permission inheritance support for role hierarchies
+    - Conditional and temporary permission grants
+    - Comprehensive audit trail for security compliance
+    """
+    
+    __tablename__ = 'role_permissions'
+    
+    # Composite primary key for many-to-many relationship
+    role_id = Column(Integer, ForeignKey('roles.id', ondelete='CASCADE'), 
+                     primary_key=True, nullable=False, index=True)
+    permission_id = Column(Integer, ForeignKey('permissions.id', ondelete='CASCADE'), 
+                           primary_key=True, nullable=False, index=True)
+    
+    # Grant audit metadata
+    granted_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    granted_by = Column(String(255), nullable=True)  # User who granted the permission
+    revoked_at = Column(DateTime, nullable=True, index=True)  # Permission revocation timestamp
+    revoked_by = Column(String(255), nullable=True)  # User who revoked the permission
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    
+    # Advanced permission grant features
+    grant_reason = Column(Text, nullable=True)  # Reason for permission grant
+    temporary_until = Column(DateTime, nullable=True, index=True)  # Temporary grant expiration
+    conditional_grant = Column(Text, nullable=True)  # Conditions for permission usage
+    inherited_from = Column(Integer, ForeignKey('roles.id', ondelete='SET NULL'), 
+                           nullable=True)  # Role hierarchy inheritance tracking
+    
+    # Relationships for navigation
+    role = relationship("Role", back_populates="role_permissions", foreign_keys=[role_id])
+    permission = relationship("Permission", back_populates="role_permissions")
+    inherited_from_role = relationship("Role", foreign_keys=[inherited_from])
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        UniqueConstraint('role_id', 'permission_id', name='uq_role_permission_active'),
+        Index('idx_role_permissions_active', 'role_id', 'permission_id', 'is_active'),
+        Index('idx_role_permissions_temporal', 'granted_at', 'revoked_at'),
+        Index('idx_role_permissions_inheritance', 'inherited_from'),
+        Index('idx_role_permissions_temporary', 'temporary_until'),
+    )
+    
+    def __repr__(self) -> str:
+        """String representation for debugging and logging."""
+        return f"<RolePermission(role_id={self.role_id}, permission_id={self.permission_id}, active={self.is_active})>"
+    
+    def revoke_permission(self, revoked_by: str = None, reason: str = None) -> bool:
+        """
+        Revoke permission grant with audit trail.
+        
+        Args:
+            revoked_by: User identifier who is revoking the permission
+            reason: Reason for permission revocation
+            
+        Returns:
+            True if revocation was successful, False otherwise
+        """
+        try:
+            self.is_active = False
+            self.revoked_at = datetime.utcnow()
+            self.revoked_by = revoked_by or getattr(g, 'current_user_id', 'system')
+            if reason:
+                self.grant_reason = f"{self.grant_reason or ''}\nRevoked: {reason}"
+            
+            logger.info(f"Permission {self.permission_id} revoked from role {self.role_id} by {self.revoked_by}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to revoke permission {self.permission_id} from role {self.role_id}: {e}")
+            return False
+    
+    def is_expired(self) -> bool:
+        """Check if temporary permission grant has expired."""
+        if self.temporary_until is None:
+            return False
+        return datetime.utcnow() > self.temporary_until
+    
+    def is_inherited(self) -> bool:
+        """Check if permission is inherited from parent role."""
+        return self.inherited_from is not None
+
+
+class Role(BaseModel):
+    """
+    Role model for hierarchical role-based access control system.
+    
+    Implements comprehensive role management with hierarchy support, active status
+    management, and role inheritance capabilities. Provides foundation for dynamic
+    permission system administration and enterprise-grade access control.
+    
+    Features:
+    - Hierarchical role structure with parent-child relationships
+    - Active status management for dynamic role administration
+    - Role inheritance with permission propagation
+    - Comprehensive role metadata and description support
+    - Integration with Flask blueprint route protection system
     """
     
     __tablename__ = 'roles'
     
-    # Primary key and core fields
-    id = Column(Integer, primary_key=True)
+    # Core role attributes
     name = Column(String(100), unique=True, nullable=False, index=True)
-    description = Column(String(500), nullable=True)
-    
-    # Status and hierarchy management
+    description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
-    is_system = Column(Boolean, default=False, nullable=False)
-    priority = Column(Integer, default=0, nullable=False, index=True)
+    
+    # Role hierarchy support
+    parent_role_id = Column(Integer, ForeignKey('roles.id', ondelete='SET NULL'), 
+                           nullable=True, index=True)
+    hierarchy_level = Column(Integer, default=0, nullable=False, index=True)
+    hierarchy_path = Column(String(500), nullable=True, index=True)  # Materialized path for efficiency
     
     # Role metadata
-    role_type = Column(String(50), default='custom', nullable=False)
-    max_assignments = Column(Integer, nullable=True)  # Optional limit on role assignments
+    role_type = Column(String(50), default='custom', nullable=False, index=True)  # system, custom, temporary
+    max_assignments = Column(Integer, nullable=True)  # Maximum number of users who can have this role
+    requires_approval = Column(Boolean, default=False, nullable=False)  # Require approval for assignment
     
-    # Relationships with association objects for audit trails
-    permissions = relationship(
-        'Permission',
-        secondary=role_permissions,
-        back_populates='roles',
-        lazy='dynamic',  # Enable filtering on the relationship
-        cascade='all'
-    )
+    # System management fields
+    is_system_role = Column(Boolean, default=False, nullable=False)  # Prevent deletion of system roles
+    display_order = Column(Integer, default=0, nullable=False)  # For UI ordering
     
-    # Additional indexes for performance optimization
+    # Relationships
+    parent_role = relationship("Role", remote_side=[id], back_populates="child_roles")
+    child_roles = relationship("Role", back_populates="parent_role", cascade="all, delete-orphan")
+    
+    # Many-to-many relationships through association tables
+    user_roles = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+    role_permissions = relationship("RolePermission", back_populates="role", 
+                                   foreign_keys=[RolePermission.role_id],
+                                   cascade="all, delete-orphan")
+    
+    # Database constraints and indexes
     __table_args__ = (
-        Index('idx_roles_active_priority', 'is_active', 'priority'),
-        Index('idx_roles_type', 'role_type'),
-        CheckConstraint('priority >= 0', name='ck_role_priority_positive'),
-        CheckConstraint("role_type IN ('system', 'custom', 'inherited')", 
-                       name='ck_role_type_valid'),
-        CheckConstraint('max_assignments IS NULL OR max_assignments > 0', 
-                       name='ck_role_max_assignments_positive')
+        Index('idx_roles_hierarchy', 'parent_role_id', 'hierarchy_level'),
+        Index('idx_roles_type_active', 'role_type', 'is_active'),
+        Index('idx_roles_name_active', 'name', 'is_active'),
     )
+    
+    def __repr__(self) -> str:
+        """String representation for debugging and logging."""
+        return f"<Role(id={self.id}, name='{self.name}', active={self.is_active})>"
+    
+    @property
+    def users(self) -> List['User']:
+        """Get all active users assigned to this role."""
+        return [ur.user for ur in self.user_roles 
+                if ur.is_active and not ur.is_expired()]
+    
+    @property
+    def permissions(self) -> List['Permission']:
+        """Get all active permissions for this role."""
+        return [rp.permission for rp in self.role_permissions 
+                if rp.is_active and not rp.is_expired()]
+    
+    @property
+    def all_permissions(self) -> Set['Permission']:
+        """Get all permissions including inherited from parent roles."""
+        permissions = set(self.permissions)
+        
+        # Add inherited permissions from parent roles
+        current_role = self.parent_role
+        while current_role:
+            permissions.update(current_role.permissions)
+            current_role = current_role.parent_role
+        
+        return permissions
+    
+    def assign_to_user(self, user_id: int, assigned_by: str = None, 
+                       reason: str = None, temporary_until: datetime = None) -> Optional[UserRole]:
+        """
+        Assign role to user with audit trail.
+        
+        Args:
+            user_id: ID of user to assign role to
+            assigned_by: User identifier who is assigning the role
+            reason: Reason for role assignment
+            temporary_until: Optional expiration date for temporary assignment
+            
+        Returns:
+            UserRole instance if successful, None otherwise
+        """
+        try:
+            # Check if assignment already exists and is active
+            existing = UserRole.query.filter_by(
+                user_id=user_id, role_id=self.id, is_active=True
+            ).first()
+            
+            if existing and not existing.is_expired():
+                logger.warning(f"User {user_id} already has active role {self.id}")
+                return existing
+            
+            # Check max assignments limit
+            if self.max_assignments:
+                active_assignments = UserRole.query.filter_by(
+                    role_id=self.id, is_active=True
+                ).count()
+                
+                if active_assignments >= self.max_assignments:
+                    logger.error(f"Role {self.id} has reached maximum assignments limit")
+                    return None
+            
+            # Create new role assignment
+            user_role = UserRole(
+                user_id=user_id,
+                role_id=self.id,
+                assigned_by=assigned_by or getattr(g, 'current_user_id', 'system'),
+                assignment_reason=reason,
+                temporary_until=temporary_until
+            )
+            
+            db.session.add(user_role)
+            logger.info(f"Role {self.id} assigned to user {user_id} by {user_role.assigned_by}")
+            
+            return user_role
+            
+        except Exception as e:
+            logger.error(f"Failed to assign role {self.id} to user {user_id}: {e}")
+            db.session.rollback()
+            return None
+    
+    def grant_permission(self, permission_id: int, granted_by: str = None,
+                        reason: str = None, temporary_until: datetime = None) -> Optional[RolePermission]:
+        """
+        Grant permission to role with audit trail.
+        
+        Args:
+            permission_id: ID of permission to grant
+            granted_by: User identifier who is granting the permission
+            reason: Reason for permission grant
+            temporary_until: Optional expiration date for temporary grant
+            
+        Returns:
+            RolePermission instance if successful, None otherwise
+        """
+        try:
+            # Check if permission already exists and is active
+            existing = RolePermission.query.filter_by(
+                role_id=self.id, permission_id=permission_id, is_active=True
+            ).first()
+            
+            if existing and not existing.is_expired():
+                logger.warning(f"Role {self.id} already has active permission {permission_id}")
+                return existing
+            
+            # Create new permission grant
+            role_permission = RolePermission(
+                role_id=self.id,
+                permission_id=permission_id,
+                granted_by=granted_by or getattr(g, 'current_user_id', 'system'),
+                grant_reason=reason,
+                temporary_until=temporary_until
+            )
+            
+            db.session.add(role_permission)
+            logger.info(f"Permission {permission_id} granted to role {self.id} by {role_permission.granted_by}")
+            
+            return role_permission
+            
+        except Exception as e:
+            logger.error(f"Failed to grant permission {permission_id} to role {self.id}: {e}")
+            db.session.rollback()
+            return None
+    
+    def has_permission(self, resource: str, action: str, check_inheritance: bool = True) -> bool:
+        """
+        Check if role has specific permission.
+        
+        Args:
+            resource: Resource name to check access for
+            action: Action to check permission for
+            check_inheritance: Whether to check inherited permissions from parent roles
+            
+        Returns:
+            True if role has permission, False otherwise
+        """
+        # Check direct permissions
+        for permission in self.permissions:
+            if permission.matches(resource, action):
+                return True
+        
+        # Check inherited permissions from parent roles
+        if check_inheritance and self.parent_role:
+            return self.parent_role.has_permission(resource, action, check_inheritance=True)
+        
+        return False
+    
+    def get_effective_permissions(self) -> Set[str]:
+        """
+        Get all effective permissions for this role including inheritance.
+        
+        Returns:
+            Set of permission names in 'resource.action' format
+        """
+        permissions = set()
+        
+        # Add direct permissions
+        for permission in self.permissions:
+            permissions.add(f"{permission.resource}.{permission.action}")
+        
+        # Add inherited permissions
+        current_role = self.parent_role
+        while current_role:
+            for permission in current_role.permissions:
+                permissions.add(f"{permission.resource}.{permission.action}")
+            current_role = current_role.parent_role
+        
+        return permissions
+    
+    def update_hierarchy_path(self) -> None:
+        """Update materialized path for efficient hierarchy queries."""
+        if self.parent_role:
+            self.hierarchy_path = f"{self.parent_role.hierarchy_path or ''}/{self.parent_role.id}"
+            self.hierarchy_level = (self.parent_role.hierarchy_level or 0) + 1
+        else:
+            self.hierarchy_path = ""
+            self.hierarchy_level = 0
     
     @validates('name')
-    def validate_name(self, key, name):
-        """Validate role name format and constraints"""
-        if not name or len(name.strip()) == 0:
-            raise ValueError("Role name cannot be empty")
+    def validate_name(self, key: str, name: str) -> str:
+        """Validate role name."""
+        if not name or len(name.strip()) < 2:
+            raise ValueError("Role name must be at least 2 characters long")
         if len(name) > 100:
             raise ValueError("Role name cannot exceed 100 characters")
-        if not name.replace('_', '').replace('-', '').replace(' ', '').isalnum():
-            raise ValueError("Role name can only contain alphanumeric characters, spaces, hyphens, and underscores")
         return name.strip()
     
-    @validates('priority')
-    def validate_priority(self, key, priority):
-        """Validate role priority constraints"""
-        if priority is None:
-            return 0
-        if priority < 0:
-            raise ValueError("Role priority must be non-negative")
-        if priority > 1000:
-            raise ValueError("Role priority cannot exceed 1000")
-        return priority
-    
-    def get_active_permissions(self) -> List['Permission']:
-        """
-        Get all active permissions assigned to this role.
+    @validates('parent_role_id')
+    def validate_parent_role(self, key: str, parent_role_id: Optional[int]) -> Optional[int]:
+        """Validate parent role to prevent circular references."""
+        if parent_role_id is None:
+            return None
         
-        Returns:
-            List of active Permission objects associated with this role
-        """
-        return self.permissions.filter_by(is_active=True).all()
-    
-    def has_permission(self, permission_name: str) -> bool:
-        """
-        Check if role has a specific permission.
+        if parent_role_id == self.id:
+            raise ValueError("Role cannot be its own parent")
         
-        Args:
-            permission_name: Name of the permission to check
-            
-        Returns:
-            Boolean indicating if role has the permission
-        """
-        return self.permissions.filter_by(
-            name=permission_name, 
-            is_active=True
-        ).first() is not None
-    
-    def get_permission_names(self) -> List[str]:
-        """
-        Get list of permission names for this role.
+        # Check for circular reference in hierarchy
+        if self.id:  # Only check if role already exists
+            parent_role = Role.query.get(parent_role_id)
+            if parent_role and parent_role.hierarchy_path:
+                if f"/{self.id}/" in f"/{parent_role.hierarchy_path}/":
+                    raise ValueError("Circular reference detected in role hierarchy")
         
-        Returns:
-            List of permission names associated with this role
-        """
-        return [p.name for p in self.get_active_permissions()]
-    
-    def can_be_assigned_to_user(self, user_id: int) -> bool:
-        """
-        Check if role can be assigned to a specific user based on constraints.
-        
-        Args:
-            user_id: ID of the user to check assignment eligibility
-            
-        Returns:
-            Boolean indicating if role can be assigned
-        """
-        if not self.is_active:
-            return False
-        
-        if self.max_assignments is not None:
-            # Check current assignment count
-            current_assignments = db.session.execute(
-                text("""
-                    SELECT COUNT(*) FROM user_roles 
-                    WHERE role_id = :role_id AND is_active = true
-                """),
-                {'role_id': self.id}
-            ).scalar()
-            
-            if current_assignments >= self.max_assignments:
-                return False
-        
-        return True
-    
-    def to_dict(self, include_permissions: bool = False) -> Dict[str, Any]:
-        """
-        Convert role to dictionary representation.
-        
-        Args:
-            include_permissions: Whether to include permission details
-            
-        Returns:
-            Dictionary representation of the role
-        """
-        result = {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'is_active': self.is_active,
-            'is_system': self.is_system,
-            'priority': self.priority,
-            'role_type': self.role_type,
-            'max_assignments': self.max_assignments,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'created_by': self.created_by,
-            'updated_by': self.updated_by
-        }
-        
-        if include_permissions:
-            result['permissions'] = [p.to_dict() for p in self.get_active_permissions()]
-        
-        return result
-    
-    def __repr__(self):
-        return f"<Role {self.name} (ID: {self.id}, Active: {self.is_active})>"
+        return parent_role_id
 
 
-class Permission(db.Model, AuditMixin):
+class Permission(BaseModel):
     """
-    Permission model implementing granular access control with resource-action patterns.
+    Permission model for granular access control with resource-action pattern.
     
-    Supports Flask blueprint route protection and business operation authorization
-    through structured resource and action definitions. Enables dynamic permission
-    evaluation and flexible authorization patterns.
+    Implements comprehensive permission management supporting Flask blueprint route
+    protection and business operation authorization. Provides resource-action based
+    granular access control with wildcards and condition support.
     
-    Attributes:
-        id: Primary key for permission identification
-        name: Unique permission name (typically resource.action format)
-        resource: Resource type or entity (e.g., 'user', 'business_entity', 'report')
-        action: Action type (e.g., 'read', 'write', 'delete', 'admin')
-        description: Human-readable permission description
-        is_active: Status flag for permission availability
-        is_system: Flag indicating system-defined permissions
-        roles: Many-to-many relationship with Role model
-        
-    Database Indexes:
-        - Primary key index on id
-        - Unique index on name
-        - Composite index on (resource, action) for fast lookups
-        - Index on is_active for filtering
-        - Index on resource for resource-based queries
+    Features:
+    - Resource-action permission model for granular access control
+    - Wildcard support for flexible permission patterns
+    - Condition-based permissions for advanced access control
+    - Integration with Flask blueprint route protection system
+    - Permission validation and normalization capabilities
     """
     
     __tablename__ = 'permissions'
     
-    # Primary key and core fields
-    id = Column(Integer, primary_key=True)
+    # Core permission attributes
     name = Column(String(100), unique=True, nullable=False, index=True)
-    resource = Column(String(50), nullable=False, index=True)
+    resource = Column(String(100), nullable=False, index=True)
     action = Column(String(50), nullable=False, index=True)
-    description = Column(String(500), nullable=True)
-    
-    # Status and metadata
+    description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
-    is_system = Column(Boolean, default=False, nullable=False)
-    permission_type = Column(String(50), default='functional', nullable=False)
     
-    # Optional scope and context restrictions
-    scope = Column(String(100), nullable=True)  # Optional scope restriction
-    context_requirements = Column(String(500), nullable=True)  # JSON string for context rules
+    # Advanced permission features
+    permission_type = Column(String(20), default='standard', nullable=False, index=True)  # standard, wildcard, conditional
+    conditions = Column(Text, nullable=True)  # JSON string for conditional permissions
+    resource_pattern = Column(String(200), nullable=True)  # For wildcard resources
+    priority = Column(Integer, default=0, nullable=False)  # For permission precedence
     
-    # Relationships with association objects for audit trails
-    roles = relationship(
-        'Role',
-        secondary=role_permissions,
-        back_populates='permissions',
-        lazy='dynamic',  # Enable filtering on the relationship
-        cascade='all'
-    )
+    # System management fields
+    is_system_permission = Column(Boolean, default=False, nullable=False)  # Prevent deletion
+    permission_category = Column(String(50), nullable=True, index=True)  # For grouping
+    requires_context = Column(Boolean, default=False, nullable=False)  # Requires additional context
     
-    # Additional indexes for performance optimization
+    # Relationships
+    role_permissions = relationship("RolePermission", back_populates="permission", 
+                                   cascade="all, delete-orphan")
+    
+    # Database constraints and indexes
     __table_args__ = (
+        UniqueConstraint('resource', 'action', name='uq_permission_resource_action'),
         Index('idx_permissions_resource_action', 'resource', 'action'),
-        Index('idx_permissions_active_resource', 'is_active', 'resource'),
-        Index('idx_permissions_type', 'permission_type'),
-        UniqueConstraint('resource', 'action', 'scope', name='uq_permission_resource_action_scope'),
-        CheckConstraint("permission_type IN ('functional', 'data', 'system', 'administrative')",
-                       name='ck_permission_type_valid'),
-        CheckConstraint("action IN ('create', 'read', 'update', 'delete', 'list', 'admin', 'execute', 'manage')",
-                       name='ck_permission_action_valid')
+        Index('idx_permissions_type_active', 'permission_type', 'is_active'),
+        Index('idx_permissions_category', 'permission_category'),
     )
     
-    @validates('name')
-    def validate_name(self, key, name):
-        """Validate permission name format and constraints"""
-        if not name or len(name.strip()) == 0:
-            raise ValueError("Permission name cannot be empty")
-        if len(name) > 100:
-            raise ValueError("Permission name cannot exceed 100 characters")
-        
-        # Enforce resource.action naming convention
-        if '.' not in name:
-            raise ValueError("Permission name must follow 'resource.action' format")
-        
-        parts = name.split('.')
-        if len(parts) != 2:
-            raise ValueError("Permission name must have exactly one dot separator")
-        
-        resource_part, action_part = parts
-        if not resource_part or not action_part:
-            raise ValueError("Both resource and action parts must be non-empty")
-        
-        return name.strip().lower()
+    def __repr__(self) -> str:
+        """String representation for debugging and logging."""
+        return f"<Permission(id={self.id}, name='{self.name}', resource='{self.resource}', action='{self.action}')>"
     
-    @validates('resource')
-    def validate_resource(self, key, resource):
-        """Validate resource name constraints"""
-        if not resource or len(resource.strip()) == 0:
-            raise ValueError("Resource cannot be empty")
-        if len(resource) > 50:
-            raise ValueError("Resource name cannot exceed 50 characters")
-        if not resource.replace('_', '').isalnum():
-            raise ValueError("Resource name can only contain alphanumeric characters and underscores")
-        return resource.strip().lower()
+    @property
+    def roles(self) -> List[Role]:
+        """Get all active roles that have this permission."""
+        return [rp.role for rp in self.role_permissions 
+                if rp.is_active and not rp.is_expired()]
     
-    @validates('action')
-    def validate_action(self, key, action):
-        """Validate action name constraints"""
-        if not action or len(action.strip()) == 0:
-            raise ValueError("Action cannot be empty")
-        if len(action) > 50:
-            raise ValueError("Action name cannot exceed 50 characters")
-        
-        valid_actions = {
-            'create', 'read', 'update', 'delete', 'list', 
-            'admin', 'execute', 'manage'
-        }
-        action = action.strip().lower()
-        if action not in valid_actions:
-            raise ValueError(f"Action must be one of: {', '.join(valid_actions)}")
-        
-        return action
-    
-    @classmethod
-    def create_permission(cls, resource: str, action: str, description: str = None,
-                         scope: str = None, permission_type: str = 'functional') -> 'Permission':
+    def matches(self, resource: str, action: str, context: Dict[str, Any] = None) -> bool:
         """
-        Factory method to create a permission with proper naming convention.
+        Check if permission matches given resource and action.
         
         Args:
-            resource: Resource name (e.g., 'user', 'business_entity')
-            action: Action name (e.g., 'read', 'write', 'delete')
-            description: Optional permission description
-            scope: Optional permission scope restriction
-            permission_type: Type of permission (functional, data, system, administrative)
+            resource: Resource to check
+            action: Action to check  
+            context: Additional context for conditional permissions
             
         Returns:
-            New Permission instance
+            True if permission matches, False otherwise
         """
-        name = f"{resource.lower()}.{action.lower()}"
+        # Direct match
+        if self.resource == resource and self.action == action:
+            return self._check_conditions(context) if self.requires_context else True
         
-        return cls(
-            name=name,
-            resource=resource.lower(),
-            action=action.lower(),
-            description=description or f"Permission to {action} {resource} resources",
-            scope=scope,
-            permission_type=permission_type
-        )
+        # Wildcard matches
+        if self.permission_type == 'wildcard':
+            if self._match_wildcard_resource(resource) and self._match_wildcard_action(action):
+                return self._check_conditions(context) if self.requires_context else True
+        
+        return False
     
-    def matches_request(self, resource: str, action: str, context: Dict[str, Any] = None) -> bool:
+    def _match_wildcard_resource(self, resource: str) -> bool:
+        """Check if resource matches wildcard pattern."""
+        if self.resource == '*':
+            return True
+        
+        if self.resource_pattern:
+            import re
+            pattern = self.resource_pattern.replace('*', '.*')
+            return bool(re.match(pattern, resource))
+        
+        return self.resource == resource
+    
+    def _match_wildcard_action(self, action: str) -> bool:
+        """Check if action matches wildcard pattern."""
+        if self.action == '*':
+            return True
+        
+        # Support action wildcards like 'read.*', '*.create'
+        if '*' in self.action:
+            import re
+            pattern = self.action.replace('*', '.*')
+            return bool(re.match(pattern, action))
+        
+        return self.action == action
+    
+    def _check_conditions(self, context: Dict[str, Any] = None) -> bool:
         """
-        Check if permission matches a specific resource and action request.
+        Check conditional permissions against provided context.
         
         Args:
-            resource: Requested resource
-            action: Requested action
-            context: Optional context for scope validation
+            context: Context data for condition evaluation
             
         Returns:
-            Boolean indicating if permission matches the request
+            True if conditions are met, False otherwise
         """
-        if not self.is_active:
+        if not self.conditions or not context:
+            return True
+        
+        try:
+            import json
+            conditions = json.loads(self.conditions)
+            
+            # Simple condition checking - can be extended for complex logic
+            for key, expected_value in conditions.items():
+                if key not in context:
+                    return False
+                
+                context_value = context[key]
+                
+                # Support different condition types
+                if isinstance(expected_value, dict):
+                    operator = expected_value.get('op', 'eq')
+                    value = expected_value.get('value')
+                    
+                    if operator == 'eq' and context_value != value:
+                        return False
+                    elif operator == 'ne' and context_value == value:
+                        return False
+                    elif operator == 'in' and context_value not in value:
+                        return False
+                    elif operator == 'not_in' and context_value in value:
+                        return False
+                elif context_value != expected_value:
+                    return False
+            
+            return True
+            
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.error(f"Error checking permission conditions for {self.name}: {e}")
             return False
-        
-        # Exact match
-        if self.resource == resource.lower() and self.action == action.lower():
-            return True
-        
-        # Wildcard action match (e.g., resource.admin covers all actions on resource)
-        if self.resource == resource.lower() and self.action == 'admin':
-            return True
-        
-        # Scope-based validation if context provided
-        if self.scope and context:
-            return self._validate_scope(context)
-        
-        return False
     
-    def _validate_scope(self, context: Dict[str, Any]) -> bool:
-        """
-        Validate permission scope against provided context.
-        
-        Args:
-            context: Context information for scope validation
-            
-        Returns:
-            Boolean indicating if context satisfies scope requirements
-        """
-        if not self.scope:
-            return True
-        
-        # Simple scope validation - can be extended for complex rules
-        if self.scope == 'own' and context.get('owner_id') == context.get('user_id'):
-            return True
-        
-        if self.scope == 'department' and context.get('department_id') == context.get('user_department_id'):
-            return True
-        
-        return False
-    
-    def get_assigned_roles(self) -> List[Role]:
-        """
-        Get all active roles that have this permission.
-        
-        Returns:
-            List of active Role objects that include this permission
-        """
-        return self.roles.filter_by(is_active=True).all()
-    
-    def to_dict(self, include_roles: bool = False) -> Dict[str, Any]:
+    def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
         """
         Convert permission to dictionary representation.
         
         Args:
-            include_roles: Whether to include role details
+            include_sensitive: Whether to include sensitive fields
             
         Returns:
-            Dictionary representation of the permission
+            Dictionary representation of permission
         """
-        result = {
-            'id': self.id,
-            'name': self.name,
-            'resource': self.resource,
-            'action': self.action,
-            'description': self.description,
-            'is_active': self.is_active,
-            'is_system': self.is_system,
-            'permission_type': self.permission_type,
-            'scope': self.scope,
-            'context_requirements': self.context_requirements,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'created_by': self.created_by,
-            'updated_by': self.updated_by
-        }
+        result = super().to_dict(include_sensitive=include_sensitive)
         
-        if include_roles:
-            result['roles'] = [r.to_dict() for r in self.get_assigned_roles()]
+        # Add computed fields
+        result['full_name'] = f"{self.resource}.{self.action}"
+        result['role_count'] = len(self.roles)
         
         return result
     
-    def __repr__(self):
-        return f"<Permission {self.name} (ID: {self.id}, Active: {self.is_active})>"
-
-
-# SQLAlchemy event listeners for automatic audit field population
-@event.listens_for(db.session, 'before_commit')
-def populate_audit_fields(session):
-    """
-    Automatically populate audit fields before database commit.
-    
-    Captures user context from Flask-Login sessions and populates created_by
-    and updated_by fields for comprehensive audit trail tracking.
-    """
-    try:
-        # Import here to avoid circular imports
-        from flask import g
-        from flask_login import current_user
+    @validates('resource', 'action')
+    def validate_resource_action(self, key: str, value: str) -> str:
+        """Validate resource and action values."""
+        if not value or len(value.strip()) < 1:
+            raise ValueError(f"{key} cannot be empty")
         
-        # Get current user information
-        user_id = None
-        if hasattr(g, 'current_user_id'):
-            user_id = g.current_user_id
-        elif hasattr(current_user, 'id') and current_user.is_authenticated:
-            user_id = str(current_user.id)
+        # Normalize to lowercase for consistency
+        value = value.strip().lower()
+        
+        # Validate characters (alphanumeric, underscore, dash, dot, asterisk)
+        import re
+        if not re.match(r'^[a-z0-9_.\-*]+$', value):
+            raise ValueError(f"{key} contains invalid characters")
+        
+        return value
+    
+    @validates('name')
+    def validate_name(self, key: str, name: str) -> str:
+        """Validate and generate permission name."""
+        if name:
+            return name.strip()
+        
+        # Auto-generate name from resource and action if not provided
+        if hasattr(self, 'resource') and hasattr(self, 'action') and self.resource and self.action:
+            return f"{self.resource}.{self.action}"
+        
+        return name
+
+
+# SQLAlchemy event hooks for automatic hierarchy and audit management
+@event.listens_for(Role, 'before_insert')
+@event.listens_for(Role, 'before_update')
+def update_role_hierarchy(mapper, connection, target):
+    """Update role hierarchy path before insert/update."""
+    if target.parent_role_id:
+        # Get parent role hierarchy info
+        result = connection.execute(
+            "SELECT hierarchy_path, hierarchy_level FROM roles WHERE id = %s",
+            (target.parent_role_id,)
+        ).fetchone()
+        
+        if result:
+            parent_path, parent_level = result
+            target.hierarchy_path = f"{parent_path or ''}/{target.parent_role_id}".lstrip('/')
+            target.hierarchy_level = (parent_level or 0) + 1
         else:
-            user_id = 'system'
-        
-        # Populate audit fields for new objects
-        for obj in session.new:
-            if hasattr(obj, 'created_by') and obj.created_by is None:
-                obj.created_by = user_id
-            if hasattr(obj, 'updated_by') and obj.updated_by is None:
-                obj.updated_by = user_id
-        
-        # Populate audit fields for modified objects
-        for obj in session.dirty:
-            if hasattr(obj, 'updated_by'):
-                obj.updated_by = user_id
-    
-    except Exception as e:
-        # Log the error but don't break the transaction
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to populate audit fields: {e}")
+            target.hierarchy_path = str(target.parent_role_id)
+            target.hierarchy_level = 1
+    else:
+        target.hierarchy_path = ""
+        target.hierarchy_level = 0
+
+
+@event.listens_for(Permission, 'before_insert')
+@event.listens_for(Permission, 'before_update')
+def generate_permission_name(mapper, connection, target):
+    """Generate permission name if not provided."""
+    if not target.name and target.resource and target.action:
+        target.name = f"{target.resource}.{target.action}"
 
 
 # Utility functions for RBAC operations
-class RBACUtils:
+class RBACManager:
     """
-    Utility class providing helper methods for RBAC operations.
+    RBAC management utility class for common authorization operations.
     
-    Includes methods for permission evaluation, role management, and audit
-    trail querying to support Flask blueprint integration and business logic.
+    Provides centralized methods for role and permission management,
+    user authorization checking, and Flask decorator integration support.
     """
     
     @staticmethod
-    def get_user_permissions(user_id: int, include_inactive: bool = False) -> List[str]:
+    def check_user_permission(user_id: int, resource: str, action: str, 
+                             context: Dict[str, Any] = None) -> bool:
         """
-        Get all permission names for a specific user across all their roles.
+        Check if user has specific permission through their roles.
         
         Args:
-            user_id: ID of the user
-            include_inactive: Whether to include inactive roles/permissions
+            user_id: ID of user to check
+            resource: Resource to check access for
+            action: Action to check permission for
+            context: Additional context for conditional permissions
             
         Returns:
-            List of unique permission names
+            True if user has permission, False otherwise
         """
-        query = db.session.query(Permission.name).distinct()
-        query = query.join(role_permissions).join(Role).join(user_roles)
-        query = query.filter(user_roles.c.user_id == user_id)
+        try:
+            # Get all active roles for user
+            user_roles = UserRole.query.filter_by(
+                user_id=user_id, is_active=True
+            ).all()
+            
+            # Check permissions for each role
+            for user_role in user_roles:
+                if user_role.is_expired():
+                    continue
+                
+                role = user_role.role
+                if role and role.is_active and role.has_permission(resource, action):
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking user {user_id} permission for {resource}.{action}: {e}")
+            return False
+    
+    @staticmethod
+    def get_user_permissions(user_id: int) -> Set[str]:
+        """
+        Get all effective permissions for user.
         
-        if not include_inactive:
-            query = query.filter(
-                Role.is_active == True,
-                Permission.is_active == True,
-                user_roles.c.is_active == True,
-                role_permissions.c.is_active == True
+        Args:
+            user_id: ID of user
+            
+        Returns:
+            Set of permission names in 'resource.action' format
+        """
+        permissions = set()
+        
+        try:
+            # Get all active roles for user
+            user_roles = UserRole.query.filter_by(
+                user_id=user_id, is_active=True
+            ).all()
+            
+            # Collect permissions from all roles
+            for user_role in user_roles:
+                if user_role.is_expired():
+                    continue
+                
+                role = user_role.role
+                if role and role.is_active:
+                    permissions.update(role.get_effective_permissions())
+            
+        except Exception as e:
+            logger.error(f"Error getting permissions for user {user_id}: {e}")
+        
+        return permissions
+    
+    @staticmethod
+    def get_user_roles(user_id: int) -> List[Role]:
+        """
+        Get all active roles for user.
+        
+        Args:
+            user_id: ID of user
+            
+        Returns:
+            List of active Role objects
+        """
+        try:
+            user_roles = UserRole.query.filter_by(
+                user_id=user_id, is_active=True
+            ).all()
+            
+            return [ur.role for ur in user_roles 
+                   if ur.role and ur.role.is_active and not ur.is_expired()]
+                   
+        except Exception as e:
+            logger.error(f"Error getting roles for user {user_id}: {e}")
+            return []
+    
+    @staticmethod
+    def create_permission(resource: str, action: str, description: str = None,
+                         permission_type: str = 'standard', **kwargs) -> Optional[Permission]:
+        """
+        Create new permission with validation.
+        
+        Args:
+            resource: Resource name
+            action: Action name
+            description: Permission description
+            permission_type: Type of permission (standard, wildcard, conditional)
+            **kwargs: Additional permission attributes
+            
+        Returns:
+            Permission instance if successful, None otherwise
+        """
+        try:
+            permission = Permission(
+                resource=resource,
+                action=action,
+                description=description,
+                permission_type=permission_type,
+                **kwargs
             )
-        
-        return [row[0] for row in query.all()]
+            
+            db.session.add(permission)
+            db.session.flush()  # Get ID without committing
+            
+            logger.info(f"Created permission: {permission.name}")
+            return permission
+            
+        except Exception as e:
+            logger.error(f"Failed to create permission {resource}.{action}: {e}")
+            db.session.rollback()
+            return None
     
     @staticmethod
-    def user_has_permission(user_id: int, permission_name: str) -> bool:
+    def create_role(name: str, description: str = None, parent_role_id: int = None,
+                   **kwargs) -> Optional[Role]:
         """
-        Check if a user has a specific permission.
+        Create new role with validation.
         
         Args:
-            user_id: ID of the user
-            permission_name: Name of the permission to check
+            name: Role name
+            description: Role description
+            parent_role_id: Parent role ID for hierarchy
+            **kwargs: Additional role attributes
             
         Returns:
-            Boolean indicating if user has the permission
+            Role instance if successful, None otherwise
         """
-        return permission_name in RBACUtils.get_user_permissions(user_id)
-    
-    @staticmethod
-    def get_role_assignments_audit(role_id: int, limit: int = 100) -> List[Dict[str, Any]]:
-        """
-        Get audit trail for role assignments.
-        
-        Args:
-            role_id: ID of the role
-            limit: Maximum number of records to return
+        try:
+            role = Role(
+                name=name,
+                description=description,
+                parent_role_id=parent_role_id,
+                **kwargs
+            )
             
-        Returns:
-            List of audit trail records
-        """
-        query = db.session.execute(
-            text("""
-                SELECT user_id, assigned_at, assigned_by, is_active
-                FROM user_roles 
-                WHERE role_id = :role_id 
-                ORDER BY assigned_at DESC 
-                LIMIT :limit
-            """),
-            {'role_id': role_id, 'limit': limit}
-        )
-        
-        return [
-            {
-                'user_id': row[0],
-                'assigned_at': row[1].isoformat() if row[1] else None,
-                'assigned_by': row[2],
-                'is_active': row[3]
-            }
-            for row in query.fetchall()
-        ]
-    
-    @staticmethod
-    def get_permission_grants_audit(permission_id: int, limit: int = 100) -> List[Dict[str, Any]]:
-        """
-        Get audit trail for permission grants.
-        
-        Args:
-            permission_id: ID of the permission
-            limit: Maximum number of records to return
+            db.session.add(role)
+            db.session.flush()  # Get ID without committing
             
-        Returns:
-            List of audit trail records
-        """
-        query = db.session.execute(
-            text("""
-                SELECT role_id, granted_at, granted_by, is_active
-                FROM role_permissions 
-                WHERE permission_id = :permission_id 
-                ORDER BY granted_at DESC 
-                LIMIT :limit
-            """),
-            {'permission_id': permission_id, 'limit': limit}
-        )
-        
-        return [
-            {
-                'role_id': row[0],
-                'granted_at': row[1].isoformat() if row[1] else None,
-                'granted_by': row[2],
-                'is_active': row[3]
-            }
-            for row in query.fetchall()
-        ]
-    
-    @staticmethod
-    def create_default_permissions() -> List[Permission]:
-        """
-        Create default system permissions for common resources and actions.
-        
-        Returns:
-            List of created Permission objects
-        """
-        default_permissions = [
-            # User management permissions
-            ('user', 'create', 'Create new user accounts'),
-            ('user', 'read', 'View user information'),
-            ('user', 'update', 'Modify user information'),
-            ('user', 'delete', 'Delete user accounts'),
-            ('user', 'list', 'List all users'),
-            ('user', 'admin', 'Full user administration'),
+            logger.info(f"Created role: {role.name}")
+            return role
             
-            # Role management permissions
-            ('role', 'create', 'Create new roles'),
-            ('role', 'read', 'View role information'),
-            ('role', 'update', 'Modify role information'),
-            ('role', 'delete', 'Delete roles'),
-            ('role', 'list', 'List all roles'),
-            ('role', 'admin', 'Full role administration'),
-            
-            # Permission management permissions
-            ('permission', 'create', 'Create new permissions'),
-            ('permission', 'read', 'View permission information'),
-            ('permission', 'update', 'Modify permission information'),
-            ('permission', 'delete', 'Delete permissions'),
-            ('permission', 'list', 'List all permissions'),
-            ('permission', 'admin', 'Full permission administration'),
-            
-            # Business entity permissions
-            ('business_entity', 'create', 'Create business entities'),
-            ('business_entity', 'read', 'View business entities'),
-            ('business_entity', 'update', 'Modify business entities'),
-            ('business_entity', 'delete', 'Delete business entities'),
-            ('business_entity', 'list', 'List business entities'),
-            ('business_entity', 'admin', 'Full business entity administration'),
-            
-            # System administration permissions
-            ('system', 'admin', 'System administration access'),
-            ('system', 'read', 'View system information'),
-            ('audit', 'read', 'View audit logs'),
-            ('audit', 'admin', 'Audit log administration'),
-        ]
-        
-        created_permissions = []
-        for resource, action, description in default_permissions:
-            # Check if permission already exists
-            existing = Permission.query.filter_by(
-                resource=resource, 
-                action=action
-            ).first()
-            
-            if not existing:
-                permission = Permission.create_permission(
-                    resource=resource,
-                    action=action,
-                    description=description,
-                    permission_type='system'
-                )
-                permission.is_system = True
-                db.session.add(permission)
-                created_permissions.append(permission)
-        
-        if created_permissions:
-            db.session.commit()
-        
-        return created_permissions
-    
-    @staticmethod
-    def create_default_roles() -> List[Role]:
-        """
-        Create default system roles with appropriate permissions.
-        
-        Returns:
-            List of created Role objects
-        """
-        # Ensure default permissions exist
-        RBACUtils.create_default_permissions()
-        
-        default_roles = [
-            {
-                'name': 'administrator',
-                'description': 'Full system administrator with all permissions',
-                'priority': 1000,
-                'permissions': ['*.admin']  # All admin permissions
-            },
-            {
-                'name': 'user_manager',
-                'description': 'User account management and administration',
-                'priority': 800,
-                'permissions': ['user.admin', 'role.read', 'permission.read']
-            },
-            {
-                'name': 'business_admin',
-                'description': 'Business entity administration',
-                'priority': 700,
-                'permissions': ['business_entity.admin', 'user.read']
-            },
-            {
-                'name': 'viewer',
-                'description': 'Read-only access to most resources',
-                'priority': 100,
-                'permissions': ['user.read', 'business_entity.read', 'role.read', 'permission.read']
-            },
-            {
-                'name': 'user',
-                'description': 'Basic user access',
-                'priority': 50,
-                'permissions': ['user.read']
-            }
-        ]
-        
-        created_roles = []
-        for role_data in default_roles:
-            # Check if role already exists
-            existing = Role.query.filter_by(name=role_data['name']).first()
-            
-            if not existing:
-                role = Role(
-                    name=role_data['name'],
-                    description=role_data['description'],
-                    priority=role_data['priority'],
-                    is_system=True,
-                    role_type='system'
-                )
-                db.session.add(role)
-                db.session.flush()  # Get role ID
-                
-                # Assign permissions
-                for perm_pattern in role_data['permissions']:
-                    if perm_pattern.endswith('.admin') and perm_pattern.startswith('*'):
-                        # All admin permissions
-                        permissions = Permission.query.filter(
-                            Permission.action == 'admin',
-                            Permission.is_active == True
-                        ).all()
-                    elif perm_pattern.endswith('.admin'):
-                        # Specific resource admin permissions
-                        resource = perm_pattern.split('.')[0]
-                        permissions = Permission.query.filter_by(
-                            resource=resource,
-                            action='admin',
-                            is_active=True
-                        ).all()
-                    else:
-                        # Specific permission
-                        permissions = Permission.query.filter_by(
-                            name=perm_pattern,
-                            is_active=True
-                        ).all()
-                    
-                    for permission in permissions:
-                        # Check if permission already assigned
-                        existing_grant = db.session.execute(
-                            text("""
-                                SELECT 1 FROM role_permissions 
-                                WHERE role_id = :role_id AND permission_id = :permission_id
-                            """),
-                            {'role_id': role.id, 'permission_id': permission.id}
-                        ).first()
-                        
-                        if not existing_grant:
-                            # Insert into association table
-                            db.session.execute(
-                                text("""
-                                    INSERT INTO role_permissions 
-                                    (role_id, permission_id, granted_at, granted_by, is_active)
-                                    VALUES (:role_id, :permission_id, :granted_at, :granted_by, :is_active)
-                                """),
-                                {
-                                    'role_id': role.id,
-                                    'permission_id': permission.id,
-                                    'granted_at': datetime.utcnow(),
-                                    'granted_by': 'system',
-                                    'is_active': True
-                                }
-                            )
-                
-                created_roles.append(role)
-        
-        if created_roles:
-            db.session.commit()
-        
-        return created_roles
+        except Exception as e:
+            logger.error(f"Failed to create role {name}: {e}")
+            db.session.rollback()
+            return None
 
 
-# Export models and utilities for application use
+# Flask decorator utilities for route protection
+def require_permission(resource: str, action: str):
+    """
+    Flask decorator to require specific permission for route access.
+    
+    Args:
+        resource: Resource name required
+        action: Action required
+        
+    Returns:
+        Decorator function for Flask routes
+    """
+    from functools import wraps
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get current user from Flask-Login or session
+            user_id = getattr(g, 'current_user_id', None)
+            
+            if not user_id:
+                logger.warning(f"Access denied to {resource}.{action}: No authenticated user")
+                raise Forbidden("Authentication required")
+            
+            # Check permission
+            if not RBACManager.check_user_permission(user_id, resource, action):
+                logger.warning(f"Access denied to {resource}.{action} for user {user_id}")
+                raise Forbidden("Insufficient permissions")
+            
+            # Store permission context for use in the view
+            g.current_permission = f"{resource}.{action}"
+            g.current_resource = resource
+            g.current_action = action
+            
+            return func(*args, **kwargs)
+        
+        return wrapper
+    return decorator
+
+
+def require_role(role_name: str):
+    """
+    Flask decorator to require specific role for route access.
+    
+    Args:
+        role_name: Role name required
+        
+    Returns:
+        Decorator function for Flask routes
+    """
+    from functools import wraps
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get current user from Flask-Login or session
+            user_id = getattr(g, 'current_user_id', None)
+            
+            if not user_id:
+                logger.warning(f"Access denied to role {role_name}: No authenticated user")
+                raise Forbidden("Authentication required")
+            
+            # Check role membership
+            user_roles = RBACManager.get_user_roles(user_id)
+            role_names = [role.name for role in user_roles]
+            
+            if role_name not in role_names:
+                logger.warning(f"Access denied to role {role_name} for user {user_id}")
+                raise Forbidden("Insufficient role privileges")
+            
+            # Store role context for use in the view
+            g.current_roles = role_names
+            g.required_role = role_name
+            
+            return func(*args, **kwargs)
+        
+        return wrapper
+    return decorator
+
+
+# Export all models and utilities
 __all__ = [
-    'Role',
-    'Permission', 
-    'user_roles',
-    'role_permissions',
-    'AuditMixin',
-    'RBACUtils',
-    'db'
+    'Role', 'Permission', 'UserRole', 'RolePermission',
+    'RBACManager', 'require_permission', 'require_role'
 ]
