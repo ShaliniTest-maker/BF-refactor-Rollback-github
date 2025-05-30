@@ -1,0 +1,99 @@
+Account Verification Required
+===============================
+
+Hello {{ user.full_name or user.username }},
+
+Welcome to our platform! To complete your account setup and ensure the security of your account, please verify your email address.
+
+VERIFICATION DETAILS
+--------------------
+Email Address: {{ user.email }}
+Account Created: {{ user.created_at.strftime('%B %d, %Y at %I:%M %p UTC') }}
+Verification Token Expires: {{ verification_expires_at.strftime('%B %d, %Y at %I:%M %p UTC') }}
+
+VERIFICATION INSTRUCTIONS
+-------------------------
+To verify your account, please follow these steps:
+
+1. Click or copy the following verification link into your browser:
+   {{ verification_url }}
+
+2. If the link doesn't work, you can manually visit our verification page and enter the following token:
+   
+   Verification Token: {{ verification_token }}
+   
+   Visit: {{ base_url }}/verify-account
+   Enter the token above when prompted.
+
+3. Complete the verification process by following the on-screen instructions.
+
+SECURITY INFORMATION
+--------------------
+- This verification link will expire in {{ expiration_hours }} hours
+- The verification token is case-sensitive
+- Do not share this verification link or token with anyone
+- If you did not create this account, please ignore this email
+- For security reasons, this token can only be used once
+
+IMPORTANT NOTES
+---------------
+- Your account access is limited until email verification is complete
+- After verification, you will have full access to all platform features
+- If you experience any issues, please contact our support team
+
+TECHNICAL DETAILS
+-----------------
+Request IP Address: {{ request_ip }}
+User Agent: {{ user_agent }}
+Account ID: {{ user.id }}
+Verification Attempt: {{ attempt_number }} of {{ max_attempts }}
+
+ALTERNATIVE VERIFICATION
+------------------------
+If you're unable to use the link above, you can also verify your account by:
+
+1. Logging into your account at: {{ base_url }}/login
+2. Navigate to Account Settings
+3. Click "Verify Email Address" 
+4. Enter verification token: {{ verification_token }}
+
+NEED HELP?
+----------
+If you need assistance with account verification:
+
+- Visit our Help Center: {{ base_url }}/help
+- Contact Support: {{ support_email }}
+- Phone Support: {{ support_phone }}
+- Live Chat: Available on our website {{ business_hours }}
+
+ACCOUNT SECURITY
+----------------
+To protect your account:
+- Use a strong, unique password
+- Enable two-factor authentication once verified
+- Keep your contact information up to date
+- Review account activity regularly
+
+Thank you for joining our platform. We're excited to have you as part of our community!
+
+Best regards,
+The {{ company_name }} Team
+
+---
+LEGAL NOTICE
+This email contains confidential information intended only for {{ user.email }}. 
+If you received this email in error, please delete it immediately and do not 
+share the verification information with anyone.
+
+Privacy Policy: {{ base_url }}/privacy
+Terms of Service: {{ base_url }}/terms
+Unsubscribe: {{ base_url }}/unsubscribe?token={{ unsubscribe_token }}
+
+{{ company_name }}
+{{ company_address }}
+{{ company_contact_info }}
+
+---
+This is an automated message from our account verification system.
+Message ID: {{ message_id }}
+Generated: {{ current_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
