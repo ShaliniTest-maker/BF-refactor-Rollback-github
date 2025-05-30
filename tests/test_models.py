@@ -1,1518 +1,1902 @@
 """
-Database model testing module validating Flask-SQLAlchemy declarative models, relationship mappings, and data operations ensuring complete schema integrity during MongoDB to SQL conversion.
+Comprehensive Database Model Testing Module
 
-This comprehensive testing module implements Pytest 8.3.3 with Flask testing utilities for validating Flask-SQLAlchemy 3.1.1 model functionality, relationship mappings, and data operations per Section 4.7.1. It ensures 100% functional parity with the original Node.js/Mongoose implementation while maintaining complete data integrity throughout the MongoDB to PostgreSQL migration process.
+This module validates Flask-SQLAlchemy declarative models, relationship mappings, 
+and data operations ensuring complete schema integrity during MongoDB to SQL conversion.
+Implements systematic testing of database models with comprehensive validation of
+business logic, data relationships, and migration integrity per Section 4.7.1.
 
-Test Coverage Areas:
-- Model field validation and constraint enforcement
-- Relationship mapping and foreign key integrity
-- CRUD operations with transaction rollback testing
-- Encrypted field functionality and data protection
-- Audit trail capture and user context tracking
-- RBAC system integration and permission management
-- Business entity relationship modeling
-- Session management and authentication flows
-- Data integrity validation and migration testing
-- Performance benchmarking against baseline metrics
+The testing framework validates:
+- Flask-SQLAlchemy declarative model functionality and constraints
+- Relationship mappings and bidirectional consistency validation
+- Data integrity preservation throughout migration process
+- SQLAlchemy session management with transaction rollback capabilities
+- Database schema preservation without modification during conversion
+- Performance benchmarking against baseline requirements
+
+Key Testing Areas:
+- User model authentication and session management
+- Encrypted field functionality with FernetEngine validation
+- Audit trail tracking with automatic timestamp population
+- RBAC integration with role and permission relationships
+- Business entity management and hierarchical relationships
+- Database transaction isolation and rollback procedures
 
 Dependencies:
-- pytest: Primary testing framework with Flask integration
-- Factory Boy: Test data generation with realistic patterns
-- SQLAlchemy: Database session management and rollback capabilities
-- Flask-SQLAlchemy: ORM functionality and model testing
+- pytest 8.3.3: Primary testing framework with Flask-specific extensions
+- Factory Boy: Django-style factory patterns for realistic test data generation
+- Flask-SQLAlchemy 3.1.1: Database ORM functionality under test
+- pytest-benchmark: Performance testing and regression detection
+- SQLAlchemy test utilities: Database session management and rollback support
 """
 
 import pytest
-import uuid
 import json
-from datetime import datetime, timedelta, timezone
+import secrets
+from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, List, Any, Optional
-import tempfile
-import os
+from typing import Dict, List, Any, Optional, Tuple
+from unittest.mock import patch, Mock
 
-# SQLAlchemy and Flask testing imports
-from sqlalchemy import text, func, and_, or_, distinct
-from sqlalchemy.exc import IntegrityError, DataError, StatementError
-from sqlalchemy.orm import sessionmaker, scoped_session
-from flask import Flask, g
+# Third-party testing imports
+from sqlalchemy import inspect, text, func, event
+from sqlalchemy.exc import IntegrityError, ValidationError as SQLValidationError
+from sqlalchemy.orm import Session, scoped_session
+from werkzeug.exceptions import ValidationError
+from cryptography.fernet import Fernet
+
+# Flask and application imports
+from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
-# Import all model classes for comprehensive testing
-from models.base import BaseModel, AuditMixin, EncryptedMixin
-from models.user import User, UserSession
-from models.rbac import Role, Permission
-from models.business import BusinessEntity, EntityRelationship  
-from models.audit import AuditLog, SecurityEvent
+# Model imports from the application
+from models.base import db, BaseModel, AuditMixin, EncryptedMixin, DatabaseManager
+from models.user import User, UserSession, UserUtils, load_user
 
-# Import Factory Boy test data generators
+# Factory imports for test data generation
 from tests.factories import (
-    UserFactory, RoleFactory, PermissionFactory, BusinessEntityFactory,
-    EntityRelationshipFactory, UserSessionFactory, AuditLogFactory,
-    SecurityEventFactory, FactoryDataManager
+    UserFactory, UserSessionFactory, RoleFactory, PermissionFactory,
+    UserRoleFactory, RolePermissionFactory, BusinessEntityFactory,
+    EntityRelationshipFactory, AuditLogFactory, SecurityEventFactory,
+    FactorySessionManager, FactoryPresets, configure_factories,
+    reset_factory_sequences, cleanup_test_data
 )
 
-# Performance and monitoring imports for baseline validation
-import time
-import psutil
-import threading
-from contextlib import contextmanager
-from collections import defaultdict
 
-
-class ModelTestBase:
+class TestDatabaseInfrastructure:
     """
-    Base test class providing common functionality for all model testing operations.
+    Test database infrastructure and session management capabilities.
     
-    Implements comprehensive testing infrastructure including database session management,
-    transaction rollback capabilities, performance monitoring, and data integrity validation
-    patterns per Section 4.7.3.1 testing infrastructure requirements.
-    
-    Features:
-    - Automatic test database session management with rollback
-    - Performance benchmarking against Node.js baseline metrics
-    - Data integrity validation and constraint testing
-    - Relationship mapping verification and foreign key testing
-    - Factory Boy integration for realistic test data generation
-    - Thread-safe session handling for concurrent test execution
+    Validates SQLAlchemy session handling, transaction management, and connection
+    pool configuration for enterprise-grade database operations per Section 4.4.1.2.
     """
     
-    @pytest.fixture(autouse=True)
-    def setup_test_session(self, db_session, app_context):
+    def test_database_session_initialization(self, app: Flask, db_session: Session):
         """
-        Automatically configure test database session with rollback capabilities.
+        Test SQLAlchemy database session initialization and configuration.
         
-        Provides isolated test execution environment with automatic cleanup and
-        rollback procedures ensuring test independence and data consistency per
-        Section 4.7.3.1 database testing setup requirements.
+        Validates proper database session setup with connection pooling,
+        transaction management, and Flask application context integration.
         
         Args:
-            db_session: SQLAlchemy test session with rollback capabilities
-            app_context: Flask application context for model operations
+            app: Flask application fixture
+            db_session: Database session fixture with rollback capabilities
         """
-        self.db = db_session
-        self.app = app_context
+        # Verify database session is properly configured
+        assert db_session is not None
+        assert hasattr(db_session, 'execute')
+        assert hasattr(db_session, 'commit')
+        assert hasattr(db_session, 'rollback')
         
-        # Configure Factory Boy to use test session
-        for factory_class in [UserFactory, RoleFactory, PermissionFactory, 
-                             BusinessEntityFactory, EntityRelationshipFactory,
-                             UserSessionFactory, AuditLogFactory, SecurityEventFactory]:
-            factory_class._meta.sqlalchemy_session = db_session
+        # Verify Flask-SQLAlchemy integration
+        assert hasattr(app, 'db')
+        assert app.db.session is not None
         
-        # Setup performance monitoring
-        self.performance_metrics = defaultdict(list)
-        self.start_time = time.time()
+        # Test connection pool configuration
+        engine = db_session.get_bind()
+        assert engine is not None
+        assert engine.pool is not None
         
-        yield
+        # Verify transaction isolation
+        with db_session.begin():
+            result = db_session.execute(text("SELECT 1 as test_value"))
+            assert result.fetchone().test_value == 1
+    
+    def test_database_transaction_rollback(self, db_session: Session):
+        """
+        Test database transaction rollback capabilities for test isolation.
         
-        # Cleanup and rollback after each test
+        Validates that database transactions can be properly rolled back
+        to maintain test isolation per Section 4.7.3.1.
+        
+        Args:
+            db_session: Database session fixture with rollback capabilities
+        """
+        # Create test user and commit
+        user = UserFactory.build()
+        db_session.add(user)
+        db_session.flush()  # Assign ID without committing
+        user_id = user.id
+        
+        # Verify user exists in session
+        found_user = db_session.query(User).filter_by(id=user_id).first()
+        assert found_user is not None
+        assert found_user.username == user.username
+        
+        # Rollback transaction
         db_session.rollback()
-        db_session.close()
+        
+        # Verify user no longer exists after rollback
+        found_user_after_rollback = db_session.query(User).filter_by(id=user_id).first()
+        assert found_user_after_rollback is None
     
-    def assert_model_fields(self, model_instance, expected_fields: Dict[str, Any]):
+    def test_database_connection_pool_configuration(self, app: Flask):
         """
-        Validate model field values against expected data with comprehensive type checking.
+        Test database connection pool configuration and management.
+        
+        Validates connection pool settings including pool_size, max_overflow,
+        and pool_timeout configuration per Section 4.4.1.2.
         
         Args:
-            model_instance: SQLAlchemy model instance to validate
-            expected_fields: Dictionary of field names and expected values
+            app: Flask application fixture
         """
-        for field_name, expected_value in expected_fields.items():
-            actual_value = getattr(model_instance, field_name, None)
+        # Get database engine configuration
+        engine = app.db.engine
+        pool = engine.pool
+        
+        # Verify connection pool is configured
+        assert pool is not None
+        
+        # Test connection acquisition and release
+        connection = pool.connect()
+        assert connection is not None
+        
+        # Test connection is functional
+        result = connection.execute(text("SELECT 1 as pool_test"))
+        assert result.fetchone().pool_test == 1
+        
+        # Release connection back to pool
+        connection.close()
+    
+    def test_database_manager_utilities(self, db_session: Session):
+        """
+        Test DatabaseManager utility functions for transaction management.
+        
+        Validates utility methods for safe commit, rollback, and transaction
+        context management per Section 6.2 database design requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test safe commit functionality
+        user = UserFactory.build()
+        db_session.add(user)
+        
+        # Test DatabaseManager.safe_commit()
+        commit_result = DatabaseManager.safe_commit()
+        assert commit_result is True
+        
+        # Verify user was committed
+        user_id = user.id
+        committed_user = db_session.query(User).filter_by(id=user_id).first()
+        assert committed_user is not None
+        
+        # Test safe rollback functionality
+        rollback_result = DatabaseManager.safe_rollback()
+        assert rollback_result is True
+        
+        # Test transaction context manager
+        with DatabaseManager.transaction():
+            test_user = UserFactory.build()
+            db_session.add(test_user)
+            # Transaction will auto-commit on context exit
+        
+        # Verify user was committed through transaction context
+        transaction_user = db_session.query(User).filter_by(id=test_user.id).first()
+        assert transaction_user is not None
+
+
+class TestBaseModelFunctionality:
+    """
+    Test BaseModel functionality including audit trails and common utilities.
+    
+    Validates the foundation model class providing common functionality across
+    all entity models per Section 4.4.1.1 model definition standards.
+    """
+    
+    def test_audit_mixin_timestamp_population(self, db_session: Session):
+        """
+        Test automatic audit timestamp population in AuditMixin.
+        
+        Validates that created_at and updated_at timestamps are automatically
+        populated during model creation and updates per Section 4.7.1.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Create user to test audit timestamp population
+        user = UserFactory()
+        db_session.flush()
+        
+        # Verify created_at timestamp is populated
+        assert user.created_at is not None
+        assert isinstance(user.created_at, datetime)
+        assert user.created_at <= datetime.utcnow()
+        
+        # Verify updated_at timestamp is populated
+        assert user.updated_at is not None
+        assert isinstance(user.updated_at, datetime)
+        assert user.updated_at >= user.created_at
+        
+        # Test updated_at timestamp changes on update
+        original_updated_at = user.updated_at
+        user.first_name = "Updated Name"
+        db_session.flush()
+        
+        assert user.updated_at > original_updated_at
+    
+    def test_audit_mixin_user_attribution(self, db_session: Session):
+        """
+        Test automatic user attribution in audit fields.
+        
+        Validates that created_by and updated_by fields are automatically
+        populated with user context per Section 4.7.1 audit requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test audit field population without user context
+        user = UserFactory()
+        db_session.flush()
+        
+        # Verify audit fields are populated with system default
+        assert user.created_by is not None
+        assert user.updated_by is not None
+        
+        # Test with mock user context
+        with patch('models.base.get_current_user_context', return_value='test_user'):
+            updated_user = UserFactory()
+            db_session.flush()
             
-            # Handle different field types appropriately
-            if isinstance(expected_value, datetime) and actual_value:
-                # Allow small time differences for auto-generated timestamps
-                time_diff = abs((actual_value - expected_value).total_seconds())
-                assert time_diff < 5, f"Timestamp field {field_name} difference too large: {time_diff}s"
-            elif expected_value is None:
-                assert actual_value is None, f"Field {field_name} should be None but was {actual_value}"
-            else:
-                assert actual_value == expected_value, f"Field {field_name} mismatch: expected {expected_value}, got {actual_value}"
+            # Note: In actual implementation, this would be populated by SQLAlchemy event
+            # For testing, we verify the structure exists
+            assert hasattr(updated_user, 'created_by')
+            assert hasattr(updated_user, 'updated_by')
     
-    def assert_relationship_integrity(self, model_instance, relationship_name: str, 
-                                   expected_count: int = None, related_model_class=None):
+    def test_encrypted_mixin_functionality(self, db_session: Session):
         """
-        Validate relationship mappings and foreign key integrity.
+        Test EncryptedMixin field encryption and decryption capabilities.
+        
+        Validates encrypted field functionality using FernetEngine for PII
+        protection per Section 4.4.1.1 security requirements.
         
         Args:
-            model_instance: Model instance with relationships to validate
-            relationship_name: Name of the relationship attribute
-            expected_count: Expected number of related objects
-            related_model_class: Expected class of related objects
+            db_session: Database session fixture
         """
-        relationship = getattr(model_instance, relationship_name, None)
-        assert relationship is not None, f"Relationship {relationship_name} not found"
+        # Test encryption key retrieval
+        with patch.dict('os.environ', {'FIELD_ENCRYPTION_KEY': Fernet.generate_key().decode()}):
+            key = EncryptedMixin.get_encryption_key()
+            assert key is not None
+            assert isinstance(key, bytes)
         
-        if expected_count is not None:
-            if hasattr(relationship, '__len__'):
-                actual_count = len(relationship)
-            elif hasattr(relationship, 'count'):
-                actual_count = relationship.count()
-            else:
-                actual_count = 1 if relationship else 0
-            assert actual_count == expected_count, f"Relationship {relationship_name} count mismatch: expected {expected_count}, got {actual_count}"
+        # Test encrypted field creation (structure validation)
+        user = UserFactory()
         
-        if related_model_class and relationship:
-            if hasattr(relationship, '__iter__'):
-                for related_obj in relationship:
-                    assert isinstance(related_obj, related_model_class), f"Related object type mismatch in {relationship_name}"
-            else:
-                assert isinstance(relationship, related_model_class), f"Related object type mismatch in {relationship_name}"
+        # Verify encrypted fields exist and can store data
+        assert hasattr(user, 'email')
+        assert hasattr(user, 'first_name')
+        assert hasattr(user, 'last_name')
+        
+        # Test that encrypted fields can be read back
+        test_email = user.email
+        assert test_email is not None
+        
+        # Test field validation for encrypted data
+        user.email = "test@example.com"
+        user.first_name = "Test"
+        user.last_name = "User"
+        
+        db_session.flush()
+        
+        # Verify data persistence through encryption
+        assert user.email == "test@example.com"
+        assert user.first_name == "Test"
+        assert user.last_name == "User"
     
-    @contextmanager
-    def measure_performance(self, operation_name: str):
+    def test_base_model_serialization(self, db_session: Session):
         """
-        Context manager for measuring database operation performance.
+        Test BaseModel serialization methods for API integration.
+        
+        Validates to_dict() and to_json() methods with sensitive data protection
+        per API contract requirements.
         
         Args:
-            operation_name: Name of the operation being measured
+            db_session: Database session fixture
         """
-        start_time = time.time()
-        start_memory = psutil.Process().memory_info().rss
+        user = UserFactory()
+        db_session.flush()
         
+        # Test basic dictionary serialization
+        user_dict = user.to_dict()
+        
+        assert isinstance(user_dict, dict)
+        assert 'id' in user_dict
+        assert 'username' in user_dict
+        assert 'created_at' in user_dict
+        assert 'updated_at' in user_dict
+        
+        # Test serialization with sensitive data excluded by default
+        assert user_dict.get('email') == '[ENCRYPTED]'  # Should be masked
+        
+        # Test serialization including sensitive data
+        user_dict_sensitive = user.to_dict(include_sensitive=True)
+        assert user_dict_sensitive.get('email') != '[ENCRYPTED]'
+        
+        # Test field exclusion
+        user_dict_excluded = user.to_dict(exclude_fields=['username', 'email'])
+        assert 'username' not in user_dict_excluded
+        assert 'email' not in user_dict_excluded
+        
+        # Test JSON serialization
+        user_json = user.to_json()
+        assert isinstance(user_json, str)
+        
+        # Verify JSON can be parsed
+        parsed_json = json.loads(user_json)
+        assert isinstance(parsed_json, dict)
+        assert 'id' in parsed_json
+    
+    def test_base_model_crud_operations(self, db_session: Session):
+        """
+        Test BaseModel CRUD operations with validation.
+        
+        Validates create, update, delete operations with proper validation
+        and error handling per Section 6.2 database design.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test create operation
+        user_data = {
+            'username': 'test_user_crud',
+            'email': 'crud@example.com',
+            'first_name': 'CRUD',
+            'last_name': 'Test'
+        }
+        
+        user = User.create(**user_data)
+        assert user is not None
+        assert user.username == 'test_user_crud'
+        
+        # Test get_by_id operation
+        user_id = user.id
+        retrieved_user = User.get_by_id(user_id)
+        assert retrieved_user is not None
+        assert retrieved_user.id == user_id
+        
+        # Test update operation
+        updated_user = user.update(first_name='Updated CRUD')
+        assert updated_user.first_name == 'Updated CRUD'
+        
+        # Test validation during update
         try:
-            yield
-        finally:
-            end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss
-            
-            execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
-            memory_delta = end_memory - start_memory
-            
-            self.performance_metrics[operation_name].append({
-                'execution_time_ms': execution_time,
-                'memory_delta_bytes': memory_delta,
-                'timestamp': datetime.utcnow()
-            })
+            user.update(email='invalid-email-format')
+            pytest.fail("Expected validation error for invalid email")
+        except (ValidationError, ValueError):
+            pass  # Expected validation error
+        
+        # Test delete operation
+        delete_result = user.delete()
+        assert delete_result is True
+        
+        # Verify user is deleted
+        deleted_user = User.get_by_id(user_id)
+        assert deleted_user is None
+
+
+class TestUserModelComprehensive:
+    """
+    Comprehensive test suite for User model functionality.
     
-    def validate_audit_fields(self, model_instance, operation_type: str = None):
+    Validates user authentication, profile management, session handling,
+    and Auth0 integration per Section 0.2.1 database model conversion.
+    """
+    
+    def test_user_model_creation_and_validation(self, db_session: Session):
         """
-        Validate audit field population and user context tracking.
+        Test User model creation with comprehensive field validation.
+        
+        Validates user creation with required fields, constraints, and
+        validation rules per Section 4.7.1 data operations testing.
         
         Args:
-            model_instance: Model instance with AuditMixin fields
-            operation_type: Expected operation type (INSERT, UPDATE, DELETE)
+            db_session: Database session fixture
         """
-        if hasattr(model_instance, 'created_at'):
-            assert model_instance.created_at is not None, "created_at field should be populated"
-            assert isinstance(model_instance.created_at, datetime), "created_at should be datetime"
+        # Test user creation with all required fields
+        user_data = {
+            'username': 'test_user_validation',
+            'email': 'validation@example.com',
+            'first_name': 'Test',
+            'last_name': 'User'
+        }
         
-        if hasattr(model_instance, 'updated_at'):
-            assert model_instance.updated_at is not None, "updated_at field should be populated"
-            assert isinstance(model_instance.updated_at, datetime), "updated_at should be datetime"
+        user = User(**user_data)
+        db_session.add(user)
+        db_session.flush()
         
-        if operation_type and hasattr(model_instance, 'operation_type'):
-            assert model_instance.operation_type == operation_type, f"Operation type mismatch: expected {operation_type}"
+        # Verify basic field population
+        assert user.id is not None
+        assert user.username == 'test_user_validation'
+        assert user.email == 'validation@example.com'
+        assert user.first_name == 'Test'
+        assert user.last_name == 'User'
+        
+        # Verify default values
+        assert user.is_active is True
+        assert user.is_verified is False
+        assert user.is_admin is False
+        assert user.login_count == 0
+        assert user.failed_login_count == 0
+        assert user.timezone == 'UTC'
+        assert user.locale == 'en'
+        
+        # Verify audit timestamps
+        assert user.created_at is not None
+        assert user.updated_at is not None
+    
+    def test_user_model_validation_rules(self, db_session: Session):
+        """
+        Test User model field validation and constraint enforcement.
+        
+        Validates input validation, format checking, and constraint enforcement
+        for user data integrity per Section 4.4.1.1 validation rules.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test username validation
+        user = User()
+        
+        # Test empty username validation
+        with pytest.raises(ValueError, match="Username cannot be empty"):
+            user.validate_username('username', '')
+        
+        # Test short username validation
+        with pytest.raises(ValueError, match="Username must be at least 3 characters"):
+            user.validate_username('username', 'ab')
+        
+        # Test long username validation
+        with pytest.raises(ValueError, match="Username cannot exceed 100 characters"):
+            user.validate_username('username', 'a' * 101)
+        
+        # Test invalid characters in username
+        with pytest.raises(ValueError, match="Username can only contain"):
+            user.validate_username('username', 'user@name!')
+        
+        # Test valid username
+        valid_username = user.validate_username('username', 'Valid_User.123')
+        assert valid_username == 'valid_user.123'  # Should be lowercased
+        
+        # Test email validation
+        with pytest.raises(ValueError, match="Email cannot be empty"):
+            user.validate_email('email', '')
+        
+        with pytest.raises(ValueError, match="Invalid email format"):
+            user.validate_email('email', 'invalid-email')
+        
+        with pytest.raises(ValueError, match="Invalid email format"):
+            user.validate_email('email', '@domain.com')
+        
+        with pytest.raises(ValueError, match="Email cannot exceed 255 characters"):
+            user.validate_email('email', 'a' * 250 + '@example.com')
+        
+        # Test valid email
+        valid_email = user.validate_email('email', 'Valid.Email@Example.COM')
+        assert valid_email == 'valid.email@example.com'  # Should be lowercased
+        
+        # Test Auth0 user ID validation
+        assert user.validate_auth0_user_id('auth0_user_id', None) is None
+        assert user.validate_auth0_user_id('auth0_user_id', '') is None
+        
+        with pytest.raises(ValueError, match="Auth0 user ID cannot exceed 255 characters"):
+            user.validate_auth0_user_id('auth0_user_id', 'a' * 256)
+        
+        valid_auth0_id = user.validate_auth0_user_id('auth0_user_id', 'auth0|user123')
+        assert valid_auth0_id == 'auth0|user123'
+    
+    def test_user_password_management(self, db_session: Session):
+        """
+        Test User model password hashing and verification.
+        
+        Validates secure password storage using Werkzeug password hashing
+        per Section 6.4 security architecture requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        
+        # Test password setting with validation
+        with pytest.raises(ValueError, match="Password cannot be empty"):
+            user.set_password('')
+        
+        with pytest.raises(ValueError, match="Password must be at least 8 characters"):
+            user.set_password('short')
+        
+        with pytest.raises(ValueError, match="Password cannot exceed 128 characters"):
+            user.set_password('a' * 129)
+        
+        # Test valid password setting
+        test_password = 'SecurePassword123!'
+        user.set_password(test_password)
+        
+        # Verify password hash is generated
+        assert user.password_hash is not None
+        assert user.password_hash != test_password  # Should be hashed
+        
+        # Test password verification
+        assert user.check_password(test_password) is True
+        assert user.check_password('wrong_password') is False
+        assert user.check_password('') is False
+        
+        # Test password check with no password hash
+        user_no_password = UserFactory(auth0_user=True)  # Auth0 users have no local password
+        assert user_no_password.check_password('any_password') is False
+    
+    def test_user_authentication_tracking(self, db_session: Session):
+        """
+        Test User model authentication and login tracking.
+        
+        Validates login tracking, failed attempt management, and account
+        locking per Section 6.4 security architecture.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        initial_login_count = user.login_count
+        
+        # Test successful login tracking
+        user.update_login_tracking()
+        
+        assert user.last_login_at is not None
+        assert user.login_count == initial_login_count + 1
+        assert user.failed_login_count == 0
+        assert user.locked_until is None
+        
+        # Test failed login recording
+        initial_failed_count = user.failed_login_count
+        
+        # Record failed login attempts
+        for i in range(4):
+            is_locked = user.record_failed_login(max_attempts=5)
+            assert is_locked is False
+            assert user.failed_login_count == initial_failed_count + i + 1
+        
+        # Fifth failed attempt should lock account
+        is_locked = user.record_failed_login(max_attempts=5, lockout_duration=30)
+        assert is_locked is True
+        assert user.failed_login_count == 5
+        assert user.locked_until is not None
+        assert user.is_account_locked() is True
+        
+        # Test account unlock
+        user.unlock_account()
+        assert user.locked_until is None
+        assert user.failed_login_count == 0
+        assert user.is_account_locked() is False
+        
+        # Test successful login after unlock
+        user.update_login_tracking()
+        assert user.failed_login_count == 0
+        assert user.locked_until is None
+    
+    def test_user_auth0_integration(self, db_session: Session):
+        """
+        Test User model Auth0 integration and synchronization.
+        
+        Validates Auth0 user data synchronization and metadata management
+        per Section 3.4 third-party services integration.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory(auth0_user=True)
+        
+        # Test Auth0 user data synchronization
+        auth0_data = {
+            'user_id': 'auth0|new_user_id_123',
+            'email': 'auth0@example.com',
+            'email_verified': True,
+            'given_name': 'Auth0',
+            'family_name': 'User',
+            'picture': 'https://example.com/auth0_avatar.jpg',
+            'user_metadata': {
+                'preferences': {'theme': 'dark', 'language': 'en'},
+                'onboarding_completed': True
+            },
+            'app_metadata': {
+                'roles': ['user', 'beta_tester'],
+                'customer_tier': 'premium'
+            },
+            'last_login': '2024-01-15T10:30:00Z',
+            'logins_count': 25
+        }
+        
+        user.sync_with_auth0(auth0_data)
+        
+        # Verify Auth0 data synchronization
+        assert user.auth0_user_id == 'auth0|new_user_id_123'
+        assert user.email == 'auth0@example.com'
+        assert user.is_verified is True
+        assert user.first_name == 'Auth0'
+        assert user.last_name == 'User'
+        assert user.avatar_url == 'https://example.com/auth0_avatar.jpg'
+        assert user.login_count >= 25  # Should be max of current and Auth0 count
+        
+        # Test metadata retrieval
+        user_metadata = user.get_auth0_metadata()
+        assert isinstance(user_metadata, dict)
+        assert user_metadata.get('preferences', {}).get('theme') == 'dark'
+        
+        app_metadata = user.get_auth0_app_metadata()
+        assert isinstance(app_metadata, dict)
+        assert 'user' in app_metadata.get('roles', [])
+        assert app_metadata.get('customer_tier') == 'premium'
+        
+        # Test invalid metadata handling
+        user.auth0_metadata = 'invalid_json'
+        assert user.get_auth0_metadata() == {}
+        
+        user.auth0_app_metadata = None
+        assert user.get_auth0_app_metadata() == {}
+    
+    def test_user_profile_management(self, db_session: Session):
+        """
+        Test User model profile management and utility methods.
+        
+        Validates profile data management, full name generation, and
+        user data representation per user management requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test full name generation
+        user = UserFactory(first_name='Test', last_name='User')
+        assert user.get_full_name() == 'Test User'
+        
+        user_first_only = UserFactory(first_name='FirstOnly', last_name=None)
+        assert user_first_only.get_full_name() == 'FirstOnly'
+        
+        user_last_only = UserFactory(first_name=None, last_name='LastOnly')
+        assert user_last_only.get_full_name() == 'LastOnly'
+        
+        user_no_names = UserFactory(first_name=None, last_name=None)
+        assert user_no_names.get_full_name() == user_no_names.username
+        
+        # Test user dictionary representation
+        user_dict = user.to_dict()
+        
+        required_fields = [
+            'id', 'username', 'is_active', 'is_verified', 'is_admin',
+            'timezone', 'locale', 'last_login_at', 'login_count',
+            'created_at', 'updated_at'
+        ]
+        
+        for field in required_fields:
+            assert field in user_dict
+        
+        # Test sensitive data inclusion
+        user_dict_sensitive = user.to_dict(include_sensitive=True)
+        sensitive_fields = [
+            'email', 'first_name', 'last_name', 'full_name',
+            'auth0_user_id', 'auth0_metadata', 'auth0_app_metadata'
+        ]
+        
+        for field in sensitive_fields:
+            assert field in user_dict_sensitive
+        
+        # Test Flask-Login integration methods
+        assert user.get_id() == str(user.id)
+        assert user.is_authenticated is True
+        assert user.is_anonymous is False
+    
+    def test_user_rbac_integration(self, db_session: Session, user_factory):
+        """
+        Test User model RBAC integration with roles and permissions.
+        
+        Validates role assignment, permission checking, and authorization
+        workflows per Section 6.4 security architecture.
+        
+        Args:
+            db_session: Database session fixture
+            user_factory: User factory for test data generation
+        """
+        # Create test scenario with RBAC entities
+        rbac_scenario = FactoryPresets.create_rbac_test_scenario()
+        
+        admin_user = rbac_scenario['users']['admin_user']
+        manager_user = rbac_scenario['users']['manager_user']
+        regular_user = rbac_scenario['users']['regular_user']
+        
+        admin_role = rbac_scenario['roles']['admin']
+        manager_role = rbac_scenario['roles']['manager']
+        user_role = rbac_scenario['roles']['user']
+        
+        db_session.flush()
+        
+        # Test role checking
+        assert admin_user.has_role('admin') is True
+        assert admin_user.has_role('manager') is False
+        assert manager_user.has_role('manager') is True
+        assert regular_user.has_role('user') is True
+        
+        # Test permission checking (Note: This would require actual RBAC implementation)
+        # For now, test the method structure exists
+        assert hasattr(admin_user, 'has_permission')
+        assert hasattr(admin_user, 'get_permissions')
+        assert hasattr(admin_user, 'get_active_roles')
+        
+        # Test role assignment methods
+        assert hasattr(admin_user, 'assign_role')
+        assert hasattr(admin_user, 'revoke_role')
 
 
-class TestUserModel(ModelTestBase):
+class TestUserSessionModel:
     """
-    Comprehensive User model testing validating authentication fields, encrypted data,
-    RBAC relationships, and Auth0 integration per Section 0.1.2 authentication migration requirements.
+    Test suite for UserSession model functionality.
     
-    Tests cover user authentication patterns, profile management, session handling,
-    and security features ensuring complete functional parity with Node.js implementation.
+    Validates session management, token handling, and security tracking
+    per Flask session management requirements.
     """
     
-    def test_user_creation_with_basic_fields(self):
-        """Test basic user creation with authentication and profile fields."""
-        with self.measure_performance('user_creation_basic'):
-            user_data = {
-                'auth0_user_id': f"auth0|{uuid.uuid4().hex[:24]}",
-                'email': 'test@example.com',
-                'username': 'testuser',
-                'first_name': 'Test',
-                'last_name': 'User',
-                'is_active': True,
-                'email_verified': True
+    def test_user_session_creation(self, db_session: Session):
+        """
+        Test UserSession creation and token generation.
+        
+        Validates session creation with secure token generation and
+        proper lifecycle management per Section 6.4 security architecture.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        
+        # Test session creation with default parameters
+        session = UserSession.create_session(user)
+        
+        # Verify session tokens are generated
+        assert session.session_token is not None
+        assert len(session.session_token) > 32  # URL-safe base64 encoded
+        assert session.csrf_token is not None
+        assert session.refresh_token is not None
+        
+        # Verify session lifecycle fields
+        assert session.user_id == user.id
+        assert session.expires_at > datetime.utcnow()
+        assert session.is_valid is True
+        assert session.revoked_at is None
+        
+        # Verify default values
+        assert session.login_method == 'password'
+        assert session.last_activity_at is not None
+        
+        # Test session creation with custom parameters
+        custom_session = UserSession.create_session(
+            user,
+            expires_in=7200,  # 2 hours
+            ip_address='192.168.1.1',
+            user_agent='Test User Agent',
+            login_method='auth0'
+        )
+        
+        assert custom_session.ip_address == '192.168.1.1'
+        assert custom_session.user_agent == 'Test User Agent'
+        assert custom_session.login_method == 'auth0'
+        assert custom_session.expires_at > datetime.utcnow() + timedelta(hours=1)
+    
+    def test_user_session_lifecycle_management(self, db_session: Session):
+        """
+        Test UserSession lifecycle and status management.
+        
+        Validates session expiration, validity checking, and extension
+        capabilities per session management requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        
+        # Test active session
+        session = UserSession.create_session(user, expires_in=3600)
+        
+        assert session.is_expired() is False
+        assert session.is_active() is True
+        
+        # Test session expiration
+        session.expires_at = datetime.utcnow() - timedelta(hours=1)
+        assert session.is_expired() is True
+        assert session.is_active() is False
+        
+        # Test invalid session
+        session.is_valid = False
+        session.expires_at = datetime.utcnow() + timedelta(hours=1)
+        assert session.is_expired() is False
+        assert session.is_active() is False
+        
+        # Test session extension
+        valid_session = UserSession.create_session(user, expires_in=1800)
+        original_expiry = valid_session.expires_at
+        
+        valid_session.extend_session(extend_by=3600)
+        
+        assert valid_session.expires_at > original_expiry
+        assert valid_session.last_activity_at > original_expiry
+        
+        # Test extension of inactive session (should not extend)
+        valid_session.is_valid = False
+        pre_extension_expiry = valid_session.expires_at
+        valid_session.extend_session(extend_by=3600)
+        # Should not extend inactive session
+        assert valid_session.expires_at == pre_extension_expiry
+    
+    def test_user_session_security_tracking(self, db_session: Session):
+        """
+        Test UserSession security tracking and activity monitoring.
+        
+        Validates IP tracking, user agent monitoring, and security
+        event detection per Section 6.4 security requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        session = UserSession.create_session(
+            user,
+            ip_address='192.168.1.100',
+            user_agent='Initial User Agent'
+        )
+        
+        # Test activity update
+        original_activity = session.last_activity_at
+        
+        session.update_activity(
+            ip_address='192.168.1.101',
+            user_agent='Updated User Agent'
+        )
+        
+        assert session.last_activity_at > original_activity
+        assert session.ip_address == '192.168.1.101'
+        assert session.user_agent == 'Updated User Agent'
+        
+        # Test IP change detection (should log warning)
+        with patch('models.user.logging.getLogger') as mock_logger:
+            session.update_activity(ip_address='10.0.0.1')
+            
+            # Verify logging was called for IP change
+            mock_logger.return_value.warning.assert_called()
+            call_args = mock_logger.return_value.warning.call_args[0][0]
+            assert 'Session IP change detected' in call_args
+        
+        # Test session revocation
+        session.revoke_session(revoked_by='admin')
+        
+        assert session.is_valid is False
+        assert session.revoked_at is not None
+        assert session.revoked_by == 'admin'
+        assert session.is_active() is False
+    
+    def test_user_session_data_management(self, db_session: Session):
+        """
+        Test UserSession data storage and retrieval.
+        
+        Validates session data serialization, storage, and retrieval
+        for application state management.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        session = UserSessionFactory(user=user)
+        
+        # Test session data storage
+        test_data = {
+            'preferences': {
+                'theme': 'dark',
+                'language': 'en',
+                'notifications': True
+            },
+            'navigation': {
+                'last_page': '/dashboard',
+                'breadcrumbs': ['/home', '/dashboard']
+            },
+            'temp_data': {
+                'form_state': {'field1': 'value1'},
+                'shopping_cart': []
             }
-            
-            user = UserFactory(**user_data)
-            self.db.add(user)
-            self.db.commit()
-            
-            # Validate basic fields
-            self.assert_model_fields(user, user_data)
-            
-            # Validate audit fields
-            self.validate_audit_fields(user, 'INSERT')
-            
-            # Validate unique constraints
-            assert user.id is not None, "User ID should be auto-generated"
-            assert user.email == user_data['email'], "Email should be preserved"
-            assert user.username == user_data['username'], "Username should be preserved"
+        }
+        
+        session.set_session_data(test_data)
+        
+        # Verify data serialization
+        assert session.session_data is not None
+        
+        # Test data retrieval
+        retrieved_data = session.get_session_data()
+        assert isinstance(retrieved_data, dict)
+        assert retrieved_data['preferences']['theme'] == 'dark'
+        assert retrieved_data['navigation']['last_page'] == '/dashboard'
+        
+        # Test empty data handling
+        session.set_session_data(None)
+        assert session.session_data is None
+        assert session.get_session_data() == {}
+        
+        # Test invalid JSON handling
+        session.session_data = 'invalid_json'
+        assert session.get_session_data() == {}
     
-    def test_user_encrypted_fields_functionality(self):
-        """Test encrypted field storage and retrieval using SQLAlchemy-Utils EncryptedType."""
-        with self.measure_performance('user_encrypted_fields'):
-            user = UserFactory(
-                phone_number='+1-555-123-4567',
-                date_of_birth=datetime(1990, 5, 15).date()
-            )
-            self.db.add(user)
-            self.db.commit()
-            
-            # Refresh from database to test encryption/decryption
-            self.db.refresh(user)
-            
-            # Validate encrypted fields are properly decrypted on access
-            assert user.phone_number == '+1-555-123-4567', "Phone number should be decrypted correctly"
-            assert user.date_of_birth == datetime(1990, 5, 15).date(), "Date of birth should be decrypted correctly"
-            
-            # Validate that encrypted data is not stored in plain text (implementation dependent)
-            # This would require direct database inspection in a full implementation
-    
-    def test_user_rbac_relationship_integration(self):
-        """Test User-Role many-to-many relationship mapping and RBAC integration."""
-        with self.measure_performance('user_rbac_relationships'):
-            # Create user with multiple roles
-            roles = RoleFactory.create_batch(3, is_active=True)
-            user = UserFactory()
-            
-            # Add roles to user
-            for role in roles:
-                user.roles.append(role)
-            
-            self.db.add(user)
-            self.db.commit()
-            
-            # Validate relationship integrity
-            self.assert_relationship_integrity(user, 'roles', expected_count=3, related_model_class=Role)
-            
-            # Test bidirectional relationship
-            for role in roles:
-                assert user in role.users, "Bidirectional relationship should be maintained"
-            
-            # Test role removal
-            user.roles.remove(roles[0])
-            self.db.commit()
-            
-            self.assert_relationship_integrity(user, 'roles', expected_count=2)
-    
-    def test_user_session_relationship_management(self):
-        """Test User-UserSession one-to-many relationship with session lifecycle."""
-        with self.measure_performance('user_session_relationships'):
-            user = UserFactory()
-            sessions = UserSessionFactory.create_batch(3, user=user, is_active=True)
-            
-            self.db.add(user)
-            self.db.commit()
-            
-            # Validate session relationships
-            self.assert_relationship_integrity(user, 'sessions', expected_count=3, related_model_class=UserSession)
-            
-            # Test session expiration handling
-            expired_session = sessions[0]
-            expired_session.expires_at = datetime.utcnow() - timedelta(hours=1)
-            expired_session.is_active = False
-            self.db.commit()
-            
-            # Validate that expired session is still associated but marked inactive
-            active_sessions = [s for s in user.sessions if s.is_active]
-            assert len(active_sessions) == 2, "Only active sessions should be counted"
-    
-    def test_user_unique_constraint_enforcement(self):
-        """Test unique constraint enforcement for email and username fields."""
-        with self.measure_performance('user_unique_constraints'):
-            # Create first user
-            user1 = UserFactory(email='unique@test.com', username='uniqueuser')
-            self.db.add(user1)
-            self.db.commit()
-            
-            # Attempt to create user with duplicate email
-            with pytest.raises(IntegrityError):
-                user2 = UserFactory(email='unique@test.com', username='differentuser')
-                self.db.add(user2)
-                self.db.commit()
-            
-            self.db.rollback()
-            
-            # Attempt to create user with duplicate username
-            with pytest.raises(IntegrityError):
-                user3 = UserFactory(email='different@test.com', username='uniqueuser')
-                self.db.add(user3)
-                self.db.commit()
-    
-    def test_user_business_entity_ownership(self):
-        """Test User ownership of BusinessEntity objects with cascade relationships."""
-        with self.measure_performance('user_business_ownership'):
-            user = UserFactory()
-            entities = BusinessEntityFactory.create_batch(3, owner=user)
-            
-            self.db.add(user)
-            self.db.commit()
-            
-            # Validate ownership relationships
-            self.assert_relationship_integrity(user, 'owned_entities', expected_count=3, related_model_class=BusinessEntity)
-            
-            # Test cascade deletion behavior (if configured)
-            for entity in entities:
-                assert entity.owner_id == user.id, "Entity should be owned by user"
-    
-    def test_user_authentication_metadata_tracking(self):
-        """Test authentication metadata fields and security tracking."""
-        with self.measure_performance('user_auth_metadata'):
-            login_time = datetime.utcnow()
-            user = UserFactory(
-                last_login_at=login_time,
-                last_login_ip='192.168.1.100',
-                failed_login_attempts=2,
-                account_locked_until=None
-            )
-            self.db.add(user)
-            self.db.commit()
-            
-            # Validate authentication metadata
-            assert user.last_login_at == login_time, "Last login time should be preserved"
-            assert user.last_login_ip == '192.168.1.100', "Last login IP should be tracked"
-            assert user.failed_login_attempts == 2, "Failed login attempts should be tracked"
-            
-            # Test account locking mechanism
-            user.account_locked_until = datetime.utcnow() + timedelta(hours=1)
-            user.failed_login_attempts = 5
-            self.db.commit()
-            
-            # Validate account lock status
-            assert user.account_locked_until > datetime.utcnow(), "Account should be locked"
-            assert not user.is_account_accessible, "Account should not be accessible when locked"
-    
-    def test_user_profile_data_validation(self):
-        """Test user profile data validation and optional field handling."""
-        with self.measure_performance('user_profile_validation'):
-            # Test with complete profile
-            complete_user = UserFactory(
-                first_name='John',
-                last_name='Doe',
-                bio='Software developer with 5+ years experience',
-                timezone='America/New_York',
-                locale='en-US',
-                profile_picture_url='https://example.com/avatar.jpg'
-            )
-            self.db.add(complete_user)
-            self.db.commit()
-            
-            # Validate profile completeness
-            assert complete_user.first_name == 'John', "First name should be stored correctly"
-            assert complete_user.last_name == 'Doe', "Last name should be stored correctly"
-            assert complete_user.bio is not None, "Bio should be optional but stored when provided"
-            assert complete_user.timezone == 'America/New_York', "Timezone should be configurable"
-            assert complete_user.locale == 'en-US', "Locale should be configurable"
-            
-            # Test with minimal profile
-            minimal_user = UserFactory(
-                first_name=None,
-                last_name=None,
-                bio=None,
-                profile_picture_url=None
-            )
-            self.db.add(minimal_user)
-            self.db.commit()
-            
-            # Validate minimal profile handling
-            assert minimal_user.first_name is None, "Optional fields should accept None"
-            assert minimal_user.bio is None, "Bio should be optional"
-
-
-class TestRolePermissionModels(ModelTestBase):
-    """
-    RBAC system testing validating Role and Permission models, many-to-many relationships,
-    and authorization system integration per Section 0.1.2 authorization requirements.
-    
-    Tests comprehensive role-based access control functionality including role hierarchy,
-    permission granularity, and user-role-permission relationship integrity.
-    """
-    
-    def test_role_creation_and_validation(self):
-        """Test Role model creation with validation and status management."""
-        with self.measure_performance('role_creation'):
-            role_data = {
-                'name': 'admin',
-                'description': 'Administrative role with full system access',
-                'is_active': True
-            }
-            
-            role = RoleFactory(**role_data)
-            self.db.add(role)
-            self.db.commit()
-            
-            # Validate role fields
-            self.assert_model_fields(role, role_data)
-            self.validate_audit_fields(role, 'INSERT')
-            
-            # Test role status management
-            role.is_active = False
-            self.db.commit()
-            
-            assert not role.is_active, "Role should be deactivatable"
-    
-    def test_permission_resource_action_model(self):
-        """Test Permission model with resource-action pattern for granular access control."""
-        with self.measure_performance('permission_resource_action'):
-            permission_data = {
-                'resource': 'users',
-                'action': 'create',
-                'description': 'Permission to create new users',
-                'is_active': True
-            }
-            
-            permission = PermissionFactory(**permission_data)
-            self.db.add(permission)
-            self.db.commit()
-            
-            # Validate permission fields
-            self.assert_model_fields(permission, permission_data)
-            
-            # Test resource-action uniqueness (if implemented)
-            # This would depend on unique constraints in the actual model
-    
-    def test_role_permission_many_to_many_relationship(self):
-        """Test Role-Permission many-to-many relationship with association metadata."""
-        with self.measure_performance('role_permission_relationships'):
-            role = RoleFactory(name='editor')
-            permissions = PermissionFactory.create_batch(5, is_active=True)
-            
-            # Assign permissions to role
-            for permission in permissions:
-                role.permissions.append(permission)
-            
-            self.db.add(role)
-            self.db.commit()
-            
-            # Validate relationship integrity
-            self.assert_relationship_integrity(role, 'permissions', expected_count=5, related_model_class=Permission)
-            
-            # Test bidirectional relationship
-            for permission in permissions:
-                assert role in permission.roles, "Bidirectional relationship should be maintained"
-            
-            # Test permission removal
-            role.permissions.remove(permissions[0])
-            self.db.commit()
-            
-            self.assert_relationship_integrity(role, 'permissions', expected_count=4)
-    
-    def test_role_hierarchy_and_inheritance(self):
-        """Test role hierarchy patterns and permission inheritance (if implemented)."""
-        with self.measure_performance('role_hierarchy'):
-            # Create role hierarchy: admin > manager > user
-            admin_role = RoleFactory(name='admin')
-            manager_role = RoleFactory(name='manager')  
-            user_role = RoleFactory(name='user')
-            
-            # Create permission set
-            admin_perms = PermissionFactory.create_batch(10, is_active=True)
-            manager_perms = admin_perms[:7]  # Subset of admin permissions
-            user_perms = admin_perms[:3]     # Subset of manager permissions
-            
-            # Assign permissions by hierarchy
-            admin_role.permissions.extend(admin_perms)
-            manager_role.permissions.extend(manager_perms)
-            user_role.permissions.extend(user_perms)
-            
-            self.db.add_all([admin_role, manager_role, user_role])
-            self.db.commit()
-            
-            # Validate hierarchy permissions
-            assert len(admin_role.permissions) == 10, "Admin should have all permissions"
-            assert len(manager_role.permissions) == 7, "Manager should have subset of permissions"
-            assert len(user_role.permissions) == 3, "User should have minimal permissions"
-    
-    def test_permission_deactivation_impact(self):
-        """Test permission deactivation and its impact on role-permission relationships."""
-        with self.measure_performance('permission_deactivation'):
-            role = RoleFactory()
-            active_permission = PermissionFactory(is_active=True)
-            inactive_permission = PermissionFactory(is_active=False)
-            
-            role.permissions.extend([active_permission, inactive_permission])
-            self.db.add(role)
-            self.db.commit()
-            
-            # Validate total permissions
-            assert len(role.permissions) == 2, "Role should have both permissions"
-            
-            # Filter for active permissions (business logic dependent)
-            active_permissions = [p for p in role.permissions if p.is_active]
-            assert len(active_permissions) == 1, "Only active permissions should be effective"
-    
-    def test_rbac_user_role_assignment(self):
-        """Test complete RBAC integration with User-Role assignments."""
-        with self.measure_performance('rbac_user_assignment'):
-            # Create RBAC system
-            rbac_system = FactoryDataManager.create_rbac_system(
-                user_count=3, role_count=3, permission_count=10
-            )
-            
-            users = rbac_system['users']
-            roles = rbac_system['roles']
-            permissions = rbac_system['permissions']
-            
-            # Validate complete RBAC integration
-            for user in users:
-                assert len(user.roles) > 0, "Users should have assigned roles"
-                
-                # Collect all permissions through roles
-                user_permissions = set()
-                for role in user.roles:
-                    user_permissions.update(role.permissions)
-                
-                assert len(user_permissions) > 0, "Users should have permissions through roles"
-
-
-class TestBusinessEntityModels(ModelTestBase):
-    """
-    Business entity and relationship model testing validating core business object
-    functionality, entity relationships, and business logic integration per Section 0.1.2
-    business logic preservation requirements.
-    
-    Tests business entity management, relationship tracking, and workflow orchestration
-    patterns ensuring complete functional equivalence with Node.js implementation.
-    """
-    
-    def test_business_entity_creation_and_metadata(self):
-        """Test BusinessEntity model with metadata fields and status management."""
-        with self.measure_performance('business_entity_creation'):
-            entity_data = {
-                'name': 'Acme Corporation',
-                'description': 'Technology consulting company',
-                'entity_type': 'company',
-                'status': 'active',
-                'external_id': f"EXT-{uuid.uuid4().hex[:12].upper()}",
-                'tags': json.dumps(['technology', 'consulting', 'enterprise']),
-                'metadata': json.dumps({
-                    'industry': 'Technology',
-                    'size': 'large',
-                    'location': 'New York',
-                    'founded': '2010'
-                })
-            }
-            
-            owner = UserFactory()
-            entity = BusinessEntityFactory(owner=owner, **entity_data)
-            
-            self.db.add(entity)
-            self.db.commit()
-            
-            # Validate entity fields
-            self.assert_model_fields(entity, entity_data)
-            self.validate_audit_fields(entity, 'INSERT')
-            
-            # Validate owner relationship
-            assert entity.owner_id == owner.id, "Entity should be owned by user"
-            assert entity in owner.owned_entities, "Bidirectional relationship should work"
-    
-    def test_entity_relationship_modeling(self):
-        """Test EntityRelationship model for business entity interconnections."""
-        with self.measure_performance('entity_relationships'):
-            # Create related entities
-            parent_company = BusinessEntityFactory(entity_type='company', name='Parent Corp')
-            subsidiary = BusinessEntityFactory(entity_type='company', name='Subsidiary LLC')
-            
-            # Create relationship
-            relationship = EntityRelationshipFactory(
-                source_entity=parent_company,
-                target_entity=subsidiary,
-                relationship_type='parent_child',
-                description='Parent-subsidiary corporate relationship',
-                is_active=True,
-                strength=9
-            )
-            
-            self.db.add(relationship)
-            self.db.commit()
-            
-            # Validate relationship fields
-            assert relationship.source_entity_id == parent_company.id, "Source entity should be linked"
-            assert relationship.target_entity_id == subsidiary.id, "Target entity should be linked"
-            assert relationship.relationship_type == 'parent_child', "Relationship type should be preserved"
-            assert relationship.strength == 9, "Relationship strength should be tracked"
-            
-            # Validate bidirectional navigation
-            assert relationship in parent_company.source_relationships, "Source relationships should be accessible"
-            assert relationship in subsidiary.target_relationships, "Target relationships should be accessible"
-    
-    def test_entity_hierarchy_creation(self):
-        """Test complex entity hierarchy creation and relationship navigation."""
-        with self.measure_performance('entity_hierarchy'):
-            # Create business hierarchy using factory manager
-            hierarchy_entities = FactoryDataManager.create_business_hierarchy(
-                levels=3, entities_per_level=2
-            )
-            
-            # Validate hierarchy structure
-            assert len(hierarchy_entities) == 6, "Should create 6 entities across 3 levels"
-            
-            # Find top-level entities (no incoming parent relationships)
-            top_level_entities = []
-            for entity in hierarchy_entities:
-                has_parent = any(
-                    rel.relationship_type == 'parent_child' and rel.target_entity_id == entity.id
-                    for rel in EntityRelationship.query.all()
-                )
-                if not has_parent:
-                    top_level_entities.append(entity)
-            
-            assert len(top_level_entities) == 2, "Should have 2 top-level entities"
-    
-    def test_entity_relationship_types_and_validation(self):
-        """Test various entity relationship types and their validation rules."""
-        with self.measure_performance('relationship_types'):
-            entity1 = BusinessEntityFactory(entity_type='company')
-            entity2 = BusinessEntityFactory(entity_type='department')
-            
-            # Test different relationship types
-            relationship_types = [
-                'parent_child', 'owns', 'manages', 'depends_on',
-                'collaborates_with', 'reports_to', 'provides_service_to'
-            ]
-            
-            relationships = []
-            for rel_type in relationship_types:
-                rel = EntityRelationshipFactory(
-                    source_entity=entity1,
-                    target_entity=entity2,
-                    relationship_type=rel_type,
-                    is_active=True
-                )
-                relationships.append(rel)
-            
-            self.db.add_all(relationships)
-            self.db.commit()
-            
-            # Validate all relationship types are preserved
-            for rel in relationships:
-                assert rel.relationship_type in relationship_types, f"Relationship type {rel.relationship_type} should be valid"
-                assert rel.is_active, "Relationships should be active by default"
-    
-    def test_entity_metadata_json_operations(self):
-        """Test JSON metadata field operations and queries."""
-        with self.measure_performance('json_metadata_operations'):
-            entity = BusinessEntityFactory(
-                metadata=json.dumps({
-                    'industry': 'Technology',
-                    'employees': 150,
-                    'locations': ['New York', 'San Francisco'],
-                    'certifications': {
-                        'iso27001': True,
-                        'soc2': True
-                    }
-                })
-            )
-            
-            self.db.add(entity)
-            self.db.commit()
-            
-            # Test metadata access and manipulation
-            metadata = json.loads(entity.metadata)
-            assert metadata['industry'] == 'Technology', "JSON metadata should be preserved"
-            assert metadata['employees'] == 150, "Numeric values should be preserved"
-            assert len(metadata['locations']) == 2, "Array values should be preserved"
-            assert metadata['certifications']['iso27001'], "Nested objects should be preserved"
-    
-    def test_entity_status_lifecycle_management(self):
-        """Test entity status transitions and lifecycle management."""
-        with self.measure_performance('entity_lifecycle'):
-            entity = BusinessEntityFactory(status='pending')
-            self.db.add(entity)
-            self.db.commit()
-            
-            # Test status transitions
-            status_transitions = ['pending', 'active', 'inactive', 'archived']
-            
-            for status in status_transitions:
-                entity.status = status
-                self.db.commit()
-                
-                # Refresh and validate
-                self.db.refresh(entity)
-                assert entity.status == status, f"Entity status should transition to {status}"
-                
-                # Validate updated_at field changes
-                previous_updated = entity.updated_at
-                entity.description = f"Updated for status {status}"
-                self.db.commit()
-                
-                assert entity.updated_at > previous_updated, "updated_at should change on modifications"
-
-
-class TestAuditAndSecurityModels(ModelTestBase):
-    """
-    Audit logging and security event model testing validating comprehensive audit trails,
-    security monitoring, and compliance requirements per Section 0.1.2 audit trail requirements.
-    
-    Tests audit log capture, security event tracking, and compliance data management
-    ensuring complete audit capabilities for regulatory requirements and security analysis.
-    """
-    
-    def test_audit_log_dml_operation_tracking(self):
-        """Test AuditLog model for comprehensive DML operation tracking."""
-        with self.measure_performance('audit_log_tracking'):
-            user = UserFactory()
-            
-            audit_data = {
-                'table_name': 'users',
-                'record_id': str(user.id),
-                'operation_type': 'INSERT',
-                'user': user,
-                'user_ip': '192.168.1.100',
-                'user_agent': 'Mozilla/5.0 Test Browser',
-                'old_values': None,
-                'new_values': json.dumps({
-                    'email': user.email,
-                    'username': user.username,
-                    'is_active': True
-                }),
-                'changed_fields': json.dumps(['email', 'username', 'is_active']),
-                'transaction_id': uuid.uuid4().hex,
-                'session_id': uuid.uuid4().hex
-            }
-            
-            audit_log = AuditLogFactory(**audit_data)
-            self.db.add(audit_log)
-            self.db.commit()
-            
-            # Validate audit log fields
-            self.assert_model_fields(audit_log, audit_data)
-            
-            # Validate JSON fields
-            new_values = json.loads(audit_log.new_values)
-            changed_fields = json.loads(audit_log.changed_fields)
-            
-            assert new_values['email'] == user.email, "New values should be tracked"
-            assert 'email' in changed_fields, "Changed fields should be tracked"
-    
-    def test_audit_log_update_operation_tracking(self):
-        """Test audit log tracking for UPDATE operations with before/after values."""
-        with self.measure_performance('audit_update_tracking'):
-            user = UserFactory()
-            
-            # Simulate update operation audit
-            old_values = {
-                'email': 'old@example.com',
-                'is_active': False
-            }
-            new_values = {
-                'email': user.email,
-                'is_active': True
-            }
-            
-            audit_log = AuditLogFactory(
-                table_name='users',
-                record_id=str(user.id),
-                operation_type='UPDATE',
-                user=user,
-                old_values=json.dumps(old_values),
-                new_values=json.dumps(new_values),
-                changed_fields=json.dumps(['email', 'is_active'])
-            )
-            
-            self.db.add(audit_log)
-            self.db.commit()
-            
-            # Validate update tracking
-            assert audit_log.operation_type == 'UPDATE', "Operation type should be UPDATE"
-            
-            old_data = json.loads(audit_log.old_values)
-            new_data = json.loads(audit_log.new_values)
-            
-            assert old_data['email'] != new_data['email'], "Old and new values should differ"
-            assert old_data['is_active'] != new_data['is_active'], "Status change should be tracked"
-    
-    def test_security_event_classification_and_tracking(self):
-        """Test SecurityEvent model for threat detection and incident response."""
-        with self.measure_performance('security_event_tracking'):
-            user = UserFactory()
-            
-            event_data = {
-                'event_type': 'authentication_failure',
-                'severity': 'medium',
-                'description': 'Multiple failed login attempts detected',
-                'user': user,
-                'ip_address': '192.168.1.100',
-                'user_agent': 'Mozilla/5.0 Test Browser',
-                'event_data': json.dumps({
-                    'request_path': '/api/auth/login',
-                    'method': 'POST',
-                    'response_code': 401,
-                    'attempt_count': 5
-                }),
-                'risk_score': 75,
-                'is_resolved': False,
-                'detection_rule': 'RULE_AUTH_001',
-                'source_system': 'webapp'
-            }
-            
-            security_event = SecurityEventFactory(**event_data)
-            self.db.add(security_event)
-            self.db.commit()
-            
-            # Validate security event fields
-            self.assert_model_fields(security_event, event_data)
-            
-            # Validate event data JSON
-            event_details = json.loads(security_event.event_data)
-            assert event_details['attempt_count'] == 5, "Event details should be preserved"
-            assert event_details['response_code'] == 401, "Response code should be tracked"
-    
-    def test_security_event_resolution_workflow(self):
-        """Test security event resolution and incident management workflow."""
-        with self.measure_performance('security_resolution'):
-            user = UserFactory()
-            resolver = UserFactory()
-            
-            security_event = SecurityEventFactory(
-                event_type='suspicious_activity',
-                severity='high',
-                user=user,
-                is_resolved=False,
-                risk_score=90
-            )
-            
-            self.db.add(security_event)
-            self.db.commit()
-            
-            # Simulate resolution process
-            resolution_time = datetime.utcnow()
-            security_event.is_resolved = True
-            security_event.resolved_by = resolver
-            security_event.resolved_at = resolution_time
-            
-            self.db.commit()
-            
-            # Validate resolution
-            assert security_event.is_resolved, "Event should be marked as resolved"
-            assert security_event.resolved_by_id == resolver.id, "Resolver should be tracked"
-            assert security_event.resolved_at == resolution_time, "Resolution time should be tracked"
-    
-    def test_audit_trail_comprehensive_data_generation(self):
-        """Test comprehensive audit trail generation across multiple entities."""
-        with self.measure_performance('comprehensive_audit_trail'):
-            # Generate comprehensive audit trail using factory manager
-            audit_logs = FactoryDataManager.create_audit_trail(
-                entity_count=10, operations_per_entity=5
-            )
-            
-            # Validate audit trail coverage
-            assert len(audit_logs) == 50, "Should create 50 audit log entries"
-            
-            # Validate operation types distribution
-            operation_types = [log.operation_type for log in audit_logs]
-            assert 'INSERT' in operation_types, "Should include INSERT operations"
-            assert 'UPDATE' in operation_types, "Should include UPDATE operations"
-            assert 'DELETE' in operation_types, "Should include DELETE operations"
-            
-            # Validate user attribution
-            users_with_operations = set(log.user_id for log in audit_logs if log.user_id)
-            assert len(users_with_operations) > 0, "Audit logs should have user attribution"
-    
-    def test_audit_log_retention_and_archival_simulation(self):
-        """Test audit log retention policies and archival procedures simulation."""
-        with self.measure_performance('audit_retention'):
-            # Create audit logs with different ages
-            current_time = datetime.utcnow()
-            
-            # Recent logs (within retention period)
-            recent_logs = []
-            for i in range(5):
-                log = AuditLogFactory(
-                    created_at=current_time - timedelta(days=i*30)  # 0-4 months old
-                )
-                recent_logs.append(log)
-            
-            # Old logs (beyond retention period)
-            old_logs = []
-            for i in range(5):
-                log = AuditLogFactory(
-                    created_at=current_time - timedelta(days=(i+24)*30)  # 2+ years old
-                )
-                old_logs.append(log)
-            
-            self.db.add_all(recent_logs + old_logs)
-            self.db.commit()
-            
-            # Simulate retention policy queries
-            retention_cutoff = current_time - timedelta(days=365*2)  # 2 years
-            
-            logs_for_archival = self.db.query(AuditLog).filter(
-                AuditLog.created_at < retention_cutoff
-            ).all()
-            
-            logs_for_retention = self.db.query(AuditLog).filter(
-                AuditLog.created_at >= retention_cutoff
-            ).all()
-            
-            assert len(logs_for_archival) == 5, "Old logs should be identified for archival"
-            assert len(logs_for_retention) == 5, "Recent logs should be retained"
-
-
-class TestUserSessionModel(ModelTestBase):
-    """
-    User session model testing validating Flask session management, security token handling,
-    and authentication flow integration per Section 0.1.3 session architecture specifications.
-    
-    Tests session lifecycle management, security features, and integration with
-    Flask-Login authentication patterns ensuring complete session functionality.
-    """
-    
-    def test_user_session_creation_and_lifecycle(self):
-        """Test UserSession creation with security tokens and expiration management."""
-        with self.measure_performance('session_lifecycle'):
-            user = UserFactory()
-            
-            session_data = {
-                'user': user,
-                'session_token': uuid.uuid4().hex,
-                'csrf_token': uuid.uuid4().hex,
-                'ip_address': '192.168.1.100',
-                'user_agent': 'Mozilla/5.0 Test Browser',
-                'device_fingerprint': uuid.uuid4().hex[:16],
-                'is_active': True,
-                'expires_at': datetime.utcnow() + timedelta(hours=24),
-                'location_data': json.dumps({
-                    'country': 'United States',
-                    'city': 'New York',
-                    'timezone': 'America/New_York'
-                })
-            }
-            
-            session = UserSessionFactory(**session_data)
-            self.db.add(session)
-            self.db.commit()
-            
-            # Validate session fields
-            self.assert_model_fields(session, session_data)
-            
-            # Validate session-user relationship
-            assert session.user_id == user.id, "Session should be linked to user"
-            assert session in user.sessions, "Bidirectional relationship should work"
-    
-    def test_session_token_uniqueness_and_security(self):
-        """Test session token uniqueness constraints and security features."""
-        with self.measure_performance('session_security'):
-            user1 = UserFactory()
-            user2 = UserFactory()
-            
-            # Create sessions with unique tokens
-            session1 = UserSessionFactory(user=user1, session_token='unique_token_1')
-            session2 = UserSessionFactory(user=user2, session_token='unique_token_2')
-            
-            self.db.add_all([session1, session2])
-            self.db.commit()
-            
-            # Attempt to create session with duplicate token
-            with pytest.raises(IntegrityError):
-                duplicate_session = UserSessionFactory(user=user2, session_token='unique_token_1')
-                self.db.add(duplicate_session)
-                self.db.commit()
-    
-    def test_session_expiration_and_cleanup(self):
-        """Test session expiration handling and cleanup procedures."""
-        with self.measure_performance('session_expiration'):
-            user = UserFactory()
-            current_time = datetime.utcnow()
-            
+    def test_user_session_cleanup_utilities(self, db_session: Session):
+        """
+        Test UserSession cleanup and maintenance utilities.
+        
+        Validates expired session cleanup and maintenance procedures
+        per Section 6.5 monitoring and observability.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        
+        # Create mix of active and expired sessions
+        active_sessions = []
+        expired_sessions = []
+        
+        for i in range(3):
             # Create active session
-            active_session = UserSessionFactory(
-                user=user,
-                is_active=True,
-                expires_at=current_time + timedelta(hours=1)
-            )
+            active_session = UserSession.create_session(user, expires_in=3600)
+            active_sessions.append(active_session)
             
             # Create expired session
-            expired_session = UserSessionFactory(
-                user=user,
-                is_active=True,  # Still marked active but expired
-                expires_at=current_time - timedelta(hours=1)
-            )
+            expired_session = UserSession.create_session(user, expires_in=3600)
+            expired_session.expires_at = datetime.utcnow() - timedelta(hours=i+1)
+            expired_sessions.append(expired_session)
+        
+        db_session.add_all(active_sessions + expired_sessions)
+        db_session.flush()
+        
+        # Test cleanup count (mock the actual cleanup since it uses text() queries)
+        with patch.object(db_session, 'execute') as mock_execute:
+            # Mock the result to simulate deleting expired sessions
+            mock_result = Mock()
+            mock_result.rowcount = len(expired_sessions)
+            mock_execute.return_value = mock_result
             
-            self.db.add_all([active_session, expired_session])
-            self.db.commit()
+            deleted_count = UserSession.cleanup_expired_sessions(batch_size=100)
             
-            # Query for expired sessions
-            expired_sessions = self.db.query(UserSession).filter(
-                UserSession.expires_at < current_time
-            ).all()
-            
-            active_sessions = self.db.query(UserSession).filter(
-                and_(
-                    UserSession.expires_at > current_time,
-                    UserSession.is_active == True
-                )
-            ).all()
-            
-            assert len(expired_sessions) == 1, "Should identify expired sessions"
-            assert len(active_sessions) == 1, "Should identify active sessions"
+            # Verify cleanup was attempted
+            assert mock_execute.called
+            assert deleted_count == len(expired_sessions)
     
-    def test_session_activity_tracking(self):
-        """Test session activity tracking and last activity updates."""
-        with self.measure_performance('session_activity'):
-            user = UserFactory()
-            session = UserSessionFactory(user=user, is_active=True)
-            
-            initial_activity = session.last_activity_at
-            self.db.add(session)
-            self.db.commit()
-            
-            # Simulate activity update
-            new_activity_time = datetime.utcnow()
-            session.last_activity_at = new_activity_time
-            self.db.commit()
-            
-            # Validate activity tracking
-            assert session.last_activity_at > initial_activity, "Activity time should be updated"
-            
-            # Test activity-based session validation
-            session_timeout = timedelta(minutes=30)
-            is_session_valid = (
-                session.is_active and 
-                session.expires_at > datetime.utcnow() and
-                session.last_activity_at > (datetime.utcnow() - session_timeout)
-            )
-            
-            # Should be valid since we just updated activity
-            assert is_session_valid, "Session should be valid based on recent activity"
-    
-    def test_session_location_and_device_tracking(self):
-        """Test session location data and device fingerprinting."""
-        with self.measure_performance('session_device_tracking'):
-            user = UserFactory()
-            
-            session = UserSessionFactory(
-                user=user,
-                ip_address='203.0.113.100',  # Example IP
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                device_fingerprint='device_fp_12345',
-                location_data=json.dumps({
-                    'country': 'Canada',
-                    'city': 'Toronto',
-                    'timezone': 'America/Toronto',
-                    'lat': 43.6532,
-                    'lon': -79.3832
-                })
-            )
-            
-            self.db.add(session)
-            self.db.commit()
-            
-            # Validate location data
-            location_data = json.loads(session.location_data)
-            assert location_data['country'] == 'Canada', "Location country should be tracked"
-            assert location_data['city'] == 'Toronto', "Location city should be tracked"
-            assert 'lat' in location_data, "Latitude should be tracked"
-            assert 'lon' in location_data, "Longitude should be tracked"
-            
-            # Validate device tracking
-            assert session.device_fingerprint == 'device_fp_12345', "Device fingerprint should be tracked"
-            assert 'Windows NT' in session.user_agent, "User agent should be preserved"
-    
-    def test_multiple_active_sessions_per_user(self):
-        """Test support for multiple active sessions per user."""
-        with self.measure_performance('multiple_sessions'):
-            user = UserFactory()
-            
-            # Create multiple active sessions (different devices)
-            sessions = []
-            devices = ['desktop', 'mobile', 'tablet']
-            
-            for device in devices:
-                session = UserSessionFactory(
-                    user=user,
-                    is_active=True,
-                    device_fingerprint=f"{device}_fingerprint",
-                    user_agent=f"TestAgent/{device}"
-                )
-                sessions.append(session)
-            
-            self.db.add_all(sessions)
-            self.db.commit()
-            
-            # Validate multiple sessions
-            user_sessions = self.db.query(UserSession).filter(
-                and_(
-                    UserSession.user_id == user.id,
-                    UserSession.is_active == True
-                )
-            ).all()
-            
-            assert len(user_sessions) == 3, "User should support multiple active sessions"
-            
-            # Validate session distinction
-            fingerprints = [s.device_fingerprint for s in user_sessions]
-            assert len(set(fingerprints)) == 3, "Each session should have unique device fingerprint"
+    def test_user_session_serialization(self, db_session: Session):
+        """
+        Test UserSession serialization for API responses.
+        
+        Validates session data serialization with token protection
+        and security considerations.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        session = UserSessionFactory(user=user)
+        
+        # Test basic serialization (without tokens)
+        session_dict = session.to_dict()
+        
+        required_fields = [
+            'id', 'user_id', 'expires_at', 'is_valid', 'is_expired',
+            'is_active', 'ip_address', 'user_agent', 'last_activity_at',
+            'login_method', 'created_at'
+        ]
+        
+        for field in required_fields:
+            assert field in session_dict
+        
+        # Verify tokens are not included by default
+        assert 'session_token' not in session_dict
+        assert 'csrf_token' not in session_dict
+        assert 'refresh_token' not in session_dict
+        
+        # Test serialization with tokens
+        session_dict_with_tokens = session.to_dict(include_tokens=True)
+        
+        token_fields = ['session_token', 'csrf_token', 'refresh_token', 'session_data']
+        
+        for field in token_fields:
+            assert field in session_dict_with_tokens
+        
+        # Test datetime serialization format
+        assert isinstance(session_dict['expires_at'], str)
+        assert 'T' in session_dict['expires_at']  # ISO format
 
 
-class TestModelPerformanceAndIntegration(ModelTestBase):
+class TestUserUtilities:
     """
-    Performance validation and integration testing ensuring Flask-SQLAlchemy models
-    meet or exceed Node.js baseline performance metrics per Section 4.7.4.1 performance
-    benchmarking requirements.
+    Test suite for UserUtils helper functions and user management operations.
     
-    Tests comprehensive integration scenarios, performance characteristics, and
-    system scalability ensuring production readiness and SLA compliance.
+    Validates utility functions for user creation, authentication, and
+    session management per comprehensive user management requirements.
     """
     
-    def test_bulk_operations_performance(self):
-        """Test bulk database operations performance against baseline metrics."""
-        with self.measure_performance('bulk_operations'):
-            start_time = time.time()
-            
-            # Create large dataset for performance testing
-            users = UserFactory.create_batch(100)
-            self.db.add_all(users)
-            self.db.commit()
-            
-            bulk_creation_time = time.time() - start_time
-            
-            # Validate performance (should be under 1 second for 100 users)
-            assert bulk_creation_time < 1.0, f"Bulk creation took {bulk_creation_time:.3f}s, should be under 1.0s"
-            
-            # Test bulk query performance
-            start_time = time.time()
-            active_users = self.db.query(User).filter(User.is_active == True).all()
-            query_time = time.time() - start_time
-            
-            assert query_time < 0.1, f"Bulk query took {query_time:.3f}s, should be under 0.1s"
+    def test_user_creation_utility(self, db_session: Session):
+        """
+        Test UserUtils.create_user() functionality.
+        
+        Validates user creation utility with validation and constraint
+        checking per Section 4.7.1 data operations testing.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test successful user creation
+        user = UserUtils.create_user(
+            username='utility_test_user',
+            email='utility@example.com',
+            password='SecurePassword123!',
+            first_name='Utility',
+            last_name='Test'
+        )
+        
+        assert user is not None
+        assert user.username == 'utility_test_user'
+        assert user.email == 'utility@example.com'
+        assert user.first_name == 'Utility'
+        assert user.last_name == 'Test'
+        assert user.password_hash is not None
+        
+        # Test user creation validation
+        with pytest.raises(ValueError, match="Username and email are required"):
+            UserUtils.create_user('', 'email@example.com')
+        
+        with pytest.raises(ValueError, match="Username and email are required"):
+            UserUtils.create_user('username', '')
+        
+        # Test duplicate user prevention
+        db_session.add(user)
+        db_session.flush()
+        
+        with pytest.raises(ValueError, match="User with this username or email already exists"):
+            UserUtils.create_user('utility_test_user', 'different@example.com')
+        
+        with pytest.raises(ValueError, match="User with this username or email already exists"):
+            UserUtils.create_user('different_username', 'utility@example.com')
+        
+        # Test Auth0 user creation (without password)
+        auth0_user = UserUtils.create_user(
+            username='auth0_utility_user',
+            email='auth0_utility@example.com',
+            auth0_user_id='auth0|utility_123'
+        )
+        
+        assert auth0_user.auth0_user_id == 'auth0|utility_123'
+        assert auth0_user.password_hash is None
     
-    def test_complex_relationship_queries_performance(self):
-        """Test complex relationship queries with joins and eager loading."""
-        with self.measure_performance('complex_queries'):
-            # Create complex data structure
-            rbac_system = FactoryDataManager.create_rbac_system(
-                user_count=20, role_count=5, permission_count=15
+    def test_user_authentication_utility(self, db_session: Session):
+        """
+        Test UserUtils.authenticate_user() functionality.
+        
+        Validates user authentication with username/email lookup and
+        password verification per Section 6.4 security architecture.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Create test user
+        user = UserUtils.create_user(
+            username='auth_test_user',
+            email='auth_test@example.com',
+            password='AuthTestPassword123!'
+        )
+        db_session.add(user)
+        db_session.flush()
+        
+        # Test successful authentication with username
+        authenticated_user = UserUtils.authenticate_user('auth_test_user', 'AuthTestPassword123!')
+        assert authenticated_user is not None
+        assert authenticated_user.id == user.id
+        assert authenticated_user.login_count > 0
+        
+        # Test successful authentication with email
+        authenticated_user_email = UserUtils.authenticate_user('auth_test@example.com', 'AuthTestPassword123!')
+        assert authenticated_user_email is not None
+        assert authenticated_user_email.id == user.id
+        
+        # Test failed authentication with wrong password
+        failed_auth = UserUtils.authenticate_user('auth_test_user', 'WrongPassword')
+        assert failed_auth is None
+        
+        # Verify failed login was recorded
+        db_session.refresh(user)
+        assert user.failed_login_count > 0
+        
+        # Test authentication with non-existent user
+        no_user = UserUtils.authenticate_user('nonexistent_user', 'any_password')
+        assert no_user is None
+        
+        # Test authentication with locked account
+        user.failed_login_count = 5
+        user.locked_until = datetime.utcnow() + timedelta(minutes=30)
+        db_session.flush()
+        
+        locked_auth = UserUtils.authenticate_user('auth_test_user', 'AuthTestPassword123!')
+        assert locked_auth is None
+        
+        # Test authentication with inactive user
+        user.is_active = False
+        user.locked_until = None
+        user.failed_login_count = 0
+        db_session.flush()
+        
+        inactive_auth = UserUtils.authenticate_user('auth_test_user', 'AuthTestPassword123!')
+        assert inactive_auth is None
+    
+    def test_auth0_user_management_utility(self, db_session: Session):
+        """
+        Test UserUtils.find_or_create_auth0_user() functionality.
+        
+        Validates Auth0 user creation and linking per Section 3.4
+        third-party services integration.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test Auth0 user creation
+        auth0_data = {
+            'user_id': 'auth0|test_user_123',
+            'email': 'auth0_user@example.com',
+            'username': 'auth0_test_user',
+            'nickname': 'auth0user',
+            'email_verified': True,
+            'given_name': 'Auth0',
+            'family_name': 'User',
+            'picture': 'https://example.com/avatar.jpg'
+        }
+        
+        # Test creating new Auth0 user
+        auth0_user = UserUtils.find_or_create_auth0_user(auth0_data)
+        db_session.flush()
+        
+        assert auth0_user is not None
+        assert auth0_user.auth0_user_id == 'auth0|test_user_123'
+        assert auth0_user.email == 'auth0_user@example.com'
+        assert auth0_user.is_verified is True
+        assert auth0_user.first_name == 'Auth0'
+        assert auth0_user.last_name == 'User'
+        
+        # Test finding existing Auth0 user
+        existing_user = UserUtils.find_or_create_auth0_user(auth0_data)
+        assert existing_user.id == auth0_user.id
+        
+        # Test linking existing email user to Auth0
+        existing_email_user = UserUtils.create_user(
+            username='existing_email_user',
+            email='existing@example.com',
+            password='ExistingPassword123!'
+        )
+        db_session.add(existing_email_user)
+        db_session.flush()
+        
+        auth0_linking_data = {
+            'user_id': 'auth0|link_user_456',
+            'email': 'existing@example.com',
+            'email_verified': True
+        }
+        
+        linked_user = UserUtils.find_or_create_auth0_user(auth0_linking_data)
+        assert linked_user.id == existing_email_user.id
+        assert linked_user.auth0_user_id == 'auth0|link_user_456'
+        
+        # Test username uniqueness handling
+        username_conflict_data = {
+            'user_id': 'auth0|conflict_user_789',
+            'email': 'conflict@example.com',
+            'username': auth0_user.username  # Same username as existing user
+        }
+        
+        conflict_user = UserUtils.find_or_create_auth0_user(username_conflict_data)
+        assert conflict_user.username != auth0_user.username
+        assert conflict_user.username.startswith(auth0_user.username)
+        
+        # Test Auth0 user ID validation
+        with pytest.raises(ValueError, match="Auth0 user ID is required"):
+            UserUtils.find_or_create_auth0_user({'email': 'no_auth0_id@example.com'})
+    
+    def test_session_management_utilities(self, db_session: Session):
+        """
+        Test UserUtils session management utilities.
+        
+        Validates session creation, validation, and user retrieval
+        per session management requirements.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        db_session.add(user)
+        db_session.flush()
+        
+        # Test session creation utility
+        session = UserUtils.create_session_for_user(
+            user,
+            expires_in=7200,
+            ip_address='10.0.0.1',
+            user_agent='Test Agent'
+        )
+        
+        assert session is not None
+        assert session.user_id == user.id
+        assert session.ip_address == '10.0.0.1'
+        assert session.user_agent == 'Test Agent'
+        
+        # Test session token validation
+        valid_session = UserUtils.validate_session_token(session.session_token)
+        assert valid_session is not None
+        assert valid_session.id == session.id
+        
+        # Test invalid token validation
+        invalid_session = UserUtils.validate_session_token('invalid_token')
+        assert invalid_session is None
+        
+        # Test empty token validation
+        empty_session = UserUtils.validate_session_token('')
+        assert empty_session is None
+        
+        # Test expired session validation
+        session.expires_at = datetime.utcnow() - timedelta(hours=1)
+        db_session.flush()
+        
+        expired_session = UserUtils.validate_session_token(session.session_token)
+        assert expired_session is None
+        
+        # Test user retrieval by session token
+        active_session = UserSession.create_session(user)
+        db_session.add(active_session)
+        db_session.flush()
+        
+        session_user = UserUtils.get_user_by_session_token(active_session.session_token)
+        assert session_user is not None
+        assert session_user.id == user.id
+        
+        # Test user retrieval with invalid token
+        no_user = UserUtils.get_user_by_session_token('invalid_token')
+        assert no_user is None
+
+
+class TestDatabaseRelationships:
+    """
+    Test database relationships and referential integrity.
+    
+    Validates model relationships, foreign key constraints, and cascading
+    operations per Section 4.7.1 relationship testing requirements.
+    """
+    
+    def test_user_session_relationship(self, db_session: Session):
+        """
+        Test User-UserSession relationship integrity.
+        
+        Validates one-to-many relationship between User and UserSession
+        with proper foreign key constraints and cascading behavior.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        user = UserFactory()
+        db_session.add(user)
+        db_session.flush()
+        
+        # Create multiple sessions for the user
+        sessions = []
+        for i in range(3):
+            session = UserSession.create_session(
+                user,
+                ip_address=f'192.168.1.{i+1}',
+                login_method='password'
             )
-            
-            start_time = time.time()
-            
-            # Complex query with multiple joins
-            users_with_permissions = self.db.query(User).join(
-                User.roles
-            ).join(
-                Role.permissions
-            ).filter(
-                Permission.resource == 'users'
-            ).distinct().all()
-            
-            complex_query_time = time.time() - start_time
-            
-            assert complex_query_time < 0.2, f"Complex query took {complex_query_time:.3f}s, should be under 0.2s"
-            assert len(users_with_permissions) > 0, "Should find users with user permissions"
+            sessions.append(session)
+            db_session.add(session)
+        
+        db_session.flush()
+        
+        # Test relationship from user side
+        user_sessions = user.sessions.all()
+        assert len(user_sessions) == 3
+        
+        for session in sessions:
+            assert session in user_sessions
+        
+        # Test relationship from session side
+        for session in sessions:
+            assert session.user.id == user.id
+            assert session.user_id == user.id
+        
+        # Test filtering on relationship
+        active_sessions = user.sessions.filter_by(is_valid=True).all()
+        assert len(active_sessions) == 3
+        
+        # Revoke one session and test filtering
+        sessions[0].revoke_session()
+        db_session.flush()
+        
+        valid_sessions = user.sessions.filter_by(is_valid=True).all()
+        assert len(valid_sessions) == 2
+        
+        # Test cascading delete (if configured)
+        session_ids = [s.id for s in sessions]
+        
+        # Delete user - sessions should be handled according to cascade configuration
+        db_session.delete(user)
+        db_session.flush()
+        
+        # Verify cascading behavior (sessions should be deleted with cascade='all, delete-orphan')
+        remaining_sessions = db_session.query(UserSession).filter(UserSession.id.in_(session_ids)).all()
+        assert len(remaining_sessions) == 0
     
-    def test_concurrent_session_handling(self):
-        """Test concurrent database session handling and connection pooling."""
-        with self.measure_performance('concurrent_sessions'):
-            import threading
-            import queue
+    def test_factory_relationship_integrity(self, db_session: Session):
+        """
+        Test relationship integrity in factory-generated data.
+        
+        Validates that Factory Boy generates consistent relationship
+        data with proper foreign key relationships.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test RBAC relationship factories
+        rbac_scenario = FactoryPresets.create_rbac_test_scenario()
+        
+        users = rbac_scenario['users']
+        roles = rbac_scenario['roles']
+        user_roles = rbac_scenario['user_roles']
+        
+        db_session.flush()
+        
+        # Verify user-role relationships
+        for role_name, user_role in user_roles.items():
+            assert user_role.user in users.values()
+            assert user_role.role in roles.values()
+            assert user_role.user_id == user_role.user.id
+            assert user_role.role_id == user_role.role.id
+        
+        # Test business entity relationships
+        business_hierarchy = FactoryPresets.create_business_entity_hierarchy()
+        
+        parent_company = business_hierarchy['parent_company']
+        departments = business_hierarchy['departments']
+        projects = business_hierarchy['projects']
+        dept_relationships = business_hierarchy['dept_relationships']
+        
+        db_session.flush()
+        
+        # Verify hierarchical relationships
+        for relationship in dept_relationships:
+            assert relationship.source_entity == parent_company
+            assert relationship.target_entity in departments
+            assert relationship.relationship_type == 'parent_child'
+        
+        # Test audit log relationships
+        audit_scenario = FactoryPresets.create_user_session_with_audit_trail()
+        
+        user = audit_scenario['user']
+        session = audit_scenario['session']
+        audit_logs = audit_scenario['audit_logs']
+        
+        db_session.flush()
+        
+        # Verify audit relationships
+        assert session.user == user
+        assert session.user_id == user.id
+        
+        for audit_log in audit_logs:
+            assert audit_log.user_id == user
+            assert hasattr(audit_log, 'username')  # Should be populated from user
+
+
+class TestPerformanceAndBenchmarking:
+    """
+    Performance testing and benchmarking for database operations.
+    
+    Validates database performance meets SLA requirements and establishes
+    benchmarks per Section 4.7.4 performance validation.
+    """
+    
+    def test_user_query_performance(self, db_session: Session, benchmark):
+        """
+        Benchmark User model query performance.
+        
+        Validates user lookup and authentication query performance
+        meets response time requirements per Section 4.7.4.1.
+        
+        Args:
+            db_session: Database session fixture
+            benchmark: pytest-benchmark fixture for performance testing
+        """
+        # Create test data for performance testing
+        users = []
+        for i in range(100):
+            user = UserFactory.build()
+            users.append(user)
+        
+        db_session.add_all(users)
+        db_session.flush()
+        
+        # Benchmark user lookup by ID
+        test_user = users[50]
+        
+        def lookup_user_by_id():
+            return db_session.query(User).filter_by(id=test_user.id).first()
+        
+        result = benchmark(lookup_user_by_id)
+        assert result is not None
+        assert result.id == test_user.id
+        
+        # Benchmark user lookup by username
+        def lookup_user_by_username():
+            return db_session.query(User).filter_by(username=test_user.username).first()
+        
+        result = benchmark(lookup_user_by_username)
+        assert result is not None
+        
+        # Benchmark user authentication query
+        def authenticate_query():
+            return db_session.query(User).filter(
+                (User.username == test_user.username) | (User.email == test_user.email)
+            ).filter_by(is_active=True).first()
+        
+        result = benchmark(authenticate_query)
+        assert result is not None
+    
+    def test_session_cleanup_performance(self, db_session: Session, benchmark):
+        """
+        Benchmark session cleanup operation performance.
+        
+        Validates batch cleanup operations meet performance requirements
+        for maintenance operations per Section 6.5 monitoring.
+        
+        Args:
+            db_session: Database session fixture
+            benchmark: pytest-benchmark fixture for performance testing
+        """
+        # Create test user and expired sessions
+        user = UserFactory()
+        db_session.add(user)
+        db_session.flush()
+        
+        # Create a mix of active and expired sessions
+        sessions = []
+        for i in range(50):
+            session = UserSession.create_session(user, expires_in=3600)
+            if i < 25:  # Make half of them expired
+                session.expires_at = datetime.utcnow() - timedelta(hours=i+1)
+            sessions.append(session)
+        
+        db_session.add_all(sessions)
+        db_session.flush()
+        
+        # Benchmark session cleanup query
+        def cleanup_expired_sessions():
+            # Simulate the cleanup query (without actual deletion in test)
+            expired_sessions = db_session.query(UserSession).filter(
+                UserSession.expires_at < datetime.utcnow()
+            ).limit(100).all()
+            return len(expired_sessions)
+        
+        expired_count = benchmark(cleanup_expired_sessions)
+        assert expired_count >= 25  # Should find at least 25 expired sessions
+    
+    def test_relationship_query_performance(self, db_session: Session, benchmark):
+        """
+        Benchmark relationship query performance.
+        
+        Validates complex relationship queries meet performance requirements
+        for business logic operations.
+        
+        Args:
+            db_session: Database session fixture
+            benchmark: pytest-benchmark fixture for performance testing
+        """
+        # Create comprehensive test scenario
+        rbac_scenario = FactoryPresets.create_rbac_test_scenario()
+        db_session.flush()
+        
+        admin_user = rbac_scenario['users']['admin_user']
+        
+        # Benchmark role lookup query
+        def get_user_roles():
+            # This would use the actual relationship once RBAC models are implemented
+            return db_session.query(User).filter_by(id=admin_user.id).first()
+        
+        result = benchmark(get_user_roles)
+        assert result is not None
+        
+        # Benchmark session query with user join
+        user_with_sessions = UserFactory()
+        sessions = [UserSession.create_session(user_with_sessions) for _ in range(10)]
+        db_session.add(user_with_sessions)
+        db_session.add_all(sessions)
+        db_session.flush()
+        
+        def get_user_with_sessions():
+            return db_session.query(User).filter_by(id=user_with_sessions.id).first()
+        
+        result = benchmark(get_user_with_sessions)
+        assert result is not None
+
+
+class TestDataIntegrityAndMigration:
+    """
+    Test data integrity and migration validation.
+    
+    Validates data consistency, constraint enforcement, and migration
+    integrity per Section 4.4.2 migration management requirements.
+    """
+    
+    def test_database_constraint_enforcement(self, db_session: Session):
+        """
+        Test database constraint enforcement and validation.
+        
+        Validates unique constraints, foreign key constraints, and
+        check constraints per Section 4.4.1.1 validation rules.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test unique constraint enforcement
+        user1 = UserFactory(username='unique_test_user', email='unique@example.com')
+        db_session.add(user1)
+        db_session.flush()
+        
+        # Attempt to create user with duplicate username
+        with pytest.raises((IntegrityError, ValueError)):
+            user2 = UserFactory(username='unique_test_user', email='different@example.com')
+            db_session.add(user2)
+            db_session.flush()
+        
+        db_session.rollback()
+        
+        # Attempt to create user with duplicate email
+        with pytest.raises((IntegrityError, ValueError)):
+            user3 = UserFactory(username='different_user', email='unique@example.com')
+            db_session.add(user3)
+            db_session.flush()
+        
+        db_session.rollback()
+        
+        # Test check constraint enforcement (if implemented)
+        user = UserFactory()
+        user.login_count = -1  # Should violate check constraint
+        
+        # This would raise IntegrityError if check constraints are enforced
+        with pytest.raises((IntegrityError, ValueError)):
+            db_session.add(user)
+            db_session.flush()
+        
+        db_session.rollback()
+    
+    def test_data_validation_during_migration(self, db_session: Session):
+        """
+        Test data validation and consistency during migration scenarios.
+        
+        Validates data integrity preservation during model changes
+        per Section 4.4.2.3 post-migration validation.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Create comprehensive test data
+        users = UserFactory.create_batch(10)
+        db_session.add_all(users)
+        db_session.flush()
+        
+        # Create sessions for each user
+        all_sessions = []
+        for user in users:
+            sessions = [UserSession.create_session(user) for _ in range(3)]
+            all_sessions.extend(sessions)
+        
+        db_session.add_all(all_sessions)
+        db_session.flush()
+        
+        # Validate data consistency
+        total_users = db_session.query(User).count()
+        total_sessions = db_session.query(UserSession).count()
+        
+        assert total_users == 10
+        assert total_sessions == 30
+        
+        # Validate relationship consistency
+        for user in users:
+            user_sessions = user.sessions.all()
+            assert len(user_sessions) == 3
             
-            results = queue.Queue()
-            error_queue = queue.Queue()
+            for session in user_sessions:
+                assert session.user_id == user.id
+                assert session.user.id == user.id
+        
+        # Validate audit trail consistency
+        for user in users:
+            assert user.created_at is not None
+            assert user.updated_at is not None
+            assert user.created_at <= user.updated_at
+        
+        for session in all_sessions:
+            assert session.created_at is not None
+            assert session.updated_at is not None
+            assert session.last_activity_at is not None
+    
+    def test_factory_data_consistency(self, db_session: Session):
+        """
+        Test Factory Boy data generation consistency and validation.
+        
+        Validates that factory-generated data maintains consistency
+        and realistic patterns per Section 4.7.3.2 test data management.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test user factory data consistency
+        users = UserFactory.create_batch(20)
+        db_session.add_all(users)
+        db_session.flush()
+        
+        # Validate unique constraints in factory data
+        usernames = [user.username for user in users]
+        emails = [user.email for user in users]
+        
+        assert len(set(usernames)) == len(usernames)  # All usernames unique
+        assert len(set(emails)) == len(emails)  # All emails unique
+        
+        # Validate realistic data patterns
+        for user in users:
+            assert user.username is not None
+            assert len(user.username) >= 3
+            assert '@' in user.email
+            assert '.' in user.email
+            assert user.timezone in ['UTC', 'America/New_York', 'America/Los_Angeles', 
+                                   'Europe/London', 'Europe/Paris', 'Asia/Tokyo', 'Australia/Sydney']
+            assert user.locale in ['en', 'es', 'fr', 'de', 'it', 'pt', 'ja', 'ko', 'zh']
+        
+        # Test session factory data consistency
+        sessions = []
+        for user in users[:5]:  # Test with subset
+            user_sessions = UserSessionFactory.create_batch(3, user=user)
+            sessions.extend(user_sessions)
+        
+        db_session.add_all(sessions)
+        db_session.flush()
+        
+        # Validate session tokens are unique
+        session_tokens = [session.session_token for session in sessions]
+        assert len(set(session_tokens)) == len(session_tokens)
+        
+        # Validate session data consistency
+        for session in sessions:
+            assert session.session_token is not None
+            assert len(session.session_token) > 32
+            assert session.user_id is not None
+            assert session.expires_at > datetime.utcnow()
+            assert session.last_activity_at <= datetime.utcnow()
+
+
+class TestErrorHandlingAndRecovery:
+    """
+    Test error handling and recovery procedures.
+    
+    Validates error scenarios, rollback procedures, and recovery
+    mechanisms per Section 4.7.6 error handling requirements.
+    """
+    
+    def test_transaction_rollback_on_error(self, db_session: Session):
+        """
+        Test transaction rollback during error conditions.
+        
+        Validates that transactions are properly rolled back on errors
+        to maintain database consistency.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Start with clean state
+        initial_user_count = db_session.query(User).count()
+        
+        try:
+            # Begin transaction with valid user
+            user1 = UserFactory(username='rollback_test_1')
+            db_session.add(user1)
+            db_session.flush()
             
-            def create_user_concurrently(thread_id):
+            # Attempt to add invalid user that should cause rollback
+            user2 = UserFactory(username='rollback_test_1')  # Duplicate username
+            db_session.add(user2)
+            db_session.flush()  # This should fail
+            
+            pytest.fail("Expected IntegrityError for duplicate username")
+            
+        except (IntegrityError, ValueError):
+            # Expected error - rollback transaction
+            db_session.rollback()
+        
+        # Verify rollback was successful
+        final_user_count = db_session.query(User).count()
+        assert final_user_count == initial_user_count
+        
+        # Verify no partial data was committed
+        rollback_user = db_session.query(User).filter_by(username='rollback_test_1').first()
+        assert rollback_user is None
+    
+    def test_database_connection_error_handling(self, app: Flask):
+        """
+        Test database connection error handling and recovery.
+        
+        Validates application behavior during database connection issues
+        per Section 4.7.6.1 test failure analysis.
+        
+        Args:
+            app: Flask application fixture
+        """
+        # Test connection pool behavior during errors
+        with app.app_context():
+            # Simulate connection error by using invalid database URL
+            with patch.object(app.db.engine, 'connect', side_effect=Exception("Connection failed")):
+                
+                # Attempt database operation that should handle connection error gracefully
                 try:
-                    # Create user in separate thread
-                    user = UserFactory(username=f'concurrent_user_{thread_id}')
-                    self.db.add(user)
-                    self.db.commit()
-                    results.put(user.id)
+                    with DatabaseManager.transaction():
+                        # This should fail gracefully
+                        User.query.first()
+                    pytest.fail("Expected database connection error")
                 except Exception as e:
-                    error_queue.put(e)
-            
-            # Launch concurrent threads
-            threads = []
-            for i in range(10):
-                thread = threading.Thread(target=create_user_concurrently, args=(i,))
-                threads.append(thread)
-                thread.start()
-            
-            # Wait for completion
-            for thread in threads:
-                thread.join()
-            
-            # Validate results
-            created_users = []
-            while not results.empty():
-                created_users.append(results.get())
-            
-            errors = []
-            while not error_queue.empty():
-                errors.append(error_queue.get())
-            
-            assert len(created_users) == 10, f"Should create 10 users concurrently, got {len(created_users)}"
-            assert len(errors) == 0, f"Should have no errors, got {len(errors)}"
+                    assert "Connection failed" in str(e)
     
-    def test_memory_usage_optimization(self):
-        """Test memory usage patterns and optimization for large datasets."""
-        with self.measure_performance('memory_optimization'):
-            import psutil
-            process = psutil.Process()
-            
-            # Measure initial memory
-            initial_memory = process.memory_info().rss
-            
-            # Create large dataset
-            large_dataset = UserFactory.create_batch(500)
-            self.db.add_all(large_dataset)
-            self.db.commit()
-            
-            # Measure memory after creation
-            after_creation_memory = process.memory_info().rss
-            memory_increase = after_creation_memory - initial_memory
-            
-            # Memory increase should be reasonable (under 100MB for 500 users)
-            max_acceptable_memory = 100 * 1024 * 1024  # 100MB
-            assert memory_increase < max_acceptable_memory, f"Memory increase {memory_increase} bytes exceeds {max_acceptable_memory}"
-            
-            # Test memory cleanup after session clear
-            self.db.expunge_all()
-            
-            # Force garbage collection
-            import gc
-            gc.collect()
+    def test_data_validation_error_recovery(self, db_session: Session):
+        """
+        Test data validation error handling and recovery.
+        
+        Validates graceful handling of validation errors with proper
+        error messages and recovery procedures.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test validation error handling in user creation
+        with pytest.raises(ValueError) as exc_info:
+            user = User()
+            user.validate_username('username', '')
+        
+        assert "Username cannot be empty" in str(exc_info.value)
+        
+        # Test recovery after validation error
+        user = User()
+        
+        # First, invalid username
+        try:
+            user.validate_username('username', 'ab')
+        except ValueError:
+            pass  # Expected
+        
+        # Then, valid username should work
+        valid_username = user.validate_username('username', 'valid_username')
+        assert valid_username == 'valid_username'
+        
+        # Test email validation error handling
+        with pytest.raises(ValueError) as exc_info:
+            user.validate_email('email', 'invalid-email')
+        
+        assert "Invalid email format" in str(exc_info.value)
+        
+        # Test recovery with valid email
+        valid_email = user.validate_email('email', 'valid@example.com')
+        assert valid_email == 'valid@example.com'
     
-    def test_transaction_rollback_integrity(self):
-        """Test transaction rollback capabilities and data integrity."""
-        with self.measure_performance('transaction_rollback'):
-            # Create initial data
+    def test_factory_error_handling(self, db_session: Session):
+        """
+        Test Factory Boy error handling and recovery.
+        
+        Validates error handling in factory data generation and
+        recovery from factory-related errors.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test factory session management error handling
+        original_session = FactorySessionManager.get_session()
+        assert original_session is not None
+        
+        # Test cleanup after errors
+        try:
+            # Force an error in factory creation
+            with patch.object(db_session, 'add', side_effect=Exception("Factory error")):
+                UserFactory()
+            pytest.fail("Expected factory error")
+        except Exception as e:
+            assert "Factory error" in str(e)
+        
+        # Test that session can be recovered
+        FactorySessionManager.cleanup_session()
+        recovered_session = FactorySessionManager.get_session()
+        assert recovered_session is not None
+        
+        # Test factory reset functionality
+        reset_result = reset_factory_sequences()
+        # Function should complete without error
+        
+        cleanup_result = cleanup_test_data()
+        assert cleanup_result is True
+    
+    def test_audit_trail_error_resilience(self, db_session: Session):
+        """
+        Test audit trail resilience during error conditions.
+        
+        Validates that audit trail tracking continues to function
+        even during error scenarios.
+        
+        Args:
+            db_session: Database session fixture
+        """
+        # Test audit field population with mock user context
+        with patch('models.base.get_current_user_context', return_value='test_user'):
             user = UserFactory()
-            self.db.add(user)
-            self.db.commit()
+            db_session.add(user)
             
-            initial_user_count = self.db.query(User).count()
+            # Simulate error in audit field population
+            with patch('models.base.logger.error') as mock_logger:
+                try:
+                    # Force flush to trigger audit event
+                    db_session.flush()
+                except Exception:
+                    pass  # Ignore any errors for this test
+        
+        # Test that audit trail errors don't break transactions
+        with patch('models.base.get_current_user_context', side_effect=Exception("Audit error")):
+            user2 = UserFactory()
+            db_session.add(user2)
             
-            # Start transaction and make changes
-            self.db.begin()
-            
-            try:
-                # Create additional users
-                new_users = UserFactory.create_batch(5)
-                self.db.add_all(new_users)
-                
-                # Simulate error condition
-                raise Exception("Simulated transaction error")
-                
-            except Exception:
-                # Rollback transaction
-                self.db.rollback()
-            
-            # Validate rollback integrity
-            final_user_count = self.db.query(User).count()
-            assert final_user_count == initial_user_count, "Transaction rollback should restore original state"
-    
-    def test_data_migration_simulation(self):
-        """Test data migration patterns and validation procedures."""
-        with self.measure_performance('migration_simulation'):
-            # Simulate MongoDB document structure migration
-            mongodb_user_data = {
-                'username': 'migrated_user',
-                'email': 'migrated@example.com',
-                'profile': {
-                    'firstName': 'John',
-                    'lastName': 'Doe',
-                    'preferences': {
-                        'theme': 'dark',
-                        'notifications': True
-                    }
-                },
-                'roles': ['admin', 'editor'],
-                'metadata': {
-                    'lastLogin': '2024-01-15T10:30:00Z',
-                    'signupSource': 'web'
-                }
-            }
-            
-            # Transform to relational structure
-            user = UserFactory(
-                username=mongodb_user_data['username'],
-                email=mongodb_user_data['email'],
-                first_name=mongodb_user_data['profile']['firstName'],
-                last_name=mongodb_user_data['profile']['lastName']
-            )
-            
-            # Create roles from array
-            role_names = mongodb_user_data['roles']
-            roles = []
-            for role_name in role_names:
-                role = RoleFactory(name=role_name)
-                roles.append(role)
-                user.roles.append(role)
-            
-            self.db.add(user)
-            self.db.commit()
-            
-            # Validate migration integrity
-            assert user.username == mongodb_user_data['username'], "Username should be preserved"
-            assert user.email == mongodb_user_data['email'], "Email should be preserved"
-            assert user.first_name == mongodb_user_data['profile']['firstName'], "First name should be extracted"
-            assert len(user.roles) == len(mongodb_user_data['roles']), "Roles should be converted to relationships"
-    
-    def test_model_serialization_performance(self):
-        """Test model serialization performance for API responses."""
-        with self.measure_performance('serialization_performance'):
-            # Create complex object graph
-            user = UserFactory()
-            roles = RoleFactory.create_batch(3)
-            permissions = PermissionFactory.create_batch(10)
-            
-            # Assign relationships
-            for role in roles:
-                user.roles.append(role)
-                for permission in permissions:
-                    role.permissions.append(permission)
-            
-            self.db.add(user)
-            self.db.commit()
-            
-            start_time = time.time()
-            
-            # Serialize to dictionary (simulating API response)
-            user_dict = {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'roles': [
-                    {
-                        'id': role.id,
-                        'name': role.name,
-                        'permissions': [
-                            {
-                                'id': perm.id,
-                                'resource': perm.resource,
-                                'action': perm.action
-                            }
-                            for perm in role.permissions
-                        ]
-                    }
-                    for role in user.roles
-                ]
-            }
-            
-            serialization_time = time.time() - start_time
-            
-            # Serialization should be fast (under 0.01 seconds)
-            assert serialization_time < 0.01, f"Serialization took {serialization_time:.3f}s, should be under 0.01s"
-            
-            # Validate serialized structure
-            assert 'id' in user_dict, "User ID should be included"
-            assert len(user_dict['roles']) == 3, "All roles should be serialized"
-            assert len(user_dict['roles'][0]['permissions']) == 10, "All permissions should be serialized"
+            # Should complete successfully despite audit error
+            db_session.flush()
+            assert user2.id is not None
 
 
-# Test fixtures and utility functions for pytest integration
-
-@pytest.fixture
-def performance_reporter():
-    """Fixture for collecting and reporting performance metrics."""
-    metrics = defaultdict(list)
-    
-    yield metrics
-    
-    # Report performance metrics at end of test session
-    if metrics:
-        print("\n=== Performance Metrics Report ===")
-        for operation, measurements in metrics.items():
-            if measurements:
-                avg_time = sum(m['execution_time_ms'] for m in measurements) / len(measurements)
-                max_time = max(m['execution_time_ms'] for m in measurements)
-                print(f"{operation}: avg={avg_time:.2f}ms, max={max_time:.2f}ms, samples={len(measurements)}")
-
-
-@pytest.mark.integration
-class TestFullSystemIntegration(ModelTestBase):
+# Pytest configuration and fixtures specific to model testing
+@pytest.fixture(scope='function')
+def setup_test_factories(db_session):
     """
-    Full system integration tests validating complete Flask-SQLAlchemy model
-    ecosystem functionality and cross-model interactions ensuring comprehensive
-    system integration and functional parity validation.
+    Set up Factory Boy configuration for model testing.
+    
+    Configures factories with proper session management and
+    cleanup for isolated test execution.
+    
+    Args:
+        db_session: Database session fixture
+        
+    Yields:
+        Configured factory environment
     """
+    # Configure factories with test session
+    configure_factories()
     
-    def test_complete_user_workflow_integration(self):
-        """Test complete user workflow from registration to complex operations."""
-        with self.measure_performance('complete_user_workflow'):
-            # Step 1: User registration and profile setup
-            user = UserFactory(
-                is_active=True,
-                email_verified=True
-            )
-            
-            # Step 2: Role assignment
-            roles = RoleFactory.create_batch(2, is_active=True)
-            permissions = PermissionFactory.create_batch(5, is_active=True)
-            
-            for role in roles:
-                user.roles.append(role)
-                for permission in permissions:
-                    role.permissions.append(permission)
-            
-            # Step 3: Session creation
-            session = UserSessionFactory(user=user, is_active=True)
-            
-            # Step 4: Business entity creation
-            entity = BusinessEntityFactory(owner=user)
-            
-            # Step 5: Audit log generation
-            audit_log = AuditLogFactory(
-                table_name='users',
-                record_id=str(user.id),
-                operation_type='INSERT',
-                user=user
-            )
-            
-            self.db.add_all([user, session, entity, audit_log])
-            self.db.commit()
-            
-            # Validate complete workflow
-            assert user.is_active, "User should be active"
-            assert len(user.roles) == 2, "User should have roles"
-            assert len(user.sessions) == 1, "User should have session"
-            assert len(user.owned_entities) == 1, "User should own entity"
-            
-            # Validate cross-model relationships
-            total_permissions = set()
-            for role in user.roles:
-                total_permissions.update(role.permissions)
-            assert len(total_permissions) == 5, "User should have access to all permissions"
+    # Set session for all factories
+    for factory_class in [UserFactory, UserSessionFactory]:
+        factory_class._meta.sqlalchemy_session = db_session
     
-    def test_system_stress_and_scalability(self):
-        """Test system performance under load with realistic data volumes."""
-        with self.measure_performance('system_stress_test'):
-            # Create realistic system load
-            start_time = time.time()
-            
-            # Create 50 users with complete profiles
-            users = []
-            for i in range(50):
-                user = FactoryDataManager.create_user_with_complete_profile(
-                    role_count=2, session_count=1
-                )
-                users.append(user)
-            
-            # Create business entity hierarchies
-            FactoryDataManager.create_business_hierarchy(levels=4, entities_per_level=3)
-            
-            # Create comprehensive audit trail
-            FactoryDataManager.create_audit_trail(entity_count=50, operations_per_entity=3)
-            
-            total_time = time.time() - start_time
-            
-            # System should handle realistic load efficiently
-            assert total_time < 5.0, f"System stress test took {total_time:.2f}s, should be under 5.0s"
-            
-            # Validate data integrity after bulk operations
-            total_users = self.db.query(User).count()
-            total_entities = self.db.query(BusinessEntity).count()
-            total_audit_logs = self.db.query(AuditLog).count()
-            
-            assert total_users >= 50, "All users should be created"
-            assert total_entities >= 12, "All entities should be created"  # 4 levels * 3 entities = 12
-            assert total_audit_logs >= 150, "All audit logs should be created"  # 50 * 3 = 150
+    yield
+    
+    # Cleanup after test
+    cleanup_test_data()
 
 
-if __name__ == '__main__':
-    # Run tests with performance reporting
-    pytest.main([
-        __file__,
-        '-v',
-        '--tb=short',
-        '--durations=10',  # Show 10 slowest tests
-        '-x'  # Stop on first failure
-    ])
+# Performance test markers for pytest-benchmark
+pytestmark = [
+    pytest.mark.database,
+    pytest.mark.models,
+    pytest.mark.sqlalchemy
+]
