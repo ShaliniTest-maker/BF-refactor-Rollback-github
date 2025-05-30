@@ -1,258 +1,240 @@
-{%- set is_collection = data is iterable and data is not string and data is not mapping -%}
-{%- set is_paginated = pagination is defined and pagination -%}
-{%- set resource_type = resource_type | default('resource') -%}
-{%- set single_resource = data if not is_collection else None -%}
-{
-  "success": true,
-  "status": 200,
-  "timestamp": "{{ timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
-  "request_id": "{{ request_id | default(g.get('request_id', 'req_' + (moment().valueOf() | string))) }}",
-  "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', g.get('correlation_id'))) }}",
-  "message": "{{ message | default('Request completed successfully') }}",
-  
-  {%- if data is defined %}
-  "data": {
-    {%- if is_collection %}
-    "type": "collection",
-    "resource_type": "{{ resource_type }}",
-    "items": {{ data | tojson | safe }},
-    "count": {{ data | length }},
-    {%- if is_paginated %}
-    "pagination_applied": true,
-    {%- else %}
-    "pagination_applied": false,
-    {%- endif %}
-    {%- if total_count is defined %}
-    "total_count": {{ total_count }},
-    {%- endif %}
-    "collection_metadata": {
-      "empty": {{ (data | length) == 0 | tojson }},
-      "items_on_page": {{ data | length }},
-      {%- if filters is defined %}
-      "filtered": true,
-      "filters_applied": {{ filters | tojson | safe }},
-      {%- else %}
-      "filtered": false,
-      {%- endif %}
-      {%- if sorting is defined %}
-      "sorted": true,
-      "sort_criteria": {{ sorting | tojson | safe }},
-      {%- else %}
-      "sorted": false,
-      {%- endif %}
-      {%- if search_query is defined %}
-      "searched": true,
-      "search_query": "{{ search_query }}",
-      {%- else %}
-      "searched": false,
-      {%- endif %}
-      "resource_permissions": {
-        "can_create": {{ can_create | default(false) | tojson }},
-        "can_bulk_update": {{ can_bulk_update | default(false) | tojson }},
-        "can_bulk_delete": {{ can_bulk_delete | default(false) | tojson }}
-      }
-    }
-    {%- else %}
-    "type": "single",
-    "resource_type": "{{ resource_type }}",
-    {%- if single_resource.id is defined %}
-    "id": "{{ single_resource.id }}",
-    {%- elif single_resource.get and single_resource.get('id') %}
-    "id": "{{ single_resource.get('id') }}",
-    {%- endif %}
-    "attributes": {{ data | tojson | safe }},
-    {%- if relationships is defined %}
-    "relationships": {{ relationships | tojson | safe }},
-    {%- endif %}
-    "resource_metadata": {
-      {%- if single_resource.created_at is defined %}
-      "created_at": "{{ single_resource.created_at.isoformat() }}",
-      {%- endif %}
-      {%- if single_resource.updated_at is defined %}
-      "updated_at": "{{ single_resource.updated_at.isoformat() }}",
-      {%- endif %}
-      {%- if single_resource.version is defined %}
-      "version": {{ single_resource.version }},
-      {%- endif %}
-      {%- if etag is defined %}
-      "etag": "{{ etag }}",
-      {%- endif %}
-      "permissions": {
-        "can_read": {{ can_read | default(true) | tojson }},
-        "can_update": {{ can_update | default(false) | tojson }},
-        "can_delete": {{ can_delete | default(false) | tojson }}
-      },
-      "cache_control": {
-        "max_age": {{ cache_max_age | default(300) }},
-        "public": {{ cache_public | default(false) | tojson }},
-        "no_cache": {{ no_cache | default(false) | tojson }}
-      }
-    }
-    {%- endif %}
-  },
-  {%- else %}
-  "data": null,
-  "message": "{{ message | default('Operation completed successfully with no data') }}",
-  {%- endif %}
-  
-  {%- if is_paginated %}
-  "pagination": {
-    "current_page": {{ pagination.page | default(current_page | default(1)) }},
-    "per_page": {{ pagination.per_page | default(per_page | default(20)) }},
-    "total_items": {{ pagination.total | default(total_items | default(0)) }},
-    "total_pages": {{ pagination.pages | default(total_pages | default(1)) }},
-    
-    "has_prev": {{ pagination.has_prev | default(has_prev | default(false)) | tojson }},
-    "has_next": {{ pagination.has_next | default(has_next | default(false)) | tojson }},
-    "prev_page": {{ pagination.prev_num | default(prev_page | default(null)) | tojson }},
-    "next_page": {{ pagination.next_num | default(next_page | default(null)) | tojson }},
-    
-    "page_range": {
-      "start": {{ ((pagination.page | default(current_page | default(1)) - 1) * (pagination.per_page | default(per_page | default(20)))) + 1 }},
-      "end": {{ ((pagination.page | default(current_page | default(1)) - 1) * (pagination.per_page | default(per_page | default(20)))) + (data | length if data else 0) }}
-    },
-    
-    "navigation": {
-      "show_pagination": {{ (pagination.pages | default(total_pages | default(1))) > 1 | tojson }},
-      "is_first_page": {{ (pagination.page | default(current_page | default(1))) == 1 | tojson }},
-      "is_last_page": {{ (pagination.page | default(current_page | default(1))) == (pagination.pages | default(total_pages | default(1))) | tojson }},
-      "pages_remaining": {{ (pagination.pages | default(total_pages | default(1))) - (pagination.page | default(current_page | default(1))) }}
-    }
-  },
-  {%- endif %}
-  
-  "links": {
-    "self": "{{ request.url if request else '#' }}",
-    
-    {%- if is_collection %}
-    {%- if is_paginated %}
-    {%- if pagination.has_prev | default(has_prev | default(false)) %}
-    "first": "{{ url_for(request.endpoint, page=1, per_page=pagination.per_page | default(per_page | default(20)), **request.args) if url_for and request else '#' }}",
-    "prev": "{{ url_for(request.endpoint, page=pagination.prev_num | default(prev_page | default(1)), per_page=pagination.per_page | default(per_page | default(20)), **request.args) if url_for and request else '#' }}",
-    {%- endif %}
-    {%- if pagination.has_next | default(has_next | default(false)) %}
-    "next": "{{ url_for(request.endpoint, page=pagination.next_num | default(next_page | default(1)), per_page=pagination.per_page | default(per_page | default(20)), **request.args) if url_for and request else '#' }}",
-    "last": "{{ url_for(request.endpoint, page=pagination.pages | default(total_pages | default(1)), per_page=pagination.per_page | default(per_page | default(20)), **request.args) if url_for and request else '#' }}",
-    {%- endif %}
-    {%- endif %}
-    
-    {%- if resource_type != 'resource' %}
-    "create": "{{ url_for('api.create_' + resource_type, _external=True) if url_for else '/api/' + resource_type }}",
-    {%- endif %}
-    "collection": "{{ url_for(request.endpoint, **request.args) | replace('?page=' + (pagination.page | default(current_page | default(1)) | string), '') | replace('&page=' + (pagination.page | default(current_page | default(1)) | string), '') | replace('page=' + (pagination.page | default(current_page | default(1)) | string) + '&', '') | replace('page=' + (pagination.page | default(current_page | default(1)) | string), '') if request else '#' }}",
-    
-    {%- else %}
-    {%- if single_resource and (single_resource.id is defined or (single_resource.get and single_resource.get('id'))) %}
-    "canonical": "{{ url_for('api.get_' + resource_type, id=single_resource.id if single_resource.id is defined else single_resource.get('id'), _external=True) if url_for else '/api/' + resource_type + '/' + (single_resource.id if single_resource.id is defined else single_resource.get('id') | string) }}",
-    {%- if resource_type != 'resource' %}
-    "update": "{{ url_for('api.update_' + resource_type, id=single_resource.id if single_resource.id is defined else single_resource.get('id'), _external=True) if url_for else '/api/' + resource_type + '/' + (single_resource.id if single_resource.id is defined else single_resource.get('id') | string) }}",
-    "delete": "{{ url_for('api.delete_' + resource_type, id=single_resource.id if single_resource.id is defined else single_resource.get('id'), _external=True) if url_for else '/api/' + resource_type + '/' + (single_resource.id if single_resource.id is defined else single_resource.get('id') | string) }}",
-    "collection": "{{ url_for('api.get_' + resource_type + 's' if not resource_type.endswith('s') else 'api.get_' + resource_type, _external=True) if url_for else '/api/' + resource_type + ('s' if not resource_type.endswith('s') else '') }}",
-    {%- endif %}
-    {%- endif %}
-    {%- endif %}
-    
-    "api_metadata": "{{ url_for('api.metadata', _external=True) if url_for else '/api/metadata' }}",
-    "documentation": "{{ docs_url | default(url_for('api.docs', _external=True) if url_for else '/docs') }}",
-    "health": "{{ health_url | default(url_for('health.check', _external=True) if url_for else '/health') }}"
-  },
-  
-  {%- if included_resources is defined %}
-  "included": [
-    {%- for included_resource in included_resources %}
+{%- extends "api/base_response.json" -%}
+
+{%- block data -%}
+{%- if data is mapping -%}
+  {%- if data.items or data.results -%}
     {
-      "type": "{{ included_resource.__class__.__name__.lower() if included_resource.__class__ is defined else 'resource' }}",
-      "id": "{{ included_resource.id if included_resource.id is defined else included_resource.get('id') }}",
-      "attributes": {{ included_resource | tojson | safe }},
-      "links": {
-        "self": "{{ url_for('api.get_' + included_resource.__class__.__name__.lower(), id=included_resource.id if included_resource.id is defined else included_resource.get('id'), _external=True) if url_for and included_resource.__class__ is defined else '#' }}"
-      }
-    }{% if not loop.last %},{% endif %}
-    {%- endfor %}
-  ],
-  {%- endif %}
-  
-  "meta": {
-    "api_version": "{{ api_version | default(config.get('API_VERSION', '1.0.0')) }}",
-    "response_type": "success_200",
-    "endpoint": "{{ request.endpoint if request else 'unknown' }}",
-    "method": "{{ request.method if request else 'GET' }}",
-    "blueprint": "{{ blueprint_name | default(request.blueprint if request else 'api') }}",
-    
-    "performance": {
-      "response_time_ms": {{ response_time_ms | default(g.get('response_time_ms', 0)) }},
-      "query_time_ms": {{ query_time_ms | default(g.get('query_time_ms', 0)) }},
-      "query_count": {{ query_count | default(g.get('query_count', 1)) }},
-      "cache_hit": {{ cache_hit | default(false) | tojson }},
-      "processed_items": {{ data | length if data and is_collection else (1 if data else 0) }}
-    },
-    
-    "request_context": {
-      "query_params": {{ request.args.to_dict() | tojson if request else {} }},
-      "content_type": "{{ request.content_type if request else 'application/json' }}",
-      "user_agent": "{{ request.headers.get('User-Agent', 'unknown') if request else 'unknown' }}",
-      {%- if user_context is defined %}
-      "user_id": "{{ user_context.id if user_context.id is defined else user_context.get('id') }}",
-      "user_role": "{{ user_context.role if user_context.role is defined else user_context.get('role', 'user') }}",
-      "user_permissions": {{ user_context.permissions | default([]) | tojson | safe }},
-      {%- endif %}
-      "client_ip": "{{ request.remote_addr if request else 'unknown' }}",
-      "request_size_bytes": {{ request.content_length | default(0) if request else 0 }}
-    },
-    
-    "flask_context": {
-      "framework": "Flask {{ config.get('FLASK_VERSION', '3.1.1') }}",
-      "python_version": "{{ python_version | default('3.13.3') }}",
-      "wsgi_server": "{{ wsgi_server | default('Werkzeug') }}",
-      "environment": "{{ config.get('FLASK_ENV', 'development') }}",
-      "debug_mode": {{ config.get('DEBUG', false) | tojson }},
-      "testing_mode": {{ config.get('TESTING', false) | tojson }}
-    },
-    
-    "migration_context": {
-      "source_platform": "Node.js/Express.js",
-      "target_platform": "Python/Flask",
-      "api_contract_preserved": {{ api_contract_preserved | default(true) | tojson }},
-      "response_format_version": "1.0.0",
-      "compatibility_mode": {{ compatibility_mode | default(true) | tojson }}
-    },
-    
-    "response_metadata": {
-      "template_used": "templates/api/success_200.json",
-      "template_version": "1.0.0",
-      "generated_at": "{{ timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
-      "content_encoding": "{{ content_encoding | default('identity') }}",
-      "response_size_estimate_bytes": {{ response_size_bytes | default(null) | tojson }},
-      "server_timezone": "{{ config.get('TIMEZONE', 'UTC') }}"
-    },
-    
-    {%- if warnings is defined and warnings %}
-    "warnings": {{ warnings | tojson | safe }},
-    {%- endif %}
-    
-    {%- if deprecation_notice is defined %}
-    "deprecation": {
-      "deprecated": true,
-      "deprecation_date": "{{ deprecation_notice.date }}",
-      "sunset_date": "{{ deprecation_notice.sunset_date }}",
-      "message": "{{ deprecation_notice.message }}",
-      "replacement_endpoint": "{{ deprecation_notice.replacement }}"
-    },
-    {%- endif %}
-    
-    "security": {
-      "https_required": {{ https_required | default(config.get('FORCE_HTTPS', false)) | tojson }},
-      "authenticated": {{ authenticated | default(false) | tojson }},
-      {%- if rate_limit_info is defined %}
-      "rate_limit": {
-        "limit": {{ rate_limit_info.limit }},
-        "remaining": {{ rate_limit_info.remaining }},
-        "reset_time": "{{ rate_limit_info.reset_time }}",
-        "retry_after": {{ rate_limit_info.retry_after | default(null) | tojson }}
-      },
-      {%- endif %}
-      "content_type_validated": {{ content_type_validated | default(true) | tojson }},
-      "input_sanitized": {{ input_sanitized | default(true) | tojson }}
+      "items": {{ (data.items or data.results) | tojson }},
+      "count": {{ (data.items or data.results) | length }},
+      "total_count": {{ data.total_count | default((data.items or data.results) | length) }},
+      "has_items": {{ ((data.items or data.results) | length > 0) | lower }},
+      "resource_type": "{{ data.resource_type | default(resource_type) | default('collection') }}",
+      "schema_version": "{{ data.schema_version | default(api_version) | default('v1') }}",
+      "data_format": "{{ data.data_format | default('json') }}",
+      "content_encoding": "{{ data.content_encoding | default('utf-8') }}",
+      "last_updated": "{{ data.last_updated | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+      "etag": "{{ data.etag | default(generate_etag(data.items or data.results)) }}",
+      "cache_key": "{{ data.cache_key | default(generate_cache_key(request.endpoint, request.args)) }}",
+      "validation_passed": {{ data.validation_passed | default('true') }},
+      "aggregations": {{ data.aggregations | default({}) | tojson }},
+      "filters_applied": {{ data.filters_applied | default([]) | tojson }},
+      "sort_criteria": {{ data.sort_criteria | default([]) | tojson }},
+      "included_fields": {{ data.included_fields | default([]) | tojson }},
+      "excluded_fields": {{ data.excluded_fields | default([]) | tojson }}
+      {%- if data.metadata -%}
+      ,
+      "metadata": {{ data.metadata | tojson }}
+      {%- endif -%}
     }
+  {%- else -%}
+    {
+      "result": {{ data | tojson }},
+      "resource_type": "{{ data.resource_type | default(resource_type) | default('single') }}",
+      "schema_version": "{{ data.schema_version | default(api_version) | default('v1') }}",
+      "data_format": "{{ data.data_format | default('json') }}",
+      "content_encoding": "{{ data.content_encoding | default('utf-8') }}",
+      "last_updated": "{{ data.last_updated | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+      "etag": "{{ data.etag | default(generate_etag(data)) }}",
+      "cache_key": "{{ data.cache_key | default(generate_cache_key(request.endpoint, request.args)) }}",
+      "validation_passed": {{ data.validation_passed | default('true') }},
+      "resource_id": "{{ data.resource_id | default(data.id) | default(null) }}",
+      "resource_version": "{{ data.resource_version | default(data.version) | default(null) }}",
+      "relationships": {{ data.relationships | default({}) | tojson }}
+      {%- if data.metadata -%}
+      ,
+      "metadata": {{ data.metadata | tojson }}
+      {%- endif -%}
+    }
+  {%- endif -%}
+{%- elif data is iterable and data is not string -%}
+  {
+    "items": {{ data | tojson }},
+    "count": {{ data | length }},
+    "total_count": {{ total_count | default(data | length) }},
+    "has_items": {{ (data | length > 0) | lower }},
+    "resource_type": "{{ resource_type | default('collection') }}",
+    "schema_version": "{{ api_version | default('v1') }}",
+    "data_format": "json",
+    "content_encoding": "utf-8",
+    "last_updated": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "etag": "{{ generate_etag(data) }}",
+    "cache_key": "{{ generate_cache_key(request.endpoint, request.args) }}",
+    "validation_passed": true,
+    "aggregations": {{ aggregations | default({}) | tojson }},
+    "filters_applied": {{ filters_applied | default([]) | tojson }},
+    "sort_criteria": {{ sort_criteria | default([]) | tojson }},
+    "included_fields": {{ included_fields | default([]) | tojson }},
+    "excluded_fields": {{ excluded_fields | default([]) | tojson }}
+  }
+{%- else -%}
+  {
+    "result": {{ data | tojson }},
+    "resource_type": "{{ resource_type | default('single') }}",
+    "schema_version": "{{ api_version | default('v1') }}",
+    "data_format": "json",
+    "content_encoding": "utf-8",
+    "last_updated": "{{ moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]') }}",
+    "etag": "{{ generate_etag(data) }}",
+    "cache_key": "{{ generate_cache_key(request.endpoint, request.args) }}",
+    "validation_passed": true,
+    "resource_id": "{{ resource_id | default(null) }}",
+    "resource_version": "{{ resource_version | default(null) }}",
+    "relationships": {{ relationships | default({}) | tojson }}
+  }
+{%- endif -%}
+{%- endblock data -%}
+
+{%- block pagination -%}
+{%- if pagination -%}
+  {
+    "page": {{ pagination.page | default(1) }},
+    "per_page": {{ pagination.per_page | default(pagination.limit) | default(20) }},
+    "total_pages": {{ pagination.pages | default(pagination.total_pages) | default((pagination.total / pagination.per_page) | round(0, 'ceil')) }},
+    "total_items": {{ pagination.total | default(pagination.total_count) | default(0) }},
+    "has_prev": {{ pagination.has_prev | default((pagination.page > 1)) | lower }},
+    "has_next": {{ pagination.has_next | default((pagination.page < pagination.pages)) | lower }},
+    "prev_page": {{ pagination.prev_num | default(pagination.prev_page) | default(null) }},
+    "next_page": {{ pagination.next_num | default(pagination.next_page) | default(null) }},
+    "items_per_page": {{ pagination.per_page | default(pagination.limit) | default(20) }},
+    "current_page_items": {{ pagination.current_page_items | default(pagination.items | length) | default(0) }},
+    "page_offset": {{ pagination.offset | default((pagination.page - 1) * pagination.per_page) }},
+    "first_item_index": {{ pagination.first_item_index | default(pagination.offset + 1) }},
+    "last_item_index": {{ pagination.last_item_index | default(pagination.offset + pagination.current_page_items) }},
+    "is_first_page": {{ pagination.is_first_page | default((pagination.page == 1)) | lower }},
+    "is_last_page": {{ pagination.is_last_page | default((pagination.page == pagination.pages)) | lower }},
+    "pagination_info": {
+      "sort_by": "{{ pagination.sort_by | default(sort_by) | default(null) }}",
+      "sort_order": "{{ pagination.sort_order | default(sort_order) | default('asc') }}",
+      "filters": {{ pagination.filters | default(filters) | default({}) | tojson }},
+      "search_query": "{{ pagination.search_query | default(search_query) | default(null) }}",
+      "page_size_options": {{ pagination.page_size_options | default([10, 20, 50, 100]) | tojson }},
+      "max_page_size": {{ pagination.max_page_size | default(500) }}
+    },
+    "cursor_pagination": {%- if pagination.cursor_pagination -%}
+      {
+        "cursor": "{{ pagination.cursor_pagination.cursor | default(null) }}",
+        "next_cursor": "{{ pagination.cursor_pagination.next_cursor | default(null) }}",
+        "prev_cursor": "{{ pagination.cursor_pagination.prev_cursor | default(null) }}",
+        "has_more": {{ pagination.cursor_pagination.has_more | default('false') }},
+        "cursor_field": "{{ pagination.cursor_pagination.cursor_field | default('id') }}"
+      }
+    {%- else -%}null{%- endif -%}
+  }
+{%- else -%}
+  null
+{%- endif -%}
+{%- endblock pagination -%}
+
+{%- block links -%}
+{
+  "self": "{{ self_link | default(request.url) }}",
+  "api_root": "{{ api_root | default(url_for('api.root', _external=True)) }}",
+  "documentation": "{{ documentation_link | default(url_for('api.docs', _external=True)) }}",
+  "schema": "{{ schema_link | default(url_for('api.schema', resource=resource_type, _external=True)) }}",
+  "collection": "{{ collection_link | default(url_for(request.endpoint.replace('.detail', '.list'), _external=True) if '.detail' in request.endpoint else null) }}",
+  "health": "{{ health_link | default(url_for('health.check', _external=True)) }}",
+  "status": "{{ status_link | default(url_for('api.status', _external=True)) }}",
+  "version": "{{ version_link | default(url_for('api.version', _external=True)) }}",
+  "navigation": {
+    {%- if pagination -%}
+    "first": "{{ first_link | default(url_for(request.endpoint, page=1, **request.args.to_dict(flat=False), _external=True) if pagination.page > 1 else null) }}",
+    "prev": "{{ prev_link | default(url_for(request.endpoint, page=pagination.prev_num, **request.args.to_dict(flat=False), _external=True) if pagination.has_prev else null) }}",
+    "next": "{{ next_link | default(url_for(request.endpoint, page=pagination.next_num, **request.args.to_dict(flat=False), _external=True) if pagination.has_next else null) }}",
+    "last": "{{ last_link | default(url_for(request.endpoint, page=pagination.pages, **request.args.to_dict(flat=False), _external=True) if pagination.page < pagination.pages else null) }}"
+    {%- else -%}
+    "first": null,
+    "prev": null,
+    "next": null,
+    "last": null
+    {%- endif -%}
+  },
+  "related": {
+    {%- if resource_type and resource_id -%}
+    "edit": "{{ edit_link | default(url_for(request.endpoint.replace('.list', '.update').replace('.detail', '.update'), id=resource_id, _external=True) if resource_id else null) }}",
+    "delete": "{{ delete_link | default(url_for(request.endpoint.replace('.list', '.delete').replace('.detail', '.delete'), id=resource_id, _external=True) if resource_id else null) }}",
+    "relationships": {{ relationships_links | default({}) | tojson }}
+    {%- else -%}
+    "create": "{{ create_link | default(url_for(request.endpoint.replace('.list', '.create'), _external=True) if '.list' in request.endpoint else null) }}",
+    "bulk_operations": "{{ bulk_operations_link | default(url_for(request.endpoint.replace('.list', '.bulk'), _external=True) if '.list' in request.endpoint else null) }}"
+    {%- endif -%}
+  },
+  "meta": {
+    "api_documentation": "{{ api_docs_link | default(url_for('api.swagger_ui', _external=True)) }}",
+    "openapi_spec": "{{ openapi_spec_link | default(url_for('api.openapi_json', _external=True)) }}",
+    "postman_collection": "{{ postman_collection_link | default(url_for('api.postman_collection', _external=True)) }}",
+    "rate_limiting": "{{ rate_limiting_link | default(url_for('api.rate_limits', _external=True)) }}",
+    "authentication": "{{ auth_docs_link | default(url_for('api.auth_docs', _external=True)) }}"
   }
 }
+{%- endblock links -%}
+
+{%- block warnings -%}
+{%- set template_warnings = [] -%}
+{%- if data and data is mapping and data.deprecated -%}
+  {%- set _ = template_warnings.append({
+    "code": "DEPRECATED_FIELDS",
+    "message": "Some fields in this response are deprecated and will be removed in a future version",
+    "deprecated_fields": data.deprecated,
+    "removal_version": data.removal_version | default("v2"),
+    "documentation": url_for('api.deprecation_guide', _external=True)
+  }) -%}
+{%- endif -%}
+{%- if pagination and pagination.total > 10000 -%}
+  {%- set _ = template_warnings.append({
+    "code": "LARGE_RESULT_SET",
+    "message": "Large result set detected. Consider using additional filters or cursor-based pagination for better performance",
+    "total_items": pagination.total,
+    "recommendation": "Use cursor-based pagination or apply more specific filters",
+    "performance_impact": "moderate"
+  }) -%}
+{%- endif -%}
+{%- if request.args.get('page') and request.args.get('page')|int > 100 -%}
+  {%- set _ = template_warnings.append({
+    "code": "DEEP_PAGINATION",
+    "message": "Deep pagination detected. Performance may be degraded for high page numbers",
+    "current_page": request.args.get('page')|int,
+    "recommendation": "Use cursor-based pagination for better performance with large datasets",
+    "alternative_endpoint": url_for(request.endpoint.replace('.list', '.cursor_list'), _external=True)
+  }) -%}
+{%- endif -%}
+{{ (warnings | default([]) + template_warnings) | tojson }}
+{%- endblock warnings -%}
+
+{%- block notifications -%}
+{%- set template_notifications = [] -%}
+{%- if data and data is mapping and data.items and (data.items | length) == 0 and request.args -%}
+  {%- set _ = template_notifications.append({
+    "type": "info",
+    "code": "NO_RESULTS_WITH_FILTERS",
+    "message": "No results found matching the applied filters. Try adjusting your search criteria",
+    "suggestions": [
+      "Remove some filters to broaden the search",
+      "Check spelling of search terms",
+      "Use broader date ranges if applicable"
+    ],
+    "clear_filters_url": url_for(request.endpoint, _external=True)
+  }) -%}
+{%- endif -%}
+{%- if pagination and pagination.page > 1 and pagination.current_page_items == 0 -%}
+  {%- set _ = template_notifications.append({
+    "type": "warning",
+    "code": "EMPTY_PAGE",
+    "message": "The requested page contains no items. You may have exceeded the available data",
+    "current_page": pagination.page,
+    "total_pages": pagination.pages,
+    "suggested_page": pagination.pages,
+    "last_page_url": url_for(request.endpoint, page=pagination.pages, **request.args.to_dict(flat=False), _external=True)
+  }) -%}
+{%- endif -%}
+{%- if data and data is mapping and data.cache_hit -%}
+  {%- set _ = template_notifications.append({
+    "type": "info",
+    "code": "CACHED_RESPONSE",
+    "message": "This response was served from cache for improved performance",
+    "cache_age": data.cache_age,
+    "cache_expires": data.cache_expires,
+    "refresh_url": url_for(request.endpoint, cache_refresh='true', **request.args.to_dict(flat=False), _external=True)
+  }) -%}
+{%- endif -%}
+{{ (notifications | default([]) + template_notifications) | tojson }}
+{%- endblock notifications -%}
