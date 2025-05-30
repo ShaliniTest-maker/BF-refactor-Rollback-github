@@ -1,397 +1,328 @@
 {#
-Account Locked Notification Template - Plain Text Version
-=========================================================
+Account Lockout Notification Text Email Template
+==============================================
 
-This template provides account lockout notifications in plain text format for
-maximum accessibility and email client compatibility. It delivers critical
-security information, lockout details, and recovery instructions in a clear,
-actionable format suitable for text-only email clients.
+This template provides text-only email notifications for account lockout security events,
+ensuring accessibility across all email clients including text-only readers and screen
+readers. The template delivers clear security information, lockout details, and recovery
+instructions in a format optimized for maximum compatibility and readability.
 
 Template Features:
-- Text-only format for broad email client support
-- Clear security alert messaging and recovery instructions
-- Lockout reason explanation and unlock procedures
-- Security contact information and next steps
-- Professional formatting optimized for text display
-- Accessibility compliance for screen readers
+- Text-only format for universal email client compatibility
+- Clear security alert information with lockout reason and timestamp
+- Comprehensive recovery instructions with multiple contact options
+- Accessibility-compliant formatting for screen readers
+- Integration with Flask security logging and incident response system
 
-Usage: Renders account lockout notifications with security details and recovery guidance
+Usage Context:
+- Triggered by Flask authentication security system during account lockout events
+- Integrated with Auth0 authentication failure monitoring and security response
+- Part of comprehensive security notification system for user account protection
+- Supports security incident response workflows and user self-service recovery
+
+Security Integration:
+- Flask-Login session management integration for lockout enforcement
+- Auth0 Python SDK security event correlation and user management
+- CloudWatch security logging integration for audit trail compliance
+- Automated incident response system integration for security monitoring
 #}
 
-{#- Extend the base text template -#}
+{#- Email Subject - Clear security alert indication -#}
 {% extends "emails/base/base.txt" %}
 
-{#- Email Subject -#}
 {% block subject -%}
-SECURITY ALERT: Your account has been locked
+SECURITY ALERT: Your Account Has Been Locked
 {%- endblock %}
 
-{#- Pre-header text for email previews -#}
+{#- Pre-header text for email client preview -#}
 {% block preheader -%}
-Account locked due to security concerns - Immediate action required
+Account security lockout - Immediate action required for account recovery
 {%- endblock %}
 
-{#- Main email content -#}
+{#- Main notification content -#}
 {% block content -%}
-URGENT SECURITY NOTIFICATION
-{{ create_section_divider('=', 78) }}
+ACCOUNT SECURITY LOCKOUT NOTIFICATION
 
-Your account has been LOCKED due to security concerns. This is an automated
-security measure to protect your account and personal information.
+Dear {{ user_name | default('Account Holder') }},
 
-LOCKOUT DETAILS
-{{ create_section_divider('-', 40) }}
-{{ format_key_value('Account', user_email or '[Your Email Address]') }}
-{{ format_key_value('Lockout Time', lockout_timestamp or '[Timestamp]') }}
-{{ format_key_value('Lockout Reason', lockout_reason or 'Multiple failed login attempts detected') }}
-{{ format_key_value('IP Address', source_ip or '[Source IP]') }}
-{{ format_key_value('User Agent', user_agent or '[Browser/Device Info]') }}
-{{ format_key_value('Incident ID', incident_id or '[Security Incident Reference]') }}
+Your account has been temporarily locked due to security concerns. This is an
+automated security measure designed to protect your account from unauthorized
+access attempts.
 
-{% if lockout_reason_details -%}
-ADDITIONAL DETAILS
-{{ create_section_divider('-', 40) }}
-{{ lockout_reason_details }}
+LOCKOUT DETAILS:
+{{ create_section_divider('-', 60) }}
+{{ format_key_value('Account', account_identifier | default('your account')) }}
+{{ format_key_value('Lockout Time', lockout_timestamp | default('Just now')) }}
+{{ format_key_value('Lockout Reason', lockout_reason | default('Multiple failed login attempts')) }}
+{{ format_key_value('IP Address', source_ip | default('Unknown')) }}
+{{ format_key_value('Location', location | default('Unknown')) }}
+{{ format_key_value('User Agent', user_agent | default('Unknown')) }}
 
+{% if lockout_duration -%}
+{{ format_key_value('Lockout Duration', lockout_duration) }}
 {% endif -%}
-SECURITY IMPACT
-{{ create_section_divider('-', 40) }}
-While your account is locked:
-{{ format_list_item('You cannot log in to your account') }}
-{{ format_list_item('All active sessions have been terminated') }}
-{{ format_list_item('API access tokens have been suspended') }}
-{{ format_list_item('Your data remains secure and protected') }}
 
-IMMEDIATE ACTIONS REQUIRED
-{{ create_section_divider('-', 40) }}
-To protect your account security:
+SECURITY CONTEXT:
+{{ create_section_divider('-', 60) }}
+This security lockout was triggered to prevent potential unauthorized access
+to your account. Common triggers include:
 
-1. VERIFY YOUR IDENTITY
-   If this lockout was unexpected, your account may have been compromised.
-   Do not attempt to log in until you have secured your credentials.
+{{ format_list_item('Multiple failed password attempts') }}
+{{ format_list_item('Suspicious login patterns or locations') }}
+{{ format_list_item('Potential credential compromise detection') }}
+{{ format_list_item('Security policy violation') }}
 
-2. CHANGE YOUR PASSWORD (if compromised)
-   {{ format_list_item('Use a strong, unique password') }}
-   {{ format_list_item('Include uppercase, lowercase, numbers, and symbols') }}
-   {{ format_list_item('Avoid using personal information') }}
-   {{ format_list_item('Do not reuse passwords from other accounts') }}
-
-3. REVIEW SECURITY SETTINGS
-   {{ format_list_item('Enable two-factor authentication') }}
-   {{ format_list_item('Review trusted devices') }}
-   {{ format_list_item('Check recent account activity') }}
-   {{ format_list_item('Update recovery contact information') }}
+If you recognize this activity as your own legitimate access attempts, you
+can proceed with account recovery. If you do not recognize this activity,
+your account may be under attack and you should take immediate action.
 {%- endblock %}
 
-{#- Account unlock instructions -#}
+{#- Account recovery instructions -#}
 {% block action_items -%}
-ACCOUNT UNLOCK PROCEDURES
-{{ create_section_divider('=', 78) }}
+ACCOUNT RECOVERY OPTIONS:
+{{ create_section_divider('=', 60) }}
 
-METHOD 1: SELF-SERVICE UNLOCK (Recommended)
-{{ create_section_divider('-', 50) }}
-{{ format_list_item('Visit the account recovery page:') }}
-   {{ format_url_for_text(unlock_url or 'https://app.company.com/account/unlock', 'Account Unlock Portal') }}
+IMMEDIATE RECOVERY (if this was you):
+{{ format_list_item('Wait for automatic unlock in ' + (auto_unlock_time | default('30 minutes'))) }}
+{{ format_list_item('Use the password reset link below if available') }}
+{{ format_list_item('Contact support using the information provided below') }}
 
-{{ format_list_item('Enter your email address and follow the verification steps') }}
-{{ format_list_item('Complete identity verification (may require photo ID)') }}
-{{ format_list_item('Set a new secure password') }}
-{{ format_list_item('Enable additional security measures') }}
+{% if unlock_url -%}
+SELF-SERVICE UNLOCK:
+{{ format_url_for_text(unlock_url, 'Account Unlock Link') }}
 
-METHOD 2: CONTACT SECURITY TEAM
-{{ create_section_divider('-', 50) }}
-If you cannot access the self-service unlock portal:
+Note: This link is valid for {{ unlock_link_expiry | default('24 hours') }} and can
+only be used once. Click or copy this link into your browser to begin the
+account recovery process.
+{% endif %}
 
-{{ format_list_item('Email: security@company.com') }}
-{{ format_list_item('Phone: 1-800-SECURITY (1-800-732-8748)') }}
-{{ format_list_item('Include this incident ID: ' + (incident_id or '[Incident Reference]')) }}
+SECURITY VERIFICATION STEPS:
+{{ format_list_item('Verify your identity through our secure recovery process') }}
+{{ format_list_item('Confirm your email address and account details') }}
+{{ format_list_item('Set a new strong password if prompted') }}
+{{ format_list_item('Review recent account activity for suspicious behavior') }}
 
-Security team hours: Monday - Friday, 8:00 AM - 8:00 PM EST
-Emergency after-hours support available for critical issues
-
-VERIFICATION REQUIREMENTS
-{{ create_section_divider('-', 50) }}
-To unlock your account, you will need to provide:
-{{ format_list_item('Valid government-issued photo identification') }}
-{{ format_list_item('Answers to your security questions') }}
-{{ format_list_item('Access to your registered email address') }}
-{{ format_list_item('Access to your registered phone number (if applicable)') }}
-
-ESTIMATED UNLOCK TIME
-{{ create_section_divider('-', 50) }}
-{{ format_list_item('Self-service unlock: Immediate upon verification') }}
-{{ format_list_item('Security team assistance: 2-4 hours during business hours') }}
-{{ format_list_item('Complex cases may require 24-48 hours for resolution') }}
+IF YOU DID NOT ATTEMPT TO ACCESS YOUR ACCOUNT:
+{{ format_list_item('Do NOT click any links in this email') }}
+{{ format_list_item('Change your password immediately from a secure device') }}
+{{ format_list_item('Enable two-factor authentication if not already active') }}
+{{ format_list_item('Contact our security team immediately') }}
+{{ format_list_item('Review all account activity and remove unrecognized devices') }}
 {%- endblock %}
 
-{#- Security recommendations and additional information -#}
+{#- Additional security information -#}
 {% block additional_info -%}
-SECURITY RECOMMENDATIONS
-{{ create_section_divider('=', 78) }}
+SECURITY RECOMMENDATIONS:
+{{ create_section_divider('=', 60) }}
 
-PREVENT FUTURE LOCKOUTS
-{{ create_section_divider('-', 50) }}
-{{ format_list_item('Use a password manager to avoid failed login attempts') }}
-{{ format_list_item('Enable two-factor authentication for enhanced security') }}
-{{ format_list_item('Keep your contact information up to date') }}
-{{ format_list_item('Log out properly when using shared computers') }}
-{{ format_list_item('Monitor your account for suspicious activity regularly') }}
+To prevent future account lockouts and enhance your account security:
 
-RECOGNIZE SUSPICIOUS ACTIVITY
-{{ create_section_divider('-', 50) }}
-Contact us immediately if you notice:
-{{ format_list_item('Unrecognized login notifications') }}
-{{ format_list_item('Unexpected password reset emails') }}
-{{ format_list_item('Changes to your account settings you did not make') }}
-{{ format_list_item('Emails about activities you did not perform') }}
+PASSWORD SECURITY:
+{{ format_list_item('Use a strong, unique password for your account') }}
+{{ format_list_item('Avoid using the same password across multiple services') }}
+{{ format_list_item('Consider using a password manager for secure storage') }}
+{{ format_list_item('Change passwords regularly, especially after security events') }}
 
-SECURITY BEST PRACTICES
-{{ create_section_divider('-', 50) }}
-{{ format_list_item('Never share your login credentials with others') }}
-{{ format_list_item('Always log in through our official website') }}
-{{ format_list_item('Be cautious of phishing emails requesting login information') }}
-{{ format_list_item('Use secure networks when accessing your account') }}
-{{ format_list_item('Keep your devices updated with security patches') }}
+ACCOUNT PROTECTION:
+{{ format_list_item('Enable two-factor authentication (2FA) or multi-factor authentication') }}
+{{ format_list_item('Keep your email address and phone number current') }}
+{{ format_list_item('Log out from shared or public computers') }}
+{{ format_list_item('Regularly review account activity and access logs') }}
 
-{% if additional_security_info -%}
-ADDITIONAL SECURITY INFORMATION
-{{ create_section_divider('-', 50) }}
-{{ additional_security_info }}
+DEVICE SECURITY:
+{{ format_list_item('Use updated browsers and operating systems') }}
+{{ format_list_item('Avoid accessing accounts from public or untrusted networks') }}
+{{ format_list_item('Log out completely when finished using the service') }}
+{{ format_list_item('Report suspicious activity immediately') }}
 
-{% endif -%}
-IMPORTANT SECURITY REMINDERS
-{{ create_section_divider('-', 50) }}
-{{ format_list_item('We will NEVER ask for your password via email or phone') }}
-{{ format_list_item('Always verify the sender of security-related emails') }}
-{{ format_list_item('Report suspected phishing attempts to security@company.com') }}
-{{ format_list_item('Use only official company websites and applications') }}
+{% if security_tips_url -%}
+For more security tips: {{ format_url_for_text(security_tips_url, 'Security Best Practices Guide') }}
+{% endif %}
 {%- endblock %}
 
 {#- Enhanced contact information for security issues -#}
 {% block contact_info -%}
-SECURITY SUPPORT CONTACT INFORMATION
-{{ create_section_divider('=', 78) }}
+SECURITY SUPPORT CONTACT:
+{{ create_section_divider('=', 60) }}
 
-PRIMARY CONTACT METHODS
-{{ create_section_divider('-', 50) }}
-Security Team Email: security@company.com
-Security Hotline: 1-800-SECURITY (1-800-732-8748)
-Emergency Line: 1-800-URGENT-SEC (1-800-874-3687)
+If you need immediate assistance or believe your account is compromised:
 
-BUSINESS HOURS
-{{ create_section_divider('-', 50) }}
-Monday - Friday: 8:00 AM - 8:00 PM Eastern Standard Time
-Saturday: 10:00 AM - 4:00 PM Eastern Standard Time
-Sunday: Emergency support only
+EMERGENCY SECURITY SUPPORT:
+- Security Email: {{ security_email | default('security@company.com') }}
+- Security Phone: {{ security_phone | default('1-800-SECURITY (1-800-732-8748)') }}
+- Security Portal: {{ security_portal_url | default('https://security.company.com') }}
 
-24/7 EMERGENCY SUPPORT
-{{ create_section_divider('-', 50) }}
-Available for critical security incidents, data breaches, or suspected
-unauthorized access. Emergency support may have longer response times
-outside normal business hours.
+GENERAL SUPPORT:
+- Support Email: {{ support_email | default('support@company.com') }}
+- Support Phone: {{ support_phone | default('1-800-SUPPORT (1-800-786-7678)') }}
+- Help Center: {{ help_center_url | default('https://help.company.com') }}
 
-SUPPORT RESOURCES
-{{ create_section_divider('-', 50) }}
-{{ format_list_item('Security Help Center: https://help.company.com/security') }}
-{{ format_list_item('Account Recovery Portal: https://app.company.com/account/recovery') }}
-{{ format_list_item('Security Status Page: https://status.company.com/security') }}
-{{ format_list_item('Security Blog: https://blog.company.com/category/security') }}
+SECURITY RESPONSE HOURS:
+- Emergency Security: 24/7 availability for critical security issues
+- General Support: Monday - Friday, 9:00 AM - 6:00 PM EST
+- Security Portal: 24/7 self-service account recovery and security tools
 
-INTERNATIONAL SUPPORT
-{{ create_section_divider('-', 50) }}
-For users outside the United States:
-{{ format_list_item('UK/Europe: +44-20-XXXX-XXXX') }}
-{{ format_list_item('Asia Pacific: +61-2-XXXX-XXXX') }}
-{{ format_list_item('Canada: 1-800-SECURITY (same as US)') }}
-
-When contacting support, please have ready:
-{{ format_list_item('Your account email address') }}
-{{ format_list_item('This incident ID: ' + (incident_id or '[Incident Reference]')) }}
-{{ format_list_item('Description of when the lockout occurred') }}
+When contacting support about this lockout, please provide:
+{{ format_list_item('This email timestamp: ' + (lockout_timestamp | default('email timestamp'))) }}
+{{ format_list_item('Your account identifier') }}
+{{ format_list_item('Description of your access attempts') }}
 {{ format_list_item('Any error messages you received') }}
 {%- endblock %}
 
-{#- Legal and compliance footer -#}
+{#- Security-specific footer information -#}
 {% block footer -%}
 
 {{ create_section_divider('=', 78) }}
-ACCOUNT SECURITY NOTIFICATION | FLASK APPLICATION SECURITY SYSTEM
+IMPORTANT SECURITY INFORMATION
 {{ create_section_divider('=', 78) }}
 
-This security notification was automatically generated in response to
-suspicious activity or security policy violations detected on your account.
+ACCOUNT LOCKOUT POLICY:
+This account lockout is a security measure designed to protect your account
+from unauthorized access. Lockouts are automatically triggered when our
+security systems detect potentially suspicious activity or multiple failed
+authentication attempts.
 
-NOTIFICATION DETAILS
-{{ create_section_divider('-', 50) }}
-{{ format_key_value('Notification Type', 'Account Security Lockout') }}
-{{ format_key_value('Generated Time', email_timestamp or '[Email Generation Time]') }}
-{{ format_key_value('Notification ID', notification_id or '[Email Notification ID]') }}
-{{ format_key_value('Security Level', 'HIGH PRIORITY - IMMEDIATE ACTION REQUIRED') }}
+VERIFICATION NOTICE:
+This security notification was sent because an account lockout occurred for
+your account. If you did not attempt to access your account, please treat
+this as a security incident and follow the emergency procedures outlined above.
 
-{% block unsubscribe_info -%}
-IMPORTANT: This is a critical security notification that cannot be disabled.
-You will continue to receive security alerts regardless of your email
-preferences to ensure account protection.
+LEGITIMATE EMAIL VERIFICATION:
+This email was sent from our official security notification system. Always
+verify that security emails come from our official domain. Be suspicious of
+any security emails asking for passwords, personal information, or directing
+you to unfamiliar websites.
 
-To manage non-security email preferences:
-{{ format_url_for_text('https://app.company.com/preferences', 'Email Preferences') }}
+PRIVACY AND SECURITY:
+We take your account security seriously and will never request sensitive
+information via email. Our security team may contact you for verification
+purposes, but will never ask for passwords, security codes, or other
+sensitive authentication details through email communication.
 
-{%- endblock %}
+{{ self.compliance_info() }}
 
-{% block legal_info -%}
-© {% now 'Y' %} Company Name. All rights reserved.
+AUTOMATED SECURITY SYSTEM:
+This message was generated by our automated security monitoring system as
+part of our comprehensive account protection protocols. The system continuously
+monitors for suspicious activity and automatically implements security measures
+to protect user accounts.
 
-This message contains confidential security information and is intended
-only for the account holder. If you have received this message in error,
-please delete it immediately and contact security@company.com.
-
-CONFIDENTIALITY NOTICE: This communication may contain privileged and
-confidential information. Any unauthorized review, use, disclosure, or
-distribution is prohibited.
-
-{%- endblock %}
-
-{% block compliance_info -%}
-Company Name Security Operations Center
-123 Security Boulevard, Suite 400
-Secure City, State 12345
-United States
-
-Incident Response Team: security@company.com
-Security Compliance: compliance@company.com
-Data Protection Office: privacy@company.com
-
-This notification complies with applicable data protection regulations
-including GDPR, CCPA, and SOX requirements for security incident disclosure.
-
-For data protection inquiries or to exercise your privacy rights:
-{{ format_url_for_text('https://privacy.company.com', 'Privacy Center') }}
-
-{%- endblock %}
-{%- endblock %}
-
-{#- Template configuration for account lockout specifics -#}
-{%- set lockout_email_config = {
-    'priority': 'HIGH',
-    'category': 'SECURITY_ALERT',
-    'retention_period': '7_years',
-    'encryption_required': true,
-    'audit_log': true
-} -%}
-
-{#- Security-specific formatting macros -#}
-{%- macro format_security_level(level) -%}
-*** {{ level.upper() }} SECURITY ALERT ***
-{%- endmacro -%}
-
-{%- macro format_incident_reference(incident_id) -%}
-INCIDENT REF: {{ incident_id or 'SEC-' + now('%Y%m%d-%H%M%S') }}
-{%- endmacro -%}
-
-{%- macro format_lockout_duration(duration) -%}
-{% if duration -%}
-Account locked for: {{ duration }}
-{% else -%}
-Account locked until manual unlock
+INCIDENT REFERENCE:
+{% if incident_id -%}
+Security Incident ID: {{ incident_id }}
 {% endif -%}
-{%- endmacro -%}
+For reference purposes when contacting support.
 
-{%- macro format_security_recommendation(recommendation, priority='MEDIUM') -%}
-[{{ priority }}] {{ recommendation }}
-{%- endmacro -%}
+{{ create_section_divider('=', 78) }}
+END OF SECURITY NOTIFICATION
+{{ create_section_divider('=', 78) }}
+{%- endblock %}
+
+{#- Technical security headers for system processing -#}
+{% block technical_headers -%}
+{#- Security event metadata for system processing -#}
+X-Security-Event-Type: account_lockout
+X-Security-Severity: medium
+X-Security-Category: authentication_failure
+X-Incident-ID: {{ incident_id | default('auto-generated') }}
+X-User-ID: {{ user_id | default('unknown') }}
+X-Lockout-Reason: {{ lockout_reason | default('security_policy') }}
+X-Source-IP: {{ source_ip | default('unknown') }}
+X-Timestamp: {{ lockout_timestamp | default('auto-generated') }}
+{%- endblock %}
 
 {#-
-Account Lockout Template Usage Examples:
-=======================================
+Template Variables Reference:
+============================
 
-1. Basic Account Lockout (Failed Login Attempts):
-{% include "emails/auth/account_locked.txt" with context %}
-Variables:
-- user_email: user@example.com
-- lockout_timestamp: 2024-01-15 14:30:00 UTC  
-- lockout_reason: Multiple failed login attempts detected
-- source_ip: 192.168.1.100
-- incident_id: SEC-20240115-143000
+Required Variables:
+- user_name: Name of the account holder for personalization
+- account_identifier: Account username, email, or ID for identification
+- lockout_timestamp: Exact time when the lockout occurred
+- lockout_reason: Specific reason for the account lockout
 
-2. Suspicious Activity Lockout:
-{% include "emails/auth/account_locked.txt" with context %}
-Variables:
-- user_email: user@example.com
-- lockout_reason: Suspicious login activity from unusual location
-- lockout_reason_details: Login attempts detected from multiple countries within 1 hour
-- source_ip: 203.0.113.42
-- user_agent: Chrome 120.0 on Unknown Device
+Optional Variables:
+- lockout_duration: How long the lockout will remain in effect
+- source_ip: IP address of the failed access attempts
+- location: Geographic location of access attempts
+- user_agent: Browser/device information from access attempts
+- unlock_url: Direct link to account unlock process
+- unlock_link_expiry: How long the unlock link remains valid
+- auto_unlock_time: When the account will automatically unlock
+- incident_id: Security incident reference number
+- user_id: Internal user identifier for system tracking
+- security_email: Direct security team contact email
+- security_phone: Emergency security contact phone number
+- security_portal_url: URL to security self-service portal
+- support_email: General support contact email
+- support_phone: General support contact phone number
+- help_center_url: URL to help center and documentation
+- security_tips_url: URL to security best practices guide
 
-3. Security Policy Violation:
-{% include "emails/auth/account_locked.txt" with context %}
-Variables:
-- lockout_reason: Account security policy violation
-- lockout_reason_details: Password sharing detected through concurrent sessions
-- additional_security_info: Please review our Terms of Service regarding account sharing
-
-4. Brute Force Attack Detection:
-{% include "emails/auth/account_locked.txt" with context %}
-Variables:
-- lockout_reason: Automated attack detected
-- lockout_reason_details: 50+ failed login attempts in 5 minutes from multiple IP addresses
-- unlock_url: https://app.company.com/security/unlock/brute-force
-
-Integration with Flask Application:
-==================================
+Usage Example:
+=============
 
 from flask import render_template
-from flask_mail import Message
+from datetime import datetime
 
-def send_account_locked_notification(user_email, lockout_details):
-    """Send account lockout notification via text email"""
-    
-    template_vars = {
-        'user_email': user_email,
-        'lockout_timestamp': lockout_details.get('timestamp'),
-        'lockout_reason': lockout_details.get('reason'),
-        'lockout_reason_details': lockout_details.get('details'),
-        'source_ip': lockout_details.get('source_ip'),
-        'user_agent': lockout_details.get('user_agent'),
-        'incident_id': lockout_details.get('incident_id'),
-        'unlock_url': url_for('auth.unlock_account', _external=True),
-        'email_timestamp': datetime.utcnow().isoformat(),
-        'notification_id': generate_notification_id()
-    }
-    
-    # Render text template
-    text_body = render_template(
+def send_account_lockout_notification(user, lockout_info):
+    email_content = render_template(
         'emails/auth/account_locked.txt',
-        **template_vars
+        user_name=user.full_name,
+        account_identifier=user.email,
+        lockout_timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
+        lockout_reason='Multiple failed login attempts detected',
+        lockout_duration='30 minutes',
+        source_ip=lockout_info.get('ip_address'),
+        location=lockout_info.get('location'),
+        user_agent=lockout_info.get('user_agent'),
+        unlock_url=url_for('auth.unlock_account', token=generate_unlock_token(user), _external=True),
+        unlock_link_expiry='24 hours',
+        auto_unlock_time='30 minutes',
+        incident_id=f'INC-{datetime.utcnow().strftime("%Y%m%d%H%M%S")}',
+        user_id=str(user.id),
+        security_email='security@company.com',
+        security_phone='1-800-SECURITY',
+        security_portal_url='https://security.company.com'
     )
     
-    # Create and send email
-    msg = Message(
-        subject='SECURITY ALERT: Your account has been locked',
-        recipients=[user_email],
-        body=text_body
+    # Send email using Flask-Mail or similar
+    send_email(
+        to=user.email,
+        subject='SECURITY ALERT: Your Account Has Been Locked',
+        body=email_content,
+        content_type='text/plain'
     )
-    
-    mail.send(msg)
 
-Security Considerations:
-=======================
-1. This template contains sensitive security information
-2. Email delivery should use encrypted transport (TLS)
-3. Consider rate limiting on account lockout notifications
-4. Log all lockout notification sends for audit purposes
-5. Ensure incident IDs are unique and trackable
-6. Validate all template variables to prevent information leakage
-7. Monitor for notification delivery failures
-8. Implement proper email authentication (SPF, DKIM, DMARC)
+Integration Notes:
+=================
 
-Accessibility Features:
-======================
-1. Clear hierarchical structure with consistent formatting
-2. Descriptive section headers and visual separators
-3. Logical reading order for screen readers
-4. No reliance on visual formatting for meaning
-5. Plain text URLs with descriptions
-6. Consistent indentation and bullet point formatting
-7. Maximum 78-character line length for email client compatibility
-8. Professional appearance across all text-only email clients
+1. Flask-Login Integration:
+   - Coordinate with Flask-Login session management for lockout enforcement
+   - Integrate with user loader functions for account status validation
+   - Synchronize with authentication decorators for access control
+
+2. Auth0 Integration:
+   - Correlate lockout events with Auth0 authentication failure logs
+   - Integrate with Auth0 user management APIs for account status updates
+   - Coordinate unlock procedures with Auth0 account restoration workflows
+
+3. Security Logging Integration:
+   - Log all lockout notifications sent for audit trail compliance
+   - Integrate with CloudWatch security logging for monitoring and alerting
+   - Coordinate with security incident response system for escalation
+
+4. Monitoring Integration:
+   - Track email delivery status for security notification reliability
+   - Monitor user response to lockout notifications for security metrics
+   - Alert security team if lockout notifications fail to deliver
+
+5. Multi-channel Notification:
+   - Coordinate with SMS and push notification systems for comprehensive alerting
+   - Integrate with in-app notification system for immediate user awareness
+   - Coordinate with phone call authentication for high-value accounts
+
+This template provides comprehensive account lockout notification capabilities
+while maintaining maximum accessibility and security best practices for
+text-only email delivery across all email client types and assistive technologies.
 -#}
