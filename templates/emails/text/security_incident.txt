@@ -1,0 +1,289 @@
+🚨 CRITICAL SECURITY INCIDENT ALERT 🚨
+
+Incident ID: {{ incident_id }}
+Timestamp: {{ timestamp }}
+Severity: {{ severity }}
+Application: Flask Security Monitor
+
+====================================================================
+INCIDENT SUMMARY
+====================================================================
+
+Incident Type: {{ incident_type }}
+Description: {{ description }}
+
+{% if affected_systems %}
+Affected Systems:
+{% for system in affected_systems %}
+- {{ system }}
+{% endfor %}
+{% endif %}
+
+{% if threat_indicators %}
+Threat Indicators:
+{% for indicator in threat_indicators %}
+- {{ indicator }}
+{% endfor %}
+{% endif %}
+
+====================================================================
+INCIDENT DETAILS
+====================================================================
+
+Detection Time: {{ detection_time }}
+Source IP(s): {{ source_ips | join(', ') if source_ips else 'Unknown' }}
+User ID(s): {{ user_ids | join(', ') if user_ids else 'Not applicable' }}
+Resource(s): {{ resources | join(', ') if resources else 'Not specified' }}
+
+{% if authentication_details %}
+Authentication Context:
+- Failed attempts: {{ authentication_details.failed_attempts }}
+- Auth method: {{ authentication_details.method }}
+- Session ID: {{ authentication_details.session_id }}
+{% endif %}
+
+{% if container_details %}
+Container Security Context:
+- Container ID: {{ container_details.container_id }}
+- Container status: {{ container_details.status }}
+- Isolation actions: {{ container_details.isolation_actions | join(', ') }}
+{% endif %}
+
+{% if guardduty_findings %}
+AWS GuardDuty Analysis:
+- Finding type: {{ guardduty_findings.type }}
+- Confidence level: {{ guardduty_findings.confidence }}
+- Service: {{ guardduty_findings.service }}
+{% endif %}
+
+{% if iam_context %}
+IAM Security Context:
+- Affected role/user: {{ iam_context.principal }}
+- Actions attempted: {{ iam_context.actions | join(', ') }}
+- Policy violations: {{ iam_context.violations | join(', ') }}
+{% endif %}
+
+====================================================================
+IMPACT ASSESSMENT
+====================================================================
+
+Security Impact Level: {{ impact_level }}
+Business Impact: {{ business_impact }}
+Data Exposure Risk: {{ data_exposure_risk }}
+
+{% if compromised_resources %}
+Potentially Compromised Resources:
+{% for resource in compromised_resources %}
+- {{ resource.name }}: {{ resource.status }}
+{% endfor %}
+{% endif %}
+
+====================================================================
+IMMEDIATE RESPONSE ACTIONS TAKEN
+====================================================================
+
+{% if automated_actions %}
+Automated Security Actions:
+{% for action in automated_actions %}
+- {{ action.timestamp }}: {{ action.description }}
+{% endfor %}
+{% endif %}
+
+{% if isolation_actions %}
+Container Isolation Actions:
+{% for action in isolation_actions %}
+- {{ action }}
+{% endfor %}
+{% endif %}
+
+{% if credential_actions %}
+Credential Revocation Actions:
+{% for action in credential_actions %}
+- {{ action }}
+{% endfor %}
+{% endif %}
+
+====================================================================
+REQUIRED MANUAL RESPONSE ACTIONS
+====================================================================
+
+IMMEDIATE ACTIONS (within 15 minutes):
+1. Verify incident scope and validate automated containment
+2. Contact affected users if applicable
+3. Review system logs for additional indicators
+4. Confirm isolation of compromised systems
+5. Document initial findings and response actions
+
+HIGH PRIORITY ACTIONS (within 1 hour):
+1. Conduct threat hunting for related indicators
+2. Review backup integrity and availability
+3. Coordinate with legal/compliance teams if required
+4. Prepare communications for stakeholders
+5. Assess need for external forensic assistance
+
+FOLLOW-UP ACTIONS (within 24 hours):
+1. Complete forensic analysis and evidence collection
+2. Implement additional security controls as needed
+3. Update incident response procedures based on learnings
+4. Schedule post-incident review meeting
+5. Prepare executive briefing materials
+
+====================================================================
+ESCALATION PROCEDURES
+====================================================================
+
+PRIMARY CONTACTS:
+- Security Team Lead: {{ security_lead_contact }}
+- On-Call Engineer: {{ oncall_contact }}
+- CISO: {{ ciso_contact }}
+
+ESCALATION TIMELINE:
+- 0-15 minutes: Security team response
+- 15-30 minutes: Management notification
+- 30-60 minutes: Executive escalation (if critical)
+- 1+ hours: External stakeholder notification (if required)
+
+EXTERNAL CONTACTS (if needed):
+- Legal Counsel: {{ legal_contact }}
+- Cyber Insurance: {{ insurance_contact }}
+- Law Enforcement: {{ law_enforcement_contact }}
+- Regulatory Bodies: {{ regulatory_contact }}
+
+====================================================================
+SYSTEM MONITORING STATUS
+====================================================================
+
+Container Orchestration Status: {{ container_status }}
+WSGI Server Health: {{ wsgi_status }}
+Database Security: {{ database_status }}
+Authentication Systems: {{ auth_status }}
+Network Security: {{ network_status }}
+
+Monitoring Dashboard: {{ dashboard_url }}
+Incident Tracking: {{ incident_tracking_url }}
+
+====================================================================
+COMMUNICATION GUIDELINES
+====================================================================
+
+Internal Communications:
+- Use secure channels only (encrypted email/Slack)
+- Limit distribution to need-to-know basis
+- All communications must reference Incident ID: {{ incident_id }}
+
+External Communications:
+- NO external communications without approval
+- All media inquiries to be directed to {{ media_contact }}
+- Customer communications require executive approval
+
+Legal/Regulatory Considerations:
+- Potential breach notification requirements: {{ breach_notification_required }}
+- Data protection regulations applicable: {{ applicable_regulations }}
+- Evidence preservation requirements: {{ evidence_preservation }}
+
+====================================================================
+TECHNICAL ANALYSIS
+====================================================================
+
+Attack Vector: {{ attack_vector }}
+Exploitation Method: {{ exploitation_method }}
+Security Controls Bypassed: {{ bypassed_controls | join(', ') if bypassed_controls else 'None identified' }}
+Detection Method: {{ detection_method }}
+
+{% if threat_intelligence %}
+Threat Intelligence:
+- IOCs identified: {{ threat_intelligence.iocs | join(', ') }}
+- Attribution: {{ threat_intelligence.attribution }}
+- Campaign association: {{ threat_intelligence.campaign }}
+{% endif %}
+
+{% if vulnerability_info %}
+Vulnerability Information:
+- CVE(s): {{ vulnerability_info.cves | join(', ') }}
+- Patch availability: {{ vulnerability_info.patch_status }}
+- Workaround available: {{ vulnerability_info.workaround }}
+{% endif %}
+
+====================================================================
+FORENSIC PRESERVATION
+====================================================================
+
+Evidence Collected:
+{% if evidence_collected %}
+{% for evidence in evidence_collected %}
+- {{ evidence.type }}: {{ evidence.location }} ({{ evidence.timestamp }})
+{% endfor %}
+{% else %}
+- Evidence collection in progress
+{% endif %}
+
+Log Sources Preserved:
+- CloudWatch Logs: {{ log_retention_period }}
+- Sentry Error Tracking: Preserved
+- Container Logs: Preserved
+- Database Audit Logs: Preserved
+- AWS GuardDuty Findings: Preserved
+
+====================================================================
+RECOVERY PROCEDURES
+====================================================================
+
+System Recovery Steps:
+1. Verify threat elimination from all affected systems
+2. Validate security control effectiveness
+3. Restore systems from verified clean backups if needed
+4. Implement additional monitoring for affected resources
+5. Conduct security validation before returning to service
+
+Business Continuity:
+- Backup systems status: {{ backup_status }}
+- Failover procedures: {{ failover_status }}
+- Service restoration timeline: {{ restoration_timeline }}
+
+====================================================================
+COMPLIANCE AND REPORTING
+====================================================================
+
+Regulatory Reporting Required: {{ regulatory_reporting_required }}
+Customer Notification Required: {{ customer_notification_required }}
+Insurance Claim Initiation: {{ insurance_claim_required }}
+
+Documentation Requirements:
+- Incident timeline: {{ timeline_documentation_status }}
+- Financial impact assessment: {{ financial_impact_status }}
+- Technical analysis report: {{ technical_report_status }}
+- Lessons learned document: {{ lessons_learned_status }}
+
+====================================================================
+POST-INCIDENT REQUIREMENTS
+====================================================================
+
+Required Reviews:
+- Security control effectiveness assessment
+- Incident response procedure evaluation
+- Staff training requirements analysis
+- Technology improvement recommendations
+
+Improvement Actions:
+- Update detection rules and signatures
+- Enhance monitoring and alerting capabilities
+- Implement additional security controls
+- Conduct security awareness training
+
+====================================================================
+
+This is an automated security alert from the Flask Application Security Monitor.
+
+For immediate assistance, contact the Security Operations Center:
+- Phone: {{ soc_phone }}
+- Email: {{ soc_email }}
+- Emergency Escalation: {{ emergency_contact }}
+
+CONFIDENTIAL: This message contains sensitive security information. 
+Handle according to your organization's data classification policies.
+
+Incident Response System Version: {{ incident_system_version }}
+Template Version: {{ template_version }}
+Generated: {{ generation_timestamp }}
+
+====================================================================
