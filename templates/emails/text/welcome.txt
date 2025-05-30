@@ -1,129 +1,155 @@
-Welcome to {{ service_name }}!
-{{ '=' * (service_name|length + 12) }}
+Welcome to Our Platform!
 
-Hi {{ user.first_name or user.username }},
+Dear {{ user.full_name or user.username }},
 
-Thank you for creating your account! We're excited to have you join our community.
+Welcome to our community! We're excited to have you join us and begin exploring all the features and capabilities our platform has to offer.
 
-Your Account Details:
--------------------
+========================================
+YOUR ACCOUNT DETAILS
+========================================
+
 Username: {{ user.username }}
 Email: {{ user.email }}
-{% if user.account_type -%}
-Account Type: {{ user.account_type.title() }}
-{% endif -%}
-Registration Date: {{ user.created_at.strftime('%B %d, %Y at %I:%M %p') }}
+Account Status: Active
+Member Since: {{ user.created_at.strftime('%B %d, %Y') }}
+{% if user.profile and user.profile.preferred_language %}
+Preferred Language: {{ user.profile.preferred_language }}
+{% endif %}
 
-Getting Started:
----------------
-Your account is now active and ready to use. Here's what you can do next:
+========================================
+GETTING STARTED
+========================================
 
-1. **API Access**: Your account provides access to our REST API endpoints. 
-   Use your credentials to authenticate and access all available services.
+1. COMPLETE YOUR PROFILE
+   Visit your profile page to add additional information and personalize your experience. A complete profile helps you get the most out of our platform and connects you with relevant features.
 
-2. **Documentation**: Visit our API documentation to explore available 
-   endpoints and learn how to integrate with our services.
+2. EXPLORE KEY FEATURES
+   - Dashboard: Your central hub for accessing all platform features
+   - Account Settings: Manage your preferences and security settings
+   - User Management: Access and manage your account information
+   - Security Center: Review and update your security preferences
 
-3. **Authentication**: Use your username/email and password to obtain 
-   authentication tokens for API requests.
+3. SECURITY SETUP
+   Your account is protected with industry-standard security measures:
+   - Secure authentication powered by Auth0
+   - Encrypted data storage and transmission
+   - Session management with automatic timeout
+   
+   For enhanced security, consider:
+   - Enabling two-factor authentication (if available)
+   - Using a strong, unique password
+   - Reviewing your login activity regularly
 
-{% if features -%}
-Available Features:
-------------------
-{% for feature in features -%}
-• {{ feature.name }}: {{ feature.description }}
-{% endfor %}
-{% endif -%}
+========================================
+WHAT'S NEXT?
+========================================
 
-Security & Best Practices:
--------------------------
-• Keep your login credentials secure and do not share them
-• Use strong, unique passwords for your account
-• Review our security guidelines for API authentication best practices
-{% if user.two_factor_enabled -%}
-• Two-factor authentication is enabled for enhanced security
-{% endif -%}
+Here are some recommended first steps to help you get the most out of your account:
+
+• LOG IN TO YOUR DASHBOARD
+  Access your account dashboard to explore available features and customize your experience.
+
+• UPDATE YOUR PREFERENCES
+  Set your notification preferences, timezone, and other personal settings to match your needs.
+
+• EXPLORE DOCUMENTATION
+  Visit our help center and documentation to learn about advanced features and best practices.
+
+• CONNECT WITH SUPPORT
+  If you have questions or need assistance, our support team is here to help.
+
+========================================
+IMPORTANT INFORMATION
+========================================
+
+Platform Features:
+- Modern Flask-based architecture for reliable performance
+- Secure database management with comprehensive data protection
+- Real-time monitoring and health checks for optimal uptime
+- Mobile-friendly interface that works across all devices
+
+Account Security:
+- Your session will automatically timeout for security
+- We use advanced encryption to protect your data
+- Regular security updates ensure your information stays safe
+- Multi-layered authentication protects your account access
+
+System Requirements:
+- Compatible with all modern web browsers
+- No additional software installation required
+- Accessible from desktop, tablet, and mobile devices
+- Optimized for both high-speed and slower internet connections
+
+========================================
+SUPPORT AND RESOURCES
+========================================
 
 Need Help?
-----------
-If you have any questions or need assistance getting started:
+If you have questions or encounter any issues, we're here to assist you:
 
-• Check our FAQ section for common questions
-• Contact our support team at {{ support_email or 'support@' + domain }}
-• Visit our documentation portal for detailed guides
+• Documentation: Access our comprehensive user guides and tutorials
+• Support Team: Contact our support team for personalized assistance
+• Community Forums: Connect with other users and share experiences
+• FAQ Section: Find quick answers to common questions
 
-{% if onboarding_steps -%}
-Next Steps:
-----------
-{% for step in onboarding_steps -%}
-{{ loop.index }}. {{ step }}
-{% endfor %}
-{% endif -%}
+Contact Information:
+For technical support or account-related questions, please don't hesitate to reach out to our support team.
 
-Account Verification:
--------------------
-{% if user.email_verified -%}
-✓ Your email address has been verified and your account is fully active.
-{% else -%}
-To complete your account setup, please verify your email address by 
-clicking the verification link sent to {{ user.email }}.
+========================================
+PRIVACY AND SECURITY
+========================================
 
-If you didn't receive the verification email, you can request a new one 
-by logging into your account and visiting the account settings page.
-{% endif -%}
+Your Privacy Matters:
+We take your privacy seriously and are committed to protecting your personal information:
 
-Technical Information:
---------------------
-{% if api_version -%}
-Current API Version: {{ api_version }}
-{% endif -%}
-{% if base_url -%}
-API Base URL: {{ base_url }}
-{% endif -%}
-{% if rate_limits -%}
-Rate Limits: {{ rate_limits }}
-{% endif -%}
+- Your data is encrypted both in transit and at rest
+- We follow industry best practices for data security
+- Your information is never shared without your explicit consent
+- You have full control over your data and privacy settings
 
-Important Notes:
----------------
-• This is an automated message from our system
-• Please do not reply to this email address
-• Save this information for your records
-• Keep your account credentials secure
+Data Protection:
+Our platform includes comprehensive security measures:
+- Regular security audits and monitoring
+- Automated backup and recovery systems
+- Compliance with data protection regulations
+- Secure authentication and session management
 
-{% if company_info -%}
-About {{ service_name }}:
-{{ '-' * (service_name|length + 7) }}
-{{ company_info.description }}
+========================================
+WELCOME TO THE COMMUNITY
+========================================
 
-{% if company_info.website -%}
-Website: {{ company_info.website }}
-{% endif -%}
-{% if company_info.terms_url -%}
-Terms of Service: {{ company_info.terms_url }}
-{% endif -%}
-{% if company_info.privacy_url -%}
-Privacy Policy: {{ company_info.privacy_url }}
-{% endif -%}
-{% endif -%}
+You're now part of a growing community of users who rely on our platform for their daily operations. We're committed to providing you with:
 
-Thank you for choosing {{ service_name }}!
+✓ Reliable and secure service
+✓ Regular feature updates and improvements
+✓ Responsive customer support
+✓ Comprehensive documentation and resources
 
----
-{{ service_name }} Team
-{% if contact_info -%}
-{{ contact_info.address }}
-{% if contact_info.phone -%}
-Phone: {{ contact_info.phone }}
-{% endif -%}
-{% endif -%}
+We believe you'll find our platform intuitive, powerful, and perfectly suited to your needs. Whether you're just getting started or you're an experienced user, we're here to support your journey.
 
-This email was sent to {{ user.email }} because you created an account 
-with {{ service_name }}. If you received this email in error, please 
-contact our support team immediately.
+========================================
+FEEDBACK AND SUGGESTIONS
+========================================
 
-{% if unsubscribe_url -%}
-To manage your email preferences: {{ unsubscribe_url }}
-{% endif -%}
+We Value Your Input:
+Your feedback helps us improve and grow. We'd love to hear about:
+- Your experience using the platform
+- Features you'd like to see added
+- Any suggestions for improvements
+- Questions or concerns you might have
 
-© {{ current_year }} {{ service_name }}. All rights reserved.
+Thank you for choosing our platform. We look forward to being part of your success!
+
+Best regards,
+The Platform Team
+
+========================================
+
+This email was sent to {{ user.email }}. If you did not create this account or received this email in error, please contact our support team immediately.
+
+For your security, this welcome email contains account information that should be kept confidential. Please do not forward this email to others.
+
+© {{ current_year }} Our Platform. All rights reserved.
+
+--
+You're receiving this email because you recently created an account with us. This is a one-time welcome message to help you get started with your new account.
