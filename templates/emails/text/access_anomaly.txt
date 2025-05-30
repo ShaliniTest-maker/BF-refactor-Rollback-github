@@ -1,0 +1,185 @@
+ACCESS ANOMALY DETECTION ALERT
+================================
+
+SECURITY INCIDENT NOTIFICATION
+==============================
+
+Alert ID: {{ alert_id }}
+Timestamp: {{ timestamp }}
+Severity: {{ severity }}
+Risk Score: {{ risk_score }}/100
+
+USER INFORMATION
+================
+User ID: {{ user_id }}
+Username: {{ username }}
+Email: {{ user_email }}
+Last Known Location: {{ last_known_location }}
+
+ANOMALY DETAILS
+===============
+Anomaly Type: {{ anomaly_type }}
+Detection Method: {{ detection_method }}
+Confidence Level: {{ confidence_level }}%
+
+BEHAVIORAL ANALYSIS
+===================
+
+Session Pattern Analysis:
+- Normal session duration: {{ normal_session_duration }}
+- Current session duration: {{ current_session_duration }}
+- Session frequency deviation: {{ session_frequency_deviation }}%
+- Unusual time pattern: {{ unusual_time_pattern }}
+
+Geographic Analysis:
+- Typical access regions: {{ typical_regions }}
+- Current access location: {{ current_location }}
+- Geographic distance from norm: {{ distance_from_norm }} km
+- VPN/Proxy detection: {{ vpn_proxy_detected }}
+
+Device and Browser Analysis:
+- Device fingerprint match: {{ device_fingerprint_match }}
+- Browser consistency: {{ browser_consistency }}
+- Operating system variance: {{ os_variance }}
+- User agent anomaly: {{ user_agent_anomaly }}
+
+Access Pattern Analysis:
+- Typical access hours: {{ typical_access_hours }}
+- Current access time: {{ current_access_time }}
+- Resource access pattern: {{ resource_access_pattern }}
+- API endpoint deviation: {{ api_endpoint_deviation }}%
+
+RISK ASSESSMENT
+===============
+Overall Risk Score: {{ risk_score }}/100
+
+Risk Factors Detected:
+{% for factor in risk_factors %}
+- {{ factor.name }}: {{ factor.weight }}/10 ({{ factor.description }})
+{% endfor %}
+
+Machine Learning Analysis:
+- Anomaly detection model: {{ ml_model_name }}
+- Model confidence: {{ ml_confidence }}%
+- Training data reference period: {{ training_period }}
+- Deviation from baseline: {{ baseline_deviation }}%
+
+SECURITY RECOMMENDATIONS
+=========================
+
+IMMEDIATE ACTIONS REQUIRED:
+{% if risk_score >= 80 %}
+1. IMMEDIATE USER SESSION TERMINATION recommended
+2. Initiate account security review
+3. Contact user through verified communication channel
+4. Enable enhanced monitoring for this account
+{% elif risk_score >= 60 %}
+1. Monitor user session closely
+2. Require additional authentication if accessing sensitive data
+3. Log all user activities for review
+4. Consider session timeout reduction
+{% else %}
+1. Continue monitoring with increased vigilance
+2. Document anomaly for pattern analysis
+3. Review user access patterns over next 24 hours
+{% endif %}
+
+INVESTIGATION PROCEDURES
+========================
+
+Step 1: Initial Verification
+- Verify user identity through secondary channel
+- Confirm legitimate access attempt
+- Check for compromised credentials
+
+Step 2: Technical Analysis
+- Review system logs for {{ log_review_period }}
+- Analyze network traffic patterns
+- Check for concurrent sessions
+- Validate authentication tokens
+
+Step 3: Security Assessment
+- Evaluate potential data exposure
+- Assess system integrity
+- Review access control effectiveness
+- Document security impact
+
+Step 4: Remediation Planning
+- Determine containment measures
+- Plan security hardening steps
+- Schedule security awareness training
+- Update monitoring rules if needed
+
+DETAILED LOG INFORMATION
+=========================
+Session ID: {{ session_id }}
+IP Address: {{ ip_address }}
+User Agent: {{ user_agent }}
+Referrer: {{ referrer }}
+Authentication Method: {{ auth_method }}
+MFA Status: {{ mfa_status }}
+
+Access History (Last 5 attempts):
+{% for access in recent_access_history %}
+{{ access.timestamp }} | {{ access.ip_address }} | {{ access.location }} | {{ access.status }}
+{% endfor %}
+
+SYSTEM CONTEXT
+===============
+Detection System: Flask Security Monitoring Framework
+Monitoring Infrastructure: AWS CloudWatch + GuardDuty Integration
+Alert Generation: Python Logging Framework
+Incident Response: Automated via Flask Security Services
+
+Related Systems:
+- Auth0 Authentication Service
+- Flask-SQLAlchemy Audit Logging
+- Sentry Error Tracking Integration
+- AWS Security Hub Correlation
+
+COMPLIANCE INFORMATION
+======================
+Data Privacy Notice: This alert contains personal information processed 
+in accordance with organizational privacy policies and applicable data 
+protection regulations.
+
+Retention Policy: Security logs retained for {{ log_retention_days }} days
+Audit Trail: Complete activity log available in security dashboard
+Reporting: Incident automatically logged to compliance database
+
+CONTACT INFORMATION
+===================
+Security Team: {{ security_email }}
+Emergency Contact: {{ emergency_contact }}
+Incident Response: {{ incident_response_number }}
+
+Security Operations Center (SOC):
+- Primary: {{ soc_primary_contact }}
+- Escalation: {{ soc_escalation_contact }}
+- Business Hours: {{ business_hours }}
+
+NEXT STEPS
+==========
+1. Security team will investigate within {{ investigation_sla }} minutes
+2. User will be contacted if verification required
+3. Additional monitoring enabled automatically
+4. Follow-up report will be generated within {{ report_sla }} hours
+
+AUTO-GENERATED ALERT
+====================
+This notification was automatically generated by the Flask Security 
+Monitoring System. Please do not reply to this message.
+
+For urgent security matters, contact the Security Operations Center 
+directly at {{ soc_emergency_number }}.
+
+System Information:
+- Generated by: Flask Anomaly Detection Service
+- Alert Version: {{ alert_version }}
+- Configuration: {{ config_version }}
+- Processing Time: {{ processing_time }}ms
+
+---
+Flask Security Monitoring Framework
+Incident ID: {{ incident_id }}
+© {{ current_year }} - Automated Security Alert System
