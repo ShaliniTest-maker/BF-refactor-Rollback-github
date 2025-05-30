@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "timestamp": "{{ timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', generate_uuid())) }}",
+    "request_id": "{{ request_id | default(request.headers.get('X-Request-ID', generate_uuid())) }}",
+    "api_version": "{{ api_version | default('v1') }}",
+    "server_timestamp": "{{ server_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "environment": "{{ environment | default(config.ENV) }}",
+    "trace_id": "{{ trace_id | default(request.headers.get('X-Trace-ID')) }}"
+  },
+  "status": {
+    "code": {{ status_code | default(200) }},
+    "message": "{{ status_message | default('Success') }}",
+    "success": {{ success | default('true') }},
+    "error": {{ error | default('null') }}
+  },
+  "request": {
+    "method": "{{ request_method | default(request.method) }}",
+    "path": "{{ request_path | default(request.path) }}",
+    "endpoint": "{{ request_endpoint | default(request.endpoint) }}",
+    "user_agent": "{{ user_agent | default(request.headers.get('User-Agent', 'Unknown')) | truncate(100) }}",
+    "ip_address": "{{ client_ip | default(request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)) }}",
+    "query_params": {{ query_params | default(request.args.to_dict()) | tojson }},
+    "content_type": "{{ content_type | default(request.content_type) }}"
+  },
+  "response": {
+    "content_type": "application/json",
+    "encoding": "utf-8",
+    "cache_control": "{{ cache_control | default('no-cache, no-store, must-revalidate') }}",
+    "etag": "{{ etag | default(null) }}",
+    "last_modified": "{{ last_modified | default(null) }}"
+  },
+  "security": {
+    "authenticated": {{ authenticated | default('false') }},
+    "user_id": "{{ user_id | default(null) }}",
+    "permissions": {{ permissions | default([]) | tojson }},
+    "session_id": "{{ session_id | default(session.get('session_id', null)) }}",
+    "csrf_token": "{{ csrf_token | default(null) }}",
+    "rate_limit": {
+      "remaining": {{ rate_limit_remaining | default(null) }},
+      "limit": {{ rate_limit_limit | default(null) }},
+      "reset_time": "{{ rate_limit_reset | default(null) }}"
+    }
+  },
+  "data": {% block data %}{{ data | default(null) | tojson }}{% endblock %},
+  "pagination": {% block pagination %}{{ pagination | default(null) | tojson }}{% endblock %},
+  "links": {% block links %}{
+    "self": "{{ self_link | default(request.url) }}",
+    "api_root": "{{ api_root | default(url_for('api.root', _external=True)) }}",
+    "documentation": "{{ documentation_link | default(url_for('api.docs', _external=True)) }}"
+  }{% endblock %},
+  "audit": {
+    "logged_at": "{{ audit_timestamp | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "operation": "{{ operation | default(request.endpoint) }}",
+    "resource": "{{ resource | default(null) }}",
+    "action": "{{ action | default(request.method.lower()) }}",
+    "result": "{{ audit_result | default('success' if success else 'failure') }}",
+    "duration_ms": {{ duration_ms | default(null) }},
+    "response_size": {{ response_size | default(null) }}
+  },
+  "performance": {
+    "request_start": "{{ request_start_time | default(null) }}",
+    "request_end": "{{ request_end_time | default(moment().utc().format('YYYY-MM-DDTHH:mm:ss.SSS[Z]')) }}",
+    "processing_time_ms": {{ processing_time_ms | default(null) }},
+    "database_queries": {{ database_queries | default(null) }},
+    "cache_hits": {{ cache_hits | default(null) }},
+    "memory_usage": {{ memory_usage | default(null) }}
+  },
+  "debug": {% if config.DEBUG %}{
+    "flask_version": "{{ flask_version | default('3.1.1') }}",
+    "python_version": "{{ python_version | default('3.13.3') }}",
+    "request_headers": {{ debug_headers | default(dict(request.headers)) | tojson }},
+    "session_data": {{ debug_session | default(dict(session)) | tojson }},
+    "template_name": "{{ template_name | default('base_response.json') }}",
+    "blueprint": "{{ blueprint | default(request.blueprint) }}"
+  }{% else %}null{% endif %},
+  "warnings": {% block warnings %}{{ warnings | default([]) | tojson }}{% endblock %},
+  "notifications": {% block notifications %}{{ notifications | default([]) | tojson }}{% endblock %}
+}
