@@ -1,0 +1,191 @@
+{# 
+404 Not Found Error Template for Flask Application
+Purpose: Standardized JSON error responses for HTTP 404 status codes with resource identification and navigation guidance
+Template Engine: Jinja2 3.1.2+ with Flask 3.1.1 integration
+Blueprint Integration: Section 5.2.2 blueprint management system
+API Documentation: Section 4.3.1.4 response formatting integration
+
+Template Features:
+- Resource identification error messaging with Flask blueprint context
+- API endpoint availability guidance with Flask-RESTX documentation integration
+- Navigation assistance for alternative endpoints and API discovery
+- Consistent error response structure maintaining API contract compliance
+
+Usage Context:
+- Automatically rendered when Flask routes return 404 status
+- Integrates with Blueprint Management System per Section 5.2.2
+- Provides client navigation assistance for API discovery
+- Maintains response formatting compliance per Section 4.3.1.4
+#}
+{%- extends "errors/base_error.json" -%}
+
+{%- set resource_type = (request.view_args.get('resource_type') or 'resource') | title -%}
+{%- set resource_id = request.view_args.get('id') or request.view_args.get('resource_id') or '' -%}
+{%- set blueprint_name = request.blueprint or 'unknown' -%}
+{%- set requested_endpoint = request.endpoint or '' -%}
+{%- set available_methods = [] -%}
+{%- set similar_endpoints = [] -%}
+{%- set api_version = g.api_version or '1.0' -%}
+
+{# Analyze Flask application routing to suggest alternatives #}
+{%- if current_app and current_app.url_map -%}
+  {%- for rule in current_app.url_map.iter_rules() -%}
+    {%- if rule.endpoint and rule.endpoint.startswith(blueprint_name + '.') -%}
+      {%- set similar_endpoints = similar_endpoints + [rule.endpoint] -%}
+    {%- endif -%}
+  {%- endfor -%}
+{%- endif -%}
+
+{% block error_type %}NotFoundError{% endblock %}
+
+{% block error_code %}ERR_NOT_FOUND_404{% endblock %}
+
+{% block error_message -%}
+{%- if resource_id -%}
+{{ resource_type }} with identifier '{{ resource_id }}' not found
+{%- else -%}
+The requested resource at '{{ request.path }}' was not found
+{%- endif -%}
+{%- endblock %}
+
+{% block error_details %}{
+  "resource": {
+    "type": "{{ resource_type.lower() }}",
+    "identifier": {{ resource_id | tojson }},
+    "requested_path": "{{ request.path }}",
+    "blueprint": "{{ blueprint_name }}",
+    "endpoint": "{{ requested_endpoint }}"
+  },
+  "context": {
+    "http_method": "{{ request.method }}",
+    "query_parameters": {{ request.args.to_dict() | tojson }},
+    "content_type": "{{ request.content_type or 'application/json' }}",
+    "accepts": "{{ request.headers.get('Accept', 'application/json') }}"
+  },
+  "suggestions": {
+    "verify_resource_id": {{ (resource_id != '') | tojson }},
+    "check_permissions": true,
+    "validate_endpoint": "{{ request.path }}",
+    "review_api_documentation": true
+  },
+  "navigation": {
+    "blueprint_endpoints": [
+      {%- for endpoint in similar_endpoints[:5] -%}
+        {%- set endpoint_name = endpoint.split('.')[-1] -%}
+        "{{ endpoint_name }}"
+        {%- if not loop.last %},{% endif -%}
+      {%- endfor -%}
+    ],
+    "alternative_methods": [
+      {%- if request.method != 'GET' %}"GET"{% endif -%}
+      {%- if request.method != 'POST' %}{% if request.method != 'GET' %},{% endif %}"POST"{% endif -%}
+      {%- if request.method != 'PUT' %}{% if request.method in ['GET', 'POST'] %},{% endif %}"PUT"{% endif -%}
+      {%- if request.method != 'DELETE' %}{% if request.method in ['GET', 'POST', 'PUT'] %},{% endif %}"DELETE"{% endif -%}
+    ],
+    "base_url": "{{ request.url_root.rstrip('/') }}",
+    "api_root": "{{ request.url_root.rstrip('/') }}/api/v{{ api_version }}"
+  },
+  "discovery": {
+    "endpoints_available": {{ similar_endpoints | length }},
+    "documentation_url": "{{ request.url_root.rstrip('/') }}/api/docs",
+    "openapi_spec": "{{ request.url_root.rstrip('/') }}/api/openapi.json",
+    "health_check": "{{ request.url_root.rstrip('/') }}/health"
+  }
+}{% endblock %}
+
+{% block api_version %}{{ api_version }}{% endblock %}
+
+{% block support_contact %}api-support@company.com{% endblock %}
+
+{% block documentation_url %}{{ request.url_root.rstrip('/') }}/api/docs/errors/404{% endblock %}
+
+{% block help_text -%}
+The requested resource was not found. Please verify the resource identifier and endpoint URL. 
+{%- if resource_id %} Check that {{ resource_type.lower() }} '{{ resource_id }}' exists and you have appropriate permissions to access it.{% endif %} 
+Consult the API documentation for available endpoints and proper request formats.
+{%- endblock %}
+
+{%- if config.DEBUG %}
+{% block debug_stack_trace %}{{ g.exception_info.traceback if g.exception_info else '' }}{% endblock %}
+
+{% block debug_variables %}{
+  "url_rule": "{{ request.url_rule }}",
+  "view_args": {{ request.view_args | tojson }},
+  "routing_exception": "{{ g.routing_exception if g.routing_exception else null }}",
+  "blueprint_name": "{{ blueprint_name }}",
+  "endpoint_function": "{{ g.endpoint_function.__name__ if g.endpoint_function else null }}",
+  "similar_endpoints_found": {{ similar_endpoints | length }},
+  "flask_app_debug": {{ current_app.debug | tojson if current_app else false }}
+}{% endblock %}
+
+{% block debug_request_data %}{
+  "raw_path": "{{ request.path }}",
+  "url_rule_options": {{ g.url_rule_options | tojson if g.url_rule_options else {} }},
+  "routing_args": {{ g.routing_args | tojson if g.routing_args else {} }},
+  "view_function": "{{ g.view_function.__name__ if g.view_function else null }}",
+  "request_routing": {
+    "url_adapter": "{{ g.url_adapter.__class__.__name__ if g.url_adapter else null }}",
+    "routing_map": "{{ current_app.url_map.__class__.__name__ if current_app and current_app.url_map else null }}"
+  }
+}{% endblock %}
+{%- endif %}
+
+{# 
+Flask Blueprint Integration Notes:
+This template integrates with Flask's blueprint management system per Section 5.2.2:
+- Captures blueprint context from request.blueprint
+- Analyzes available endpoints within the same blueprint
+- Provides navigation assistance for related resources
+- Maintains modular route organization patterns
+
+API Documentation Integration:
+Per Section 4.3.1.4 response formatting integration:
+- Links to Flask-RESTX/OpenAPI documentation
+- Provides endpoint discovery information
+- Maintains consistent error response structure
+- Supports automated API documentation generation
+
+Resource Identification Features:
+- Extracts resource type and identifier from URL parameters
+- Provides context about the requested resource
+- Suggests verification steps for the client
+- Maintains API contract compliance
+
+Navigation Assistance:
+Per Section 4.3.1.4 API documentation automation:
+- Lists available endpoints in the same blueprint
+- Suggests alternative HTTP methods
+- Provides links to API documentation and OpenAPI spec
+- Includes health check endpoint for service verification
+
+Error Response Structure:
+Maintains consistent structure per Section 4.3.1.4:
+- Extends base error template for standardization
+- Provides detailed resource and context information
+- Includes navigation and discovery guidance
+- Supports debug information in development environments
+
+Security Considerations:
+- Filters sensitive information from error responses
+- Maintains user context and authentication status
+- Provides audit trail information via base template
+- Follows security monitoring requirements per Section 6.4.6.1
+
+Blueprint Context Integration:
+- Automatically captures Flask blueprint information
+- Provides blueprint-specific endpoint suggestions
+- Maintains organized route management patterns
+- Supports modular application architecture
+
+Client Error Handling Support:
+- Provides actionable error messages
+- Includes suggestion for error resolution
+- Maintains API usability through clear guidance
+- Supports client-side error handling patterns
+
+Flask-RESTX Integration:
+- Compatible with automatic documentation generation
+- Provides OpenAPI specification references
+- Maintains documentation consistency across endpoints
+- Supports interactive API exploration capabilities
+#}
