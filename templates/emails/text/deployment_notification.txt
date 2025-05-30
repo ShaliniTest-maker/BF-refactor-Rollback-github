@@ -1,0 +1,261 @@
+DEPLOYMENT NOTIFICATION - Flask Application Migration
+================================================================
+
+DEPLOYMENT SUMMARY
+------------------
+Application: {{ application_name | default('Flask Application') }}
+Version: {{ version | default('Unknown') }}
+Environment: {{ environment | upper | default('UNKNOWN') }}
+Deployment ID: {{ deployment_id | default('N/A') }}
+Timestamp: {{ deployment_timestamp | default(current_timestamp) }}
+Deployed By: {{ deployed_by | default('Automated CI/CD') }}
+Duration: {{ deployment_duration | default('N/A') }}
+
+DEPLOYMENT STATUS: {{ deployment_status | upper | default('UNKNOWN') }}
+
+{% if deployment_status == 'SUCCESS' %}
+✓ Deployment completed successfully
+{% elif deployment_status == 'FAILED' %}
+✗ Deployment failed - see details below
+{% elif deployment_status == 'IN_PROGRESS' %}
+⚡ Deployment currently in progress
+{% else %}
+⚠ Deployment status unknown
+{% endif %}
+
+================================================================
+RELEASE INFORMATION
+================================================================
+
+Build Information:
+------------------
+Build Number: {{ build_number | default('N/A') }}
+Commit Hash: {{ commit_hash | default('N/A') }}
+Branch: {{ branch_name | default('N/A') }}
+GitHub Actions Run: {{ github_actions_url | default('N/A') }}
+
+Change Summary:
+---------------
+{% if changes %}
+{% for change in changes %}
+• {{ change }}
+{% endfor %}
+{% else %}
+• No change summary available
+{% endif %}
+
+Migration Components:
+---------------------
+• Node.js to Flask 3.1.1 migration
+• Database schema migration (Flask-SQLAlchemy)
+• Authentication system migration (Auth0 integration)
+• API endpoint conversion to Flask blueprints
+• Service layer implementation
+
+================================================================
+TECHNICAL VALIDATION
+================================================================
+
+Database Migration Status:
+---------------------------
+Flask-Migrate Execution: {{ migration_status | default('N/A') }}
+{% if migration_status == 'SUCCESS' %}
+✓ Schema migration completed successfully
+✓ Foreign key constraints validated
+✓ Index consistency verified
+✓ Data integrity confirmed
+{% elif migration_status == 'FAILED' %}
+✗ Migration failed - rollback initiated
+✗ Check migration logs for details
+{% else %}
+⚠ Migration status unknown
+{% endif %}
+
+Schema Version: {{ schema_version | default('N/A') }}
+Migration Duration: {{ migration_duration | default('N/A') }}
+
+Performance Validation:
+-----------------------
+{% if performance_results %}
+API Response Time (P95): {{ performance_results.response_time_p95 | default('N/A') }}ms
+{% if performance_results.response_time_p95 and performance_results.response_time_p95 <= 220 %}
+✓ Response time within acceptable range (≤220ms)
+{% elif performance_results.response_time_p95 and performance_results.response_time_p95 > 220 %}
+✗ Response time exceeds baseline tolerance
+{% endif %}
+
+Memory Utilization: {{ performance_results.memory_usage | default('N/A') }}MB
+{% if performance_results.memory_usage and performance_results.memory_usage <= 537 %}
+✓ Memory usage within acceptable range (≤537MB)
+{% elif performance_results.memory_usage and performance_results.memory_usage > 537 %}
+✗ Memory usage exceeds baseline tolerance
+{% endif %}
+
+Concurrent Users Supported: {{ performance_results.concurrent_users | default('N/A') }}
+Database Query Performance: {{ performance_results.db_query_time | default('N/A') }}ms
+{% else %}
+⚠ Performance validation results not available
+{% endif %}
+
+Infrastructure Status:
+----------------------
+Terraform Plan Status: {{ terraform_status | default('N/A') }}
+Container Registry: {{ container_registry_status | default('N/A') }}
+Load Balancer Health: {{ load_balancer_status | default('N/A') }}
+Blue-Green Switch: {{ blue_green_status | default('N/A') }}
+
+================================================================
+OPERATIONAL INFORMATION
+================================================================
+
+Deployment URLs:
+----------------
+{% if environment == 'production' %}
+Application URL: {{ production_url | default('https://app.production.domain.com') }}
+Admin Dashboard: {{ admin_url | default('https://admin.production.domain.com') }}
+Health Check: {{ health_check_url | default('https://app.production.domain.com/health') }}
+Metrics Endpoint: {{ metrics_url | default('https://app.production.domain.com/metrics') }}
+{% elif environment == 'staging' %}
+Application URL: {{ staging_url | default('https://app.staging.domain.com') }}
+Admin Dashboard: {{ admin_url | default('https://admin.staging.domain.com') }}
+Health Check: {{ health_check_url | default('https://app.staging.domain.com/health') }}
+Metrics Endpoint: {{ metrics_url | default('https://app.staging.domain.com/metrics') }}
+{% else %}
+Application URL: {{ application_url | default('N/A') }}
+Health Check: {{ health_check_url | default('N/A') }}
+{% endif %}
+
+Monitoring Links:
+-----------------
+CloudWatch Dashboard: {{ cloudwatch_dashboard_url | default('N/A') }}
+Grafana Metrics: {{ grafana_dashboard_url | default('N/A') }}
+Application Logs: {{ logs_url | default('N/A') }}
+Performance Metrics: {{ performance_dashboard_url | default('N/A') }}
+
+================================================================
+{% if deployment_status == 'FAILED' or rollback_required %}
+ROLLBACK PROCEDURES
+================================================================
+
+IMMEDIATE ROLLBACK ACTIONS:
+---------------------------
+{% if rollback_required %}
+⚠ ROLLBACK INITIATED AUTOMATICALLY
+{% endif %}
+
+1. Application Rollback:
+   a) Access AWS Load Balancer console
+   b) Switch traffic back to previous blue/green environment
+   c) Command: aws elbv2 modify-target-group --target-group-arn <previous-tg>
+   
+2. Database Rollback:
+   a) Connect to database server
+   b) Execute: flask db downgrade {{ previous_schema_version | default('<previous-version>') }}
+   c) Verify schema consistency
+   d) Validate data integrity
+
+3. Infrastructure Rollback:
+   a) Navigate to deployment directory
+   b) Execute: terraform apply -var-file="previous.tfvars"
+   c) Verify resource state restoration
+   d) Confirm network connectivity
+
+EMERGENCY PROCEDURES:
+---------------------
+If automated rollback fails:
+
+1. Manual Blue-Green Switch:
+   - Access AWS Console → EC2 → Load Balancers
+   - Update target group to previous stable version
+   - Monitor health checks until stable
+
+2. Database Emergency Restore:
+   - Stop Flask application instances
+   - Restore from latest backup: {{ backup_location | default('<backup-location>') }}
+   - Restart with previous application version
+   - Verify service functionality
+
+3. Complete System Restore:
+   - If Flask rollback fails, restore to Node.js baseline
+   - Deploy previous Node.js version from backup
+   - Synchronize data between systems
+   - Update DNS/load balancer configuration
+
+ROLLBACK VALIDATION:
+--------------------
+After rollback completion, verify:
+✓ Application responds successfully at health check endpoint
+✓ Database connections established and queries successful
+✓ Authentication system functional (Auth0 integration)
+✓ API endpoints returning expected responses
+✓ Performance metrics within acceptable ranges
+✓ No error alerts in monitoring systems
+
+{% endif %}
+
+================================================================
+MONITORING AND ALERTS
+================================================================
+
+Post-Deployment Monitoring:
+----------------------------
+• Monitor CloudWatch alarms for 24 hours post-deployment
+• Track API response times and error rates
+• Validate database query performance metrics
+• Monitor memory usage and connection pool health
+• Check Auth0 integration and authentication flows
+
+Alert Thresholds:
+-----------------
+• HTTP 5xx errors: >1% error rate triggers immediate alert
+• API response time: >220ms P95 for 2+ minutes
+• Database queries: >110ms average for 1+ minute
+• Memory usage: >537MB sustained for 5+ minutes
+• Authentication failures: >10 failures in 5 minutes
+
+Escalation Contacts:
+--------------------
+Primary: DevOps Team - {{ devops_contact | default('devops@company.com') }}
+Secondary: Platform Team - {{ platform_contact | default('platform@company.com') }}
+Database Issues: DBA Team - {{ dba_contact | default('dba@company.com') }}
+Security Issues: Security Team - {{ security_contact | default('security@company.com') }}
+
+Emergency Hotline: {{ emergency_contact | default('+1-XXX-XXX-XXXX') }}
+Incident Response: {{ incident_response_url | default('https://incident.company.com') }}
+
+================================================================
+ADDITIONAL INFORMATION
+================================================================
+
+Documentation:
+--------------
+• Deployment Guide: {{ deployment_guide_url | default('https://docs.company.com/deployment') }}
+• Rollback Procedures: {{ rollback_guide_url | default('https://docs.company.com/rollback') }}
+• Monitoring Dashboard: {{ monitoring_guide_url | default('https://docs.company.com/monitoring') }}
+• API Documentation: {{ api_docs_url | default('https://docs.company.com/api') }}
+
+CI/CD Pipeline:
+---------------
+GitHub Repository: {{ repository_url | default('N/A') }}
+Actions Workflow: {{ workflow_url | default('N/A') }}
+Artifact Registry: {{ artifact_url | default('N/A') }}
+Terraform State: {{ terraform_state_url | default('N/A') }}
+
+Notes:
+------
+{% if notes %}
+{{ notes }}
+{% else %}
+• This is an automated deployment notification
+• Verify all systems operational before business hours
+• Contact DevOps team for any deployment-related issues
+• Monitor performance metrics for 24-48 hours post-deployment
+{% endif %}
+
+================================================================
+END OF DEPLOYMENT NOTIFICATION
+================================================================
+
+This notification was generated automatically by the CI/CD pipeline.
+For technical support, contact: {{ support_email | default('support@company.com') }}
+Generated at: {{ notification_timestamp | default(current_timestamp) }}
