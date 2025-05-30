@@ -1,0 +1,273 @@
+{% extends "emails/base/base.html" %}
+
+{# Email Layout Template - Professional HTML Email Structure #}
+{# This template provides standardized header, navigation, and footer sections #}
+{# for consistent branding and structure across all HTML emails #}
+
+{% block title %}
+  {%- if email_subject -%}
+    {{ email_subject }}
+  {%- else -%}
+    {{ application_name or "Application" }} Notification
+  {%- endif -%}
+{% endblock %}
+
+{% block email_content %}
+<!-- Email Container - Responsive wrapper for all email content -->
+<div class="email-container" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; line-height: 1.6; color: #333333;">
+
+  <!-- Email Header Section -->
+  {% block email_header %}
+  <div class="email-header" style="background-color: #f8f9fa; padding: 20px 30px; border-bottom: 2px solid #e9ecef; text-align: center;">
+    
+    <!-- Application Logo/Branding -->
+    <div class="email-logo" style="margin-bottom: 15px;">
+      {% if application_logo_url %}
+        <img src="{{ application_logo_url }}" alt="{{ application_name or 'Application' }} Logo" 
+             style="max-height: 50px; max-width: 200px; height: auto; width: auto; display: inline-block;">
+      {% else %}
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; color: #2c3e50; text-decoration: none;">
+          {{ application_name or "Application" }}
+        </h1>
+      {% endif %}
+    </div>
+
+    <!-- Email Header Navigation -->
+    {% block email_navigation %}
+    <div class="email-navigation" style="margin-top: 10px;">
+      {% if show_navigation|default(true) %}
+        <div style="font-size: 14px; color: #6c757d;">
+          {% if user_dashboard_url %}
+            <a href="{{ user_dashboard_url }}" style="color: #007bff; text-decoration: none; margin: 0 10px;">Dashboard</a>
+          {% endif %}
+          {% if account_settings_url %}
+            <a href="{{ account_settings_url }}" style="color: #007bff; text-decoration: none; margin: 0 10px;">Account Settings</a>
+          {% endif %}
+          {% if support_url %}
+            <a href="{{ support_url }}" style="color: #007bff; text-decoration: none; margin: 0 10px;">Support</a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+    {% endblock email_navigation %}
+
+  </div>
+  {% endblock email_header %}
+
+  <!-- Main Email Content Area -->
+  <div class="email-body" style="padding: 30px;">
+    
+    <!-- Email Subject/Title -->
+    {% block email_title %}
+      {% if email_title %}
+        <h2 style="margin: 0 0 20px 0; font-size: 20px; font-weight: 600; color: #2c3e50; line-height: 1.3;">
+          {{ email_title }}
+        </h2>
+      {% endif %}
+    {% endblock email_title %}
+
+    <!-- Personalized Greeting -->
+    {% block email_greeting %}
+      {% if recipient_name %}
+        <p style="margin: 0 0 20px 0; font-size: 16px; color: #333333;">
+          Hello {{ recipient_name }},
+        </p>
+      {% endif %}
+    {% endblock email_greeting %}
+
+    <!-- Main Content Block - Override this in specific email templates -->
+    {% block email_main_content %}
+      <div class="content-placeholder" style="padding: 20px 0; font-size: 16px; color: #333333;">
+        <!-- This block should be overridden by specific email templates -->
+        <p style="margin: 0 0 15px 0;">
+          This is the main content area for your email template.
+        </p>
+      </div>
+    {% endblock email_main_content %}
+
+    <!-- Call-to-Action Section -->
+    {% block email_cta %}
+      {% if cta_text and cta_url %}
+        <div class="email-cta" style="text-align: center; margin: 30px 0;">
+          <a href="{{ cta_url }}" 
+             style="display: inline-block; background-color: #007bff; color: #ffffff; text-decoration: none; padding: 12px 25px; border-radius: 5px; font-weight: 600; font-size: 16px;">
+            {{ cta_text }}
+          </a>
+        </div>
+      {% endif %}
+    {% endblock email_cta %}
+
+    <!-- Additional Content Block -->
+    {% block email_additional_content %}
+      <!-- Override this block for additional content sections -->
+    {% endblock email_additional_content %}
+
+  </div>
+
+  <!-- Email Footer Section -->
+  {% block email_footer %}
+  <div class="email-footer" style="background-color: #f8f9fa; padding: 25px 30px; border-top: 1px solid #e9ecef; font-size: 14px; color: #6c757d;">
+    
+    <!-- Company/Organization Information -->
+    <div class="footer-company" style="margin-bottom: 15px; text-align: center;">
+      {% if company_name %}
+        <strong style="color: #495057;">{{ company_name }}</strong><br>
+      {% endif %}
+      {% if company_address %}
+        {{ company_address }}<br>
+      {% endif %}
+      {% if company_city_state_zip %}
+        {{ company_city_state_zip }}<br>
+      {% endif %}
+    </div>
+
+    <!-- Contact Information -->
+    <div class="footer-contact" style="margin-bottom: 15px; text-align: center;">
+      {% if support_email %}
+        <p style="margin: 5px 0;">
+          <strong>Support:</strong> 
+          <a href="mailto:{{ support_email }}" style="color: #007bff; text-decoration: none;">
+            {{ support_email }}
+          </a>
+        </p>
+      {% endif %}
+      {% if support_phone %}
+        <p style="margin: 5px 0;">
+          <strong>Phone:</strong> {{ support_phone }}
+        </p>
+      {% endif %}
+    </div>
+
+    <!-- Social Media Links -->
+    {% block email_social_links %}
+      {% if show_social_links|default(true) %}
+        <div class="footer-social" style="margin-bottom: 15px; text-align: center;">
+          {% if social_links %}
+            <p style="margin: 10px 0 5px 0; font-weight: 600;">Follow Us:</p>
+            <div style="margin: 10px 0;">
+              {% for social in social_links %}
+                <a href="{{ social.url }}" style="color: #007bff; text-decoration: none; margin: 0 8px;">
+                  {{ social.name }}
+                </a>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endblock email_social_links %}
+
+    <!-- Legal and Compliance Links -->
+    <div class="footer-legal" style="margin-bottom: 15px; text-align: center; border-top: 1px solid #e9ecef; padding-top: 15px;">
+      
+      <!-- Privacy Policy and Terms -->
+      <div style="margin-bottom: 10px;">
+        {% if privacy_policy_url %}
+          <a href="{{ privacy_policy_url }}" style="color: #6c757d; text-decoration: none; margin: 0 10px;">
+            Privacy Policy
+          </a>
+        {% endif %}
+        {% if terms_of_service_url %}
+          <a href="{{ terms_of_service_url }}" style="color: #6c757d; text-decoration: none; margin: 0 10px;">
+            Terms of Service
+          </a>
+        {% endif %}
+      </div>
+
+      <!-- Unsubscribe Link - Required for compliance -->
+      <div style="margin: 10px 0;">
+        {% if unsubscribe_url %}
+          <a href="{{ unsubscribe_url }}" style="color: #6c757d; text-decoration: none; font-size: 12px;">
+            Unsubscribe from these emails
+          </a>
+        {% elif unsubscribe_email %}
+          <a href="mailto:{{ unsubscribe_email }}?subject=Unsubscribe" style="color: #6c757d; text-decoration: none; font-size: 12px;">
+            Unsubscribe from these emails
+          </a>
+        {% else %}
+          <span style="color: #6c757d; font-size: 12px;">
+            To unsubscribe, please contact support
+          </span>
+        {% endif %}
+      </div>
+
+    </div>
+
+    <!-- Email Delivery Information -->
+    <div class="footer-delivery" style="text-align: center; font-size: 12px; color: #868e96; border-top: 1px solid #e9ecef; padding-top: 15px;">
+      <p style="margin: 5px 0;">
+        This email was sent to 
+        {% if recipient_email %}
+          <strong>{{ recipient_email }}</strong>
+        {% else %}
+          you
+        {% endif %}
+      </p>
+      {% if email_timestamp %}
+        <p style="margin: 5px 0;">
+          Sent on {{ email_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') if email_timestamp.strftime else email_timestamp }}
+        </p>
+      {% endif %}
+      {% if email_id %}
+        <p style="margin: 5px 0;">
+          Email ID: {{ email_id }}
+        </p>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endblock email_footer %}
+
+</div>
+
+<!-- Responsive CSS for Email Clients -->
+<style type="text/css">
+  /* Responsive Design for Mobile Email Clients */
+  @media only screen and (max-width: 600px) {
+    .email-container {
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+    
+    .email-header, .email-body, .email-footer {
+      padding-left: 20px !important;
+      padding-right: 20px !important;
+    }
+    
+    .email-navigation a {
+      display: block !important;
+      margin: 5px 0 !important;
+    }
+    
+    .email-cta a {
+      display: block !important;
+      width: 80% !important;
+      margin: 0 auto !important;
+    }
+  }
+  
+  /* Dark Mode Support */
+  @media (prefers-color-scheme: dark) {
+    .email-container {
+      background-color: #1a1a1a !important;
+      color: #e9ecef !important;
+    }
+    
+    .email-header, .email-footer {
+      background-color: #2d3436 !important;
+      border-color: #495057 !important;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block email_tracking %}
+  <!-- Email tracking pixel (if enabled) -->
+  {% if tracking_pixel_url %}
+    <img src="{{ tracking_pixel_url }}" alt="" style="display: none; width: 1px; height: 1px;">
+  {% endif %}
+  
+  <!-- Additional tracking scripts -->
+  {% if email_analytics_enabled %}
+    <!-- Analytics tracking can be added here -->
+  {% endif %}
+{% endblock %}
