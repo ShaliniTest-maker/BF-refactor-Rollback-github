@@ -1,388 +1,359 @@
 ================================================================================
-FLASK APPLICATION SYSTEM STATUS REPORT
+                        FLASK APPLICATION SYSTEM STATUS REPORT
 ================================================================================
 
-Report Generated: {{ report_timestamp }}
-Report Period: {{ report_start_date }} to {{ report_end_date }}
-System Environment: {{ environment }}
-Report ID: {{ report_id }}
+Generated: {{ timestamp }}
+Environment: {{ environment }}
+Report Period: {{ report_period }}
+Report Version: {{ report_version }}
 
 ================================================================================
-EXECUTIVE SUMMARY
+                              EXECUTIVE SUMMARY
 ================================================================================
 
 Overall System Health: {{ overall_health_status }}
 System Uptime: {{ system_uptime }}
-Critical Alerts: {{ critical_alerts_count }}
-Warning Alerts: {{ warning_alerts_count }}
+Migration Status: {{ migration_status }}
+Critical Issues: {{ critical_issues_count }}
+Security Status: {{ security_status }}
 
-Key Performance Indicators:
-- Average API Response Time: {{ avg_api_response_time }}ms (Target: <200ms)
-- Database Query Performance: {{ avg_db_query_time }}ms (Target: <100ms)
-- Authentication Success Rate: {{ auth_success_rate }}% (Target: >99.5%)
-- System Availability: {{ system_availability }}% (Target: >99.9%)
-
-{% if critical_issues %}
-CRITICAL ISSUES REQUIRING IMMEDIATE ATTENTION:
+{% if critical_issues_count > 0 %}
+IMMEDIATE ATTENTION REQUIRED:
 {% for issue in critical_issues %}
-- {{ issue.description }} (Priority: {{ issue.priority }})
-  Impact: {{ issue.impact }}
-  Recommended Action: {{ issue.action }}
+- {{ issue.severity }}: {{ issue.description }}
 {% endfor %}
 {% endif %}
 
 ================================================================================
-FLASK APPLICATION METRICS
+                           FLASK APPLICATION HEALTH
 ================================================================================
 
-Web Framework Performance (Flask 3.1.1):
-- Total Requests Processed: {{ total_requests }}
-- Average Response Time: {{ flask_avg_response_time }}ms
-- 95th Percentile Response Time: {{ flask_p95_response_time }}ms
-- 99th Percentile Response Time: {{ flask_p99_response_time }}ms
-- Request Throughput: {{ requests_per_second }} req/sec
-- Error Rate: {{ flask_error_rate }}% (4xx: {{ error_4xx_rate }}%, 5xx: {{ error_5xx_rate }}%)
+Application Status: {{ flask_app_status }}
+Flask Version: {{ flask_version }}
+Python Version: {{ python_version }}
 
-WSGI Server Performance (Gunicorn):
-- Active Workers: {{ gunicorn_active_workers }}/{{ gunicorn_total_workers }}
-- Worker Utilization: {{ gunicorn_worker_utilization }}%
-- Worker Restart Count: {{ gunicorn_worker_restarts }}
-- Average Worker Memory Usage: {{ gunicorn_avg_memory }}MB
-- Request Queue Depth: {{ gunicorn_queue_depth }}
-- Worker Timeout Events: {{ gunicorn_timeouts }}
+WSGI Server Metrics:
+- Server Type: {{ wsgi_server_type }}
+- Active Workers: {{ wsgi_active_workers }}
+- Total Requests: {{ wsgi_total_requests }}
+- Average Response Time: {{ wsgi_avg_response_time }}ms
+- Worker Memory Usage: {{ wsgi_worker_memory }}MB
+- Worker CPU Usage: {{ wsgi_worker_cpu }}%
 
-Blueprint Performance Breakdown:
+Blueprint Performance:
 {% for blueprint in blueprint_metrics %}
-- {{ blueprint.name }}: {{ blueprint.avg_response_time }}ms ({{ blueprint.request_count }} requests)
+- {{ blueprint.name }}: {{ blueprint.requests }} requests, {{ blueprint.avg_response }}ms avg
 {% endfor %}
 
-Container Orchestration (ECS/EKS):
-- Running Containers: {{ container_count_running }}/{{ container_count_desired }}
-- Container CPU Utilization: {{ container_cpu_avg }}% (Peak: {{ container_cpu_peak }}%)
-- Container Memory Utilization: {{ container_memory_avg }}% (Peak: {{ container_memory_peak }}%)
-- Container Restart Count: {{ container_restart_count }}
-- Service Mesh Health: {{ service_mesh_status }}
-- Load Balancer Health: {{ load_balancer_status }}
+Environment Configuration:
+- FLASK_ENV: {{ flask_env }}
+- DEBUG Mode: {{ debug_mode }}
+- Configuration Source: {{ config_source }}
+- Environment Variables Loaded: {{ env_vars_count }}
 
 ================================================================================
-DATABASE PERFORMANCE & HEALTH
+                            DATABASE HEALTH STATUS
 ================================================================================
 
-PostgreSQL 14.12+ Database Engine:
-- Database Status: {{ db_status }}
-- Active Connections: {{ db_active_connections }}/{{ db_max_connections }}
-- Connection Pool Utilization: {{ db_pool_utilization }}%
-- Database Size: {{ db_size_gb }}GB
-- Available Storage: {{ db_available_storage_gb }}GB ({{ db_storage_usage_percent }}% used)
+Database System: {{ database_type }}
+Database Version: {{ database_version }}
+Connection Status: {{ database_connection_status }}
 
-Flask-SQLAlchemy 3.1.1 ORM Performance:
-- Average Query Execution Time: {{ sqlalchemy_avg_query_time }}ms
-- Slow Queries (>100ms): {{ sqlalchemy_slow_queries_count }}
-- N+1 Query Detections: {{ sqlalchemy_n_plus_one_count }}
-- Connection Pool Status: {{ sqlalchemy_pool_size }} (Overflow: {{ sqlalchemy_pool_overflow }})
-- Session Lifecycle Health: {{ sqlalchemy_session_health }}
+Flask-SQLAlchemy Metrics:
+- Connection Pool Size: {{ sqlalchemy_pool_size }}
+- Active Connections: {{ sqlalchemy_active_connections }}
+- Pool Utilization: {{ sqlalchemy_pool_utilization }}%
+- Connection Overflow: {{ sqlalchemy_overflow_count }}
+- Average Query Time: {{ sqlalchemy_avg_query_time }}ms
+- Slow Queries (>100ms): {{ sqlalchemy_slow_queries }}
 
-Query Performance Analysis:
-- SELECT Operations: {{ query_select_avg }}ms ({{ query_select_count }} queries)
-- INSERT Operations: {{ query_insert_avg }}ms ({{ query_insert_count }} queries)
-- UPDATE Operations: {{ query_update_avg }}ms ({{ query_update_count }} queries)
-- DELETE Operations: {{ query_delete_avg }}ms ({{ query_delete_count }} queries)
+Migration Status:
+- Current Schema Version: {{ migration_current_version }}
+- Pending Migrations: {{ migration_pending_count }}
+- Last Migration Date: {{ migration_last_date }}
+- Migration Integrity: {{ migration_integrity_status }}
 
-Database Migration Status (Flask-Migrate 4.1.0):
-- Current Schema Version: {{ db_schema_version }}
-- Pending Migrations: {{ pending_migrations_count }}
-- Last Migration Applied: {{ last_migration_timestamp }}
-- Migration Health: {{ migration_health_status }}
+Database Performance Metrics:
+- Total Queries (24h): {{ database_total_queries }}
+- Read Queries: {{ database_read_queries }}
+- Write Queries: {{ database_write_queries }}
+- Failed Queries: {{ database_failed_queries }}
+- Database Size: {{ database_size_gb }}GB
 
-Index Performance:
-- Index Hit Ratio: {{ index_hit_ratio }}% (Target: >95%)
-- Index Usage Efficiency: {{ index_usage_efficiency }}%
-- Unused Indexes: {{ unused_indexes_count }}
-- Missing Index Recommendations: {{ missing_indexes_count }}
-
-Table Statistics:
-{% for table in top_tables_by_size %}
-- {{ table.name }}: {{ table.size_mb }}MB ({{ table.row_count }} rows)
-{% endfor %}
+Connection Pool Health:
+- Pool Timeout Events: {{ connection_timeout_events }}
+- Connection Recycling: {{ connection_recycling_rate }}
+- SSL Connections: {{ ssl_connections_enabled }}
 
 ================================================================================
-AUTHENTICATION & AUTHORIZATION STATUS
+                         AUTH0 INTEGRATION STATUS
 ================================================================================
 
-Auth0 Integration Health:
-- Auth0 Service Status: {{ auth0_service_status }}
-- API Response Time: {{ auth0_response_time }}ms (Target: <150ms)
-- Authentication Success Rate: {{ auth0_success_rate }}%
-- Token Validation Rate: {{ auth0_token_validation_rate }}%
-- Rate Limit Status: {{ auth0_rate_limit_status }}
+Auth0 Service Status: {{ auth0_status }}
+Auth0 Python SDK Version: {{ auth0_sdk_version }}
 
 Authentication Metrics:
-- Total Login Attempts: {{ total_login_attempts }}
-- Successful Logins: {{ successful_logins }} ({{ login_success_rate }}%)
-- Failed Login Attempts: {{ failed_login_attempts }}
-- Multi-Factor Authentication Usage: {{ mfa_usage_rate }}%
-- Password Reset Requests: {{ password_reset_requests }}
-- Suspicious Login Attempts: {{ suspicious_login_attempts }}
+- Total Login Attempts (24h): {{ auth0_login_attempts }}
+- Successful Logins: {{ auth0_successful_logins }}
+- Failed Logins: {{ auth0_failed_logins }}
+- Authentication Success Rate: {{ auth0_success_rate }}%
+- Average Login Time: {{ auth0_avg_login_time }}ms
 
-Flask-JWT-Extended 4.7.1 Token Management:
-- Active JWT Tokens: {{ active_jwt_tokens }}
-- Token Refresh Rate: {{ token_refresh_rate }}%
-- Token Expiration Compliance: {{ token_expiration_compliance }}%
-- Revoked Tokens: {{ revoked_tokens_count }}
-- CSRF Protection Status: {{ csrf_protection_status }}
+Token Management:
+- Active JWT Tokens: {{ jwt_active_tokens }}
+- Token Refresh Rate: {{ jwt_refresh_rate }}
+- Token Validation Errors: {{ jwt_validation_errors }}
+- Token Expiration Events: {{ jwt_expiration_events }}
 
-Session Management (ItsDangerous 2.2+):
+Multi-Factor Authentication:
+- MFA Enabled Users: {{ auth0_mfa_users }}%
+- MFA Success Rate: {{ auth0_mfa_success_rate }}%
+- MFA Challenge Frequency: {{ auth0_mfa_challenges }}
+
+Session Management:
 - Active Sessions: {{ active_sessions }}
-- Average Session Duration: {{ avg_session_duration }} minutes
-- Session Security Status: {{ session_security_status }}
-- Cookie Security Compliance: {{ cookie_security_compliance }}%
-
-Role-Based Access Control (RBAC):
-- Total Users: {{ total_users }} (Active: {{ active_users }})
-- Total Roles: {{ total_roles }}
-- Permission Enforcement Rate: {{ permission_enforcement_rate }}%
-- Authorization Failures: {{ authorization_failures }}
-- Role Assignment Accuracy: {{ role_assignment_accuracy }}%
+- Session Duration (avg): {{ avg_session_duration }}
+- Session Timeout Events: {{ session_timeout_events }}
+- Secure Cookie Usage: {{ secure_cookie_usage }}%
 
 ================================================================================
-INFRASTRUCTURE & SECURITY MONITORING
+                           SECURITY & COMPLIANCE
 ================================================================================
 
-AWS Infrastructure Health:
-- VPC Status: {{ vpc_status }}
-- Security Group Compliance: {{ security_group_compliance }}%
-- Load Balancer Health: {{ alb_health_status }}
-- CloudWatch Integration: {{ cloudwatch_status }}
-- Auto Scaling Status: {{ auto_scaling_status }}
+Security Posture: {{ security_posture }}
+Last Security Scan: {{ last_security_scan }}
 
-Security Monitoring:
-- AWS GuardDuty Findings: {{ guardduty_findings_count }} (High: {{ guardduty_high_severity }})
-- Security Events Detected: {{ security_events_count }}
-- Failed Authentication Attempts: {{ failed_auth_attempts }}
-- Suspicious Activity Score: {{ suspicious_activity_score }}/100
-- Security Scan Results: {{ security_scan_status }}
+Authorization & Access Control:
+- RBAC Model Status: {{ rbac_status }}
+- Active User Roles: {{ active_user_roles }}
+- Permission Violations (24h): {{ permission_violations }}
+- Access Control Failures: {{ access_control_failures }}
 
-Monitoring & Observability:
-- CloudWatch Logs Status: {{ cloudwatch_logs_status }}
-- Sentry Error Tracking: {{ sentry_status }} ({{ sentry_error_count }} errors)
-- Prometheus Metrics: {{ prometheus_status }}
-- Alert Manager Status: {{ alert_manager_status }}
-- Dashboard Availability: {{ dashboard_availability }}%
-
-SSL/TLS Security:
-- Certificate Status: {{ ssl_certificate_status }}
-- Certificate Expiry: {{ ssl_certificate_expiry_days }} days
-- TLS 1.3 Compliance: {{ tls_compliance_status }}
-- Cipher Suite Security: {{ cipher_suite_status }}
-
-Key Management Service (AWS KMS):
-- KMS Key Status: {{ kms_key_status }}
-- Encryption Operations: {{ kms_operations_count }}
-- Key Rotation Status: {{ kms_key_rotation_status }}
+Encryption Status:
+- Data at Rest Encryption: {{ data_at_rest_encryption }}
+- Data in Transit Encryption: {{ data_in_transit_encryption }}
+- TLS Version: {{ tls_version }}
+- Certificate Expiry: {{ certificate_expiry_days }} days
 - Field-Level Encryption: {{ field_encryption_status }}
 
-================================================================================
-SYSTEM DEPENDENCIES & INTEGRATIONS
-================================================================================
+Security Monitoring:
+- Failed Authentication Attempts: {{ failed_auth_attempts }}
+- Suspicious Activity Events: {{ suspicious_activity_events }}
+- Security Alerts (24h): {{ security_alerts_count }}
+- Compliance Violations: {{ compliance_violations }}
 
-Python Runtime Environment:
-- Python Version: {{ python_version }}
-- Virtual Environment: {{ venv_status }}
-- Package Dependencies Status: {{ dependencies_status }}
-- Security Vulnerabilities: {{ dependency_vulnerabilities }}
-
-Core Flask Dependencies:
-- Werkzeug 3.1+: {{ werkzeug_status }} (Version: {{ werkzeug_version }})
-- Jinja2 3.1.2+: {{ jinja2_status }} (Version: {{ jinja2_version }})
-- Click 8.1.3+: {{ click_status }} (Version: {{ click_version }})
-- Blinker 1.9+: {{ blinker_status }} (Version: {{ blinker_version }})
-
-External Service Dependencies:
-- AWS Services: {{ aws_services_status }}
-- Redis Cache: {{ redis_status }} (Memory: {{ redis_memory_usage }}%)
-- External APIs: {{ external_apis_status }}
-- CDN Status: {{ cdn_status }}
-
-Development & Deployment Tools:
-- Git Repository: {{ git_status }}
-- Docker Containers: {{ docker_status }}
-- CI/CD Pipeline: {{ cicd_status }}
-- Terraform Infrastructure: {{ terraform_status }}
+Audit Trail Health:
+- Audit Log Entries (24h): {{ audit_log_entries }}
+- Log Integrity Status: {{ log_integrity_status }}
+- Retention Policy Compliance: {{ retention_compliance }}
 
 ================================================================================
-PERFORMANCE TRENDS & ANALYSIS
+                          INFRASTRUCTURE METRICS
 ================================================================================
 
-7-Day Performance Trends:
-- Response Time Trend: {{ response_time_trend }} ({{ response_time_change }}% vs last week)
-- Database Performance Trend: {{ db_performance_trend }} ({{ db_performance_change }}% vs last week)
-- Error Rate Trend: {{ error_rate_trend }} ({{ error_rate_change }}% vs last week)
-- Authentication Performance: {{ auth_performance_trend }} ({{ auth_performance_change }}% vs last week)
+Container Orchestration:
+- Platform: {{ container_platform }}
+- Running Containers: {{ running_containers }}
+- Container Health: {{ container_health_status }}
+- Container CPU Usage: {{ container_cpu_usage }}%
+- Container Memory Usage: {{ container_memory_usage }}%
+- Container Restart Count: {{ container_restart_count }}
 
-Resource Utilization Trends:
-- CPU Usage Pattern: {{ cpu_usage_pattern }}
-- Memory Usage Pattern: {{ memory_usage_pattern }}
-- Database Connection Pattern: {{ db_connection_pattern }}
-- Network I/O Pattern: {{ network_io_pattern }}
+Load Balancer Status:
+- Load Balancer Type: {{ load_balancer_type }}
+- Health Check Status: {{ health_check_status }}
+- Request Distribution: {{ request_distribution }}
+- SSL Termination: {{ ssl_termination_status }}
 
-Capacity Planning Insights:
-- Current Capacity Utilization: {{ capacity_utilization }}%
-- Projected Growth Rate: {{ projected_growth_rate }}%
-- Scaling Recommendations: {{ scaling_recommendations }}
-- Resource Optimization Opportunities: {{ optimization_opportunities }}
+Network Security:
+- WAF Status: {{ waf_status }}
+- DDoS Protection: {{ ddos_protection_status }}
+- Security Groups: {{ security_groups_count }}
+- Network ACLs: {{ network_acls_count }}
 
-Performance Bottlenecks Identified:
-{% if performance_bottlenecks %}
-{% for bottleneck in performance_bottlenecks %}
-- {{ bottleneck.component }}: {{ bottleneck.description }}
-  Impact: {{ bottleneck.impact }}
-  Recommended Action: {{ bottleneck.recommendation }}
+AWS Services Health:
+- CloudWatch Status: {{ cloudwatch_status }}
+- RDS Status: {{ rds_status }}
+- KMS Status: {{ kms_status }}
+- Parameter Store: {{ parameter_store_status }}
+
+================================================================================
+                          PERFORMANCE ANALYSIS
+================================================================================
+
+API Performance Metrics:
+- Total API Requests (24h): {{ total_api_requests }}
+- Average Response Time: {{ avg_response_time }}ms
+- 95th Percentile Response Time: {{ p95_response_time }}ms
+- Error Rate: {{ error_rate }}%
+- Throughput: {{ throughput_rps }} req/sec
+
+Endpoint Performance (Top 10):
+{% for endpoint in top_endpoints %}
+{{ endpoint.method }} {{ endpoint.path }}: {{ endpoint.requests }} req, {{ endpoint.avg_time }}ms avg
+{% endfor %}
+
+Resource Utilization:
+- Application Memory Usage: {{ app_memory_usage }}MB
+- Application CPU Usage: {{ app_cpu_usage }}%
+- Disk Usage: {{ disk_usage }}%
+- Network I/O: {{ network_io_mbps }}Mbps
+
+Cache Performance:
+- Cache Type: {{ cache_type }}
+- Cache Hit Rate: {{ cache_hit_rate }}%
+- Cache Memory Usage: {{ cache_memory_usage }}MB
+- Cache Eviction Rate: {{ cache_eviction_rate }}
+
+================================================================================
+                           OPERATIONAL STATUS
+================================================================================
+
+Monitoring & Alerting:
+- Monitoring Systems: {{ monitoring_systems_status }}
+- Active Alerts: {{ active_alerts_count }}
+- Alert Response Time (avg): {{ avg_alert_response_time }}
+- Escalation Events: {{ escalation_events }}
+
+Backup & Recovery:
+- Last Database Backup: {{ last_database_backup }}
+- Backup Status: {{ backup_status }}
+- Recovery Point Objective: {{ rpo_status }}
+- Recovery Time Objective: {{ rto_status }}
+
+Maintenance Status:
+- Scheduled Maintenance: {{ scheduled_maintenance }}
+- System Updates Available: {{ system_updates_available }}
+- Security Patches Pending: {{ security_patches_pending }}
+- Configuration Drift: {{ configuration_drift_status }}
+
+================================================================================
+                           MIGRATION STATUS
+================================================================================
+
+Node.js to Flask Migration:
+- Migration Phase: {{ migration_phase }}
+- Migration Progress: {{ migration_progress }}%
+- Features Migrated: {{ features_migrated }}/{{ total_features }}
+- API Endpoint Parity: {{ api_parity_status }}
+
+Migration Health Metrics:
+- Data Integrity Validation: {{ data_integrity_status }}
+- Performance Baseline Comparison: {{ performance_comparison }}
+- Security Posture Validation: {{ security_validation_status }}
+- Rollback Readiness: {{ rollback_readiness_status }}
+
+Known Migration Issues:
+{% if migration_issues %}
+{% for issue in migration_issues %}
+- {{ issue.severity }}: {{ issue.description }}
+  Status: {{ issue.status }}
+  ETA: {{ issue.eta }}
 {% endfor %}
 {% else %}
-No significant performance bottlenecks detected.
+- No active migration issues
 {% endif %}
 
 ================================================================================
-OPERATIONAL RECOMMENDATIONS
+                              TREND ANALYSIS
 ================================================================================
 
-IMMEDIATE ACTIONS REQUIRED:
+Performance Trends (7-day):
+- Response Time Trend: {{ response_time_trend }}
+- Error Rate Trend: {{ error_rate_trend }}
+- Throughput Trend: {{ throughput_trend }}
+- Database Performance Trend: {{ database_performance_trend }}
+
+Security Trends (7-day):
+- Authentication Failure Trend: {{ auth_failure_trend }}
+- Security Alert Trend: {{ security_alert_trend }}
+- Compliance Score Trend: {{ compliance_score_trend }}
+
+Resource Usage Trends (7-day):
+- CPU Usage Trend: {{ cpu_usage_trend }}
+- Memory Usage Trend: {{ memory_usage_trend }}
+- Database Growth Trend: {{ database_growth_trend }}
+- Connection Pool Trend: {{ connection_pool_trend }}
+
+================================================================================
+                         OPERATIONAL RECOMMENDATIONS
+================================================================================
+
+Immediate Actions Required:
 {% if immediate_actions %}
 {% for action in immediate_actions %}
-- Priority {{ action.priority }}: {{ action.description }}
-  Timeline: {{ action.timeline }}
-  Owner: {{ action.owner }}
+{{ loop.index }}. PRIORITY {{ action.priority }}: {{ action.description }}
+   Impact: {{ action.impact }}
+   Timeline: {{ action.timeline }}
+   Owner: {{ action.owner }}
 {% endfor %}
 {% else %}
-No immediate actions required at this time.
+- No immediate actions required
 {% endif %}
 
-PREVENTIVE MAINTENANCE RECOMMENDATIONS:
-{% if maintenance_recommendations %}
-{% for maintenance in maintenance_recommendations %}
-- {{ maintenance.task }}: {{ maintenance.description }}
-  Recommended Schedule: {{ maintenance.schedule }}
-  Estimated Duration: {{ maintenance.duration }}
+Performance Optimization Recommendations:
+{% if performance_recommendations %}
+{% for rec in performance_recommendations %}
+- {{ rec.area }}: {{ rec.description }}
+  Expected Improvement: {{ rec.expected_improvement }}
+  Implementation Effort: {{ rec.effort_level }}
 {% endfor %}
 {% else %}
-System maintenance is up to date.
+- System performance is within acceptable parameters
 {% endif %}
 
-OPTIMIZATION OPPORTUNITIES:
-{% if optimization_opportunities %}
-{% for opportunity in optimization_opportunities %}
-- {{ opportunity.area }}: {{ opportunity.description }}
-  Expected Benefit: {{ opportunity.benefit }}
-  Implementation Effort: {{ opportunity.effort }}
-{% endfor %}
-{% else %}
-No optimization opportunities identified.
-{% endif %}
-
-SECURITY RECOMMENDATIONS:
+Security Recommendations:
 {% if security_recommendations %}
-{% for security in security_recommendations %}
-- {{ security.category }}: {{ security.description }}
-  Risk Level: {{ security.risk_level }}
-  Recommended Timeline: {{ security.timeline }}
+{% for rec in security_recommendations %}
+- {{ rec.category }}: {{ rec.description }}
+  Risk Level: {{ rec.risk_level }}
+  Recommended Timeline: {{ rec.timeline }}
 {% endfor %}
 {% else %}
-Security posture is optimal.
+- Security posture is adequate
 {% endif %}
 
-CAPACITY PLANNING RECOMMENDATIONS:
-- Current headroom: {{ capacity_headroom }}%
-- Projected scaling needs: {{ scaling_timeline }}
-- Resource allocation adjustments: {{ resource_adjustments }}
-- Cost optimization opportunities: {{ cost_optimization }}
+Capacity Planning:
+- Projected Growth Rate: {{ projected_growth_rate }}%
+- Estimated Capacity Limit: {{ capacity_limit_timeline }}
+- Scaling Recommendations: {{ scaling_recommendations }}
 
 ================================================================================
-INCIDENT SUMMARY
+                           CONTACT INFORMATION
 ================================================================================
 
-Recent Incidents (Last 7 Days):
-{% if recent_incidents %}
-{% for incident in recent_incidents %}
-- Incident ID: {{ incident.id }}
-  Date: {{ incident.date }}
-  Severity: {{ incident.severity }}
-  Description: {{ incident.description }}
-  Resolution Time: {{ incident.resolution_time }}
-  Status: {{ incident.status }}
-  Root Cause: {{ incident.root_cause }}
-{% endfor %}
-{% else %}
-No incidents recorded in the last 7 days.
-{% endif %}
+Report Generated By: Flask Application Monitoring System
+System Administrator: {{ system_admin_contact }}
+Security Team: {{ security_team_contact }}
+On-Call Engineer: {{ oncall_engineer_contact }}
 
-Mean Time to Recovery (MTTR): {{ mttr }} minutes (Target: <30 minutes)
-Mean Time to Detection (MTTD): {{ mttd }} minutes (Target: <2 minutes)
-Incident Recurrence Rate: {{ incident_recurrence_rate }}% (Target: <10%)
+For immediate assistance with critical issues:
+- Emergency Hotline: {{ emergency_contact }}
+- Incident Response: {{ incident_response_contact }}
+- Technical Support: {{ technical_support_contact }}
+
+Dashboard Links:
+- Application Monitoring: {{ monitoring_dashboard_url }}
+- Security Dashboard: {{ security_dashboard_url }}
+- Infrastructure Dashboard: {{ infrastructure_dashboard_url }}
 
 ================================================================================
-SYSTEM HEALTH SCORE BREAKDOWN
+                               REPORT FOOTER
 ================================================================================
 
-Health Score Components:
-- Application Performance: {{ app_performance_score }}/100
-- Database Health: {{ database_health_score }}/100
-- Security Posture: {{ security_health_score }}/100
-- Infrastructure Reliability: {{ infrastructure_health_score }}/100
-- Monitoring Effectiveness: {{ monitoring_health_score }}/100
+This automated system status report is generated every {{ report_frequency }}.
+Last System Check: {{ last_system_check }}
+Next Scheduled Report: {{ next_report_time }}
 
-Overall System Health Score: {{ overall_health_score }}/100
+For questions about this report or to modify report settings:
+Contact: {{ report_admin_contact }}
 
-Health Score Calculation:
-- Green (90-100): Optimal performance, no action required
-- Yellow (70-89): Good performance, monitor for trends
-- Orange (50-69): Degraded performance, investigation recommended
-- Red (0-49): Poor performance, immediate action required
+System Health Legend:
+- HEALTHY: All systems operating normally
+- WARNING: Minor issues detected, monitoring closely
+- CRITICAL: Immediate attention required
+- DEGRADED: Reduced functionality, investigation in progress
 
 ================================================================================
-CONTACT INFORMATION & ESCALATION
+                              END OF REPORT
 ================================================================================
-
-For questions about this report or system issues:
-
-Primary Contacts:
-- System Administrator: {{ admin_contact }}
-- Database Administrator: {{ dba_contact }}
-- Security Team: {{ security_contact }}
-- DevOps Team: {{ devops_contact }}
-
-Emergency Escalation:
-- On-Call Engineer: {{ oncall_contact }}
-- Emergency Hotline: {{ emergency_hotline }}
-- Incident Management: {{ incident_mgmt_contact }}
-
-Additional Resources:
-- System Documentation: {{ docs_url }}
-- Monitoring Dashboard: {{ dashboard_url }}
-- Status Page: {{ status_page_url }}
-- Incident Portal: {{ incident_portal_url }}
-
-================================================================================
-REPORT METADATA
-================================================================================
-
-Report Configuration:
-- Data Sources: {{ data_sources }}
-- Collection Period: {{ collection_period }}
-- Metric Aggregation: {{ metric_aggregation }}
-- Report Generation Time: {{ generation_time }} seconds
-
-Next Scheduled Report: {{ next_report_date }}
-Report Frequency: {{ report_frequency }}
-Report Version: {{ report_version }}
-
-For automated processing of this report, use Report ID: {{ report_id }}
-
-================================================================================
-END OF SYSTEM STATUS REPORT
-================================================================================
-
-This report was automatically generated by the Flask Application Monitoring System.
-For the latest real-time system status, please visit: {{ dashboard_url }}
-
-Report Generated: {{ report_timestamp }}
-System Timezone: {{ system_timezone }}
