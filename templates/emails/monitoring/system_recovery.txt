@@ -1,0 +1,530 @@
+{#
+System Recovery Email Template
+==============================
+
+Plain text email template for system recovery notifications, providing text-only format
+for incident resolution updates. Contains recovery status, service restoration information,
+and post-incident analysis in accessible text format for reliable stakeholder communication.
+
+This template ensures:
+- Compatibility with all email clients including text-only clients
+- Clear incident resolution tracking and status updates
+- Comprehensive service restoration information
+- Post-incident analysis and preventive measures
+- Professional stakeholder communication format
+
+Usage:
+This template is used by the monitoring system to notify stakeholders when
+system incidents have been resolved and services have been restored.
+
+Template Variables:
+- incident: Incident object with details about the resolved issue
+- recovery: Recovery object with restoration information
+- services: List of affected services and their current status
+- metrics: System health metrics post-recovery
+- analysis: Post-incident analysis data
+- timeline: Recovery timeline information
+- stakeholder: Recipient information for personalization
+#}
+
+{% extends "emails/base/base.txt" %}
+
+{#- Email Subject -#}
+{% block subject -%}
+RESOLVED: {{ incident.title }} - System Recovery Complete
+{%- endblock %}
+
+{#- Pre-header text for email clients that support it -#}
+{% block preheader -%}
+System recovery completed at {{ recovery.completion_time|strftime('%Y-%m-%d %H:%M:%S') }} UTC. All services restored.
+{%- endblock %}
+
+{#- Main Content -#}
+{% block content -%}
+{% if stakeholder.name -%}
+Hello {{ stakeholder.name }},
+{% else -%}
+Hello,
+{% endif %}
+
+We are pleased to inform you that the system incident has been RESOLVED and
+all affected services have been successfully restored to normal operation.
+
+{{ create_section_divider('=', 78) }}
+INCIDENT RESOLUTION SUMMARY
+{{ create_section_divider('=', 78) }}
+
+{{ format_key_value('Incident ID', incident.id) }}
+{{ format_key_value('Incident Title', incident.title) }}
+{{ format_key_value('Severity Level', incident.severity|upper) }}
+{{ format_key_value('Status', 'RESOLVED') }}
+
+{{ format_key_value('Detection Time', incident.detection_time|strftime('%Y-%m-%d %H:%M:%S UTC')) }}
+{{ format_key_value('Resolution Time', recovery.completion_time|strftime('%Y-%m-%d %H:%M:%S UTC')) }}
+{{ format_key_value('Total Duration', recovery.total_duration) }}
+{{ format_key_value('Time to Recovery', recovery.time_to_recovery) }}
+
+{% if incident.description -%}
+{{ format_key_value('Description', incident.description) }}
+{% endif -%}
+{%- endblock %}
+
+{#- Service Restoration Status -#}
+{% block additional_info -%}
+{{ create_section_divider('=', 78) }}
+SERVICE RESTORATION STATUS
+{{ create_section_divider('=', 78) }}
+
+All affected services have been restored and are operating normally:
+
+{% for service in services -%}
+{{ format_list_item(service.name + ' - ' + service.status|upper + ' (Health: ' + service.health_score + '%)') }}
+  {{ format_key_value('Last Check', service.last_health_check|strftime('%H:%M:%S UTC')) }}
+  {% if service.notes -%}
+  {{ format_key_value('Notes', service.notes) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor %}
+
+{{ create_section_divider('-', 78) }}
+SYSTEM HEALTH METRICS
+{{ create_section_divider('-', 78) }}
+
+Current system performance metrics following recovery:
+
+{{ format_key_value('Overall Health Score', metrics.overall_health + '%') }}
+{{ format_key_value('CPU Utilization', metrics.cpu_usage + '%') }}
+{{ format_key_value('Memory Usage', metrics.memory_usage + '%') }}
+{{ format_key_value('Disk Usage', metrics.disk_usage + '%') }}
+{{ format_key_value('Network Latency', metrics.network_latency + ' ms') }}
+{{ format_key_value('Error Rate', metrics.error_rate + '%') }}
+{{ format_key_value('Response Time', metrics.avg_response_time + ' ms') }}
+{{ format_key_value('Active Connections', metrics.active_connections) }}
+
+{% if metrics.database -%}
+
+DATABASE METRICS:
+{% for db in metrics.database -%}
+{{ format_list_item(db.name + ' - Connection Pool: ' + db.connection_pool_status) }}
+  {{ format_key_value('Query Performance', db.avg_query_time + ' ms') }}
+  {{ format_key_value('Active Queries', db.active_queries) }}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor -%}
+{% endif %}
+
+{% if metrics.external_services -%}
+
+EXTERNAL SERVICE CONNECTIVITY:
+{% for ext_service in metrics.external_services -%}
+{{ format_list_item(ext_service.name + ' - ' + ext_service.status|upper) }}
+  {{ format_key_value('Response Time', ext_service.response_time + ' ms') }}
+  {{ format_key_value('Last Verified', ext_service.last_check|strftime('%H:%M:%S UTC')) }}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor -%}
+{% endif %}
+
+{{ create_section_divider('=', 78) }}
+RECOVERY TIMELINE
+{{ create_section_divider('=', 78) }}
+
+Key milestones during the incident resolution process:
+
+{% for event in timeline.events -%}
+{{ format_key_value(event.timestamp|strftime('%H:%M:%S'), event.description) }}
+{% if event.details -%}
+{{ ' ' * 10 }}{{ event.details }}
+{% endif -%}
+{% if not loop.last %}
+
+{% endif -%}
+{% endfor %}
+
+{{ create_section_divider('=', 78) }}
+POST-INCIDENT ANALYSIS
+{{ create_section_divider('=', 78) }}
+
+ROOT CAUSE ANALYSIS:
+{{ analysis.root_cause.description }}
+
+{% if analysis.root_cause.contributing_factors -%}
+
+CONTRIBUTING FACTORS:
+{% for factor in analysis.root_cause.contributing_factors -%}
+{{ format_list_item(factor) }}
+{% endfor -%}
+{% endif %}
+
+IMPACT ASSESSMENT:
+{{ format_key_value('Affected Users', analysis.impact.affected_users) }}
+{{ format_key_value('Failed Requests', analysis.impact.failed_requests) }}
+{{ format_key_value('Data Loss', analysis.impact.data_loss|default('None')) }}
+{{ format_key_value('Revenue Impact', analysis.impact.revenue_impact|default('Under review')) }}
+{{ format_key_value('SLA Compliance', analysis.impact.sla_compliance) }}
+
+{% if analysis.impact.user_impact_details -%}
+
+USER IMPACT DETAILS:
+{% for detail in analysis.impact.user_impact_details -%}
+{{ format_list_item(detail) }}
+{% endfor -%}
+{% endif %}
+
+RESOLUTION ACTIONS TAKEN:
+{% for action in analysis.resolution_actions -%}
+{{ format_list_item(action.description) }}
+  {{ format_key_value('Performed by', action.performed_by) }}
+  {{ format_key_value('Timestamp', action.timestamp|strftime('%H:%M:%S UTC')) }}
+  {% if action.result -%}
+  {{ format_key_value('Result', action.result) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor %}
+{%- endblock %}
+
+{#- Preventive Measures and Next Steps -#}
+{% block action_items -%}
+{{ create_section_divider('=', 78) }}
+PREVENTIVE MEASURES AND NEXT STEPS
+{{ create_section_divider('=', 78) }}
+
+To prevent similar incidents in the future, the following measures are being
+implemented:
+
+IMMEDIATE ACTIONS (Next 24-48 hours):
+{% for action in analysis.preventive_measures.immediate -%}
+{{ format_list_item(action.description) }}
+  {{ format_key_value('Owner', action.owner) }}
+  {{ format_key_value('Due Date', action.due_date|strftime('%Y-%m-%d')) }}
+  {% if action.priority -%}
+  {{ format_key_value('Priority', action.priority|upper) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor %}
+
+SHORT-TERM IMPROVEMENTS (Next 1-4 weeks):
+{% for improvement in analysis.preventive_measures.short_term -%}
+{{ format_list_item(improvement.description) }}
+  {{ format_key_value('Owner', improvement.owner) }}
+  {{ format_key_value('Target Date', improvement.target_date|strftime('%Y-%m-%d')) }}
+  {% if improvement.estimated_effort -%}
+  {{ format_key_value('Estimated Effort', improvement.estimated_effort) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor %}
+
+LONG-TERM ENHANCEMENTS (Next 1-3 months):
+{% for enhancement in analysis.preventive_measures.long_term -%}
+{{ format_list_item(enhancement.description) }}
+  {{ format_key_value('Owner', enhancement.owner) }}
+  {{ format_key_value('Target Quarter', enhancement.target_quarter) }}
+  {% if enhancement.budget_impact -%}
+  {{ format_key_value('Budget Impact', enhancement.budget_impact) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor %}
+
+{% if analysis.monitoring_improvements -%}
+
+MONITORING AND ALERTING IMPROVEMENTS:
+{% for improvement in analysis.monitoring_improvements -%}
+{{ format_list_item(improvement.description) }}
+  {{ format_key_value('Implementation Status', improvement.status) }}
+  {% if improvement.eta -%}
+  {{ format_key_value('ETA', improvement.eta|strftime('%Y-%m-%d')) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor -%}
+{% endif %}
+
+FOLLOW-UP ACTIONS REQUIRED:
+{% for followup in analysis.followup_actions -%}
+{{ format_list_item(followup.action) }}
+  {{ format_key_value('Responsible Party', followup.responsible_party) }}
+  {{ format_key_value('Due Date', followup.due_date|strftime('%Y-%m-%d')) }}
+  {% if followup.criticality -%}
+  {{ format_key_value('Criticality', followup.criticality|upper) }}
+  {% endif -%}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor %}
+
+{% if analysis.post_mortem -%}
+
+POST-MORTEM MEETING:
+{{ format_key_value('Scheduled Date', analysis.post_mortem.date|strftime('%Y-%m-%d %H:%M')) }}
+{{ format_key_value('Meeting Lead', analysis.post_mortem.lead) }}
+{{ format_key_value('Attendees', analysis.post_mortem.attendees|join(', ')) }}
+{% if analysis.post_mortem.agenda_link -%}
+{{ format_key_value('Agenda', analysis.post_mortem.agenda_link) }}
+{% endif -%}
+{% endif %}
+{%- endblock %}
+
+{#- Contact Information Override -#}
+{% block contact_info -%}
+{{ create_section_divider('=', 78) }}
+INCIDENT RESPONSE CONTACT INFORMATION
+{{ create_section_divider('=', 78) }}
+
+For questions about this incident or recovery process:
+
+PRIMARY INCIDENT COMMANDER:
+{{ format_key_value('Name', recovery.incident_commander.name) }}
+{{ format_key_value('Email', recovery.incident_commander.email) }}
+{% if recovery.incident_commander.phone -%}
+{{ format_key_value('Phone', recovery.incident_commander.phone) }}
+{% endif %}
+
+TECHNICAL LEAD:
+{{ format_key_value('Name', recovery.technical_lead.name) }}
+{{ format_key_value('Email', recovery.technical_lead.email) }}
+{% if recovery.technical_lead.phone -%}
+{{ format_key_value('Phone', recovery.technical_lead.phone) }}
+{% endif %}
+
+GENERAL SUPPORT:
+{{ format_list_item('Emergency Hotline: 1-800-SYS-HELP (1-800-797-4357)') }}
+{{ format_list_item('Email: incident-response@company.com') }}
+{{ format_list_item('Status Page: ' + format_url_for_text('https://status.company.com')) }}
+{{ format_list_item('Documentation: ' + format_url_for_text('https://docs.company.com/incidents')) }}
+
+ESCALATION CONTACTS:
+{% for contact in recovery.escalation_contacts -%}
+{{ format_key_value(contact.role, contact.name + ' (' + contact.email + ')') }}
+{% endfor %}
+
+Business Hours: 24/7 for critical incidents
+Response Time: < 15 minutes for P0/P1 incidents
+{%- endblock %}
+
+{#- Custom Footer for System Recovery -#}
+{% block footer -%}
+{{ create_section_divider('=', 78) }}
+SYSTEM RECOVERY NOTIFICATION | {{ recovery.completion_time|strftime('%Y-%m-%d %H:%M:%S') }} UTC
+{{ create_section_divider('=', 78) }}
+
+This is an automated system recovery notification confirming that the incident
+has been resolved and all services have been restored to normal operation.
+
+INCIDENT TRACKING:
+{{ format_key_value('Incident ID', incident.id) }}
+{{ format_key_value('Recovery ID', recovery.id) }}
+{{ format_key_value('Recovery Status', 'COMPLETE') }}
+{{ format_key_value('Service Status', 'ALL OPERATIONAL') }}
+
+{% if recovery.verification -%}
+
+RECOVERY VERIFICATION:
+{% for check in recovery.verification.checks -%}
+{{ format_list_item(check.name + ' - ' + check.status|upper) }}
+  {{ format_key_value('Verified at', check.verified_at|strftime('%H:%M:%S UTC')) }}
+  {{ format_key_value('Verified by', check.verified_by) }}
+  {% if not loop.last %}
+
+  {% endif -%}
+{% endfor -%}
+{% endif %}
+
+{% if recovery.sla_impact -%}
+
+SLA IMPACT SUMMARY:
+{{ format_key_value('SLA Status', recovery.sla_impact.status) }}
+{{ format_key_value('Uptime Impact', recovery.sla_impact.uptime_impact) }}
+{{ format_key_value('Credit Eligibility', recovery.sla_impact.credit_eligibility|default('Under review')) }}
+{% endif %}
+
+NOTIFICATION PREFERENCES:
+To manage your incident notification preferences or update your contact
+information, please visit: {{ format_url_for_text('https://app.company.com/notifications') }}
+
+For incident history and detailed reports:
+{{ format_url_for_text('https://status.company.com/incidents/' + incident.id) }}
+
+{% block unsubscribe_info -%}
+You are receiving this notification because you are subscribed to system
+incident updates. To modify your notification preferences:
+{{ format_url_for_text('https://app.company.com/preferences') }}
+
+{% endblock %}
+
+{% block legal_info -%}
+© {% now 'Y' %} Company Name. All rights reserved.
+
+This incident notification contains confidential system information and is
+intended only for authorized personnel and stakeholders. If you have received
+this message in error, please delete it immediately and notify the sender.
+
+Incident data is retained according to our data retention policy and may be
+used for system improvement and compliance reporting purposes.
+
+{% endblock %}
+
+{% block compliance_info -%}
+Company Name - System Operations Center
+123 Business Street
+City, State 12345
+United States
+
+Emergency Contact: +1-800-797-4357
+Incident Response Email: incident-response@company.com
+
+{% endblock %}
+{%- endblock %}
+
+{#- Technical Headers for System Recovery -#}
+{% block technical_headers -%}
+X-Incident-ID: {{ incident.id }}
+X-Recovery-ID: {{ recovery.id }}
+X-Incident-Severity: {{ incident.severity }}
+X-Recovery-Status: COMPLETE
+X-Service-Status: OPERATIONAL
+X-Notification-Type: SYSTEM_RECOVERY
+X-Recovery-Time: {{ recovery.completion_time|strftime('%Y-%m-%dT%H:%M:%SZ') }}
+X-Total-Duration: {{ recovery.total_duration_seconds }}
+X-Affected-Services: {{ services|map(attribute='name')|join(',') }}
+{% if recovery.sla_impact -%}
+X-SLA-Impact: {{ recovery.sla_impact.status }}
+{% endif -%}
+{%- endblock %}
+
+{#-
+Example Usage:
+==============
+
+To use this template in your Flask application:
+
+```python
+from flask import render_template
+from flask_mail import Message
+
+def send_system_recovery_notification(incident_data, recovery_data, recipient):
+    subject = render_template(
+        'emails/monitoring/system_recovery.txt',
+        incident=incident_data,
+        recovery=recovery_data,
+        services=recovery_data['services'],
+        metrics=recovery_data['metrics'],
+        analysis=recovery_data['analysis'],
+        timeline=recovery_data['timeline'],
+        stakeholder=recipient
+    ).split('\n')[0].replace('Subject: ', '')
+    
+    text_body = render_template(
+        'emails/monitoring/system_recovery.txt',
+        incident=incident_data,
+        recovery=recovery_data,
+        services=recovery_data['services'],
+        metrics=recovery_data['metrics'],
+        analysis=recovery_data['analysis'],
+        timeline=recovery_data['timeline'],
+        stakeholder=recipient
+    )
+    
+    msg = Message(
+        subject=subject,
+        recipients=[recipient['email']],
+        body=text_body
+    )
+    
+    mail.send(msg)
+```
+
+Sample Data Structure:
+=====================
+
+incident = {
+    'id': 'INC-2024-001',
+    'title': 'Database Connection Pool Exhaustion',
+    'severity': 'high',
+    'description': 'Primary database connection pool reached maximum capacity causing service degradation',
+    'detection_time': datetime(2024, 1, 15, 14, 30, 0),
+    'status': 'resolved'
+}
+
+recovery = {
+    'id': 'REC-2024-001',
+    'completion_time': datetime(2024, 1, 15, 16, 45, 0),
+    'total_duration': '2 hours 15 minutes',
+    'time_to_recovery': '1 hour 30 minutes',
+    'incident_commander': {
+        'name': 'John Smith',
+        'email': 'john.smith@company.com',
+        'phone': '+1-555-0123'
+    },
+    'technical_lead': {
+        'name': 'Jane Doe',
+        'email': 'jane.doe@company.com',
+        'phone': '+1-555-0124'
+    },
+    'escalation_contacts': [
+        {'role': 'Engineering Manager', 'name': 'Bob Johnson', 'email': 'bob.johnson@company.com'},
+        {'role': 'VP Engineering', 'name': 'Alice Brown', 'email': 'alice.brown@company.com'}
+    ],
+    'verification': {
+        'checks': [
+            {
+                'name': 'Database Connectivity',
+                'status': 'passed',
+                'verified_at': datetime(2024, 1, 15, 16, 50, 0),
+                'verified_by': 'System Health Monitor'
+            },
+            {
+                'name': 'API Response Times',
+                'status': 'passed',
+                'verified_at': datetime(2024, 1, 15, 16, 52, 0),
+                'verified_by': 'Performance Monitor'
+            }
+        ]
+    },
+    'sla_impact': {
+        'status': 'WITHIN_SLA',
+        'uptime_impact': '0.02%',
+        'credit_eligibility': 'Not applicable'
+    }
+}
+
+services = [
+    {
+        'name': 'Web Application',
+        'status': 'operational',
+        'health_score': '99',
+        'last_health_check': datetime(2024, 1, 15, 17, 0, 0),
+        'notes': 'All endpoints responding normally'
+    },
+    {
+        'name': 'API Gateway',
+        'status': 'operational',
+        'health_score': '100',
+        'last_health_check': datetime(2024, 1, 15, 17, 0, 0),
+        'notes': 'Performance metrics within normal ranges'
+    },
+    {
+        'name': 'Database Cluster',
+        'status': 'operational',
+        'health_score': '98',
+        'last_health_check': datetime(2024, 1, 15, 17, 0, 0),
+        'notes': 'Connection pool optimized and monitoring enhanced'
+    }
+]
+
+This template provides comprehensive system recovery notification capabilities
+while maintaining compatibility with text-only email clients and ensuring
+clear, professional communication for all stakeholders.
+-#}
