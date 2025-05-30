@@ -1,0 +1,109 @@
+{# 
+Base Error Template for Flask Application
+Purpose: Standardized JSON error response structure with security monitoring integration
+Template Engine: Jinja2 3.1.2+ with Flask 3.1.1 integration
+Security: Real-time security monitoring per Section 6.4.6.1
+API Compliance: Response formatting per Section 4.3.1.4
+
+Template Inheritance Support:
+- Child templates should extend this base template
+- Override specific blocks to customize error responses
+- Maintain consistent structure across all error types
+
+Usage Example:
+{% extends "errors/base_error.json" %}
+{% block error_type %}ValidationError{% endblock %}
+{% block error_message %}Invalid input data provided{% endblock %}
+#}
+{%- set timestamp = moment().utc().isoformat() if moment else (request.timestamp or '') -%}
+{%- set correlation_id = request.correlation_id or g.correlation_id or (request.headers.get('X-Correlation-ID') or '') -%}
+{%- set request_id = request.request_id or g.request_id or (uuid4().hex if uuid4 else '') -%}
+{%- set user_id = g.current_user_id or (current_user.id if current_user and current_user.is_authenticated else null) -%}
+{%- set request_path = request.path or '' -%}
+{%- set request_method = request.method or '' -%}
+{%- set client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) or '' -%}
+{%- set user_agent = request.headers.get('User-Agent', '') or '' -%}
+{
+  "error": {
+    "type": "{% block error_type %}GenericError{% endblock %}",
+    "code": "{% block error_code %}ERR_GENERIC{% endblock %}",
+    "message": "{% block error_message %}An unexpected error occurred{% endblock %}",
+    "details": {% block error_details %}null{% endblock %},
+    "timestamp": "{{ timestamp }}",
+    "correlation_id": "{{ correlation_id }}",
+    "request_id": "{{ request_id }}"
+  },
+  "request": {
+    "method": "{{ request_method }}",
+    "path": "{{ request_path }}",
+    "timestamp": "{{ timestamp }}",
+    "correlation_id": "{{ correlation_id }}"
+  },
+  "security": {
+    "user_id": {{ user_id | tojson }},
+    "client_ip": "{{ client_ip }}",
+    "user_agent": "{{ user_agent | truncate(255) }}",
+    "session_id": "{{ session.get('session_id', '') if session else '' }}",
+    "authenticated": {{ (current_user and current_user.is_authenticated) | tojson if current_user else false }}
+  },
+  "metadata": {
+    "api_version": "{% block api_version %}1.0{% endblock %}",
+    "environment": "{{ config.ENV or 'unknown' }}",
+    "service": "flask-api",
+    "trace_id": "{{ g.trace_id or '' }}",
+    "span_id": "{{ g.span_id or '' }}"
+  },
+  "support": {
+    "contact": "{% block support_contact %}support@company.com{% endblock %}",
+    "documentation": "{% block documentation_url %}https://docs.company.com/api/errors{% endblock %}",
+    "incident_id": "{{ correlation_id }}",
+    "help_text": "{% block help_text %}Please contact support with the correlation_id if this error persists{% endblock %}"
+  }{% if config.DEBUG %},
+  "debug": {
+    "stack_trace": "{% block debug_stack_trace %}{% endblock %}",
+    "variables": {% block debug_variables %}{}{% endblock %},
+    "request_data": {% block debug_request_data %}{}{% endblock %}
+  }{% endif %}
+}
+{# 
+Security Monitoring Integration:
+This template automatically captures security context for error audit trails per Section 6.4.6.1:
+- User identification and authentication status
+- Request correlation and tracing information  
+- Client IP and user agent for security analysis
+- Session information for authentication monitoring
+
+Template Inheritance Blocks:
+- error_type: Specific error type classification
+- error_code: Machine-readable error code
+- error_message: Human-readable error description
+- error_details: Additional error-specific details (JSON object)
+- api_version: API version for compatibility tracking
+- support_contact: Support contact information
+- documentation_url: Link to error documentation
+- help_text: User-friendly help message
+- debug_stack_trace: Stack trace for debug mode (DEBUG=True only)
+- debug_variables: Debug variables (DEBUG=True only)
+- debug_request_data: Request data for debugging (DEBUG=True only)
+
+Common Error Response Patterns:
+1. Validation Errors: Override error_type="ValidationError", provide field-specific details
+2. Authentication Errors: Override error_type="AuthenticationError", include auth context
+3. Authorization Errors: Override error_type="AuthorizationError", include permission context
+4. Resource Not Found: Override error_type="NotFoundError", include resource information
+5. Rate Limiting: Override error_type="RateLimitError", include rate limit details
+6. Server Errors: Override error_type="ServerError", include system context
+
+Flask Integration Notes:
+- Compatible with Flask 3.1.1 and Jinja2 3.1.2+
+- Integrates with Flask-SQLAlchemy 3.1.1 for user context
+- Supports Flask session management and security context
+- Designed for Service Layer pattern per Section 5.2 Component Details
+- Maintains API contract compliance per Section 4.3.1.4
+
+Security Considerations:
+- Sensitive data is filtered from debug information
+- User context is properly secured and validated
+- Error responses maintain security posture during migration
+- Audit trail integration for security monitoring compliance
+#}
