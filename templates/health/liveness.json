@@ -1,0 +1,29 @@
+{
+  "status": "{{ status }}",
+  "timestamp": "{{ timestamp }}",
+  "service": "flask-application",
+  "version": "{{ version }}",
+  "environment": "{{ environment }}",
+  "instance_id": "{{ instance_id }}",
+  "uptime_seconds": {{ uptime_seconds }},
+  "check_type": "liveness",
+  "response_time_ms": {{ response_time_ms }},
+  {% if status == "healthy" -%}
+  "message": "Application is responsive and accepting requests",
+  "details": {
+    "application_status": "running",
+    "basic_connectivity": "ok",
+    "memory_available": true,
+    "process_status": "active"
+  }
+  {%- else -%}
+  "message": "Application responsiveness check failed",
+  "details": {
+    "application_status": "degraded",
+    "basic_connectivity": "{{ connectivity_status|default('unknown') }}",
+    "memory_available": {{ memory_available|default(false)|lower }},
+    "process_status": "{{ process_status|default('unknown') }}"
+  },
+  "error": "{{ error_message|default('Application not responding') }}"
+  {%- endif %}
+}
