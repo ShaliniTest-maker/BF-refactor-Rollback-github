@@ -1,289 +1,253 @@
-🚨 CRITICAL SECURITY INCIDENT ALERT 🚨
+==============================================================================
+SECURITY INCIDENT ALERT - IMMEDIATE ACTION REQUIRED
+==============================================================================
 
+INCIDENT DETAILS:
+-----------------
 Incident ID: {{ incident_id }}
-Timestamp: {{ timestamp }}
-Severity: {{ severity }}
-Application: Flask Security Monitor
-
-====================================================================
-INCIDENT SUMMARY
-====================================================================
-
+Detection Time: {{ detection_timestamp }}
+Current Time: {{ current_timestamp }}
+Severity Level: {{ severity_level }}
 Incident Type: {{ incident_type }}
-Description: {{ description }}
 
-{% if affected_systems %}
-Affected Systems:
-{% for system in affected_systems %}
-- {{ system }}
-{% endfor %}
-{% endif %}
+AFFECTED SYSTEMS:
+-----------------
+Application: {{ application_name }}
+Environment: {{ environment }}
+{% if affected_containers -%}
+Affected Containers: {{ affected_containers }}
+{% endif -%}
+{% if affected_services -%}
+Affected Services: {{ affected_services }}
+{% endif -%}
+Source IP Address: {{ source_ip_address }}
+User Account: {{ affected_user_account }}
 
-{% if threat_indicators %}
-Threat Indicators:
-{% for indicator in threat_indicators %}
-- {{ indicator }}
-{% endfor %}
-{% endif %}
-
-====================================================================
-INCIDENT DETAILS
-====================================================================
-
-Detection Time: {{ detection_time }}
-Source IP(s): {{ source_ips | join(', ') if source_ips else 'Unknown' }}
-User ID(s): {{ user_ids | join(', ') if user_ids else 'Not applicable' }}
-Resource(s): {{ resources | join(', ') if resources else 'Not specified' }}
-
-{% if authentication_details %}
-Authentication Context:
-- Failed attempts: {{ authentication_details.failed_attempts }}
-- Auth method: {{ authentication_details.method }}
-- Session ID: {{ authentication_details.session_id }}
-{% endif %}
-
-{% if container_details %}
-Container Security Context:
-- Container ID: {{ container_details.container_id }}
-- Container status: {{ container_details.status }}
-- Isolation actions: {{ container_details.isolation_actions | join(', ') }}
-{% endif %}
-
-{% if guardduty_findings %}
-AWS GuardDuty Analysis:
-- Finding type: {{ guardduty_findings.type }}
-- Confidence level: {{ guardduty_findings.confidence }}
-- Service: {{ guardduty_findings.service }}
-{% endif %}
-
-{% if iam_context %}
-IAM Security Context:
-- Affected role/user: {{ iam_context.principal }}
-- Actions attempted: {{ iam_context.actions | join(', ') }}
-- Policy violations: {{ iam_context.violations | join(', ') }}
-{% endif %}
-
-====================================================================
-IMPACT ASSESSMENT
-====================================================================
-
-Security Impact Level: {{ impact_level }}
-Business Impact: {{ business_impact }}
-Data Exposure Risk: {{ data_exposure_risk }}
-
-{% if compromised_resources %}
-Potentially Compromised Resources:
-{% for resource in compromised_resources %}
-- {{ resource.name }}: {{ resource.status }}
-{% endfor %}
-{% endif %}
-
-====================================================================
-IMMEDIATE RESPONSE ACTIONS TAKEN
-====================================================================
-
-{% if automated_actions %}
-Automated Security Actions:
-{% for action in automated_actions %}
-- {{ action.timestamp }}: {{ action.description }}
-{% endfor %}
-{% endif %}
-
-{% if isolation_actions %}
-Container Isolation Actions:
-{% for action in isolation_actions %}
-- {{ action }}
-{% endfor %}
-{% endif %}
-
-{% if credential_actions %}
-Credential Revocation Actions:
-{% for action in credential_actions %}
-- {{ action }}
-{% endfor %}
-{% endif %}
-
-====================================================================
-REQUIRED MANUAL RESPONSE ACTIONS
-====================================================================
-
-IMMEDIATE ACTIONS (within 15 minutes):
-1. Verify incident scope and validate automated containment
-2. Contact affected users if applicable
-3. Review system logs for additional indicators
-4. Confirm isolation of compromised systems
-5. Document initial findings and response actions
-
-HIGH PRIORITY ACTIONS (within 1 hour):
-1. Conduct threat hunting for related indicators
-2. Review backup integrity and availability
-3. Coordinate with legal/compliance teams if required
-4. Prepare communications for stakeholders
-5. Assess need for external forensic assistance
-
-FOLLOW-UP ACTIONS (within 24 hours):
-1. Complete forensic analysis and evidence collection
-2. Implement additional security controls as needed
-3. Update incident response procedures based on learnings
-4. Schedule post-incident review meeting
-5. Prepare executive briefing materials
-
-====================================================================
-ESCALATION PROCEDURES
-====================================================================
-
-PRIMARY CONTACTS:
-- Security Team Lead: {{ security_lead_contact }}
-- On-Call Engineer: {{ oncall_contact }}
-- CISO: {{ ciso_contact }}
-
-ESCALATION TIMELINE:
-- 0-15 minutes: Security team response
-- 15-30 minutes: Management notification
-- 30-60 minutes: Executive escalation (if critical)
-- 1+ hours: External stakeholder notification (if required)
-
-EXTERNAL CONTACTS (if needed):
-- Legal Counsel: {{ legal_contact }}
-- Cyber Insurance: {{ insurance_contact }}
-- Law Enforcement: {{ law_enforcement_contact }}
-- Regulatory Bodies: {{ regulatory_contact }}
-
-====================================================================
-SYSTEM MONITORING STATUS
-====================================================================
-
-Container Orchestration Status: {{ container_status }}
-WSGI Server Health: {{ wsgi_status }}
-Database Security: {{ database_status }}
-Authentication Systems: {{ auth_status }}
-Network Security: {{ network_status }}
-
-Monitoring Dashboard: {{ dashboard_url }}
-Incident Tracking: {{ incident_tracking_url }}
-
-====================================================================
-COMMUNICATION GUIDELINES
-====================================================================
-
-Internal Communications:
-- Use secure channels only (encrypted email/Slack)
-- Limit distribution to need-to-know basis
-- All communications must reference Incident ID: {{ incident_id }}
-
-External Communications:
-- NO external communications without approval
-- All media inquiries to be directed to {{ media_contact }}
-- Customer communications require executive approval
-
-Legal/Regulatory Considerations:
-- Potential breach notification requirements: {{ breach_notification_required }}
-- Data protection regulations applicable: {{ applicable_regulations }}
-- Evidence preservation requirements: {{ evidence_preservation }}
-
-====================================================================
-TECHNICAL ANALYSIS
-====================================================================
-
+THREAT ASSESSMENT:
+-----------------
+Threat Category: {{ threat_category }}
 Attack Vector: {{ attack_vector }}
-Exploitation Method: {{ exploitation_method }}
-Security Controls Bypassed: {{ bypassed_controls | join(', ') if bypassed_controls else 'None identified' }}
-Detection Method: {{ detection_method }}
+{% if compromise_indicators -%}
+Compromise Indicators: {{ compromise_indicators }}
+{% endif -%}
+{% if malware_detected -%}
+Malware Detection: {{ malware_detected }}
+{% endif -%}
+Risk Level: {{ risk_level }}
 
-{% if threat_intelligence %}
-Threat Intelligence:
-- IOCs identified: {{ threat_intelligence.iocs | join(', ') }}
-- Attribution: {{ threat_intelligence.attribution }}
-- Campaign association: {{ threat_intelligence.campaign }}
-{% endif %}
+INCIDENT DESCRIPTION:
+--------------------
+{{ incident_description }}
 
-{% if vulnerability_info %}
-Vulnerability Information:
-- CVE(s): {{ vulnerability_info.cves | join(', ') }}
-- Patch availability: {{ vulnerability_info.patch_status }}
-- Workaround available: {{ vulnerability_info.workaround }}
-{% endif %}
+{% if technical_details -%}
+Technical Details:
+{{ technical_details }}
+{% endif -%}
 
-====================================================================
-FORENSIC PRESERVATION
-====================================================================
+IMMEDIATE IMPACT:
+-----------------
+System Availability: {{ system_availability_status }}
+Data Integrity: {{ data_integrity_status }}
+Service Disruption: {{ service_disruption_level }}
+{% if user_impact -%}
+User Impact: {{ user_impact }}
+{% endif -%}
+{% if business_impact -%}
+Business Impact: {{ business_impact }}
+{% endif -%}
 
-Evidence Collected:
-{% if evidence_collected %}
-{% for evidence in evidence_collected %}
-- {{ evidence.type }}: {{ evidence.location }} ({{ evidence.timestamp }})
-{% endfor %}
-{% else %}
-- Evidence collection in progress
-{% endif %}
+AUTOMATED RESPONSE ACTIONS TAKEN:
+---------------------------------
+{% if container_isolation_status -%}
+Container Isolation: {{ container_isolation_status }}
+{% endif -%}
+{% if credential_revocation_status -%}
+IAM Credential Revocation: {{ credential_revocation_status }}
+{% endif -%}
+{% if network_isolation_status -%}
+Network Isolation: {{ network_isolation_status }}
+{% endif -%}
+{% if security_group_updates -%}
+Security Group Updates: {{ security_group_updates }}
+{% endif -%}
+{% if access_control_changes -%}
+Access Control Changes: {{ access_control_changes }}
+{% endif -%}
 
-Log Sources Preserved:
-- CloudWatch Logs: {{ log_retention_period }}
-- Sentry Error Tracking: Preserved
-- Container Logs: Preserved
-- Database Audit Logs: Preserved
-- AWS GuardDuty Findings: Preserved
+REQUIRED IMMEDIATE ACTIONS:
+---------------------------
+{% if severity_level == "CRITICAL" -%}
+CRITICAL SEVERITY - IMMEDIATE RESPONSE REQUIRED:
 
-====================================================================
-RECOVERY PROCEDURES
-====================================================================
+1. ACKNOWLEDGE this incident within 5 minutes by replying to this email
+2. Join emergency response bridge: {{ emergency_bridge_number }}
+3. Review incident dashboard: {{ incident_dashboard_url }}
+4. Validate automated containment measures
+5. Assess need for additional isolation procedures
+6. Coordinate with security team for threat analysis
+7. Prepare stakeholder communication if business impact confirmed
 
-System Recovery Steps:
-1. Verify threat elimination from all affected systems
-2. Validate security control effectiveness
-3. Restore systems from verified clean backups if needed
-4. Implement additional monitoring for affected resources
-5. Conduct security validation before returning to service
+{% elif severity_level == "HIGH" -%}
+HIGH SEVERITY - URGENT RESPONSE REQUIRED:
 
-Business Continuity:
-- Backup systems status: {{ backup_status }}
-- Failover procedures: {{ failover_status }}
-- Service restoration timeline: {{ restoration_timeline }}
+1. ACKNOWLEDGE this incident within 15 minutes by replying to this email
+2. Access incident tracking system: {{ incident_tracking_url }}
+3. Review security monitoring dashboard for additional context
+4. Validate automated response effectiveness
+5. Coordinate with affected system owners
+6. Document investigation findings and response actions
+7. Prepare for potential escalation if impact increases
 
-====================================================================
-COMPLIANCE AND REPORTING
-====================================================================
+{% elif severity_level == "MEDIUM" -%}
+MEDIUM SEVERITY - PROMPT INVESTIGATION REQUIRED:
 
-Regulatory Reporting Required: {{ regulatory_reporting_required }}
-Customer Notification Required: {{ customer_notification_required }}
-Insurance Claim Initiation: {{ insurance_claim_required }}
+1. ACKNOWLEDGE this incident within 30 minutes
+2. Begin security investigation and log analysis
+3. Review automated response actions for completeness
+4. Assess potential for lateral movement or escalation
+5. Coordinate with infrastructure team for system health validation
+6. Monitor for related security events
+7. Document findings and recommend preventive measures
 
-Documentation Requirements:
-- Incident timeline: {{ timeline_documentation_status }}
-- Financial impact assessment: {{ financial_impact_status }}
-- Technical analysis report: {{ technical_report_status }}
-- Lessons learned document: {{ lessons_learned_status }}
+{% else -%}
+LOW SEVERITY - INVESTIGATION AND MONITORING REQUIRED:
 
-====================================================================
-POST-INCIDENT REQUIREMENTS
-====================================================================
+1. ACKNOWLEDGE this incident within 2 hours
+2. Conduct thorough security log analysis
+3. Validate system integrity and user access patterns
+4. Review automated response actions for appropriateness
+5. Monitor for related or escalating security events
+6. Document incident for security trend analysis
+7. Update security monitoring rules if necessary
+{% endif -%}
 
-Required Reviews:
-- Security control effectiveness assessment
-- Incident response procedure evaluation
-- Staff training requirements analysis
-- Technology improvement recommendations
+ESCALATION PROCEDURES:
+---------------------
+{% if severity_level == "CRITICAL" -%}
+CRITICAL INCIDENT ESCALATION PATH:
+- Primary On-Call Engineer: {{ primary_oncall_contact }}
+- Security Team Lead: {{ security_team_lead_contact }}
+- Engineering Manager: {{ engineering_manager_contact }}
+- CTO Notification: {{ cto_contact }} (automatic after 15 minutes)
+- Emergency Bridge: {{ emergency_bridge_number }}
 
-Improvement Actions:
-- Update detection rules and signatures
-- Enhance monitoring and alerting capabilities
-- Implement additional security controls
-- Conduct security awareness training
+{% else -%}
+ESCALATION PATH:
+- Primary Response Team: {{ primary_response_team }}
+- Security Team: {{ security_team_contact }}
+- Team Lead: {{ team_lead_contact }}
+- Manager Escalation: {{ manager_escalation_contact }}
+{% endif -%}
 
-====================================================================
+EMERGENCY CONTACTS:
+------------------
+24/7 Security Operations Center: {{ soc_contact }}
+Incident Commander On-Call: {{ incident_commander_contact }}
+Infrastructure Team: {{ infrastructure_team_contact }}
+{% if external_security_vendor -%}
+External Security Vendor: {{ external_security_vendor }}
+{% endif -%}
+Emergency Bridge Number: {{ emergency_bridge_number }}
+Secure Communication Channel: {{ secure_communication_channel }}
 
-This is an automated security alert from the Flask Application Security Monitor.
+MONITORING AND FORENSICS:
+-------------------------
+{% if monitoring_dashboard_url -%}
+Security Dashboard: {{ monitoring_dashboard_url }}
+{% endif -%}
+{% if log_analysis_url -%}
+Log Analysis Portal: {{ log_analysis_url }}
+{% endif -%}
+{% if threat_intelligence_url -%}
+Threat Intelligence Platform: {{ threat_intelligence_url }}
+{% endif -%}
+{% if forensics_tools_url -%}
+Forensics Tools: {{ forensics_tools_url }}
+{% endif -%}
 
-For immediate assistance, contact the Security Operations Center:
-- Phone: {{ soc_phone }}
-- Email: {{ soc_email }}
-- Emergency Escalation: {{ emergency_contact }}
+Incident Tracking: {{ incident_tracking_number }}
+Case Management: {{ case_management_url }}
 
-CONFIDENTIAL: This message contains sensitive security information. 
-Handle according to your organization's data classification policies.
+COMMUNICATION GUIDELINES:
+-------------------------
+- Reply to this email to acknowledge incident awareness
+- Use secure communication channels for sensitive information
+- Document all investigation steps and findings
+- Coordinate with incident commander before external communications
+{% if severity_level == "CRITICAL" -%}
+- Prepare executive briefing materials
+- Coordinate with legal and compliance teams if data exposure suspected
+{% endif -%}
 
-Incident Response System Version: {{ incident_system_version }}
-Template Version: {{ template_version }}
+COMPLIANCE AND REPORTING:
+-------------------------
+{% if regulatory_requirements -%}
+Regulatory Requirements: {{ regulatory_requirements }}
+{% endif -%}
+{% if compliance_reporting_required -%}
+Compliance Reporting: {{ compliance_reporting_required }}
+{% endif -%}
+Data Breach Assessment: {{ data_breach_assessment_required }}
+{% if customer_notification_required -%}
+Customer Notification: {{ customer_notification_required }}
+{% endif -%}
+
+SYSTEM STATUS VALIDATION:
+------------------------
+To validate current system status, check:
+1. Application health endpoints: {{ health_check_urls }}
+2. Authentication service status: {{ auth_service_status_url }}
+3. Database connectivity: {{ database_status_url }}
+4. Container orchestration health: {{ container_health_url }}
+5. Security monitoring systems: {{ security_monitoring_status }}
+
+RECOVERY PROCEDURES:
+-------------------
+{% if severity_level == "CRITICAL" -%}
+CRITICAL INCIDENT RECOVERY:
+1. Assess containment effectiveness
+2. Validate no lateral movement occurred
+3. Scan for additional compromise indicators
+4. Prepare system restoration procedures
+5. Coordinate with disaster recovery team if needed
+6. Plan staged service restoration
+7. Implement additional monitoring and controls
+
+{% else -%}
+STANDARD RECOVERY PROCEDURES:
+1. Complete security investigation
+2. Validate system integrity
+3. Remove or remediate identified threats
+4. Restore normal operations if safe
+5. Implement additional preventive controls
+6. Update security monitoring rules
+7. Conduct post-incident review
+{% endif -%}
+
+ADDITIONAL RESOURCES:
+--------------------
+Security Incident Response Playbook: {{ security_playbook_url }}
+Emergency Procedures Documentation: {{ emergency_procedures_url }}
+Threat Intelligence Resources: {{ threat_intelligence_resources }}
+Forensic Analysis Tools: {{ forensic_tools_documentation }}
+
+POST-INCIDENT REQUIREMENTS:
+---------------------------
+- Detailed incident timeline documentation
+- Root cause analysis and lessons learned
+- Security control effectiveness assessment  
+- Recommendations for preventive measures
+- Executive summary and stakeholder communication
+- Compliance reporting and regulatory notifications if required
+
+==============================================================================
+This is an automated security alert from the Flask Application Security 
+Monitoring System. Do not reply with sensitive information unless using 
+approved secure communication channels.
+
+For immediate assistance: {{ emergency_contact_number }}
+For secure communication: {{ secure_communication_instructions }}
+
 Generated: {{ generation_timestamp }}
-
-====================================================================
+Alert System: Flask Security Incident Response v{{ system_version }}
+==============================================================================
