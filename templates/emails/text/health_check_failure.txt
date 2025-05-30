@@ -1,0 +1,258 @@
+FLASK APPLICATION HEALTH CHECK FAILURE ALERT
+
+================================================================================
+CRITICAL SYSTEM HEALTH ALERT
+================================================================================
+
+Timestamp: {{ timestamp }}
+Alert ID: {{ alert_id }}
+Severity: {{ severity }}
+Environment: {{ environment }}
+
+================================================================================
+AFFECTED SYSTEM DETAILS
+================================================================================
+
+Application: Flask Application (Node.js to Python Migration)
+Service Name: {{ service_name }}
+Instance/Container: {{ instance_id }}
+Health Check Endpoint: {{ health_check_endpoint }}
+Health Check Type: {{ health_check_type }}
+
+Failure Details:
+- Status Code: {{ status_code }}
+- Response Time: {{ response_time }}ms (Threshold: {{ threshold_response_time }}ms)
+- Error Message: {{ error_message }}
+- Failed Checks: {{ failed_checks }}
+
+================================================================================
+SERVICE IMPACT ASSESSMENT
+================================================================================
+
+Affected Components:
+{% for component in affected_components %}
+- {{ component.name }}: {{ component.status }} ({{ component.impact_level }})
+{% endfor %}
+
+Database Connectivity:
+- PostgreSQL Connection: {{ database_status }}
+- Connection Pool Status: {{ connection_pool_status }}
+- SQLAlchemy Health: {{ sqlalchemy_status }}
+
+External Service Dependencies:
+- Auth0 Authentication: {{ auth0_status }}
+- AWS Services: {{ aws_services_status }}
+- Redis Cache: {{ redis_status }}
+
+WSGI Server Status:
+- Gunicorn Workers: {{ gunicorn_workers_status }}
+- Active Workers: {{ active_workers }}/{{ total_workers }}
+- Worker Health: {{ worker_health_status }}
+
+Container Orchestration:
+- ECS/EKS Status: {{ container_orchestration_status }}
+- Container Health: {{ container_health }}
+- Network Connectivity: {{ network_status }}
+
+================================================================================
+DIAGNOSTIC INFORMATION
+================================================================================
+
+System Metrics (Last 5 minutes):
+- CPU Usage: {{ cpu_usage }}%
+- Memory Usage: {{ memory_usage }}%
+- Disk Usage: {{ disk_usage }}%
+- Network I/O: {{ network_io }}
+
+Application Metrics:
+- Request Rate: {{ request_rate }} req/min
+- Error Rate: {{ error_rate }}%
+- Response Time P95: {{ p95_response_time }}ms
+- Active Sessions: {{ active_sessions }}
+
+Flask Application Status:
+- Application State: {{ application_state }}
+- Configuration Status: {{ config_status }}
+- Blueprint Registration: {{ blueprint_status }}
+- Service Layer Health: {{ service_layer_status }}
+
+Recent Events (Last 10 minutes):
+{% for event in recent_events %}
+- {{ event.timestamp }}: {{ event.type }} - {{ event.message }}
+{% endfor %}
+
+================================================================================
+IMMEDIATE RECOVERY PROCEDURES
+================================================================================
+
+STEP 1: INITIAL ASSESSMENT (0-2 minutes)
+1. Access monitoring dashboard: {{ monitoring_dashboard_url }}
+2. Check CloudWatch Container Insights for container status
+3. Verify ECS/EKS service health in AWS Console
+4. Review Gunicorn worker process status
+
+STEP 2: BASIC TROUBLESHOOTING (2-5 minutes)
+1. Restart unhealthy containers/instances:
+   Command: aws ecs update-service --cluster {{ cluster_name }} --service {{ service_name }} --force-new-deployment
+   
+2. Check application logs:
+   CloudWatch Log Group: {{ cloudwatch_log_group }}
+   Command: aws logs tail {{ cloudwatch_log_group }} --follow
+   
+3. Verify database connectivity:
+   Check PostgreSQL connection: {{ database_check_command }}
+   Validate SQLAlchemy pool: flask db-pool-status
+
+STEP 3: FLASK-SPECIFIC CHECKS (5-10 minutes)
+1. Verify Flask application configuration:
+   - Check environment variables are loaded via python-dotenv
+   - Validate Flask-SQLAlchemy database connections
+   - Confirm Auth0 Python SDK configuration
+   
+2. Check Flask-Migrate database status:
+   Command: flask db current
+   
+3. Validate Flask blueprint registration:
+   Check application initialization logs for blueprint errors
+
+STEP 4: CONTAINER ORCHESTRATION RECOVERY (10-15 minutes)
+1. Scale up healthy instances:
+   Command: aws ecs update-service --cluster {{ cluster_name }} --service {{ service_name }} --desired-count {{ desired_count }}
+   
+2. Apply Terraform remediation if infrastructure issues detected:
+   Command: terraform plan -target=module.ecs_cluster
+   
+3. Check for AWS service degradation:
+   AWS Status Page: https://status.aws.amazon.com/
+
+================================================================================
+ESCALATION PROCEDURES
+================================================================================
+
+LEVEL 1 - IMMEDIATE RESPONSE (0-15 minutes)
+Contact: On-Call Engineer
+Phone: {{ oncall_phone }}
+Slack: #incidents-critical
+Email: {{ oncall_email }}
+
+Action Required:
+- Acknowledge alert within 5 minutes
+- Begin initial troubleshooting
+- Update incident channel with status
+
+LEVEL 2 - TECHNICAL ESCALATION (15-30 minutes)
+Contact: Flask Migration Team Lead
+Phone: {{ team_lead_phone }}
+Slack: #flask-migration-team
+Email: {{ team_lead_email }}
+
+Action Required:
+- Flask-specific troubleshooting
+- Database migration issue resolution
+- Service Layer debugging
+
+LEVEL 3 - MANAGEMENT ESCALATION (30+ minutes)
+Contact: Engineering Manager
+Phone: {{ manager_phone }}
+Email: {{ manager_email }}
+
+Action Required:
+- Business impact assessment
+- Customer communication coordination
+- Resource allocation decisions
+
+================================================================================
+AUTOMATED RESPONSE ACTIONS
+================================================================================
+
+Actions Already Taken:
+{% for action in automated_actions %}
+- {{ action.timestamp }}: {{ action.description }} - {{ action.status }}
+{% endfor %}
+
+Pending Automated Actions:
+{% for action in pending_actions %}
+- {{ action.eta }}: {{ action.description }}
+{% endfor %}
+
+Container Isolation Status:
+- Compromised containers isolated: {{ isolated_containers }}
+- Traffic redirected to healthy instances: {{ traffic_redirection_status }}
+- Security containment measures: {{ security_containment_status }}
+
+================================================================================
+MONITORING AND ALERTING
+================================================================================
+
+Related Monitoring Links:
+- Application Dashboard: {{ app_dashboard_url }}
+- Infrastructure Dashboard: {{ infra_dashboard_url }}
+- Security Dashboard: {{ security_dashboard_url }}
+- Container Metrics: {{ container_metrics_url }}
+
+Alert Configuration:
+- Health Check Frequency: {{ health_check_frequency }}
+- Failure Threshold: {{ failure_threshold }}
+- Alert Cooldown: {{ alert_cooldown }}
+
+Additional Metrics to Monitor:
+- Flask request processing latency
+- SQLAlchemy connection pool utilization
+- Gunicorn worker process health
+- Container resource consumption
+- AWS service health status
+
+================================================================================
+MIGRATION-SPECIFIC CONSIDERATIONS
+================================================================================
+
+Migration Status Context:
+- Migration Phase: {{ migration_phase }}
+- Node.js Baseline Performance: {{ nodejs_baseline }}
+- Flask Performance Comparison: {{ flask_performance }}
+- Migration Health Score: {{ migration_health_score }}
+
+Rollback Preparation:
+- Node.js System Status: {{ nodejs_system_status }}
+- Rollback Readiness: {{ rollback_readiness }}
+- Data Synchronization Status: {{ data_sync_status }}
+
+Performance SLA Validation:
+- Target Response Time: <200ms (Current: {{ current_response_time }}ms)
+- Target Database Query Time: <100ms (Current: {{ current_db_time }}ms)
+- Target Authentication Time: <150ms (Current: {{ current_auth_time }}ms)
+- Target Availability: 99.9% (Current: {{ current_availability }}%)
+
+================================================================================
+REFERENCE INFORMATION
+================================================================================
+
+Technical Documentation:
+- Flask Application Architecture: {{ flask_docs_url }}
+- Health Check Implementation: {{ health_check_docs_url }}
+- Incident Response Playbook: {{ playbook_url }}
+- Migration Guide: {{ migration_guide_url }}
+
+Key Configuration Files:
+- Flask Configuration: config/security.py
+- Gunicorn Configuration: gunicorn.conf.py
+- Docker Configuration: Dockerfile.security
+- Terraform Modules: terraform/modules/
+
+Emergency Contacts:
+- Security Team: {{ security_team_contact }}
+- Database Team: {{ database_team_contact }}
+- Infrastructure Team: {{ infrastructure_team_contact }}
+- Business Continuity: {{ business_continuity_contact }}
+
+================================================================================
+
+This automated alert was generated by the Flask Application Monitoring System.
+Alert generation time: {{ alert_generation_time }}
+Next health check in: {{ next_health_check }}
+
+For immediate assistance, contact the on-call engineer or join the incident response channel.
+
+IMPORTANT: If this is a security-related health check failure, immediately escalate to the security team and begin container isolation procedures.
+
+================================================================================
