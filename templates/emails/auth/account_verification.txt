@@ -1,0 +1,103 @@
+{{- config.COMPANY_NAME or "Your Application" }} - Account Verification Required
+
+Hello {{ user.first_name or "User" }},
+
+Welcome to {{ config.COMPANY_NAME or "our application" }}! To complete your account setup and ensure the security of your account, please verify your email address.
+
+ACCOUNT VERIFICATION DETAILS
+=============================
+
+Email Address: {{ user.email }}
+Account Created: {{ user.created_at.strftime('%B %d, %Y at %I:%M %p %Z') if user.created_at else 'Just now' }}
+Verification Token: {{ verification_token }}
+
+VERIFICATION INSTRUCTIONS
+=========================
+
+To verify your account, please complete ONE of the following options:
+
+OPTION 1: Click the verification link (recommended)
+Copy and paste the following URL into your web browser:
+
+{{ verification_url }}
+
+OPTION 2: Manual verification
+If the link above doesn't work, you can manually verify your account:
+
+1. Visit: {{ config.BASE_URL or request.host_url }}verify-account
+2. Enter your email address: {{ user.email }}
+3. Enter the verification code: {{ verification_code }}
+
+IMPORTANT SECURITY INFORMATION
+==============================
+
+• This verification link will expire in {{ expiration_hours or 24 }} hours
+• For your security, this link can only be used once
+• Do not share this verification link or code with anyone
+• If you didn't create this account, please ignore this email
+
+TOKEN EXPIRATION
+================
+
+Verification Link Expires: {{ expiration_time.strftime('%B %d, %Y at %I:%M %p %Z') if expiration_time else 'In 24 hours' }}
+
+If the verification link expires, you can request a new one by:
+1. Visiting the login page
+2. Clicking "Resend verification email"
+3. Entering your email address: {{ user.email }}
+
+NEED HELP?
+==========
+
+If you're having trouble verifying your account:
+
+• Make sure you're using the same device and browser
+• Check that JavaScript is enabled in your browser
+• Clear your browser cache and cookies
+• Try using a different web browser
+
+For additional support:
+• Email: {{ config.SUPPORT_EMAIL or "support@example.com" }}
+• Help Center: {{ config.BASE_URL or request.host_url }}help
+• Phone: {{ config.SUPPORT_PHONE or "Contact support via email" }}
+
+ACCOUNT SECURITY TIPS
+=====================
+
+To keep your account secure:
+
+✓ Use a strong, unique password
+✓ Enable two-factor authentication once your account is verified
+✓ Never share your login credentials
+✓ Log out when using shared computers
+✓ Report suspicious activity immediately
+
+Thank you for choosing {{ config.COMPANY_NAME or "our service" }}!
+
+Best regards,
+The {{ config.COMPANY_NAME or "Application" }} Team
+
+---
+
+TECHNICAL INFORMATION
+======================
+
+This is an automated message from {{ config.COMPANY_NAME or "the system" }}.
+Please do not reply to this email address.
+
+Verification Reference: {{ verification_reference or "VRF-" + verification_token[:8] }}
+Message ID: {{ message_id or "MSG-" + current_timestamp }}
+Sent: {{ current_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') if current_timestamp else 'Just now' }}
+
+If you received this email by mistake, no action is required.
+Your email address will not be verified without completing the verification process.
+
+---
+
+{{ config.COMPANY_NAME or "Company Name" }}
+{{ config.COMPANY_ADDRESS or "Company Address" }}
+{{ config.COMPANY_WEBSITE or "www.example.com" }}
+
+Privacy Policy: {{ config.BASE_URL or request.host_url }}privacy
+Terms of Service: {{ config.BASE_URL or request.host_url }}terms
+Unsubscribe: {{ config.BASE_URL or request.host_url }}unsubscribe?token={{ unsubscribe_token }}
