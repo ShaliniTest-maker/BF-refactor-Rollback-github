@@ -1,0 +1,129 @@
+Welcome to {{ service_name }}!
+{{ '=' * (service_name|length + 12) }}
+
+Hi {{ user.first_name or user.username }},
+
+Thank you for creating your account! We're excited to have you join our community.
+
+Your Account Details:
+-------------------
+Username: {{ user.username }}
+Email: {{ user.email }}
+{% if user.account_type -%}
+Account Type: {{ user.account_type.title() }}
+{% endif -%}
+Registration Date: {{ user.created_at.strftime('%B %d, %Y at %I:%M %p') }}
+
+Getting Started:
+---------------
+Your account is now active and ready to use. Here's what you can do next:
+
+1. **API Access**: Your account provides access to our REST API endpoints. 
+   Use your credentials to authenticate and access all available services.
+
+2. **Documentation**: Visit our API documentation to explore available 
+   endpoints and learn how to integrate with our services.
+
+3. **Authentication**: Use your username/email and password to obtain 
+   authentication tokens for API requests.
+
+{% if features -%}
+Available Features:
+------------------
+{% for feature in features -%}
+• {{ feature.name }}: {{ feature.description }}
+{% endfor %}
+{% endif -%}
+
+Security & Best Practices:
+-------------------------
+• Keep your login credentials secure and do not share them
+• Use strong, unique passwords for your account
+• Review our security guidelines for API authentication best practices
+{% if user.two_factor_enabled -%}
+• Two-factor authentication is enabled for enhanced security
+{% endif -%}
+
+Need Help?
+----------
+If you have any questions or need assistance getting started:
+
+• Check our FAQ section for common questions
+• Contact our support team at {{ support_email or 'support@' + domain }}
+• Visit our documentation portal for detailed guides
+
+{% if onboarding_steps -%}
+Next Steps:
+----------
+{% for step in onboarding_steps -%}
+{{ loop.index }}. {{ step }}
+{% endfor %}
+{% endif -%}
+
+Account Verification:
+-------------------
+{% if user.email_verified -%}
+✓ Your email address has been verified and your account is fully active.
+{% else -%}
+To complete your account setup, please verify your email address by 
+clicking the verification link sent to {{ user.email }}.
+
+If you didn't receive the verification email, you can request a new one 
+by logging into your account and visiting the account settings page.
+{% endif -%}
+
+Technical Information:
+--------------------
+{% if api_version -%}
+Current API Version: {{ api_version }}
+{% endif -%}
+{% if base_url -%}
+API Base URL: {{ base_url }}
+{% endif -%}
+{% if rate_limits -%}
+Rate Limits: {{ rate_limits }}
+{% endif -%}
+
+Important Notes:
+---------------
+• This is an automated message from our system
+• Please do not reply to this email address
+• Save this information for your records
+• Keep your account credentials secure
+
+{% if company_info -%}
+About {{ service_name }}:
+{{ '-' * (service_name|length + 7) }}
+{{ company_info.description }}
+
+{% if company_info.website -%}
+Website: {{ company_info.website }}
+{% endif -%}
+{% if company_info.terms_url -%}
+Terms of Service: {{ company_info.terms_url }}
+{% endif -%}
+{% if company_info.privacy_url -%}
+Privacy Policy: {{ company_info.privacy_url }}
+{% endif -%}
+{% endif -%}
+
+Thank you for choosing {{ service_name }}!
+
+---
+{{ service_name }} Team
+{% if contact_info -%}
+{{ contact_info.address }}
+{% if contact_info.phone -%}
+Phone: {{ contact_info.phone }}
+{% endif -%}
+{% endif -%}
+
+This email was sent to {{ user.email }} because you created an account 
+with {{ service_name }}. If you received this email in error, please 
+contact our support team immediately.
+
+{% if unsubscribe_url -%}
+To manage your email preferences: {{ unsubscribe_url }}
+{% endif -%}
+
+© {{ current_year }} {{ service_name }}. All rights reserved.
