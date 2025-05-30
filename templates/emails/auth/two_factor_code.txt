@@ -1,318 +1,397 @@
 {#
-Two-Factor Authentication Code Email Template - Plain Text Version
-================================================================
+Two-Factor Authentication Code - Plain Text Email Template
+==========================================================
 
-This template provides secure OTP code delivery for MFA workflows in plain text format,
-ensuring accessibility for text-only email clients while maintaining comprehensive
-security instructions and authentication code visibility.
+This template provides a plain text email format for delivering two-factor authentication
+codes and one-time passwords (OTP) as part of the multi-factor authentication (MFA) workflow.
+The template ensures accessibility compliance for text-only email clients while maintaining
+clear security instructions and authentication code visibility.
 
 Template Features:
-- Auth0 MFA integration support for TOTP and SMS authentication flows
-- Clear OTP code presentation optimized for text-only email clients
-- Security instructions and expiration information in accessible format
-- Accessibility compliance for screen readers and text-based email systems
-- Comprehensive authentication guidance and usage instructions
+- Clear, prominent display of authentication codes
+- Security instructions and best practices
+- Expiration time information with countdown
+- Accessibility-optimized formatting for screen readers
+- Consistent with Flask application security architecture
+- Integration with Auth0 MFA workflows via Python SDK
+- Text-only format for universal email client compatibility
 
 Usage Context:
-- Two-factor authentication code delivery via email
-- MFA workflow completion for enhanced account security
-- Auth0 Python SDK 4.9.0 integration with OTP generation
-- Flask-based authentication system OTP email delivery
+- Two-factor authentication login processes
+- OTP delivery for account verification
+- MFA step-up authentication workflows
+- Account security enhancement procedures
+- Password reset multi-factor verification
 
 Security Considerations:
-- OTP codes are time-sensitive and expire automatically
-- Codes should only be used for immediate authentication completion
-- Users should never share authentication codes with others
-- Email delivery provides backup authentication method for MFA flows
+- Authentication codes displayed in clear, unambiguous format
+- Explicit expiration time warnings
+- Security tips for safe code usage
+- Clear instructions for reporting unauthorized requests
+- Integration with Flask-Login session management
 #}
 
-{#- Extend base text email template -#}
 {% extends "emails/base/base.txt" %}
 
-{#- Email subject for two-factor authentication code -#}
+{#- Email Subject -#}
 {% block subject -%}
-Your Two-Factor Authentication Code - {{ app_name | default('Flask Application') }}
+Your Two-Factor Authentication Code
 {%- endblock %}
 
-{#- Pre-header for email clients that support it -#}
+{#- Pre-header text for email preview -#}
 {% block preheader -%}
-Authentication code: {{ two_factor_code | default('XXXXXX') }} - Expires in {{ expiration_minutes | default('10') }} minutes
+Your security code: {{ auth_code }} - Expires in {{ expiration_minutes }} minutes
 {%- endblock %}
 
-{#- Main content with OTP code and instructions -#}
+{#- Main Content Area -#}
 {% block content -%}
-Hello {{ user_name | default('User') }},
+Hello {{ user_name or 'User' }},
 
-You have requested a two-factor authentication code to complete your login.
+You have requested a two-factor authentication code to access your account.
+Please use the code below to complete your login process.
 
-===============================================================================
+{{ create_section_divider('=', 60) }}
 YOUR AUTHENTICATION CODE
-===============================================================================
+{{ create_section_divider('=', 60) }}
 
-{{ two_factor_code | default('XXXXXX') }}
+                           {{ auth_code }}
 
-===============================================================================
+{{ create_section_divider('=', 60) }}
 
-{{ format_key_value('Authentication Code', two_factor_code | default('XXXXXX')) }}
-{{ format_key_value('Valid Until', expiration_time | default('Not specified')) }}
-{{ format_key_value('Requested From', user_ip | default('Unknown location')) }}
-{{ format_key_value('Device', user_agent | default('Unknown device') | truncate(50)) }}
+{{ screen_reader_text('Authentication code is: ' + auth_code) }}
 
 IMPORTANT SECURITY INFORMATION:
-{{ create_section_divider('-', 40) }}
+• This code will expire in {{ expiration_minutes }} minutes (at {{ expiration_time }})
+• Use this code only on the device where you initiated the login
+• Do not share this code with anyone, including support staff
+• Enter this code exactly as shown above
 
-{{ format_list_item('This code is valid for ' + (expiration_minutes | default('10') | string) + ' minutes only') }}
-{{ format_list_item('Use this code immediately to complete your login') }}
-{{ format_list_item('Do not share this code with anyone') }}
-{{ format_list_item('Our support team will never ask for authentication codes') }}
-{{ format_list_item('If you did not request this code, secure your account immediately') }}
-
-HOW TO USE YOUR AUTHENTICATION CODE:
-{{ create_section_divider('-', 40) }}
-
-1. Return to the login screen where you were prompted for the authentication code
-2. Enter the 6-digit code exactly as shown above: {{ two_factor_code | default('XXXXXX') }}
-3. Complete your login within {{ expiration_minutes | default('10') }} minutes
-4. If the code expires, request a new one from the login screen
-
-AUTHENTICATION CODE DETAILS:
-{{ create_section_divider('-', 40) }}
-
-{{ format_key_value('Code Type', 'Email-based Two-Factor Authentication') }}
-{{ format_key_value('Security Level', 'Enhanced Account Protection') }}
-{{ format_key_value('Generated At', generation_time | default(now() | strftime('%Y-%m-%d %H:%M:%S UTC'))) }}
-{{ format_key_value('Delivery Method', 'Secure Email Transmission') }}
-
+{% if device_info -%}
+LOGIN REQUEST DETAILS:
+{{ format_key_value('Request Time', request_time) }}
+{{ format_key_value('IP Address', ip_address) }}
+{{ format_key_value('Location', location or 'Unknown') }}
+{{ format_key_value('Device', device_info or 'Unknown') }}
+{% endif -%}
 {%- endblock %}
 
-{#- Additional security information block -#}
-{% block additional_info -%}
-ACCOUNT SECURITY BEST PRACTICES
-{{ create_section_divider('-', 50) }}
-
-{{ format_list_item('Enable two-factor authentication on all your accounts') }}
-{{ format_list_item('Use unique passwords for each online service') }}
-{{ format_list_item('Regularly review your account security settings') }}
-{{ format_list_item('Keep your contact information up to date') }}
-{{ format_list_item('Report suspicious activity immediately') }}
-
-ALTERNATIVE AUTHENTICATION METHODS
-{{ create_section_divider('-', 50) }}
-
-If you cannot use this email code, you may also use:
-
-{{ format_list_item('Authenticator app (Google Authenticator, Authy, etc.)') }}
-{{ format_list_item('SMS text message to your registered phone number') }}
-{{ format_list_item('Backup authentication codes (if previously generated)') }}
-
-To manage your two-factor authentication settings:
-{{ format_url_for_text(account_settings_url | default('https://app.company.com/security'), 'Account Security Settings') }}
-
-{%- endblock %}
-
-{#- Action items for user -#}
+{#- Action Items Block - Security Instructions -#}
 {% block action_items -%}
-NEXT STEPS:
-{{ create_section_divider('-', 20) }}
+TO COMPLETE YOUR LOGIN:
 
-{{ format_list_item('Use the authentication code above to complete your login') }}
-{{ format_list_item('Ensure you complete login within ' + (expiration_minutes | default('10') | string) + ' minutes') }}
-{{ format_list_item('Save backup authentication codes for future use') }}
-{{ format_list_item('Consider using an authenticator app for enhanced security') }}
+1. Return to the login page where you requested this code
+2. Enter the 6-digit code exactly as shown above: {{ auth_code }}
+3. Click "Verify" or "Continue" to access your account
+4. Your session will be secured with two-factor authentication
 
-IF YOU DID NOT REQUEST THIS CODE:
-{{ create_section_divider('-', 40) }}
+SECURITY CHECKLIST:
+{{ format_list_item('Verify you are on the correct website URL') }}
+{{ format_list_item('Ensure your browser shows a secure connection (https://)') }}
+{{ format_list_item('Do not enter this code on any other website') }}
+{{ format_list_item('Log out completely when finished using the application') }}
+{%- endblock %}
 
-{{ format_list_item('Change your password immediately') }}
-{{ format_list_item('Review recent account activity') }}
-{{ format_list_item('Contact support if you notice unauthorized access') }}
-{{ format_list_item('Consider enabling additional security measures') }}
+{#- Additional Security Information -#}
+{% block additional_info -%}
+MULTI-FACTOR AUTHENTICATION SECURITY
+
+Two-factor authentication adds an extra layer of security to your account by
+requiring both your password and this temporary code. This helps protect your
+account even if your password is compromised.
+
+{% if backup_codes_available -%}
+BACKUP ACCESS:
+If you cannot receive authentication codes, you can use your backup recovery
+codes. Access your account settings to view and manage backup codes.
+{% endif -%}
+
+TROUBLESHOOTING:
+{{ format_list_item('Code not working? Check that you entered it exactly as shown') }}
+{{ format_list_item('Code expired? Request a new code from the login page') }}
+{{ format_list_item('Not receiving codes? Check your email spam/junk folder') }}
+{{ format_list_item('Having issues? Contact support with your account email') }}
+
+{{ format_url_for_text(help_url or 'https://help.company.com/2fa', 'Two-Factor Authentication Help') }}
+{%- endblock %}
+
+{#- Security Alert Section -#}
+{% block separator -%}
+
+{{ create_section_divider('!', 78) }}
+SECURITY ALERT - PLEASE READ
+{{ create_section_divider('!', 78) }}
+
+DID NOT REQUEST THIS CODE?
+
+If you did not request this authentication code, your account may be at risk.
+Take these steps immediately:
+
+{{ format_list_item('Change your password from a secure device') }}
+{{ format_list_item('Review recent account activity for unauthorized access') }}
+{{ format_list_item('Enable additional security features in your account') }}
+{{ format_list_item('Contact our security team for assistance') }}
+
+Security Contact: {{ security_email or 'security@company.com' }}
+Emergency Security Line: {{ security_phone or '1-800-SECURITY' }}
+
+{{ create_section_divider('!', 78) }}
 
 {%- endblock %}
 
-{#- Enhanced contact information for MFA support -#}
+{#- Contact Information Override -#}
 {% block contact_info -%}
-NEED HELP WITH TWO-FACTOR AUTHENTICATION?
+Need help with two-factor authentication?
 
-Security Support Team:
-- Email: security@{{ company_domain | default('company.com') }}
-- Phone: {{ support_phone | default('1-800-SUPPORT (1-800-786-7678)') }}
-- Help Center: {{ help_center_url | default('https://help.company.com/mfa') }}
+AUTHENTICATION SUPPORT:
+- Help Center: {{ format_url_for_text(help_url or 'https://help.company.com/2fa') }}
+- Email Support: {{ support_email or 'support@company.com' }}
+- Security Team: {{ security_email or 'security@company.com' }}
+- Phone: {{ support_phone or '1-800-SUPPORT (1-800-786-7678)' }}
 
-Two-Factor Authentication Guide:
-{{ format_url_for_text(mfa_guide_url | default('https://help.company.com/mfa/setup'), 'MFA Setup Guide') }}
+BUSINESS HOURS:
+Monday - Friday: 9:00 AM - 6:00 PM EST
+Saturday: 10:00 AM - 4:00 PM EST
+Emergency Security: 24/7 available
 
-Account Recovery Options:
-{{ format_url_for_text(recovery_url | default('https://app.company.com/recovery'), 'Account Recovery') }}
-
-Business Hours: {{ support_hours | default('Monday - Friday, 9:00 AM - 6:00 PM EST') }}
-Emergency Security Line: Available 24/7 for urgent security matters
-
+For urgent security matters, use our emergency security contact line.
 {%- endblock %}
 
-{#- Footer with enhanced security messaging -#}
-{% block footer -%}
-
-===============================================================================
-{{ app_name | default('Flask Application') }} | Secure Authentication System
-===============================================================================
-
-This authentication code email was sent because a two-factor authentication
-code was requested for your account. This is part of our enhanced security
-measures to protect your account and personal information.
-
-{% block unsubscribe_info -%}
-Two-factor authentication emails are required for account security and cannot
-be unsubscribed. To disable two-factor authentication, visit your account
-security settings after logging in.
-
-Account Security Settings: {{ account_settings_url | default('https://app.company.com/security') }}
-
-{%- endblock %}
-
-{% block legal_info -%}
-© {% now 'Y' %} {{ company_name | default('Company Name') }}. All rights reserved.
-
-This message contains a time-sensitive authentication code and is intended
-only for {{ user_email | default('the account holder') }}. If you have 
-received this message in error, please delete it immediately and contact
-our security team.
-
-SECURITY NOTICE: {{ company_name | default('Company Name') }} will never ask you to 
-share authentication codes via email, phone, or any other communication method.
-Keep your codes private and secure.
-
-{%- endblock %}
-
-{% block compliance_info -%}
-{{ company_name | default('Company Name') }}
-{{ company_address | default('123 Business Street\nCity, State 12345\nUnited States') }}
-
-Authentication Code ID: {{ code_id | default('AUTH-' + now() | strftime('%Y%m%d-%H%M%S')) }}
-Email Delivery ID: {{ delivery_id | default('EMAIL-' + now() | strftime('%Y%m%d-%H%M%S')) }}
-
-For security auditing and compliance purposes, the delivery of this
-authentication code has been logged with timestamp and recipient information.
-
-{%- endblock %}
-{%- endblock %}
-
-{#- Technical headers for email tracking and security -#}
+{#- Technical Headers for Email Metadata -#}
 {% block technical_headers -%}
-{#- Authentication code metadata for system tracking -#}
-X-Auth-Code-Type: Two-Factor-Authentication
-X-Auth-Code-Method: Email-Delivery
-X-Auth-Code-Expiration: {{ expiration_time | default('Not specified') }}
-X-Security-Level: Enhanced-MFA
-X-Template-Version: two-factor-code-v1.0
-
-{#- Integration with Auth0 MFA system -#}
-X-Auth0-Integration: MFA-Email-Delivery
-X-Flask-Auth-System: Two-Factor-Authentication
-X-Security-Framework: {{ security_framework | default('Flask-Login + Auth0') }}
-
+{#- Email tracking and security metadata -#}
+Message-Type: Two-Factor-Authentication
+Security-Level: High
+Code-ID: {{ code_id or 'Unknown' }}
+Request-IP: {{ ip_address or 'Unknown' }}
+Timestamp: {{ request_time or 'Unknown' }}
 {%- endblock %}
+
+{#- Template Variables and Validation -#}
+{%- if not auth_code -%}
+{#- Ensure authentication code is provided -#}
+{% set auth_code = 'XXXXXX' -%}
+{%- endif -%}
+
+{%- if not expiration_minutes -%}
+{% set expiration_minutes = '5' -%}
+{%- endif -%}
+
+{%- if not request_time -%}
+{% set request_time = 'Just now' -%}
+{%- endif -%}
 
 {#-
-Template Variables Reference:
+Template Usage Examples:
+========================
+
+1. Basic Two-Factor Authentication:
+{% include "emails/auth/two_factor_code.txt" with context %}
+Context variables:
+- auth_code: "123456"
+- expiration_minutes: "5"
+- user_name: "John Doe"
+- request_time: "2024-01-15 14:30:00 UTC"
+- ip_address: "192.168.1.100"
+
+2. Enhanced Security Context:
+{% include "emails/auth/two_factor_code.txt" with context %}
+Context variables:
+- auth_code: "789012"
+- expiration_minutes: "10"
+- user_name: "Jane Smith"
+- device_info: "Chrome on Windows 11"
+- location: "New York, NY, United States"
+- backup_codes_available: true
+- security_email: "security@company.com"
+
+3. Emergency Access Context:
+{% include "emails/auth/two_factor_code.txt" with context %}
+Context variables:
+- auth_code: "456789"
+- expiration_minutes: "3"
+- user_name: "Admin User"
+- ip_address: "10.0.1.50"
+- device_info: "Safari on macOS"
+- help_url: "https://help.company.com/emergency-access"
+- security_phone: "1-800-EMERGENCY"
+
+Integration with Flask Application:
+===================================
+
+# Email sending function
+def send_two_factor_code(user, auth_code, request_info):
+    """
+    Send two-factor authentication code via email
+    
+    Args:
+        user: User object with email and name
+        auth_code: 6-digit authentication code
+        request_info: Dict with IP, device, location info
+    """
+    from flask import render_template
+    from datetime import datetime, timedelta
+    
+    expiration_time = datetime.utcnow() + timedelta(minutes=5)
+    
+    context = {
+        'user_name': user.name,
+        'auth_code': auth_code,
+        'expiration_minutes': '5',
+        'expiration_time': expiration_time.strftime('%H:%M UTC'),
+        'request_time': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'ip_address': request_info.get('ip_address'),
+        'location': request_info.get('location'),
+        'device_info': request_info.get('device_info'),
+        'backup_codes_available': user.has_backup_codes,
+        'code_id': f"2FA-{user.id}-{int(datetime.utcnow().timestamp())}"
+    }
+    
+    # Render text template
+    text_content = render_template(
+        'emails/auth/two_factor_code.txt',
+        **context
+    )
+    
+    # Send email (implementation depends on email service)
+    send_email(
+        to=user.email,
+        subject=f"Your Two-Factor Authentication Code",
+        text_content=text_content,
+        priority='high'
+    )
+
+# Auth0 Integration Example
+from auth0.v3.authentication import Users
+from auth0.v3.management import Auth0
+
+def trigger_mfa_challenge(user_id, auth0_config):
+    """
+    Trigger MFA challenge through Auth0 Python SDK
+    """
+    auth0_users = Users(auth0_config['domain'])
+    
+    # Challenge the user for MFA
+    challenge_response = auth0_users.challenge_mfa(
+        user_id=user_id,
+        challenge_type='otp',
+        otp_channel='email'
+    )
+    
+    return challenge_response
+
+Flask Security Integration:
+===========================
+
+# Flask-Login integration for MFA step-up
+from flask_login import login_required, current_user
+from flask import session, request, flash
+
+@app.route('/verify-2fa', methods=['GET', 'POST'])
+@login_required
+def verify_two_factor():
+    """
+    Two-factor authentication verification endpoint
+    """
+    if request.method == 'POST':
+        submitted_code = request.form.get('auth_code')
+        stored_code = session.get('pending_2fa_code')
+        code_expiry = session.get('2fa_code_expiry')
+        
+        if not stored_code or not code_expiry:
+            flash('Authentication code expired. Please request a new code.')
+            return redirect(url_for('request_2fa'))
+        
+        if datetime.utcnow() > datetime.fromisoformat(code_expiry):
+            flash('Authentication code expired. Please request a new code.')
+            session.pop('pending_2fa_code', None)
+            session.pop('2fa_code_expiry', None)
+            return redirect(url_for('request_2fa'))
+        
+        if submitted_code == stored_code:
+            # Clear temporary code data
+            session.pop('pending_2fa_code', None)
+            session.pop('2fa_code_expiry', None)
+            
+            # Mark user as fully authenticated
+            session['mfa_verified'] = True
+            flash('Two-factor authentication successful!')
+            
+            return redirect(session.get('next_url', url_for('dashboard')))
+        else:
+            flash('Invalid authentication code. Please try again.')
+    
+    return render_template('auth/verify_2fa.html')
+
+Security Best Practices:
+========================
+
+1. Code Generation:
+   - Use cryptographically secure random number generation
+   - Implement proper entropy for code generation
+   - Ensure codes are truly random and unpredictable
+
+2. Code Storage:
+   - Store codes with secure hashing if persistence is needed
+   - Implement automatic cleanup of expired codes
+   - Use secure session storage for temporary codes
+
+3. Rate Limiting:
+   - Implement request rate limiting for code generation
+   - Limit verification attempts per code
+   - Implement progressive delays for failed attempts
+
+4. Monitoring:
+   - Log all MFA events for security monitoring
+   - Alert on suspicious MFA patterns
+   - Monitor for brute force attempts
+
+5. Expiration:
+   - Use short expiration times (5-10 minutes)
+   - Implement automatic code invalidation
+   - Clear codes after successful use
+
+Accessibility Considerations:
 =============================
 
-Required Variables:
-- two_factor_code: The 6-digit authentication code (e.g., "123456")
-- user_name: Recipient's display name
-- user_email: Recipient's email address
+1. Screen Reader Compatibility:
+   - Clear code announcement with screen_reader_text macro
+   - Logical reading order for code and instructions
+   - Descriptive labels for all code elements
 
-Optional Variables:
-- app_name: Application name (default: "Flask Application")
-- company_name: Company name (default: "Company Name")
-- company_domain: Company domain (default: "company.com")
-- expiration_minutes: Code validity in minutes (default: "10")
-- expiration_time: Formatted expiration timestamp
-- generation_time: Code generation timestamp
-- user_ip: IP address of the authentication request
-- user_agent: Browser/device information
-- account_settings_url: URL to account security settings
-- help_center_url: URL to help documentation
-- mfa_guide_url: URL to MFA setup guide
-- recovery_url: URL to account recovery
-- support_phone: Support phone number
-- support_hours: Support business hours
-- code_id: Unique identifier for the authentication code
-- delivery_id: Unique identifier for email delivery
-- security_framework: Description of security framework in use
+2. Text-Only Client Support:
+   - Proper formatting for text-only email clients
+   - Clear visual hierarchy using text formatting
+   - Consistent spacing and indentation
 
-Integration Examples:
+3. Cognitive Accessibility:
+   - Clear, simple language for instructions
+   - Step-by-step guidance for code usage
+   - Prominent display of important information
+
+4. Motor Accessibility:
+   - Large, clear code display for easy reading
+   - Simple copy-paste friendly format
+   - Clear target areas for code entry
+
+Template Validation:
 ====================
 
-Flask Route Integration:
-```python
-from flask import render_template
+Required Context Variables:
+- auth_code: String (6-digit authentication code)
+- expiration_minutes: String (expiration time in minutes)
 
-@auth_blueprint.route('/send-mfa-code', methods=['POST'])
-def send_mfa_code():
-    code = generate_mfa_code()
-    
-    email_content = render_template(
-        'emails/auth/two_factor_code.txt',
-        two_factor_code=code,
-        user_name=current_user.name,
-        user_email=current_user.email,
-        expiration_minutes=10,
-        user_ip=request.remote_addr,
-        user_agent=request.headers.get('User-Agent')
-    )
-    
-    send_email(current_user.email, email_content)
-    return jsonify({'status': 'code_sent'})
-```
-
-Auth0 Integration:
-```python
-import auth0.v3.authentication
-
-def send_auth0_mfa_code(user_id):
-    auth0_client = auth0.v3.authentication.GetToken()
-    code = auth0_client.generate_mfa_code(user_id)
-    
-    email_content = render_template(
-        'emails/auth/two_factor_code.txt',
-        two_factor_code=code['code'],
-        expiration_time=code['expires_at'],
-        security_framework='Auth0 MFA + Flask-Login'
-    )
-    
-    return send_mfa_email(email_content)
-```
-
-Accessibility Features:
-======================
-
-1. Clear Visual Hierarchy:
-   - Section dividers using consistent character patterns
-   - Structured content blocks with proper spacing
-   - Key information highlighted through formatting
-
-2. Screen Reader Compatibility:
-   - Descriptive section headers and labels
-   - Logical content flow for sequential reading
-   - Important information clearly separated and emphasized
-
-3. Text-Only Client Optimization:
-   - No reliance on HTML formatting or images
-   - ASCII-based visual elements for structure
-   - Consistent line length for readability
-
-4. Security Information Clarity:
-   - Step-by-step instructions for code usage
-   - Clear warnings about code sharing and security
-   - Multiple contact methods for assistance
-
-5. Alternative Format Support:
-   - Plain text format compatible with all email clients
-   - Structured content that maintains meaning without styling
-   - Complete information available in text-only format
-
-This template ensures that two-factor authentication remains accessible and secure
-across all email client types while providing comprehensive authentication guidance
-and security best practices for users completing MFA workflows.
+Optional Context Variables:
+- user_name: String (user's display name)
+- request_time: String (when code was requested)
+- expiration_time: String (formatted expiration time)
+- ip_address: String (requesting IP address)
+- location: String (geographic location)
+- device_info: String (device/browser information)
+- backup_codes_available: Boolean (user has backup codes)
+- code_id: String (unique identifier for this code)
+- help_url: String (help documentation URL)
+- security_email: String (security team contact)
+- security_phone: String (security team phone)
+- support_email: String (general support email)
+- support_phone: String (general support phone)
 -#}
