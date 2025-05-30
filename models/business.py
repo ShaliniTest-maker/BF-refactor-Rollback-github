@@ -1,633 +1,1003 @@
 """
 Business Entity and Relationship Models
 
-This module implements Flask-SQLAlchemy declarative models for core business entity management
-and relationship tracking, providing the foundation for business logic operations throughout
-the application. These models support entity ownership, hierarchical relationships, and
-comprehensive business object management with proper validation and constraint enforcement.
+This module implements Flask-SQLAlchemy declarative classes for comprehensive business entity
+management and relationship tracking. Provides the foundation for business logic operations,
+entity interconnections, and hierarchy management throughout the application.
 
-Models:
-    BusinessEntity: Core business entity model with ownership tracking and status management
-    EntityRelationship: Business entity relationship model supporting complex interconnections
+The business system supports:
+- Core business entity management with user ownership integration
+- Flexible relationship tracking between business entities with type classification
+- Cascade deletion policies ensuring referential integrity
+- Comprehensive audit trails for all business operations
+- Performance-optimized relationship queries with bidirectional navigation
+- Validation and constraint enforcement for business rules
 
 Dependencies:
-    - models.base: Provides AuditMixin and BaseModel for common functionality
-    - models.user: User model for entity ownership relationships
-    - Flask-SQLAlchemy: ORM functionality and declarative model support
-    - SQLAlchemy: Database relationship and constraint definitions
+- Flask-SQLAlchemy 3.1.1: ORM functionality and declarative models
+- models.base: BaseModel and AuditMixin for common functionality
+- models.user: User model for ownership relationships
+- SQLAlchemy relationship patterns for efficient data navigation
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, Index
-from sqlalchemy.orm import relationship, validates
-from sqlalchemy.ext.declarative import declared_attr
 from datetime import datetime
-import re
+from typing import List, Dict, Any, Optional, Union
+from sqlalchemy import (
+    Column, Integer, String, Text, Boolean, DateTime, ForeignKey,
+    Index, UniqueConstraint, CheckConstraint, event, and_, or_
+)
+from sqlalchemy.orm import relationship, validates, backref
+from werkzeug.exceptions import ValidationError
+import logging
 
-from . import db
-from .base import BaseModel, AuditMixin
+# Import base model components
+from .base import BaseModel, db
+from .user import User
+
+# Configure logging for business model operations
+logger = logging.getLogger(__name__)
 
 
-class BusinessEntity(BaseModel, AuditMixin, db.Model):
+class BusinessEntity(BaseModel):
     """
-    Business Entity Model
+    Business entity model implementing core business object management with user ownership.
     
-    Represents core business objects within the application with ownership tracking,
-    status management, and comprehensive validation. Provides the foundation for
-    business logic operations and entity management workflows.
+    Represents fundamental business objects within the application with comprehensive
+    relationship tracking, user ownership integration, and flexible status management.
+    Provides the foundation for business logic operations and entity management workflows.
+    
+    Features:
+    - User ownership integration with cascade deletion policies
+    - Flexible status management system supporting business workflows
+    - Comprehensive validation and constraint enforcement
+    - Bidirectional relationship navigation for entity interconnections
+    - Performance-optimized queries with proper indexing
+    - Audit trail integration through BaseModel inheritance
     
     Attributes:
-        id (int): Primary key identifier
-        name (str): Business entity name with validation constraints
-        description (str): Detailed entity description supporting rich text content
-        owner_id (int): Foreign key reference to User model for ownership tracking
-        status (str): Entity status with predefined values for lifecycle management
-        is_active (bool): Soft delete flag for entity lifecycle management
+        id: Primary key inherited from BaseModel
+        name: Business entity name with uniqueness constraints
+        description: Detailed description of the business entity
+        owner_id: Foreign key reference to User model for ownership tracking
+        status: Entity status supporting business workflow states
+        created_at: Creation timestamp from AuditMixin
+        updated_at: Last modification timestamp from AuditMixin
+        created_by: User who created the entity from AuditMixin
+        updated_by: User who last modified the entity from AuditMixin
         
     Relationships:
-        owner: Many-to-one relationship with User model (entity ownership)
-        source_relationships: One-to-many with EntityRelationship (as source entity)
-        target_relationships: One-to-many with EntityRelationship (as target entity)
-    
-    Validation:
-        - Name: Required, 1-255 characters, alphanumeric with spaces and common punctuation
-        - Description: Optional, maximum 2000 characters
-        - Status: Must be one of predefined valid status values
-        - Owner: Must reference valid existing user
-    
-    Constraints:
-        - Unique constraint on (name, owner_id) for scoped uniqueness
-        - Foreign key constraint with cascade deletion on owner relationship
-        - Check constraints for status and name format validation
+        owner: Many-to-one relationship with User model
+        source_relationships: One-to-many with EntityRelationship (as source)
+        target_relationships: One-to-many with EntityRelationship (as target)
+        
+    Database Indexes:
+        - Primary key index on id (inherited)
+        - Foreign key index on owner_id
+        - Index on name for search operations
+        - Index on status for filtering
+        - Composite index on (owner_id, status) for owner queries
+        - Composite index on (name, owner_id) for uniqueness validation
     """
     
-    __tablename__ = 'business_entity'
+    __tablename__ = 'business_entities'
     
-    # Primary identifier
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    # Core entity fields
+    name = Column(String(200), nullable=False, index=True)
+    description = Column(Text, nullable=True)
     
-    # Core entity attributes with validation constraints
-    name = db.Column(db.String(255), nullable=False, index=True,
-                     doc="Business entity name with length and format validation")
-    
-    description = db.Column(db.Text, nullable=True,
-                           doc="Optional detailed description of the business entity")
-    
-    # Ownership and status management
-    owner_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), 
-                        nullable=False, index=True,
-                        doc="Foreign key reference to User model for entity ownership")
-    
-    status = db.Column(db.String(50), nullable=False, default='active', index=True,
-                       doc="Entity lifecycle status with predefined valid values")
-    
-    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True,
-                         doc="Soft delete flag for entity lifecycle management")
-    
-    # Relationship definitions with bidirectional navigation
-    owner = db.relationship('User', back_populates='owned_entities',
-                           doc="Many-to-one relationship with User model for entity ownership")
-    
-    source_relationships = db.relationship('EntityRelationship', 
-                                          foreign_keys='EntityRelationship.source_entity_id',
-                                          back_populates='source_entity',
-                                          cascade='all, delete-orphan',
-                                          doc="One-to-many relationships where this entity is the source")
-    
-    target_relationships = db.relationship('EntityRelationship',
-                                          foreign_keys='EntityRelationship.target_entity_id', 
-                                          back_populates='target_entity',
-                                          cascade='all, delete-orphan',
-                                          doc="One-to-many relationships where this entity is the target")
-    
-    # Database constraints and indexes
-    __table_args__ = (
-        # Unique constraint for scoped entity names per owner
-        db.UniqueConstraint('name', 'owner_id', name='uq_business_entity_name_owner'),
-        
-        # Composite index for efficient ownership queries
-        Index('idx_business_entity_owner_status', 'owner_id', 'status'),
-        
-        # Index for active entity queries with status filtering
-        Index('idx_business_entity_active_status', 'is_active', 'status'),
-        
-        # Check constraint for valid status values
-        db.CheckConstraint(
-            status.in_(['active', 'inactive', 'pending', 'archived', 'suspended']),
-            name='ck_business_entity_status'
-        ),
-        
-        # Check constraint for name format validation
-        db.CheckConstraint(
-            db.and_(
-                db.func.length(name) >= 1,
-                db.func.length(name) <= 255,
-                name != ''
-            ),
-            name='ck_business_entity_name_length'
-        )
+    # User ownership integration with cascade deletion
+    owner_id = Column(
+        Integer, 
+        ForeignKey('users.id', ondelete='CASCADE'), 
+        nullable=False, 
+        index=True
     )
     
-    # Validation methods for data integrity
-    @validates('name')
-    def validate_name(self, key, value):
-        """
-        Validate business entity name format and constraints
-        
-        Args:
-            key (str): Attribute name being validated
-            value (str): Name value to validate
-            
-        Returns:
-            str: Validated and normalized name value
-            
-        Raises:
-            ValueError: If name fails validation constraints
-        """
-        if not value or not value.strip():
-            raise ValueError("Business entity name is required and cannot be empty")
-        
-        # Normalize whitespace
-        normalized_name = re.sub(r'\s+', ' ', value.strip())
-        
-        # Length validation
-        if len(normalized_name) < 1 or len(normalized_name) > 255:
-            raise ValueError("Business entity name must be between 1 and 255 characters")
-        
-        # Format validation - allow alphanumeric, spaces, and common business punctuation
-        if not re.match(r'^[a-zA-Z0-9\s\-_.,&()\'\"]+$', normalized_name):
-            raise ValueError("Business entity name contains invalid characters")
-        
-        return normalized_name
+    # Status management for business workflows
+    status = Column(
+        String(50), 
+        nullable=False, 
+        default='active', 
+        index=True
+    )
     
-    @validates('description')
-    def validate_description(self, key, value):
+    # Additional entity metadata
+    entity_type = Column(String(100), nullable=True)
+    priority = Column(Integer, default=0, nullable=False)
+    metadata = Column(Text, nullable=True)  # JSON string for flexible metadata storage
+    
+    # Business entity relationships using back_populates for bidirectional navigation
+    owner = relationship(
+        'User',
+        foreign_keys=[owner_id],
+        lazy='select'
+    )
+    
+    # Entity relationship tracking - source relationships (this entity as source)
+    source_relationships = relationship(
+        'EntityRelationship',
+        foreign_keys='EntityRelationship.source_entity_id',
+        back_populates='source_entity',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
+    
+    # Entity relationship tracking - target relationships (this entity as target)
+    target_relationships = relationship(
+        'EntityRelationship',
+        foreign_keys='EntityRelationship.target_entity_id',
+        back_populates='target_entity',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
+    )
+    
+    # Database constraints and indexes for performance optimization
+    __table_args__ = (
+        # Composite indexes for efficient querying
+        Index('idx_business_entities_owner_status', 'owner_id', 'status'),
+        Index('idx_business_entities_name_search', 'name', 'owner_id'),
+        Index('idx_business_entities_type_status', 'entity_type', 'status'),
+        Index('idx_business_entities_priority', 'priority', 'status'),
+        
+        # Business rule constraints
+        CheckConstraint(
+            "status IN ('active', 'inactive', 'pending', 'archived', 'deleted')",
+            name='ck_business_entity_status_valid'
+        ),
+        CheckConstraint(
+            "priority >= 0 AND priority <= 100",
+            name='ck_business_entity_priority_range'
+        ),
+        CheckConstraint(
+            "LENGTH(TRIM(name)) > 0",
+            name='ck_business_entity_name_not_empty'
+        ),
+        
+        # Uniqueness constraint for entity name within owner scope
+        UniqueConstraint('name', 'owner_id', name='uq_business_entity_name_owner'),
+    )
+    
+    @validates('name')
+    def validate_name(self, key, name):
         """
-        Validate business entity description constraints
+        Validate business entity name format and constraints.
         
         Args:
-            key (str): Attribute name being validated
-            value (str): Description value to validate
+            key: Field name being validated
+            name: Name value to validate
             
         Returns:
-            str: Validated description value or None
+            Validated and normalized name
             
         Raises:
-            ValueError: If description exceeds length constraints
+            ValueError: If name validation fails
         """
-        if value is None:
-            return None
+        if not name or not name.strip():
+            raise ValueError("Business entity name cannot be empty")
         
-        # Length validation for description
-        if len(value) > 2000:
-            raise ValueError("Business entity description cannot exceed 2000 characters")
+        name = name.strip()
         
-        return value.strip() if value.strip() else None
+        if len(name) < 2:
+            raise ValueError("Business entity name must be at least 2 characters")
+        if len(name) > 200:
+            raise ValueError("Business entity name cannot exceed 200 characters")
+        
+        # Validate name contains meaningful characters
+        if name.replace(' ', '').replace('-', '').replace('_', '').replace('.', '').isspace():
+            raise ValueError("Business entity name must contain meaningful characters")
+        
+        return name
     
     @validates('status')
-    def validate_status(self, key, value):
+    def validate_status(self, key, status):
         """
-        Validate business entity status against allowed values
+        Validate business entity status values.
         
         Args:
-            key (str): Attribute name being validated
-            value (str): Status value to validate
+            key: Field name being validated
+            status: Status value to validate
             
         Returns:
-            str: Validated status value
+            Validated status value
             
         Raises:
-            ValueError: If status is not in allowed values
+            ValueError: If status validation fails
         """
-        valid_statuses = {'active', 'inactive', 'pending', 'archived', 'suspended'}
+        valid_statuses = ['active', 'inactive', 'pending', 'archived', 'deleted']
         
-        if value not in valid_statuses:
-            raise ValueError(f"Invalid status '{value}'. Must be one of: {', '.join(sorted(valid_statuses))}")
+        if status not in valid_statuses:
+            raise ValueError(f"Status must be one of: {', '.join(valid_statuses)}")
         
-        return value
+        return status
     
-    def get_all_relationships(self):
+    @validates('entity_type')
+    def validate_entity_type(self, key, entity_type):
         """
-        Retrieve all relationships (both source and target) for this entity
-        
-        Returns:
-            list: Combined list of all EntityRelationship objects where this entity participates
-        """
-        return list(self.source_relationships) + list(self.target_relationships)
-    
-    def get_active_relationships(self):
-        """
-        Retrieve only active relationships for this entity
-        
-        Returns:
-            list: List of active EntityRelationship objects
-        """
-        return [rel for rel in self.get_all_relationships() if rel.is_active]
-    
-    def get_relationships_by_type(self, relationship_type):
-        """
-        Retrieve relationships filtered by relationship type
+        Validate business entity type if provided.
         
         Args:
-            relationship_type (str): Type of relationship to filter by
+            key: Field name being validated
+            entity_type: Entity type value to validate
             
         Returns:
-            list: List of EntityRelationship objects matching the specified type
+            Validated entity type or None
         """
-        return [rel for rel in self.get_all_relationships() 
-                if rel.relationship_type == relationship_type]
-    
-    def deactivate(self):
-        """
-        Soft delete the entity by setting is_active to False and status to archived
+        if entity_type is not None:
+            entity_type = entity_type.strip()
+            if not entity_type:
+                return None
+            if len(entity_type) > 100:
+                raise ValueError("Entity type cannot exceed 100 characters")
         
-        This method provides a safe way to remove entities while preserving audit trails
-        and relationship history for compliance and business continuity.
-        """
-        self.is_active = False
-        self.status = 'archived'
+        return entity_type
     
-    def reactivate(self):
+    @validates('priority')
+    def validate_priority(self, key, priority):
         """
-        Reactivate a previously deactivated entity
+        Validate business entity priority range.
         
-        Sets is_active to True and status to active, allowing the entity to participate
-        in business operations again while maintaining historical data integrity.
+        Args:
+            key: Field name being validated
+            priority: Priority value to validate
+            
+        Returns:
+            Validated priority value
+            
+        Raises:
+            ValueError: If priority validation fails
         """
-        self.is_active = True
-        self.status = 'active'
+        if priority is None:
+            return 0
+        
+        if not isinstance(priority, int):
+            try:
+                priority = int(priority)
+            except (ValueError, TypeError):
+                raise ValueError("Priority must be an integer")
+        
+        if priority < 0 or priority > 100:
+            raise ValueError("Priority must be between 0 and 100")
+        
+        return priority
+    
+    def get_all_relationships(self, include_inactive: bool = False) -> List['EntityRelationship']:
+        """
+        Get all relationships for this entity (both source and target).
+        
+        Args:
+            include_inactive: Whether to include inactive relationships
+            
+        Returns:
+            List of EntityRelationship objects
+        """
+        source_query = self.source_relationships
+        target_query = self.target_relationships
+        
+        if not include_inactive:
+            source_query = source_query.filter_by(is_active=True)
+            target_query = target_query.filter_by(is_active=True)
+        
+        source_rels = source_query.all()
+        target_rels = target_query.all()
+        
+        return source_rels + target_rels
+    
+    def get_relationships_by_type(self, relationship_type: str, 
+                                 include_inactive: bool = False) -> List['EntityRelationship']:
+        """
+        Get relationships of a specific type for this entity.
+        
+        Args:
+            relationship_type: Type of relationship to filter by
+            include_inactive: Whether to include inactive relationships
+            
+        Returns:
+            List of EntityRelationship objects of the specified type
+        """
+        filters = [EntityRelationship.relationship_type == relationship_type]
+        
+        if not include_inactive:
+            filters.append(EntityRelationship.is_active == True)
+        
+        # Query relationships where this entity is either source or target
+        source_rels = self.source_relationships.filter(*filters).all()
+        target_rels = self.target_relationships.filter(*filters).all()
+        
+        return source_rels + target_rels
+    
+    def get_related_entities(self, relationship_type: str = None, 
+                           include_inactive: bool = False) -> List['BusinessEntity']:
+        """
+        Get all entities related to this entity through relationships.
+        
+        Args:
+            relationship_type: Optional filter by relationship type
+            include_inactive: Whether to include inactive relationships
+            
+        Returns:
+            List of related BusinessEntity objects
+        """
+        if relationship_type:
+            relationships = self.get_relationships_by_type(relationship_type, include_inactive)
+        else:
+            relationships = self.get_all_relationships(include_inactive)
+        
+        related_entities = []
+        for rel in relationships:
+            if rel.source_entity_id == self.id:
+                related_entities.append(rel.target_entity)
+            else:
+                related_entities.append(rel.source_entity)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_entities = []
+        for entity in related_entities:
+            if entity.id not in seen:
+                seen.add(entity.id)
+                unique_entities.append(entity)
+        
+        return unique_entities
+    
+    def has_relationship_with(self, other_entity: 'BusinessEntity', 
+                            relationship_type: str = None) -> bool:
+        """
+        Check if this entity has a relationship with another entity.
+        
+        Args:
+            other_entity: The other BusinessEntity to check
+            relationship_type: Optional specific relationship type to check
+            
+        Returns:
+            Boolean indicating if relationship exists
+        """
+        filters = [
+            or_(
+                and_(
+                    EntityRelationship.source_entity_id == self.id,
+                    EntityRelationship.target_entity_id == other_entity.id
+                ),
+                and_(
+                    EntityRelationship.source_entity_id == other_entity.id,
+                    EntityRelationship.target_entity_id == self.id
+                )
+            ),
+            EntityRelationship.is_active == True
+        ]
+        
+        if relationship_type:
+            filters.append(EntityRelationship.relationship_type == relationship_type)
+        
+        return EntityRelationship.query.filter(*filters).first() is not None
+    
+    def create_relationship(self, target_entity: 'BusinessEntity', 
+                          relationship_type: str, **kwargs) -> 'EntityRelationship':
+        """
+        Create a new relationship with another entity.
+        
+        Args:
+            target_entity: The target BusinessEntity
+            relationship_type: Type of relationship to create
+            **kwargs: Additional relationship attributes
+            
+        Returns:
+            New EntityRelationship instance
+            
+        Raises:
+            ValueError: If relationship cannot be created
+        """
+        if self.id == target_entity.id:
+            raise ValueError("Cannot create relationship with self")
+        
+        if self.has_relationship_with(target_entity, relationship_type):
+            raise ValueError(f"Relationship of type '{relationship_type}' already exists")
+        
+        relationship = EntityRelationship(
+            source_entity_id=self.id,
+            target_entity_id=target_entity.id,
+            relationship_type=relationship_type,
+            **kwargs
+        )
+        
+        return relationship
+    
+    def get_metadata(self) -> Dict[str, Any]:
+        """
+        Get entity metadata as dictionary.
+        
+        Returns:
+            Dictionary of entity metadata
+        """
+        if not self.metadata:
+            return {}
+        try:
+            import json
+            return json.loads(self.metadata)
+        except (ValueError, TypeError):
+            return {}
+    
+    def set_metadata(self, metadata: Dict[str, Any]) -> None:
+        """
+        Set entity metadata from dictionary.
+        
+        Args:
+            metadata: Dictionary of metadata to store
+        """
+        if metadata:
+            import json
+            self.metadata = json.dumps(metadata)
+        else:
+            self.metadata = None
+    
+    def is_owned_by(self, user: Union[User, int]) -> bool:
+        """
+        Check if entity is owned by the specified user.
+        
+        Args:
+            user: User object or user ID
+            
+        Returns:
+            Boolean indicating ownership
+        """
+        user_id = user.id if isinstance(user, User) else user
+        return self.owner_id == user_id
+    
+    def can_be_accessed_by(self, user: Union[User, int]) -> bool:
+        """
+        Check if entity can be accessed by the specified user.
+        
+        Args:
+            user: User object or user ID
+            
+        Returns:
+            Boolean indicating access permission
+        """
+        # Basic ownership check - can be extended for more complex permissions
+        return self.is_owned_by(user)
+    
+    def to_dict(self, include_relationships: bool = False, 
+               include_metadata: bool = True) -> Dict[str, Any]:
+        """
+        Convert business entity to dictionary representation.
+        
+        Args:
+            include_relationships: Whether to include relationship information
+            include_metadata: Whether to include metadata information
+            
+        Returns:
+            Dictionary representation of the business entity
+        """
+        result = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'owner_id': self.owner_id,
+            'status': self.status,
+            'entity_type': self.entity_type,
+            'priority': self.priority,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_by': self.created_by,
+            'updated_by': self.updated_by
+        }
+        
+        if include_metadata:
+            result['metadata'] = self.get_metadata()
+        
+        if include_relationships:
+            result['relationships'] = {
+                'source_count': self.source_relationships.count(),
+                'target_count': self.target_relationships.count(),
+                'total_count': len(self.get_all_relationships())
+            }
+        
+        return result
+    
+    @classmethod
+    def get_by_owner(cls, owner_id: int, status: str = None, 
+                    limit: int = None, offset: int = None) -> List['BusinessEntity']:
+        """
+        Get business entities by owner with optional filtering.
+        
+        Args:
+            owner_id: Owner user ID
+            status: Optional status filter
+            limit: Maximum number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of BusinessEntity objects
+        """
+        query = cls.query.filter_by(owner_id=owner_id)
+        
+        if status:
+            query = query.filter_by(status=status)
+        
+        query = query.order_by(cls.priority.desc(), cls.created_at.desc())
+        
+        if offset:
+            query = query.offset(offset)
+        if limit:
+            query = query.limit(limit)
+        
+        return query.all()
+    
+    @classmethod
+    def search_by_name(cls, name_pattern: str, owner_id: int = None, 
+                      status: str = 'active') -> List['BusinessEntity']:
+        """
+        Search business entities by name pattern.
+        
+        Args:
+            name_pattern: Name pattern to search for
+            owner_id: Optional owner filter
+            status: Optional status filter
+            
+        Returns:
+            List of matching BusinessEntity objects
+        """
+        query = cls.query.filter(cls.name.ilike(f'%{name_pattern}%'))
+        
+        if owner_id:
+            query = query.filter_by(owner_id=owner_id)
+        
+        if status:
+            query = query.filter_by(status=status)
+        
+        return query.order_by(cls.name).all()
     
     def __repr__(self):
-        """String representation for debugging and logging purposes"""
-        return f"<BusinessEntity(id={self.id}, name='{self.name}', owner_id={self.owner_id}, status='{self.status}')>"
+        return f"<BusinessEntity {self.name} (ID: {self.id}, Owner: {self.owner_id}, Status: {self.status})>"
 
 
-class EntityRelationship(BaseModel, AuditMixin, db.Model):
+class EntityRelationship(BaseModel):
     """
-    Entity Relationship Model
+    Entity relationship model for tracking relationships between business entities.
     
-    Manages relationships between business entities, supporting complex business object
-    interconnections, hierarchy management, and relationship type classification.
-    Enables tracking of entity dependencies, organizational structures, and business workflows.
+    Implements flexible relationship tracking system supporting various business entity
+    connections with type classification, active status management, and comprehensive
+    audit trails. Enables complex business object interconnections and hierarchy management.
+    
+    Features:
+    - Flexible relationship type classification system
+    - Active status management for relationship lifecycle
+    - Bidirectional relationship navigation with back_populates
+    - Comprehensive audit trails through BaseModel inheritance
+    - Performance-optimized queries with proper indexing
+    - Cascade deletion policies for referential integrity
     
     Attributes:
-        id (int): Primary key identifier
-        source_entity_id (int): Foreign key to source BusinessEntity
-        target_entity_id (int): Foreign key to target BusinessEntity  
-        relationship_type (str): Classification of relationship type
-        is_active (bool): Active status for relationship lifecycle management
-        metadata (dict): Optional JSON metadata for relationship context
+        id: Primary key inherited from BaseModel
+        source_entity_id: Foreign key to source BusinessEntity
+        target_entity_id: Foreign key to target BusinessEntity
+        relationship_type: Classification of the relationship type
+        is_active: Boolean flag for relationship status management
+        strength: Numeric strength or weight of the relationship
+        metadata: JSON metadata for additional relationship attributes
+        created_at: Creation timestamp from AuditMixin
+        updated_at: Last modification timestamp from AuditMixin
+        created_by: User who created the relationship from AuditMixin
+        updated_by: User who last modified the relationship from AuditMixin
         
     Relationships:
         source_entity: Many-to-one relationship with BusinessEntity (source)
         target_entity: Many-to-one relationship with BusinessEntity (target)
-    
-    Validation:
-        - Source and target entities must be different (no self-relationships)
-        - Relationship type must be from predefined valid types
-        - Source and target entities must exist and be active
-        - Prevents duplicate relationships between same entities with same type
-    
-    Constraints:
-        - Unique constraint on (source_entity_id, target_entity_id, relationship_type)
-        - Foreign key constraints with cascade deletion
-        - Check constraint preventing self-relationships
-        - Index optimization for relationship queries
+        
+    Database Indexes:
+        - Primary key index on id (inherited)
+        - Foreign key indexes on source_entity_id and target_entity_id
+        - Index on relationship_type for type filtering
+        - Index on is_active for status filtering
+        - Composite index on (source_entity_id, target_entity_id) for relationship lookups
+        - Composite index on (relationship_type, is_active) for type queries
     """
     
-    __tablename__ = 'entity_relationship'
+    __tablename__ = 'entity_relationships'
     
-    # Primary identifier
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    
-    # Entity relationship references
-    source_entity_id = db.Column(db.Integer, 
-                                db.ForeignKey('business_entity.id', ondelete='CASCADE'),
-                                nullable=False, index=True,
-                                doc="Foreign key reference to source business entity")
-    
-    target_entity_id = db.Column(db.Integer,
-                                db.ForeignKey('business_entity.id', ondelete='CASCADE'), 
-                                nullable=False, index=True,
-                                doc="Foreign key reference to target business entity")
-    
-    # Relationship classification and status
-    relationship_type = db.Column(db.String(100), nullable=False, index=True,
-                                 doc="Classification type for the entity relationship")
-    
-    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True,
-                         doc="Active status flag for relationship lifecycle management")
-    
-    # Optional metadata for relationship context (using PostgreSQL JSON support)
-    metadata = db.Column(db.JSON, nullable=True,
-                        doc="Optional JSON metadata for additional relationship context")
-    
-    # Bidirectional relationship definitions
-    source_entity = db.relationship('BusinessEntity',
-                                   foreign_keys=[source_entity_id],
-                                   back_populates='source_relationships',
-                                   doc="Many-to-one relationship with source BusinessEntity")
-    
-    target_entity = db.relationship('BusinessEntity', 
-                                   foreign_keys=[target_entity_id],
-                                   back_populates='target_relationships',
-                                   doc="Many-to-one relationship with target BusinessEntity")
-    
-    # Database constraints and indexes  
-    __table_args__ = (
-        # Unique constraint preventing duplicate relationships
-        db.UniqueConstraint('source_entity_id', 'target_entity_id', 'relationship_type',
-                           name='uq_entity_relationship_unique'),
-        
-        # Check constraint preventing self-relationships
-        db.CheckConstraint(
-            source_entity_id != target_entity_id,
-            name='ck_entity_relationship_no_self'
-        ),
-        
-        # Composite indexes for efficient relationship queries
-        Index('idx_entity_relationship_source_type', 'source_entity_id', 'relationship_type'),
-        Index('idx_entity_relationship_target_type', 'target_entity_id', 'relationship_type'),
-        Index('idx_entity_relationship_active_type', 'is_active', 'relationship_type'),
-        
-        # Index for bidirectional relationship queries
-        Index('idx_entity_relationship_bidirectional', 'source_entity_id', 'target_entity_id')
+    # Relationship entity references with cascade deletion
+    source_entity_id = Column(
+        Integer,
+        ForeignKey('business_entities.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
     )
     
-    # Validation methods for relationship integrity
+    target_entity_id = Column(
+        Integer,
+        ForeignKey('business_entities.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
+    )
+    
+    # Relationship classification and management
+    relationship_type = Column(String(100), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    
+    # Relationship strength and metadata
+    strength = Column(Integer, default=1, nullable=False)
+    bidirectional = Column(Boolean, default=False, nullable=False)
+    metadata = Column(Text, nullable=True)  # JSON string for flexible metadata storage
+    
+    # Relationship lifecycle management
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    deactivated_at = Column(DateTime, nullable=True)
+    deactivated_by = Column(String(100), nullable=True)
+    
+    # Bidirectional relationships using back_populates for efficient navigation
+    source_entity = relationship(
+        'BusinessEntity',
+        foreign_keys=[source_entity_id],
+        back_populates='source_relationships',
+        lazy='select'
+    )
+    
+    target_entity = relationship(
+        'BusinessEntity',
+        foreign_keys=[target_entity_id],
+        back_populates='target_relationships',
+        lazy='select'
+    )
+    
+    # Database constraints and indexes for performance optimization
+    __table_args__ = (
+        # Composite indexes for efficient relationship queries
+        Index('idx_entity_relationships_source_target', 'source_entity_id', 'target_entity_id'),
+        Index('idx_entity_relationships_target_source', 'target_entity_id', 'source_entity_id'),
+        Index('idx_entity_relationships_type_active', 'relationship_type', 'is_active'),
+        Index('idx_entity_relationships_source_type', 'source_entity_id', 'relationship_type'),
+        Index('idx_entity_relationships_target_type', 'target_entity_id', 'relationship_type'),
+        Index('idx_entity_relationships_strength', 'strength', 'is_active'),
+        
+        # Business rule constraints
+        CheckConstraint(
+            'source_entity_id != target_entity_id',
+            name='ck_entity_relationship_no_self_reference'
+        ),
+        CheckConstraint(
+            "relationship_type IN ('parent_child', 'dependency', 'association', 'composition', 'aggregation', 'collaboration', 'inheritance', 'realization', 'uses', 'contains', 'owns', 'manages', 'supports', 'references', 'custom')",
+            name='ck_entity_relationship_type_valid'
+        ),
+        CheckConstraint(
+            'strength >= 1 AND strength <= 10',
+            name='ck_entity_relationship_strength_range'
+        ),
+        
+        # Prevent duplicate active relationships of the same type
+        UniqueConstraint(
+            'source_entity_id', 'target_entity_id', 'relationship_type',
+            name='uq_entity_relationship_unique_active'
+        ),
+    )
+    
     @validates('relationship_type')
-    def validate_relationship_type(self, key, value):
+    def validate_relationship_type(self, key, relationship_type):
         """
-        Validate relationship type against predefined classification types
+        Validate relationship type classification.
         
         Args:
-            key (str): Attribute name being validated
-            value (str): Relationship type to validate
+            key: Field name being validated
+            relationship_type: Relationship type to validate
             
         Returns:
-            str: Validated relationship type value
+            Validated relationship type
             
         Raises:
-            ValueError: If relationship type is invalid
+            ValueError: If relationship type validation fails
         """
-        valid_types = {
-            'parent_child', 'child_parent', 'sibling', 'dependency', 'composition',
-            'aggregation', 'association', 'collaboration', 'hierarchy', 'workflow',
-            'category', 'classification', 'reference', 'link', 'custom'
-        }
+        valid_types = [
+            'parent_child', 'dependency', 'association', 'composition',
+            'aggregation', 'collaboration', 'inheritance', 'realization',
+            'uses', 'contains', 'owns', 'manages', 'supports', 'references', 'custom'
+        ]
         
-        if not value or value.strip() == '':
-            raise ValueError("Relationship type is required and cannot be empty")
+        if not relationship_type or relationship_type not in valid_types:
+            raise ValueError(f"Relationship type must be one of: {', '.join(valid_types)}")
         
-        normalized_type = value.strip().lower()
-        
-        if normalized_type not in valid_types:
-            raise ValueError(f"Invalid relationship type '{value}'. Must be one of: {', '.join(sorted(valid_types))}")
-        
-        return normalized_type
+        return relationship_type
     
-    @validates('source_entity_id', 'target_entity_id')
-    def validate_entity_ids(self, key, value):
+    @validates('strength')
+    def validate_strength(self, key, strength):
         """
-        Validate entity ID references for relationship creation
+        Validate relationship strength range.
         
         Args:
-            key (str): Attribute name being validated ('source_entity_id' or 'target_entity_id')
-            value (int): Entity ID to validate
+            key: Field name being validated
+            strength: Strength value to validate
             
         Returns:
-            int: Validated entity ID
+            Validated strength value
             
         Raises:
-            ValueError: If entity ID is invalid or entities are the same
+            ValueError: If strength validation fails
         """
-        if not value or value <= 0:
-            raise ValueError(f"{key} must be a positive integer")
+        if strength is None:
+            return 1
         
-        # Prevent self-relationships during validation
-        if key == 'target_entity_id' and hasattr(self, 'source_entity_id'):
-            if self.source_entity_id == value:
-                raise ValueError("Source and target entities cannot be the same (self-relationships not allowed)")
-        elif key == 'source_entity_id' and hasattr(self, 'target_entity_id'):
-            if self.target_entity_id == value:
-                raise ValueError("Source and target entities cannot be the same (self-relationships not allowed)")
+        if not isinstance(strength, int):
+            try:
+                strength = int(strength)
+            except (ValueError, TypeError):
+                raise ValueError("Relationship strength must be an integer")
         
-        return value
+        if strength < 1 or strength > 10:
+            raise ValueError("Relationship strength must be between 1 and 10")
+        
+        return strength
     
-    @validates('metadata')
-    def validate_metadata(self, key, value):
+    def activate(self, activated_by: str = None) -> None:
         """
-        Validate relationship metadata JSON structure and constraints
+        Activate the relationship.
         
         Args:
-            key (str): Attribute name being validated
-            value (dict): Metadata dictionary to validate
-            
-        Returns:
-            dict: Validated metadata dictionary or None
-            
-        Raises:
-            ValueError: If metadata structure is invalid
+            activated_by: User who activated the relationship
         """
-        if value is None:
+        self.is_active = True
+        self.activated_at = datetime.utcnow()
+        self.deactivated_at = None
+        self.deactivated_by = None
+        
+        if activated_by:
+            self.updated_by = activated_by
+    
+    def deactivate(self, deactivated_by: str = None, reason: str = None) -> None:
+        """
+        Deactivate the relationship.
+        
+        Args:
+            deactivated_by: User who deactivated the relationship
+            reason: Optional reason for deactivation
+        """
+        self.is_active = False
+        self.deactivated_at = datetime.utcnow()
+        self.deactivated_by = deactivated_by or 'system'
+        
+        if reason:
+            metadata = self.get_metadata()
+            metadata['deactivation_reason'] = reason
+            self.set_metadata(metadata)
+        
+        if deactivated_by:
+            self.updated_by = deactivated_by
+    
+    def get_reverse_relationship(self) -> Optional['EntityRelationship']:
+        """
+        Get the reverse relationship if this is bidirectional.
+        
+        Returns:
+            Reverse EntityRelationship if exists, None otherwise
+        """
+        if not self.bidirectional:
             return None
         
-        if not isinstance(value, dict):
-            raise ValueError("Relationship metadata must be a dictionary/JSON object")
-        
-        # Limit metadata size to prevent excessive storage usage
-        import json
-        metadata_size = len(json.dumps(value))
-        if metadata_size > 10000:  # 10KB limit
-            raise ValueError("Relationship metadata size cannot exceed 10KB")
-        
-        return value
-    
-    def get_reverse_relationship(self):
-        """
-        Find the reverse relationship if it exists
-        
-        Returns:
-            EntityRelationship: Reverse relationship object or None if not found
-        """
-        return EntityRelationship.query.filter_by(
-            source_entity_id=self.target_entity_id,
-            target_entity_id=self.source_entity_id,
-            relationship_type=self.relationship_type,
-            is_active=True
+        return EntityRelationship.query.filter(
+            EntityRelationship.source_entity_id == self.target_entity_id,
+            EntityRelationship.target_entity_id == self.source_entity_id,
+            EntityRelationship.relationship_type == self.relationship_type,
+            EntityRelationship.is_active == True
         ).first()
     
-    def create_reverse_relationship(self, commit=True):
+    def create_reverse_relationship(self) -> Optional['EntityRelationship']:
         """
-        Create a bidirectional relationship by adding the reverse relationship
+        Create a reverse relationship if this is bidirectional.
         
-        Args:
-            commit (bool): Whether to commit the transaction immediately
-            
         Returns:
-            EntityRelationship: Created reverse relationship object
+            New reverse EntityRelationship if created, None if not bidirectional
         """
+        if not self.bidirectional:
+            return None
+        
+        # Check if reverse relationship already exists
+        if self.get_reverse_relationship():
+            return None
+        
         reverse_rel = EntityRelationship(
             source_entity_id=self.target_entity_id,
             target_entity_id=self.source_entity_id,
             relationship_type=self.relationship_type,
+            strength=self.strength,
+            bidirectional=True,
             is_active=self.is_active,
-            metadata=self.metadata.copy() if self.metadata else None
+            metadata=self.metadata
         )
-        
-        db.session.add(reverse_rel)
-        
-        if commit:
-            db.session.commit()
         
         return reverse_rel
     
-    def deactivate(self, deactivate_reverse=True):
+    def get_other_entity(self, entity: BusinessEntity) -> Optional[BusinessEntity]:
         """
-        Deactivate this relationship and optionally its reverse
+        Get the other entity in this relationship.
         
         Args:
-            deactivate_reverse (bool): Whether to also deactivate the reverse relationship
+            entity: One entity in the relationship
+            
+        Returns:
+            The other entity, or None if entity is not part of this relationship
         """
-        self.is_active = False
-        
-        if deactivate_reverse:
-            reverse_rel = self.get_reverse_relationship()
-            if reverse_rel:
-                reverse_rel.is_active = False
+        if entity.id == self.source_entity_id:
+            return self.target_entity
+        elif entity.id == self.target_entity_id:
+            return self.source_entity
+        else:
+            return None
     
-    def reactivate(self, reactivate_reverse=True):
+    def get_relationship_direction(self, entity: BusinessEntity) -> Optional[str]:
         """
-        Reactivate this relationship and optionally its reverse
+        Get the direction of the relationship relative to the given entity.
         
         Args:
-            reactivate_reverse (bool): Whether to also reactivate the reverse relationship
+            entity: Entity to determine direction from
+            
+        Returns:
+            'outgoing' if entity is source, 'incoming' if entity is target, None otherwise
         """
-        self.is_active = True
+        if entity.id == self.source_entity_id:
+            return 'outgoing'
+        elif entity.id == self.target_entity_id:
+            return 'incoming'
+        else:
+            return None
+    
+    def get_metadata(self) -> Dict[str, Any]:
+        """
+        Get relationship metadata as dictionary.
         
-        if reactivate_reverse:
-            reverse_rel = self.get_reverse_relationship()
-            if reverse_rel:
-                reverse_rel.is_active = True
+        Returns:
+            Dictionary of relationship metadata
+        """
+        if not self.metadata:
+            return {}
+        try:
+            import json
+            return json.loads(self.metadata)
+        except (ValueError, TypeError):
+            return {}
+    
+    def set_metadata(self, metadata: Dict[str, Any]) -> None:
+        """
+        Set relationship metadata from dictionary.
+        
+        Args:
+            metadata: Dictionary of metadata to store
+        """
+        if metadata:
+            import json
+            self.metadata = json.dumps(metadata)
+        else:
+            self.metadata = None
+    
+    def to_dict(self, include_entities: bool = False) -> Dict[str, Any]:
+        """
+        Convert entity relationship to dictionary representation.
+        
+        Args:
+            include_entities: Whether to include entity information
+            
+        Returns:
+            Dictionary representation of the entity relationship
+        """
+        result = {
+            'id': self.id,
+            'source_entity_id': self.source_entity_id,
+            'target_entity_id': self.target_entity_id,
+            'relationship_type': self.relationship_type,
+            'is_active': self.is_active,
+            'strength': self.strength,
+            'bidirectional': self.bidirectional,
+            'activated_at': self.activated_at.isoformat() if self.activated_at else None,
+            'deactivated_at': self.deactivated_at.isoformat() if self.deactivated_at else None,
+            'deactivated_by': self.deactivated_by,
+            'metadata': self.get_metadata(),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_by': self.created_by,
+            'updated_by': self.updated_by
+        }
+        
+        if include_entities:
+            result['source_entity'] = self.source_entity.to_dict() if self.source_entity else None
+            result['target_entity'] = self.target_entity.to_dict() if self.target_entity else None
+        
+        return result
+    
+    @classmethod
+    def get_relationships_for_entity(cls, entity_id: int, relationship_type: str = None,
+                                   direction: str = None, include_inactive: bool = False) -> List['EntityRelationship']:
+        """
+        Get all relationships for a specific entity.
+        
+        Args:
+            entity_id: BusinessEntity ID
+            relationship_type: Optional filter by relationship type
+            direction: Optional filter by direction ('incoming', 'outgoing', or None for both)
+            include_inactive: Whether to include inactive relationships
+            
+        Returns:
+            List of EntityRelationship objects
+        """
+        filters = []
+        
+        # Direction filters
+        if direction == 'outgoing':
+            filters.append(cls.source_entity_id == entity_id)
+        elif direction == 'incoming':
+            filters.append(cls.target_entity_id == entity_id)
+        else:
+            filters.append(
+                or_(cls.source_entity_id == entity_id, cls.target_entity_id == entity_id)
+            )
+        
+        # Type filter
+        if relationship_type:
+            filters.append(cls.relationship_type == relationship_type)
+        
+        # Active status filter
+        if not include_inactive:
+            filters.append(cls.is_active == True)
+        
+        return cls.query.filter(*filters).order_by(cls.strength.desc(), cls.created_at.desc()).all()
+    
+    @classmethod
+    def get_relationship_types(cls) -> List[str]:
+        """
+        Get all available relationship types.
+        
+        Returns:
+            List of valid relationship type strings
+        """
+        return [
+            'parent_child', 'dependency', 'association', 'composition',
+            'aggregation', 'collaboration', 'inheritance', 'realization',
+            'uses', 'contains', 'owns', 'manages', 'supports', 'references', 'custom'
+        ]
     
     def __repr__(self):
-        """String representation for debugging and logging purposes"""
-        return (f"<EntityRelationship(id={self.id}, "
-                f"source_entity_id={self.source_entity_id}, "
-                f"target_entity_id={self.target_entity_id}, "
-                f"relationship_type='{self.relationship_type}', "
-                f"is_active={self.is_active})>")
+        return f"<EntityRelationship {self.source_entity_id}->{self.target_entity_id} ({self.relationship_type}, Active: {self.is_active})>"
 
 
-# Additional utility functions for business entity operations
-def get_entities_by_owner(owner_id, status=None, include_inactive=False):
+# SQLAlchemy event listeners for relationship management
+@event.listens_for(EntityRelationship, 'after_insert')
+def create_reverse_relationship_handler(mapper, connection, target):
     """
-    Retrieve business entities owned by a specific user
+    Automatically create reverse relationship for bidirectional relationships.
     
     Args:
-        owner_id (int): User ID of the entity owner
-        status (str, optional): Filter by specific status
-        include_inactive (bool): Whether to include inactive entities
-        
-    Returns:
-        Query: SQLAlchemy query object for further filtering or execution
+        mapper: SQLAlchemy mapper
+        connection: Database connection
+        target: EntityRelationship instance that was inserted
     """
-    query = BusinessEntity.query.filter_by(owner_id=owner_id)
-    
-    if not include_inactive:
-        query = query.filter_by(is_active=True)
-    
-    if status:
-        query = query.filter_by(status=status)
-    
-    return query.order_by(BusinessEntity.name)
+    if target.bidirectional:
+        try:
+            # Create reverse relationship if it doesn't exist
+            reverse_rel = target.create_reverse_relationship()
+            if reverse_rel:
+                db.session.add(reverse_rel)
+                logger.debug(f"Created reverse relationship for bidirectional relationship {target.id}")
+        except Exception as e:
+            logger.error(f"Failed to create reverse relationship: {e}")
 
 
-def get_entity_hierarchy(entity_id, relationship_type='parent_child', max_depth=10):
+@event.listens_for(BusinessEntity, 'before_delete')
+def cleanup_entity_relationships_handler(mapper, connection, target):
     """
-    Retrieve hierarchical relationships for a business entity
+    Clean up related EntityRelationship records before deleting BusinessEntity.
     
     Args:
-        entity_id (int): ID of the root entity
-        relationship_type (str): Type of hierarchical relationship to follow
-        max_depth (int): Maximum depth to traverse in the hierarchy
-        
-    Returns:
-        dict: Hierarchical structure of related entities
+        mapper: SQLAlchemy mapper
+        connection: Database connection
+        target: BusinessEntity instance being deleted
     """
-    visited = set()
-    
-    def _build_hierarchy(current_id, depth=0):
-        if depth >= max_depth or current_id in visited:
-            return None
+    try:
+        # Deactivate all relationships before cascade deletion
+        for relationship in target.get_all_relationships(include_inactive=True):
+            if relationship.is_active:
+                relationship.deactivate(deactivated_by='system', reason='Entity deletion')
         
-        visited.add(current_id)
-        entity = BusinessEntity.query.get(current_id)
-        
-        if not entity or not entity.is_active:
-            return None
-        
-        children = []
-        for rel in entity.source_relationships:
-            if (rel.relationship_type == relationship_type and 
-                rel.is_active and 
-                rel.target_entity_id not in visited):
-                child_hierarchy = _build_hierarchy(rel.target_entity_id, depth + 1)
-                if child_hierarchy:
-                    children.append(child_hierarchy)
-        
-        return {
-            'entity': entity,
-            'children': children,
-            'depth': depth
-        }
-    
-    return _build_hierarchy(entity_id)
+        logger.info(f"Cleaned up relationships for BusinessEntity {target.id} before deletion")
+    except Exception as e:
+        logger.error(f"Error cleaning up relationships for BusinessEntity {target.id}: {e}")
 
 
-def find_relationship_path(source_entity_id, target_entity_id, max_depth=5):
-    """
-    Find relationship path between two business entities
-    
-    Args:
-        source_entity_id (int): Starting entity ID
-        target_entity_id (int): Target entity ID
-        max_depth (int): Maximum depth to search
-        
-    Returns:
-        list: List of EntityRelationship objects forming the path, or empty list if no path found
-    """
-    if source_entity_id == target_entity_id:
-        return []
-    
-    visited = set()
-    queue = [(source_entity_id, [])]
-    
-    while queue:
-        current_id, path = queue.pop(0)
-        
-        if current_id == target_entity_id:
-            return path
-        
-        if current_id in visited or len(path) >= max_depth:
-            continue
-        
-        visited.add(current_id)
-        
-        # Find all active relationships from current entity
-        relationships = EntityRelationship.query.filter(
-            db.or_(
-                EntityRelationship.source_entity_id == current_id,
-                EntityRelationship.target_entity_id == current_id
-            ),
-            EntityRelationship.is_active == True
-        ).all()
-        
-        for rel in relationships:
-            next_id = (rel.target_entity_id if rel.source_entity_id == current_id 
-                      else rel.source_entity_id)
-            
-            if next_id not in visited:
-                new_path = path + [rel]
-                queue.append((next_id, new_path))
-    
-    return []  # No path found
+# Export models for application use
+__all__ = [
+    'BusinessEntity',
+    'EntityRelationship'
+]
