@@ -1,0 +1,337 @@
+{
+  "status": "{{ overall_status }}",
+  "timestamp": "{{ timestamp }}",
+  "environment": "{{ environment }}",
+  "version": "{{ app_version }}",
+  "instance_id": "{{ instance_id }}",
+  "response_time_ms": {{ response_time_ms }},
+  "uptime_seconds": {{ uptime_seconds }},
+  "system": {
+    "status": "{{ system_status }}",
+    "hostname": "{{ hostname }}",
+    "platform": "{{ platform }}",
+    "python_version": "{{ python_version }}",
+    "flask_version": "{{ flask_version }}",
+    "process_id": {{ process_id }},
+    "memory_usage": {
+      "rss_mb": {{ memory_rss_mb }},
+      "vms_mb": {{ memory_vms_mb }},
+      "percent": {{ memory_percent }}
+    },
+    "cpu_usage": {
+      "percent": {{ cpu_percent }},
+      "load_average": {{ load_average }}
+    },
+    "disk_usage": {
+      "percent": {{ disk_percent }},
+      "free_gb": {{ disk_free_gb }},
+      "total_gb": {{ disk_total_gb }}
+    }
+  },
+  "application": {
+    "status": "{{ app_status }}",
+    "flask_app_name": "{{ flask_app_name }}",
+    "debug_mode": {{ debug_mode }},
+    "config_loaded": {{ config_loaded }},
+    "blueprints_registered": {{ blueprints_count }},
+    "active_requests": {{ active_requests }},
+    "total_requests": {{ total_requests }},
+    "error_rate_percent": {{ error_rate_percent }},
+    "avg_response_time_ms": {{ avg_response_time_ms }},
+    "performance_metrics": {
+      "requests_per_second": {{ requests_per_second }},
+      "slow_requests_count": {{ slow_requests_count }},
+      "timeout_count": {{ timeout_count }},
+      "success_rate_percent": {{ success_rate_percent }}
+    },
+    "monitoring_dashboard": {
+      "enabled": {{ monitoring_dashboard_enabled }},
+      "data_available": {{ monitoring_data_available }},
+      "last_updated": "{{ monitoring_last_updated }}"
+    }
+  },
+  "database": {
+    "status": "{{ database_status }}",
+    "connection_status": "{{ db_connection_status }}",
+    "database_name": "{{ database_name }}",
+    "database_type": "{{ database_type }}",
+    "host": "{{ database_host }}",
+    "port": {{ database_port }},
+    "connection_pool": {
+      "size": {{ db_pool_size }},
+      "checked_out": {{ db_pool_checked_out }},
+      "overflow": {{ db_pool_overflow }},
+      "checked_in": {{ db_pool_checked_in }},
+      "utilization_percent": {{ db_pool_utilization_percent }},
+      "health": "{{ db_pool_health }}"
+    },
+    "query_performance": {
+      "avg_query_time_ms": {{ avg_query_time_ms }},
+      "slow_queries_count": {{ slow_queries_count }},
+      "failed_queries_count": {{ failed_queries_count }},
+      "total_queries": {{ total_queries }},
+      "queries_per_second": {{ queries_per_second }}
+    },
+    "sqlalchemy": {
+      "version": "{{ sqlalchemy_version }}",
+      "engine_status": "{{ sqlalchemy_engine_status }}",
+      "last_connection_time": "{{ last_db_connection_time }}",
+      "connection_errors": {{ db_connection_errors }}
+    }
+  },
+  "authentication": {
+    "status": "{{ auth_status }}",
+    "provider": "Auth0",
+    "integration_health": "{{ auth0_health }}",
+    "last_token_validation": "{{ last_token_validation }}",
+    "auth_response_time_ms": {{ auth_response_time_ms }},
+    "token_cache": {
+      "enabled": {{ token_cache_enabled }},
+      "hit_rate_percent": {{ token_cache_hit_rate }},
+      "size": {{ token_cache_size }},
+      "max_size": {{ token_cache_max_size }}
+    },
+    "auth_metrics": {
+      "successful_logins": {{ successful_logins }},
+      "failed_logins": {{ failed_logins }},
+      "active_sessions": {{ active_sessions }},
+      "token_refreshes": {{ token_refreshes }},
+      "auth_errors": {{ auth_errors }}
+    },
+    "auth0_integration": {
+      "domain_reachable": {{ auth0_domain_reachable }},
+      "api_status": "{{ auth0_api_status }}",
+      "last_sync": "{{ auth0_last_sync }}",
+      "rate_limit_remaining": {{ auth0_rate_limit_remaining }}
+    }
+  },
+  "external_services": {
+    "aws": {
+      "cloudwatch": {
+        "status": "{{ cloudwatch_status }}",
+        "logs_enabled": {{ cloudwatch_logs_enabled }},
+        "metrics_enabled": {{ cloudwatch_metrics_enabled }},
+        "last_log_ship": "{{ cloudwatch_last_log_ship }}"
+      },
+      "prometheus": {
+        "status": "{{ prometheus_status }}",
+        "managed_service": {{ aws_managed_prometheus }},
+        "metrics_exported": {{ prometheus_metrics_exported }},
+        "last_scrape": "{{ prometheus_last_scrape }}"
+      }
+    },
+    "monitoring": {
+      "sentry": {
+        "enabled": {{ sentry_enabled }},
+        "status": "{{ sentry_status }}",
+        "error_count_24h": {{ sentry_error_count_24h }},
+        "last_error_sent": "{{ sentry_last_error_sent }}"
+      },
+      "flask_monitoring_dashboard": {
+        "enabled": {{ flask_monitoring_enabled }},
+        "status": "{{ flask_monitoring_status }}",
+        "data_collection": {{ flask_monitoring_data_collection }}
+      }
+    }
+  },
+  "security": {
+    "status": "{{ security_status }}",
+    "security_headers": {
+      "enabled": {{ security_headers_enabled }},
+      "csrf_protection": {{ csrf_protection_enabled }},
+      "content_security_policy": {{ csp_enabled }}
+    },
+    "session_management": {
+      "secure_cookies": {{ secure_cookies_enabled }},
+      "session_timeout_minutes": {{ session_timeout_minutes }},
+      "active_sessions": {{ active_secure_sessions }}
+    },
+    "audit_trail": {
+      "enabled": {{ audit_trail_enabled }},
+      "events_logged": {{ audit_events_logged }},
+      "last_security_event": "{{ last_security_event }}"
+    }
+  },
+  "container_info": {
+    "containerized": {{ is_containerized }},
+    "container_id": "{{ container_id }}",
+    "orchestration": "{{ orchestration_platform }}",
+    "container_health": "{{ container_health_status }}",
+    "restart_count": {{ container_restart_count }},
+    "last_restart": "{{ container_last_restart }}",
+    "resource_limits": {
+      "memory_limit_gb": {{ container_memory_limit_gb }},
+      "cpu_limit_cores": {{ container_cpu_limit_cores }},
+      "memory_usage_percent": {{ container_memory_usage_percent }},
+      "cpu_usage_percent": {{ container_cpu_usage_percent }}
+    }
+  },
+  "migration_status": {
+    "from_nodejs": {{ migration_from_nodejs }},
+    "migration_phase": "{{ migration_phase }}",
+    "functional_parity": {{ functional_parity_achieved }},
+    "performance_comparison": {
+      "flask_vs_nodejs_ratio": {{ performance_ratio }},
+      "performance_target_met": {{ performance_target_met }},
+      "baseline_response_time_ms": {{ baseline_response_time_ms }},
+      "current_response_time_ms": {{ current_response_time_ms }}
+    },
+    "migration_metrics": {
+      "endpoints_migrated": {{ endpoints_migrated }},
+      "total_endpoints": {{ total_endpoints }},
+      "migration_completion_percent": {{ migration_completion_percent }},
+      "rollback_capable": {{ rollback_capable }}
+    }
+  },
+  "business_metrics": {
+    "user_sessions": {
+      "active_users": {{ active_users }},
+      "session_duration_avg_minutes": {{ avg_session_duration_minutes }},
+      "user_interactions_per_session": {{ avg_interactions_per_session }}
+    },
+    "data_integrity": {
+      "database_consistency_check": "{{ db_consistency_status }}",
+      "data_validation_errors": {{ data_validation_errors }},
+      "data_migration_status": "{{ data_migration_status }}"
+    },
+    "operational_metrics": {
+      "throughput_requests_per_minute": {{ throughput_rpm }},
+      "error_budget_remaining_percent": {{ error_budget_remaining }},
+      "sla_compliance_percent": {{ sla_compliance_percent }}
+    }
+  },
+  "alerts": {
+    "active_alerts": {{ active_alerts_count }},
+    "critical_alerts": {{ critical_alerts_count }},
+    "warning_alerts": {{ warning_alerts_count }},
+    "last_alert": "{{ last_alert_time }}",
+    "alert_categories": {
+      "performance": {{ performance_alerts }},
+      "security": {{ security_alerts }},
+      "infrastructure": {{ infrastructure_alerts }},
+      "application": {{ application_alerts }}
+    }
+  },
+  "sla_compliance": {
+    "api_response_time_sla": {
+      "target_ms": 200,
+      "current_ms": {{ current_api_response_time }},
+      "compliance_percent": {{ api_response_sla_compliance }},
+      "violations_24h": {{ api_sla_violations_24h }}
+    },
+    "database_query_sla": {
+      "target_ms": 100,
+      "current_ms": {{ current_db_query_time }},
+      "compliance_percent": {{ db_query_sla_compliance }},
+      "violations_24h": {{ db_sla_violations_24h }}
+    },
+    "availability_sla": {
+      "target_percent": 99.9,
+      "current_percent": {{ current_availability_percent }},
+      "uptime_24h_percent": {{ uptime_24h_percent }},
+      "downtime_minutes_24h": {{ downtime_minutes_24h }}
+    }
+  },
+  "dependencies": {
+    "internal": [
+      {% for dep in internal_dependencies %}
+      {
+        "name": "{{ dep.name }}",
+        "status": "{{ dep.status }}",
+        "version": "{{ dep.version }}",
+        "health": "{{ dep.health }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ],
+    "external": [
+      {% for dep in external_dependencies %}
+      {
+        "name": "{{ dep.name }}",
+        "status": "{{ dep.status }}",
+        "response_time_ms": {{ dep.response_time_ms }},
+        "last_check": "{{ dep.last_check }}",
+        "health": "{{ dep.health }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ]
+  },
+  "diagnostics": {
+    "request_tracing": {
+      "enabled": {{ request_tracing_enabled }},
+      "trace_id": "{{ current_trace_id }}",
+      "span_count": {{ span_count }},
+      "distributed_tracing": {{ distributed_tracing_enabled }}
+    },
+    "log_levels": {
+      "current_level": "{{ current_log_level }}",
+      "debug_enabled": {{ debug_logging_enabled }},
+      "structured_logging": {{ structured_logging_enabled }}
+    },
+    "cache_status": {
+      "enabled": {{ cache_enabled }},
+      "hit_rate_percent": {{ cache_hit_rate }},
+      "size_mb": {{ cache_size_mb }},
+      "evictions": {{ cache_evictions }}
+    },
+    "feature_flags": {
+      {% for flag in feature_flags %}
+      "{{ flag.name }}": {{ flag.enabled }}{% if not loop.last %},{% endif %}
+      {% endfor %}
+    }
+  },
+  "recommendations": [
+    {% for recommendation in health_recommendations %}
+    {
+      "category": "{{ recommendation.category }}",
+      "priority": "{{ recommendation.priority }}",
+      "message": "{{ recommendation.message }}",
+      "action_required": {{ recommendation.action_required }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ],
+  "checks_performed": [
+    {
+      "name": "application_startup",
+      "status": "{{ app_startup_check }}",
+      "duration_ms": {{ app_startup_check_duration }},
+      "last_run": "{{ app_startup_check_time }}"
+    },
+    {
+      "name": "database_connectivity",
+      "status": "{{ db_connectivity_check }}",
+      "duration_ms": {{ db_connectivity_check_duration }},
+      "last_run": "{{ db_connectivity_check_time }}"
+    },
+    {
+      "name": "auth0_integration",
+      "status": "{{ auth0_integration_check }}",
+      "duration_ms": {{ auth0_integration_check_duration }},
+      "last_run": "{{ auth0_integration_check_time }}"
+    },
+    {
+      "name": "external_services",
+      "status": "{{ external_services_check }}",
+      "duration_ms": {{ external_services_check_duration }},
+      "last_run": "{{ external_services_check_time }}"
+    },
+    {
+      "name": "security_validation",
+      "status": "{{ security_validation_check }}",
+      "duration_ms": {{ security_validation_check_duration }},
+      "last_run": "{{ security_validation_check_time }}"
+    }
+  ],
+  "metadata": {
+    "health_check_version": "1.0.0",
+    "template_type": "detailed",
+    "response_format": "json",
+    "generator": "Flask Health Check System",
+    "specification_compliance": {
+      "section_6_5_2_1": true,
+      "section_8_5_1": true,
+      "response_time_requirement_ms": 200,
+      "monitoring_integration": true,
+      "administrative_support": true
+    }
+  }
+}
