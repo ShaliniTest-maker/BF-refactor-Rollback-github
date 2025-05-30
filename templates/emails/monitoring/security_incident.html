@@ -1,0 +1,599 @@
+{% extends "emails/base/base.html" %}
+
+{% block title %}Security Incident Alert - {{ incident_data.incident_id }}{% endblock %}
+
+{% block email_label %}Security Incident Notification{% endblock %}
+
+{% block email_styles %}
+{{ super() }}
+<!-- Security incident specific styles -->
+<style type="text/css">
+    /* Security incident severity colors */
+    .severity-critical {
+        background-color: #d32f2f !important;
+        color: #ffffff !important;
+        border: 2px solid #b71c1c !important;
+    }
+    
+    .severity-high {
+        background-color: #f57c00 !important;
+        color: #ffffff !important;
+        border: 2px solid #e65100 !important;
+    }
+    
+    .severity-medium {
+        background-color: #fbc02d !important;
+        color: #000000 !important;
+        border: 2px solid #f57f17 !important;
+    }
+    
+    .severity-low {
+        background-color: #388e3c !important;
+        color: #ffffff !important;
+        border: 2px solid #2e7d32 !important;
+    }
+    
+    /* Security incident layout */
+    .incident-header {
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    
+    .incident-details {
+        background-color: #f8f9fa;
+        border-left: 4px solid #007bff;
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    .incident-details h3 {
+        margin-top: 0;
+        color: #495057;
+        font-size: 16px;
+        font-weight: 600;
+    }
+    
+    .incident-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+    }
+    
+    .incident-table th,
+    .incident-table td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .incident-table th {
+        background-color: #e9ecef;
+        font-weight: 600;
+        color: #495057;
+    }
+    
+    .incident-table td {
+        color: #212529;
+    }
+    
+    .incident-actions {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+    
+    .incident-actions h3 {
+        color: #856404;
+        margin-top: 0;
+    }
+    
+    .action-list {
+        margin: 10px 0;
+        padding-left: 20px;
+    }
+    
+    .action-list li {
+        margin: 5px 0;
+        color: #495057;
+    }
+    
+    .guardduty-finding {
+        background-color: #ffe6e6;
+        border-left: 4px solid #dc3545;
+        padding: 12px;
+        margin: 10px 0;
+        border-radius: 4px;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .status-in-progress {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    
+    .status-completed {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    
+    .status-failed {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .timeline-item {
+        border-left: 2px solid #007bff;
+        padding-left: 15px;
+        margin: 10px 0;
+        position: relative;
+    }
+    
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        left: -6px;
+        top: 5px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: #007bff;
+    }
+    
+    .contact-info {
+        background-color: #e7f3ff;
+        border: 1px solid #b3d7ff;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+    
+    .contact-info h3 {
+        color: #0066cc;
+        margin-top: 0;
+    }
+    
+    /* Dark mode compatibility */
+    @media (prefers-color-scheme: dark) {
+        .incident-details {
+            background-color: #2d2d2d !important;
+            border-left-color: #4db6e6 !important;
+        }
+        
+        .incident-table th {
+            background-color: #404040 !important;
+            color: #ffffff !important;
+        }
+        
+        .incident-table td {
+            color: #ffffff !important;
+            border-bottom-color: #555555 !important;
+        }
+        
+        .guardduty-finding {
+            background-color: #4d2d2d !important;
+            border-left-color: #ff6b6b !important;
+        }
+        
+        .contact-info {
+            background-color: #2d3d4d !important;
+            border-color: #4d6d8d !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}Security Incident Alert{% endblock %}
+
+{% block email_content %}
+<!-- Incident Header with Severity -->
+<div class="incident-header severity-{{ incident_data.severity.lower() }}">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 700;">
+        🚨 SECURITY INCIDENT DETECTED
+    </h1>
+    <p style="margin: 10px 0 0 0; font-size: 18px; font-weight: 600;">
+        Incident ID: {{ incident_data.incident_id }}
+    </p>
+    <p style="margin: 5px 0 0 0; font-size: 16px;">
+        Severity: {{ incident_data.severity.upper() }} | 
+        Type: {{ incident_data.incident_type | title }}
+    </p>
+</div>
+
+<!-- Incident Summary -->
+<div class="incident-details">
+    <h3>Incident Summary</h3>
+    <table class="incident-table">
+        <tr>
+            <th>Incident ID</th>
+            <td>{{ incident_data.incident_id }}</td>
+        </tr>
+        <tr>
+            <th>Detection Time</th>
+            <td>{{ incident_data.timestamp }} UTC</td>
+        </tr>
+        <tr>
+            <th>Incident Type</th>
+            <td>{{ incident_data.incident_type | title }}</td>
+        </tr>
+        <tr>
+            <th>Severity Level</th>
+            <td><span class="status-badge severity-{{ incident_data.severity.lower() }}">{{ incident_data.severity.upper() }}</span></td>
+        </tr>
+        <tr>
+            <th>Source System</th>
+            <td>{{ incident_data.source_system | default('Flask Security Monitor') }}</td>
+        </tr>
+        <tr>
+            <th>Affected Component</th>
+            <td>{{ incident_data.affected_component | default('Unknown') }}</td>
+        </tr>
+    </table>
+</div>
+
+<!-- Incident Description -->
+<div class="incident-details">
+    <h3>Incident Description</h3>
+    <p>{{ incident_data.description | default('A security incident has been detected requiring immediate attention.') }}</p>
+    
+    {% if incident_data.threat_indicators %}
+    <h4>Threat Indicators</h4>
+    <ul>
+        {% for indicator in incident_data.threat_indicators %}
+        <li><strong>{{ indicator.type }}:</strong> {{ indicator.value }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+
+<!-- Authentication Failures Section -->
+{% if incident_data.incident_type == 'authentication_failure' %}
+<div class="incident-details">
+    <h3>Authentication Failure Details</h3>
+    <table class="incident-table">
+        <tr>
+            <th>Failed Attempts</th>
+            <td>{{ incident_data.auth_details.failure_count | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Source IP</th>
+            <td>{{ incident_data.auth_details.source_ip | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Targeted User</th>
+            <td>{{ incident_data.auth_details.username | default('Multiple users') }}</td>
+        </tr>
+        <tr>
+            <th>User Agent</th>
+            <td>{{ incident_data.auth_details.user_agent | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Geolocation</th>
+            <td>{{ incident_data.auth_details.geolocation | default('Unknown') }}</td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<!-- Authorization Violations Section -->
+{% if incident_data.incident_type == 'authorization_violation' %}
+<div class="incident-details">
+    <h3>Authorization Violation Details</h3>
+    <table class="incident-table">
+        <tr>
+            <th>User ID</th>
+            <td>{{ incident_data.authz_details.user_id | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Attempted Resource</th>
+            <td>{{ incident_data.authz_details.resource | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Attempted Action</th>
+            <td>{{ incident_data.authz_details.action | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>User Permissions</th>
+            <td>{{ incident_data.authz_details.user_permissions | join(', ') | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Violation Reason</th>
+            <td>{{ incident_data.authz_details.reason | default('Insufficient permissions') }}</td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<!-- Suspicious Activity Section -->
+{% if incident_data.incident_type == 'suspicious_activity' %}
+<div class="incident-details">
+    <h3>Suspicious Activity Details</h3>
+    <table class="incident-table">
+        <tr>
+            <th>Activity Type</th>
+            <td>{{ incident_data.suspicious_details.activity_type | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Risk Score</th>
+            <td>{{ incident_data.suspicious_details.risk_score | default('Unknown') }}/100</td>
+        </tr>
+        <tr>
+            <th>Pattern Detected</th>
+            <td>{{ incident_data.suspicious_details.pattern | default('Anomalous behavior') }}</td>
+        </tr>
+        <tr>
+            <th>Time Window</th>
+            <td>{{ incident_data.suspicious_details.time_window | default('Unknown') }}</td>
+        </tr>
+        <tr>
+            <th>Affected Endpoints</th>
+            <td>{{ incident_data.suspicious_details.endpoints | join(', ') | default('Multiple') }}</td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<!-- GuardDuty Findings Section -->
+{% if incident_data.guardduty_findings %}
+<div class="incident-details">
+    <h3>AWS GuardDuty Threat Detection</h3>
+    {% for finding in incident_data.guardduty_findings %}
+    <div class="guardduty-finding">
+        <h4 style="margin-top: 0; color: #721c24;">{{ finding.title }}</h4>
+        <table class="incident-table">
+            <tr>
+                <th>Finding ID</th>
+                <td>{{ finding.id }}</td>
+            </tr>
+            <tr>
+                <th>Finding Type</th>
+                <td>{{ finding.type }}</td>
+            </tr>
+            <tr>
+                <th>Severity</th>
+                <td>{{ finding.severity }}</td>
+            </tr>
+            <tr>
+                <th>Confidence</th>
+                <td>{{ finding.confidence | default('Unknown') }}</td>
+            </tr>
+            <tr>
+                <th>Region</th>
+                <td>{{ finding.region | default('Unknown') }}</td>
+            </tr>
+            <tr>
+                <th>Description</th>
+                <td>{{ finding.description }}</td>
+            </tr>
+        </table>
+        
+        {% if finding.service_details %}
+        <h5>Service Details</h5>
+        <p><strong>Archived:</strong> {{ finding.service_details.archived | default('No') }}</p>
+        <p><strong>Count:</strong> {{ finding.service_details.count | default('1') }}</p>
+        {% endif %}
+        
+        {% if finding.resource_details %}
+        <h5>Affected Resource</h5>
+        <p><strong>Resource Type:</strong> {{ finding.resource_details.type | default('Unknown') }}</p>
+        {% if finding.resource_details.instance_details %}
+        <p><strong>Instance ID:</strong> {{ finding.resource_details.instance_details.instance_id | default('Unknown') }}</p>
+        <p><strong>Instance Type:</strong> {{ finding.resource_details.instance_details.instance_type | default('Unknown') }}</p>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Automated Response Actions -->
+{% if incident_data.automated_response %}
+<div class="incident-actions">
+    <h3>🤖 Automated Incident Response Actions</h3>
+    
+    {% if incident_data.automated_response.container_isolation %}
+    <h4>Container Isolation</h4>
+    <p><strong>Status:</strong> <span class="status-badge status-{{ incident_data.automated_response.container_isolation.status }}">{{ incident_data.automated_response.container_isolation.status | title }}</span></p>
+    {% if incident_data.automated_response.container_isolation.actions_taken %}
+    <p><strong>Actions Taken:</strong></p>
+    <ul class="action-list">
+        {% for action in incident_data.automated_response.container_isolation.actions_taken %}
+        <li>{{ action }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    
+    {% if incident_data.automated_response.credential_revocation %}
+    <h4>Credential Revocation</h4>
+    <p><strong>Status:</strong> <span class="status-badge status-{{ incident_data.automated_response.credential_revocation.status }}">{{ incident_data.automated_response.credential_revocation.status | title }}</span></p>
+    {% if incident_data.automated_response.credential_revocation.actions_taken %}
+    <p><strong>Actions Taken:</strong></p>
+    <ul class="action-list">
+        {% for action in incident_data.automated_response.credential_revocation.actions_taken %}
+        <li>{{ action }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    
+    {% if incident_data.automated_response.infrastructure_remediation %}
+    <h4>Infrastructure Remediation</h4>
+    <p><strong>Status:</strong> <span class="status-badge status-{{ incident_data.automated_response.infrastructure_remediation.status }}">{{ incident_data.automated_response.infrastructure_remediation.status | title }}</span></p>
+    {% if incident_data.automated_response.infrastructure_remediation.actions_taken %}
+    <p><strong>Actions Taken:</strong></p>
+    <ul class="action-list">
+        {% for action in incident_data.automated_response.infrastructure_remediation.actions_taken %}
+        <li>{{ action }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Incident Timeline -->
+{% if incident_data.timeline %}
+<div class="incident-details">
+    <h3>Incident Timeline</h3>
+    {% for event in incident_data.timeline %}
+    <div class="timeline-item">
+        <p><strong>{{ event.timestamp }}</strong> - {{ event.description }}</p>
+        {% if event.details %}
+        <p style="margin-left: 20px; color: #6c757d; font-size: 14px;">{{ event.details }}</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Recommended Actions -->
+<div class="incident-actions">
+    <h3>📋 Recommended Security Team Actions</h3>
+    <ul class="action-list">
+        {% if incident_data.incident_type == 'authentication_failure' %}
+        <li>Review and analyze authentication logs for the affected IP address</li>
+        <li>Consider implementing IP-based rate limiting or blocking</li>
+        <li>Verify user account security status and enable additional MFA if needed</li>
+        <li>Check for any successful logins from the same source IP</li>
+        {% elif incident_data.incident_type == 'authorization_violation' %}
+        <li>Review user permissions and role assignments for the affected account</li>
+        <li>Audit recent permission changes and access pattern modifications</li>
+        <li>Investigate if this represents a privilege escalation attempt</li>
+        <li>Consider temporary access restrictions pending investigation</li>
+        {% elif incident_data.incident_type == 'suspicious_activity' %}
+        <li>Analyze activity patterns and correlate with known attack signatures</li>
+        <li>Review system logs for additional indicators of compromise</li>
+        <li>Consider implementing additional monitoring for the affected resources</li>
+        <li>Validate all recent system changes and access modifications</li>
+        {% else %}
+        <li>Immediately assess the scope and impact of the security incident</li>
+        <li>Isolate affected systems and resources to prevent lateral movement</li>
+        <li>Collect and preserve forensic evidence for detailed analysis</li>
+        <li>Coordinate with legal and compliance teams as required</li>
+        {% endif %}
+        <li>Document all investigative actions and findings</li>
+        <li>Update incident status in the security management system</li>
+        <li>Escalate to appropriate stakeholders based on severity assessment</li>
+    </ul>
+</div>
+
+<!-- Investigation Context -->
+{% if incident_data.investigation_context %}
+<div class="incident-details">
+    <h3>Investigation Context</h3>
+    <table class="incident-table">
+        {% for key, value in incident_data.investigation_context.items() %}
+        <tr>
+            <th>{{ key | title | replace('_', ' ') }}</th>
+            <td>{{ value }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+<!-- Related Incidents -->
+{% if incident_data.related_incidents %}
+<div class="incident-details">
+    <h3>Related Security Incidents</h3>
+    <table class="incident-table">
+        <thead>
+            <tr>
+                <th>Incident ID</th>
+                <th>Type</th>
+                <th>Timestamp</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for related in incident_data.related_incidents %}
+            <tr>
+                <td>{{ related.incident_id }}</td>
+                <td>{{ related.type | title }}</td>
+                <td>{{ related.timestamp }}</td>
+                <td><span class="status-badge status-{{ related.status }}">{{ related.status | title }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Security Team Contact Information -->
+<div class="contact-info">
+    <h3>🔐 Security Team Contact Information</h3>
+    <p><strong>Security Operations Center (SOC):</strong> {{ security_contact.soc_phone | default('+1-555-SEC-OPS1') }}</p>
+    <p><strong>Security Team Email:</strong> <a href="mailto:{{ security_contact.email | default('security@company.com') }}">{{ security_contact.email | default('security@company.com') }}</a></p>
+    <p><strong>Incident Response Hotline:</strong> {{ security_contact.hotline | default('+1-555-INCIDENT') }}</p>
+    <p><strong>Security Portal:</strong> <a href="{{ security_contact.portal_url | default('#') }}">Access Security Management Dashboard</a></p>
+    
+    {% if incident_data.severity in ['CRITICAL', 'HIGH'] %}
+    <p style="color: #d32f2f; font-weight: 600; margin-top: 15px;">
+        ⚠️ This is a {{ incident_data.severity }} severity incident requiring immediate response. 
+        Please acknowledge receipt and begin investigation within 15 minutes.
+    </p>
+    {% endif %}
+</div>
+
+<!-- System Information -->
+<div class="incident-details">
+    <h3>System Information</h3>
+    <table class="incident-table">
+        <tr>
+            <th>Application</th>
+            <td>Flask Security Monitoring System</td>
+        </tr>
+        <tr>
+            <th>Environment</th>
+            <td>{{ system_info.environment | default('Production') }}</td>
+        </tr>
+        <tr>
+            <th>Version</th>
+            <td>{{ system_info.version | default('1.0.0') }}</td>
+        </tr>
+        <tr>
+            <th>Alert Generated</th>
+            <td>{{ incident_data.timestamp }} UTC</td>
+        </tr>
+        <tr>
+            <th>Correlation ID</th>
+            <td>{{ incident_data.correlation_id | default(incident_data.incident_id) }}</td>
+        </tr>
+    </table>
+</div>
+
+<!-- Footer Message -->
+<p style="margin-top: 30px; padding: 15px; background-color: #e7f3ff; border-radius: 6px; font-size: 14px; color: #495057;">
+    This is an automated security incident notification from the Flask Application Security Monitoring System. 
+    This alert was generated based on security event correlation and threat detection rules. 
+    Please do not reply to this email - use the contact information provided above for incident coordination.
+</p>
+
+{% if incident_data.severity == 'CRITICAL' %}
+<p style="text-align: center; margin-top: 20px; padding: 10px; background-color: #d32f2f; color: #ffffff; border-radius: 6px; font-weight: 600;">
+    🚨 CRITICAL SECURITY INCIDENT - IMMEDIATE ACTION REQUIRED 🚨
+</p>
+{% endif %}
+{% endblock %}
+
+{% block footer_content %}
+<p><strong>Flask Security Operations</strong></p>
+<p>
+    <a href="mailto:{{ security_contact.email | default('security@company.com') }}">Security Team</a> |
+    <a href="{{ security_contact.portal_url | default('#') }}">Security Portal</a> |
+    <a href="{{ security_contact.runbook_url | default('#') }}">Incident Response Runbook</a>
+</p>
+<p>Security Monitoring System - Flask Application</p>
+{% endblock %}
