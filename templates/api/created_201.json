@@ -1,0 +1,90 @@
+{
+  "status": "created",
+  "status_code": 201,
+  "message": "Resource created successfully",
+  "timestamp": "{{ timestamp or moment().utc().isoformat() }}",
+  "request_id": "{{ request_id or g.request_id or request.headers.get('X-Request-ID', 'unknown') }}",
+  "data": {
+    "resource": {
+      "id": "{{ resource.id if resource else resource_id }}",
+      "type": "{{ resource_type or 'resource' }}",
+      "attributes": {{ resource.to_dict() if resource and hasattr(resource, 'to_dict') else resource_data or '{}' | safe }},
+      {% if relationships %}
+      "relationships": {{ relationships | tojson }},
+      {% endif %}
+      "links": {
+        "self": "{{ url_for(self_endpoint, **self_params) if self_endpoint else location_url }}",
+        {% if related_links %}
+        {% for key, link in related_links.items() %}
+        "{{ key }}": "{{ link }}",
+        {% endfor %}
+        {% endif %}
+        "collection": "{{ url_for(collection_endpoint, **collection_params) if collection_endpoint else base_url }}"
+      }
+    }
+  },
+  "meta": {
+    "created_at": "{{ created_at or moment().utc().isoformat() }}",
+    "created_by": {
+      "user_id": "{{ current_user.id if current_user else user_id }}",
+      "username": "{{ current_user.username if current_user else username }}",
+      {% if current_user and hasattr(current_user, 'email') %}
+      "email": "{{ current_user.email }}",
+      {% endif %}
+      "ip_address": "{{ request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) }}",
+      "user_agent": "{{ request.headers.get('User-Agent', '') }}"
+    },
+    "blueprint": {
+      "name": "{{ request.blueprint }}",
+      "endpoint": "{{ request.endpoint }}",
+      "url_rule": "{{ request.url_rule.rule if request.url_rule else '' }}"
+    },
+    "location": {
+      "url": "{{ location_url or url_for(self_endpoint, **self_params) if self_endpoint else '' }}",
+      "resource_path": "{{ resource_path or request.path }}"
+    },
+    {% if audit_context %}
+    "audit": {
+      "tracking_id": "{{ audit_context.tracking_id or uuid4() }}",
+      "operation": "{{ audit_context.operation or 'create' }}",
+      "resource_type": "{{ audit_context.resource_type or resource_type }}",
+      "business_entity_id": "{{ audit_context.business_entity_id if audit_context.business_entity_id else '' }}",
+      "classification": "{{ audit_context.classification or 'standard' }}",
+      "compliance_tags": {{ audit_context.compliance_tags | tojson if audit_context.compliance_tags else '[]' | safe }}
+    },
+    {% endif %}
+    "performance": {
+      "processing_time_ms": "{{ processing_time_ms if processing_time_ms is defined else '' }}",
+      "database_queries": "{{ db_query_count if db_query_count is defined else '' }}"
+    }
+  },
+  "links": {
+    "self": "{{ request.url }}",
+    "resource": "{{ location_url or url_for(self_endpoint, **self_params) if self_endpoint else '' }}",
+    {% if parent_resource %}
+    "parent": "{{ parent_resource.url if parent_resource.url else url_for(parent_resource.endpoint, **parent_resource.params) if parent_resource.endpoint else '' }}",
+    {% endif %}
+    {% if collection_endpoint %}
+    "collection": "{{ url_for(collection_endpoint, **collection_params) }}",
+    {% endif %}
+    {% if related_resources %}
+    {% for key, related in related_resources.items() %}
+    "{{ key }}": "{{ related.url if related.url else url_for(related.endpoint, **related.params) if related.endpoint else '' }}",
+    {% endfor %}
+    {% endif %}
+    "api_docs": "{{ url_for('api.documentation') if url_for else '/docs' }}"
+  },
+  {% if validation_errors %}
+  "warnings": {
+    "validation": {{ validation_errors | tojson }},
+    "message": "Resource created with validation warnings"
+  },
+  {% endif %}
+  {% if server_info %}
+  "server": {
+    "version": "{{ server_info.version or config.VERSION }}",
+    "environment": "{{ server_info.environment or config.ENV }}",
+    "instance_id": "{{ server_info.instance_id or config.INSTANCE_ID }}"
+  }
+  {% endif %}
+}
