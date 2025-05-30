@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Account Security Alert - Account Locked</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 0;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+        
+        /* Container and layout */
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        /* Header section */
+        .header {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: #ffffff;
+            padding: 30px 40px;
+            text-align: center;
+        }
+        
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            display: block;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+        
+        .header p {
+            font-size: 16px;
+            opacity: 0.95;
+            margin: 0;
+        }
+        
+        /* Content section */
+        .content {
+            padding: 40px;
+        }
+        
+        .alert-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .alert-box h2 {
+            color: #856404;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .alert-box p {
+            color: #856404;
+            margin: 0;
+        }
+        
+        /* Account details section */
+        .account-details {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .account-details h3 {
+            color: #495057;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #6c757d;
+            flex: 1;
+        }
+        
+        .detail-value {
+            color: #495057;
+            flex: 2;
+            text-align: right;
+        }
+        
+        /* Security instructions */
+        .security-instructions {
+            margin-bottom: 30px;
+        }
+        
+        .security-instructions h3 {
+            color: #dc3545;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        
+        .instruction-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .instruction-list li {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #007bff;
+            position: relative;
+        }
+        
+        .instruction-list li:before {
+            content: counter(step-counter);
+            counter-increment: step-counter;
+            position: absolute;
+            left: -25px;
+            top: 15px;
+            background-color: #007bff;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .instruction-list {
+            counter-reset: step-counter;
+            margin-left: 25px;
+        }
+        
+        /* Call-to-action button */
+        .cta-section {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 15px 30px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .cta-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        
+        /* Security tips */
+        .security-tips {
+            background-color: #e8f4fd;
+            border: 1px solid #b8daff;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .security-tips h3 {
+            color: #004085;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        
+        .tips-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .tips-list li {
+            color: #004085;
+            padding: 5px 0;
+            position: relative;
+            padding-left: 20px;
+        }
+        
+        .tips-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        /* Support section */
+        .support-section {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .support-section h3 {
+            color: #495057;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .support-section p {
+            color: #6c757d;
+            margin-bottom: 15px;
+        }
+        
+        .support-contact {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        /* Footer */
+        .footer {
+            background-color: #6c757d;
+            color: #ffffff;
+            padding: 20px 40px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .footer p {
+            margin: 5px 0;
+            opacity: 0.9;
+        }
+        
+        .footer a {
+            color: #ffffff;
+            text-decoration: underline;
+        }
+        
+        /* Responsive design */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                margin: 10px;
+                border-radius: 0;
+            }
+            
+            .header, .content, .footer {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 24px;
+            }
+            
+            .detail-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .detail-value {
+                text-align: left;
+                margin-top: 5px;
+            }
+            
+            .instruction-list {
+                margin-left: 15px;
+            }
+            
+            .instruction-list li:before {
+                left: -20px;
+                width: 20px;
+                height: 20px;
+                font-size: 11px;
+            }
+        }
+        
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #1a1a1a;
+            }
+            
+            .email-container {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+            }
+            
+            .account-details, .security-tips, .support-section {
+                background-color: #3a3a3a;
+                border-color: #4a4a4a;
+            }
+            
+            .alert-box {
+                background-color: #3d3a2a;
+                border-color: #5a5a2a;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header Section -->
+        <div class="header">
+            <span class="header-icon">🔒</span>
+            <h1>Account Security Alert</h1>
+            <p>Your account has been temporarily locked for security reasons</p>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Alert Box -->
+            <div class="alert-box">
+                <h2>Account Lockout Notification</h2>
+                <p>Your account has been automatically locked due to {{ lockout_reason|default('multiple failed login attempts') }}. This is a security measure to protect your account.</p>
+            </div>
+            
+            <!-- Account Details -->
+            <div class="account-details">
+                <h3>Account Information</h3>
+                <div class="detail-row">
+                    <span class="detail-label">Account:</span>
+                    <span class="detail-value">{{ user_email|default('your account') }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Locked On:</span>
+                    <span class="detail-value">{{ lockout_timestamp|default('Just now') }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">IP Address:</span>
+                    <span class="detail-value">{{ source_ip|default('Not available') }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Incident ID:</span>
+                    <span class="detail-value">{{ incident_id|default('N/A') }}</span>
+                </div>
+            </div>
+            
+            <!-- Security Instructions -->
+            <div class="security-instructions">
+                <h3>Account Recovery Steps</h3>
+                <ol class="instruction-list">
+                    <li>
+                        <strong>Wait for automatic unlock:</strong> Your account will automatically unlock after {{ unlock_duration|default('30 minutes') }}. No action is required from your side.
+                    </li>
+                    <li>
+                        <strong>Verify your credentials:</strong> Ensure you are using the correct username and password for your account.
+                    </li>
+                    <li>
+                        <strong>Check for security issues:</strong> Scan your device for malware and ensure your credentials haven't been compromised.
+                    </li>
+                    <li>
+                        <strong>Contact support if needed:</strong> If you continue experiencing issues, contact our security team using the information below.
+                    </li>
+                </ol>
+            </div>
+            
+            <!-- Call to Action -->
+            {% if unlock_url %}
+            <div class="cta-section">
+                <a href="{{ unlock_url }}" class="cta-button">Request Immediate Unlock</a>
+                <p style="margin-top: 10px; font-size: 14px; color: #6c757d;">
+                    You may also wait for automatic unlock in {{ unlock_duration|default('30 minutes') }}
+                </p>
+            </div>
+            {% endif %}
+            
+            <!-- Security Tips -->
+            <div class="security-tips">
+                <h3>Security Best Practices</h3>
+                <ul class="tips-list">
+                    <li>Use a strong, unique password for your account</li>
+                    <li>Enable two-factor authentication for enhanced security</li>
+                    <li>Never share your login credentials with others</li>
+                    <li>Log out from shared or public computers</li>
+                    <li>Monitor your account for unusual activity</li>
+                    <li>Keep your contact information up to date</li>
+                </ul>
+            </div>
+            
+            <!-- Support Section -->
+            <div class="support-section">
+                <h3>Need Help?</h3>
+                <p>If you believe this lockout was triggered in error or if you need immediate assistance:</p>
+                <a href="mailto:{{ support_email|default('security@company.com') }}" class="support-contact">
+                    Contact Security Support: {{ support_email|default('security@company.com') }}
+                </a>
+                <p style="margin-top: 15px; font-size: 14px;">
+                    When contacting support, please reference Incident ID: <strong>{{ incident_id|default('N/A') }}</strong>
+                </p>
+            </div>
+            
+            <!-- Important Notice -->
+            <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin-top: 20px;">
+                <p style="margin: 0; color: #856404; font-size: 14px;">
+                    <strong>Important:</strong> This is an automated security notification. If you did not attempt to access your account, please change your password immediately and contact our security team.
+                </p>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>&copy; {{ current_year|default('2024') }} {{ company_name|default('Your Company') }}. All rights reserved.</p>
+            <p>This is an automated security notification from our authentication system.</p>
+            <p>
+                <a href="{{ privacy_policy_url|default('#') }}">Privacy Policy</a> | 
+                <a href="{{ security_policy_url|default('#') }}">Security Policy</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
