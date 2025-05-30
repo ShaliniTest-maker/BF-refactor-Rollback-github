@@ -1,790 +1,1391 @@
 """
-Comprehensive audit logging and security event models implementing Flask-SQLAlchemy declarative classes 
-for complete audit trail management and security monitoring.
+Comprehensive Audit Logging and Security Event Models
 
-This module provides:
-- AuditLog model for comprehensive DML operation tracking (INSERT, UPDATE, DELETE)
-- SecurityEvent model for tracking authentication failures, authorization violations, and security incidents
-- SQLAlchemy event hooks for automatic audit trail generation with user context tracking
-- PostgreSQL JSON column utilization for flexible audit data storage with proper indexing
+This module implements Flask-SQLAlchemy declarative classes for complete audit trail management
+and security monitoring. Provides detailed tracking of all database operations, user activities,
+and security events throughout the application for compliance requirements and security analysis.
+
+The audit system supports:
+- Flask-SQLAlchemy 3.1.1 declarative model architecture
+- PostgreSQL JSON column utilization for flexible audit data storage
+- Comprehensive DML operation tracking (INSERT, UPDATE, DELETE)
+- Security event monitoring with severity classification and context storage
+- SQLAlchemy event hook integration for automatic audit trail generation
+- User context tracking from Flask-Login sessions with timestamp accuracy
+- Performance-optimized indexing for efficient audit queries
+- Compliance-ready audit retention and archival procedures
+
+Dependencies:
+- Flask-SQLAlchemy 3.1.1: ORM functionality and declarative models
+- PostgreSQL 14.12+: JSON column support and advanced indexing capabilities
+- Flask-Login: User context capture for audit attribution
+- models.base: BaseModel, AuditMixin, and database utilities
+- models.user: User model integration for audit attribution
 """
 
+import os
 import json
 import logging
-from datetime import datetime
-from typing import Any, Dict, Optional, Union
-from sqlalchemy import Column, Integer, String, DateTime, Text, Index, event, text
-from sqlalchemy.dialects.postgresql import JSON, JSONB
-from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.orm import Session
-from flask import request, g, has_request_context
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.user_agent import UserAgent
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List, Union
+from enum import Enum
 
-# Import base components (these would be defined in base.py)
-try:
-    from .base import db, AuditMixin
-except ImportError:
-    # Fallback for standalone testing - define minimal base components
-    from flask_sqlalchemy import SQLAlchemy
-    from sqlalchemy.ext.declarative import declarative_base
-    
-    db = SQLAlchemy()
-    
-    class AuditMixin:
-        """Base audit mixin providing common audit fields"""
-        
-        @declared_attr
-        def created_at(cls):
-            return db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-        
-        @declared_attr
-        def updated_at(cls):
-            return db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-        
-        @declared_attr
-        def created_by(cls):
-            return db.Column(db.String(255), nullable=True)
-        
-        @declared_attr
-        def updated_by(cls):
-            return db.Column(db.String(255), nullable=True)
+from sqlalchemy import (
+    Column, Integer, String, Text, DateTime, Boolean, JSON, Index,
+    ForeignKey, CheckConstraint, event, text, UniqueConstraint
+)
+from sqlalchemy.orm import relationship, validates, backref
+from sqlalchemy.dialects.postgresql import JSONB, INET
+from flask import request, g
+from flask_login import current_user
+from werkzeug.exceptions import ValidationError
 
-# Configure logger for audit operations
-audit_logger = logging.getLogger('audit')
+from .base import BaseModel, db, DatabaseManager
+from .user import User
 
 
-class AuditLog(db.Model, AuditMixin):
+# Configure logging for audit operations
+logger = logging.getLogger(__name__)
+
+
+class AuditOperationType(Enum):
+    """Enumeration of database operation types for audit logging"""
+    INSERT = "INSERT"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+    SELECT = "SELECT"
+    BULK_INSERT = "BULK_INSERT"
+    BULK_UPDATE = "BULK_UPDATE"
+    BULK_DELETE = "BULK_DELETE"
+
+
+class SecurityEventSeverity(Enum):
+    """Enumeration of security event severity levels"""
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class SecurityEventType(Enum):
+    """Enumeration of security event types for classification"""
+    AUTHENTICATION_FAILURE = "AUTHENTICATION_FAILURE"
+    AUTHENTICATION_SUCCESS = "AUTHENTICATION_SUCCESS"
+    AUTHORIZATION_VIOLATION = "AUTHORIZATION_VIOLATION"
+    SESSION_ANOMALY = "SESSION_ANOMALY"
+    SUSPICIOUS_ACTIVITY = "SUSPICIOUS_ACTIVITY"
+    DATA_ACCESS_VIOLATION = "DATA_ACCESS_VIOLATION"
+    PRIVILEGE_ESCALATION = "PRIVILEGE_ESCALATION"
+    BRUTE_FORCE_ATTEMPT = "BRUTE_FORCE_ATTEMPT"
+    ACCOUNT_LOCKOUT = "ACCOUNT_LOCKOUT"
+    PASSWORD_POLICY_VIOLATION = "PASSWORD_POLICY_VIOLATION"
+    CSRF_ATTEMPT = "CSRF_ATTEMPT"
+    XSS_ATTEMPT = "XSS_ATTEMPT"
+    SQL_INJECTION_ATTEMPT = "SQL_INJECTION_ATTEMPT"
+    MALICIOUS_FILE_UPLOAD = "MALICIOUS_FILE_UPLOAD"
+    RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
+    SECURITY_CONFIGURATION_CHANGE = "SECURITY_CONFIGURATION_CHANGE"
+    SYSTEM_INTEGRITY_VIOLATION = "SYSTEM_INTEGRITY_VIOLATION"
+
+
+class AuditLog(BaseModel):
     """
-    Comprehensive audit logging model for tracking all database operations (DML events).
+    Comprehensive audit log model for tracking all database operations and data modifications.
     
-    Provides detailed tracking of INSERT, UPDATE, and DELETE operations with:
-    - Complete change data capture using PostgreSQL JSON columns
-    - User attribution from Flask-Login sessions
-    - Timestamp accuracy and operation context
-    - Optimized indexing for efficient audit queries
+    Provides complete audit trail functionality including:
+    - DML operation tracking (INSERT, UPDATE, DELETE) with before/after change data
+    - User attribution through Flask-Login session integration
+    - PostgreSQL JSON column utilization for flexible change data storage
+    - Performance-optimized indexing for efficient audit queries
+    - Compliance-ready audit retention and query capabilities
+    
+    Database Design:
+    - Primary key: Auto-incrementing integer for optimal performance
+    - Foreign key: user_id references users.id for audit attribution
+    - JSON columns: change_data stores before/after values with JSONB indexing
+    - Indexes: Optimized for common audit query patterns
+    
+    Attributes:
+        id: Primary key for audit log identification
+        table_name: Name of the database table that was modified
+        record_id: Primary key of the modified record
+        operation_type: Type of database operation (INSERT, UPDATE, DELETE)
+        user_id: Foreign key reference to User model for attribution
+        session_id: Session identifier for request correlation
+        change_data: JSON column storing before/after values and metadata
+        ip_address: Client IP address for security correlation
+        user_agent: Client user agent for request identification
+        request_url: URL endpoint that triggered the database operation
+        request_method: HTTP method (GET, POST, PUT, DELETE) for operation context
+        execution_time_ms: Query execution time in milliseconds for performance monitoring
+        transaction_id: Database transaction identifier for operation grouping
+        
+    Relationships:
+        user: Many-to-one relationship with User model for audit attribution
+        
+    Database Indexes:
+        - Primary key index on id for optimal join performance
+        - Composite index on (table_name, record_id) for record-specific audit queries
+        - Index on user_id for user-specific audit trail queries
+        - Index on created_at for time-based audit queries and archival
+        - Index on operation_type for filtering by operation type
+        - GIN index on change_data JSONB for efficient JSON queries
+        - Composite index on (table_name, created_at) for table-specific time queries
     """
     
     __tablename__ = 'audit_logs'
     
-    # Primary identification fields
-    id = db.Column(db.Integer, primary_key=True)
+    # Core audit identification fields
+    table_name = Column(String(100), nullable=False, index=True,
+                       doc="Name of the database table that was modified")
+    record_id = Column(String(50), nullable=True, index=True,
+                      doc="Primary key of the modified record (stored as string for flexibility)")
+    operation_type = Column(String(20), nullable=False, index=True,
+                           doc="Type of database operation (INSERT, UPDATE, DELETE)")
     
-    # Core audit tracking fields
-    table_name = db.Column(db.String(100), nullable=False, index=True)
-    record_id = db.Column(db.String(50), nullable=True, index=True)  # String to handle various ID types
-    operation_type = db.Column(db.String(10), nullable=False, index=True)  # INSERT, UPDATE, DELETE
+    # User attribution and session tracking
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True,
+                    doc="Foreign key reference to User model for audit attribution")
+    session_id = Column(String(255), nullable=True,
+                       doc="Session identifier for request correlation")
     
-    # User and session context
-    user_id = db.Column(db.String(255), nullable=True, index=True)
-    username = db.Column(db.String(255), nullable=True)
-    session_id = db.Column(db.String(255), nullable=True)
+    # Comprehensive change data storage using PostgreSQL JSONB
+    change_data = Column(JSONB, nullable=True,
+                        doc="JSON column storing before/after values, metadata, and context")
     
-    # Request context information
-    ip_address = db.Column(db.String(45), nullable=True)  # IPv6 compatible
-    user_agent = db.Column(db.Text, nullable=True)
-    request_method = db.Column(db.String(10), nullable=True)
-    request_path = db.Column(db.String(500), nullable=True)
+    # Request context and security information
+    ip_address = Column(INET, nullable=True,
+                       doc="Client IP address for security correlation and geo-location")
+    user_agent = Column(Text, nullable=True,
+                       doc="Client user agent for request identification and device tracking")
+    request_url = Column(String(500), nullable=True,
+                        doc="URL endpoint that triggered the database operation")
+    request_method = Column(String(10), nullable=True,
+                           doc="HTTP method (GET, POST, PUT, DELETE) for operation context")
     
-    # Change data capture using PostgreSQL JSONB for performance
-    # JSONB provides better query performance and indexing compared to JSON
-    old_values = db.Column(JSONB, nullable=True)
-    new_values = db.Column(JSONB, nullable=True)
-    changes = db.Column(JSONB, nullable=True)  # Computed diff of old vs new values
+    # Performance and technical metadata
+    execution_time_ms = Column(Integer, nullable=True,
+                              doc="Query execution time in milliseconds for performance monitoring")
+    transaction_id = Column(String(100), nullable=True,
+                           doc="Database transaction identifier for operation grouping")
     
     # Additional audit metadata
-    operation_timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
-    transaction_id = db.Column(db.String(255), nullable=True)
+    application_version = Column(String(50), nullable=True,
+                                doc="Application version for change tracking across releases")
+    environment = Column(String(20), nullable=True,
+                        doc="Environment identifier (development, staging, production)")
     
-    # Error handling for failed operations
-    error_message = db.Column(db.Text, nullable=True)
+    # Relationship with User model for audit attribution
+    user = relationship('User', backref=backref('audit_logs', lazy='dynamic'),
+                       doc="Many-to-one relationship with User model for audit attribution")
     
-    # Composite indexes for efficient audit queries
+    # Database constraints and indexes for optimal performance
     __table_args__ = (
-        # Primary audit query patterns
-        Index('idx_audit_table_operation_time', 'table_name', 'operation_type', 'operation_timestamp'),
-        Index('idx_audit_user_time', 'user_id', 'operation_timestamp'),
-        Index('idx_audit_record_tracking', 'table_name', 'record_id', 'operation_timestamp'),
+        # Composite indexes for common audit query patterns
+        Index('idx_audit_table_record', 'table_name', 'record_id'),
+        Index('idx_audit_table_time', 'table_name', 'created_at'),
+        Index('idx_audit_user_time', 'user_id', 'created_at'),
+        Index('idx_audit_operation_time', 'operation_type', 'created_at'),
         
-        # Security monitoring indexes
-        Index('idx_audit_ip_time', 'ip_address', 'operation_timestamp'),
-        Index('idx_audit_session_tracking', 'session_id', 'operation_timestamp'),
+        # GIN index for JSONB change_data queries
+        Index('idx_audit_change_data_gin', 'change_data', postgresql_using='gin'),
         
-        # JSONB GIN indexes for efficient JSON queries
-        Index('idx_audit_changes_gin', 'changes', postgresql_using='gin'),
-        Index('idx_audit_new_values_gin', 'new_values', postgresql_using='gin'),
+        # Performance optimization indexes
+        Index('idx_audit_session_time', 'session_id', 'created_at'),
+        Index('idx_audit_ip_time', 'ip_address', 'created_at'),
+        
+        # Check constraints for data validation
+        CheckConstraint(
+            operation_type.in_(['INSERT', 'UPDATE', 'DELETE', 'SELECT', 'BULK_INSERT', 'BULK_UPDATE', 'BULK_DELETE']),
+            name='ck_audit_operation_type_valid'
+        ),
+        CheckConstraint(
+            "request_method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS')",
+            name='ck_audit_request_method_valid'
+        ),
+        CheckConstraint(
+            'execution_time_ms >= 0',
+            name='ck_audit_execution_time_positive'
+        ),
+        
+        # Unique constraint for preventing duplicate audit entries
+        UniqueConstraint('table_name', 'record_id', 'operation_type', 'created_at', 'user_id',
+                        name='uq_audit_operation_uniqueness')
     )
     
-    def __init__(self, **kwargs):
-        """Initialize audit log entry with automatic context capture"""
-        super().__init__(**kwargs)
-        self._capture_request_context()
+    @validates('table_name')
+    def validate_table_name(self, key, table_name):
+        """Validate table name format and constraints"""
+        if not table_name or len(table_name.strip()) == 0:
+            raise ValueError("Table name cannot be empty")
+        if len(table_name) > 100:
+            raise ValueError("Table name cannot exceed 100 characters")
+        if not table_name.replace('_', '').isalnum():
+            raise ValueError("Table name can only contain alphanumeric characters and underscores")
+        return table_name.strip().lower()
     
-    def _capture_request_context(self):
-        """Capture Flask request context for audit trail"""
-        if has_request_context():
-            self.ip_address = self._get_client_ip()
-            self.user_agent = request.headers.get('User-Agent', '')[:1000]  # Truncate long user agents
-            self.request_method = request.method
-            self.request_path = request.path[:500]  # Truncate long paths
-            
-            # Capture session ID if available
-            if hasattr(g, 'session_id'):
-                self.session_id = g.session_id
-            
-            # Capture user context from Flask-Login or custom auth
-            if hasattr(g, 'current_user_id'):
-                self.user_id = str(g.current_user_id)
-            if hasattr(g, 'current_username'):
-                self.username = g.current_username
+    @validates('operation_type')
+    def validate_operation_type(self, key, operation_type):
+        """Validate operation type against allowed values"""
+        if operation_type not in [op.value for op in AuditOperationType]:
+            raise ValueError(f"Invalid operation type: {operation_type}")
+        return operation_type.upper()
     
-    def _get_client_ip(self) -> Optional[str]:
-        """Extract client IP address handling proxy headers"""
-        if request:
-            # Check for forwarded IP (load balancer/proxy)
-            forwarded_for = request.headers.get('X-Forwarded-For')
-            if forwarded_for:
-                return forwarded_for.split(',')[0].strip()
+    @validates('change_data')
+    def validate_change_data(self, key, change_data):
+        """Validate change data JSON structure"""
+        if change_data is not None:
+            if not isinstance(change_data, dict):
+                raise ValueError("Change data must be a dictionary")
             
-            # Check for real IP header
-            real_ip = request.headers.get('X-Real-IP')
-            if real_ip:
-                return real_ip.strip()
+            # Validate required structure for UPDATE operations
+            if self.operation_type == 'UPDATE' and change_data:
+                if 'before' not in change_data and 'after' not in change_data:
+                    raise ValueError("UPDATE operations must include 'before' and/or 'after' data")
+        
+        return change_data
+    
+    @classmethod
+    def create_audit_entry(cls, table_name: str, record_id: Union[int, str], operation_type: str,
+                          change_data: Optional[Dict[str, Any]] = None, user_id: Optional[int] = None,
+                          additional_context: Optional[Dict[str, Any]] = None) -> 'AuditLog':
+        """
+        Create comprehensive audit log entry with automatic context capture.
+        
+        Args:
+            table_name: Name of the database table that was modified
+            record_id: Primary key of the modified record
+            operation_type: Type of database operation (INSERT, UPDATE, DELETE)
+            change_data: Dictionary containing before/after values and metadata
+            user_id: User ID for audit attribution (auto-detected if not provided)
+            additional_context: Additional context data to include in audit log
             
-            # Fallback to remote address
-            return request.remote_addr
+        Returns:
+            Created AuditLog instance
+            
+        Raises:
+            ValueError: If required parameters are invalid or missing
+        """
+        try:
+            # Auto-detect user context if not provided
+            if user_id is None:
+                user_id = cls._get_current_user_id()
+            
+            # Capture request context
+            request_context = cls._capture_request_context()
+            
+            # Build comprehensive change data
+            comprehensive_change_data = {
+                'operation_metadata': {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'operation_type': operation_type,
+                    'table_name': table_name,
+                    'record_id': str(record_id)
+                }
+            }
+            
+            if change_data:
+                comprehensive_change_data['data_changes'] = change_data
+            
+            if additional_context:
+                comprehensive_change_data['additional_context'] = additional_context
+            
+            # Create audit log entry
+            audit_entry = cls(
+                table_name=table_name,
+                record_id=str(record_id),
+                operation_type=operation_type,
+                user_id=user_id,
+                session_id=request_context.get('session_id'),
+                change_data=comprehensive_change_data,
+                ip_address=request_context.get('ip_address'),
+                user_agent=request_context.get('user_agent'),
+                request_url=request_context.get('request_url'),
+                request_method=request_context.get('request_method'),
+                application_version=os.environ.get('APP_VERSION', 'unknown'),
+                environment=os.environ.get('FLASK_ENV', 'unknown')
+            )
+            
+            db.session.add(audit_entry)
+            logger.info(f"Created audit entry: {operation_type} on {table_name}#{record_id} by user {user_id}")
+            
+            return audit_entry
+            
+        except Exception as e:
+            logger.error(f"Failed to create audit entry: {e}")
+            raise ValueError(f"Failed to create audit entry: {str(e)}")
+    
+    @staticmethod
+    def _get_current_user_id() -> Optional[int]:
+        """Get current user ID from Flask-Login session or Flask g object"""
+        try:
+            # Try Flask-Login current_user
+            if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
+                return current_user.id
+        except (RuntimeError, AttributeError):
+            pass
+        
+        # Try Flask g object
+        if hasattr(g, 'current_user_id'):
+            return g.current_user_id
         
         return None
     
-    def compute_changes(self):
-        """Compute change diff between old and new values"""
-        if self.old_values and self.new_values:
-            changes = {}
-            
-            # Find changed fields
-            for key, new_value in self.new_values.items():
-                old_value = self.old_values.get(key)
-                if old_value != new_value:
-                    changes[key] = {
-                        'old': old_value,
-                        'new': new_value
-                    }
-            
-            # Find removed fields (present in old but not in new)
-            for key, old_value in self.old_values.items():
-                if key not in self.new_values:
-                    changes[key] = {
-                        'old': old_value,
-                        'new': None
-                    }
-            
-            self.changes = changes if changes else None
+    @staticmethod
+    def _capture_request_context() -> Dict[str, Optional[str]]:
+        """Capture request context for audit logging"""
+        context = {
+            'session_id': None,
+            'ip_address': None,
+            'user_agent': None,
+            'request_url': None,
+            'request_method': None
+        }
+        
+        try:
+            if request:
+                context.update({
+                    'session_id': request.cookies.get('session'),
+                    'ip_address': request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
+                    'user_agent': request.headers.get('User-Agent'),
+                    'request_url': request.url,
+                    'request_method': request.method
+                })
+        except RuntimeError:
+            # Outside of request context
+            pass
+        
+        return context
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert audit log to dictionary for JSON serialization"""
-        return {
+    def get_change_summary(self) -> Dict[str, Any]:
+        """
+        Get human-readable summary of changes from audit log entry.
+        
+        Returns:
+            Dictionary containing change summary and metadata
+        """
+        summary = {
+            'operation': self.operation_type,
+            'table': self.table_name,
+            'record': self.record_id,
+            'timestamp': self.created_at.isoformat() if self.created_at else None,
+            'user': self.user.username if self.user else 'system',
+            'changes': []
+        }
+        
+        if self.change_data and 'data_changes' in self.change_data:
+            changes = self.change_data['data_changes']
+            
+            if self.operation_type == 'UPDATE' and 'before' in changes and 'after' in changes:
+                before = changes['before']
+                after = changes['after']
+                
+                for field, new_value in after.items():
+                    old_value = before.get(field)
+                    if old_value != new_value:
+                        summary['changes'].append({
+                            'field': field,
+                            'old_value': old_value,
+                            'new_value': new_value
+                        })
+            elif self.operation_type == 'INSERT' and 'after' in changes:
+                summary['changes'] = [{'field': 'record_created', 'new_value': changes['after']}]
+            elif self.operation_type == 'DELETE' and 'before' in changes:
+                summary['changes'] = [{'field': 'record_deleted', 'old_value': changes['before']}]
+        
+        return summary
+    
+    @classmethod
+    def get_audit_trail(cls, table_name: Optional[str] = None, record_id: Optional[str] = None,
+                       user_id: Optional[int] = None, start_date: Optional[datetime] = None,
+                       end_date: Optional[datetime] = None, operation_types: Optional[List[str]] = None,
+                       limit: int = 100, offset: int = 0) -> List['AuditLog']:
+        """
+        Retrieve comprehensive audit trail with flexible filtering options.
+        
+        Args:
+            table_name: Filter by specific table name
+            record_id: Filter by specific record ID
+            user_id: Filter by specific user ID
+            start_date: Filter entries after this date
+            end_date: Filter entries before this date
+            operation_types: Filter by specific operation types
+            limit: Maximum number of records to return
+            offset: Number of records to skip for pagination
+            
+        Returns:
+            List of AuditLog instances matching filter criteria
+        """
+        query = cls.query
+        
+        # Apply filters
+        if table_name:
+            query = query.filter(cls.table_name == table_name)
+        if record_id:
+            query = query.filter(cls.record_id == str(record_id))
+        if user_id:
+            query = query.filter(cls.user_id == user_id)
+        if start_date:
+            query = query.filter(cls.created_at >= start_date)
+        if end_date:
+            query = query.filter(cls.created_at <= end_date)
+        if operation_types:
+            query = query.filter(cls.operation_type.in_(operation_types))
+        
+        # Order by most recent first
+        query = query.order_by(cls.created_at.desc())
+        
+        # Apply pagination
+        query = query.offset(offset).limit(limit)
+        
+        return query.all()
+    
+    @classmethod
+    def cleanup_old_audit_logs(cls, retention_days: int = 2555) -> int:
+        """
+        Clean up audit logs older than retention period.
+        
+        Args:
+            retention_days: Number of days to retain audit logs (default: 7 years)
+            
+        Returns:
+            Number of audit logs deleted
+        """
+        cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+        
+        try:
+            deleted_count = cls.query.filter(cls.created_at < cutoff_date).delete()
+            db.session.commit()
+            
+            logger.info(f"Cleaned up {deleted_count} audit logs older than {retention_days} days")
+            return deleted_count
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to cleanup audit logs: {e}")
+            raise
+    
+    def to_dict(self, include_sensitive: bool = False, include_change_data: bool = True) -> Dict[str, Any]:
+        """
+        Convert audit log to dictionary representation.
+        
+        Args:
+            include_sensitive: Whether to include sensitive information
+            include_change_data: Whether to include detailed change data
+            
+        Returns:
+            Dictionary representation of the audit log
+        """
+        result = {
             'id': self.id,
             'table_name': self.table_name,
             'record_id': self.record_id,
             'operation_type': self.operation_type,
             'user_id': self.user_id,
-            'username': self.username,
-            'session_id': self.session_id,
-            'ip_address': self.ip_address,
-            'user_agent': self.user_agent,
-            'request_method': self.request_method,
-            'request_path': self.request_path,
-            'old_values': self.old_values,
-            'new_values': self.new_values,
-            'changes': self.changes,
-            'operation_timestamp': self.operation_timestamp.isoformat() if self.operation_timestamp else None,
-            'transaction_id': self.transaction_id,
-            'error_message': self.error_message,
+            'user_name': self.user.username if self.user else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'created_by': self.created_by
+            'request_method': self.request_method,
+            'execution_time_ms': self.execution_time_ms,
+            'environment': self.environment
         }
-    
-    @classmethod
-    def create_audit_entry(cls, table_name: str, record_id: Union[str, int], operation_type: str,
-                          old_values: Optional[Dict] = None, new_values: Optional[Dict] = None,
-                          error_message: Optional[str] = None) -> 'AuditLog':
-        """
-        Create a new audit log entry with comprehensive change tracking.
         
-        Args:
-            table_name: Name of the table being modified
-            record_id: ID of the record being modified
-            operation_type: Type of operation (INSERT, UPDATE, DELETE)
-            old_values: Previous values (for UPDATE/DELETE)
-            new_values: New values (for INSERT/UPDATE)
-            error_message: Error message if operation failed
-            
-        Returns:
-            AuditLog: Created audit log entry
-        """
-        audit_entry = cls(
-            table_name=table_name,
-            record_id=str(record_id) if record_id is not None else None,
-            operation_type=operation_type.upper(),
-            old_values=old_values,
-            new_values=new_values,
-            error_message=error_message
-        )
+        if include_sensitive:
+            result.update({
+                'session_id': self.session_id,
+                'ip_address': str(self.ip_address) if self.ip_address else None,
+                'user_agent': self.user_agent,
+                'request_url': self.request_url,
+                'transaction_id': self.transaction_id,
+                'application_version': self.application_version
+            })
         
-        # Compute changes for UPDATE operations
-        if operation_type.upper() == 'UPDATE' and old_values and new_values:
-            audit_entry.compute_changes()
+        if include_change_data and self.change_data:
+            result['change_data'] = self.change_data
+            result['change_summary'] = self.get_change_summary()
         
-        return audit_entry
+        return result
     
     def __repr__(self):
-        return f"<AuditLog(id={self.id}, table='{self.table_name}', operation='{self.operation_type}', record_id='{self.record_id}')>"
+        """String representation of the audit log entry"""
+        return (f"<AuditLog(id={self.id}, table={self.table_name}, "
+                f"record={self.record_id}, operation={self.operation_type}, "
+                f"user={self.user_id}, timestamp={self.created_at})>")
 
 
-class SecurityEvent(db.Model, AuditMixin):
+class SecurityEvent(BaseModel):
     """
-    Security event model for tracking authentication failures, authorization violations,
-    suspicious activities, and security incidents.
+    Security event model for comprehensive security monitoring and incident tracking.
     
-    Provides comprehensive security monitoring with:
-    - Severity classification for threat assessment
-    - Context storage for incident analysis
-    - Integration with security monitoring systems
-    - Real-time alerting capabilities
+    Provides complete security event management including:
+    - Authentication failure and success tracking with context
+    - Authorization violation monitoring with detailed incident data
+    - Suspicious activity detection and pattern analysis
+    - Security incident classification with severity levels
+    - Real-time security monitoring integration with alerting systems
+    - Compliance-ready security event retention and reporting
+    
+    Database Design:
+    - Primary key: Auto-incrementing integer for optimal performance
+    - Foreign key: user_id references users.id for security attribution
+    - JSON columns: event_context stores detailed security event data
+    - Indexes: Optimized for security monitoring and incident response queries
+    
+    Attributes:
+        id: Primary key for security event identification
+        event_type: Type of security event for classification and filtering
+        severity: Security event severity level (LOW, MEDIUM, HIGH, CRITICAL)
+        user_id: Foreign key reference to User model for attribution
+        session_id: Session identifier for incident correlation
+        event_context: JSON column storing detailed security event data and metadata
+        ip_address: Client IP address for geo-location and threat analysis
+        user_agent: Client user agent for device identification and analysis
+        request_url: URL endpoint where security event occurred
+        request_method: HTTP method for security context analysis
+        threat_indicators: JSON array of threat indicators and IOCs
+        response_action: Action taken in response to the security event
+        resolved_at: Timestamp when security incident was resolved
+        resolved_by: User who resolved the security incident
+        incident_id: Reference to related security incident for correlation
+        
+    Relationships:
+        user: Many-to-one relationship with User model for security attribution
+        
+    Database Indexes:
+        - Primary key index on id for optimal join performance
+        - Index on event_type for security event classification queries
+        - Index on severity for filtering by threat level
+        - Index on user_id for user-specific security event analysis
+        - Index on created_at for time-based security analysis
+        - Index on ip_address for geo-location and threat tracking
+        - GIN index on event_context JSONB for efficient security data queries
+        - Composite index on (event_type, severity, created_at) for security monitoring
     """
     
     __tablename__ = 'security_events'
     
-    # Primary identification
-    id = db.Column(db.Integer, primary_key=True)
+    # Security event classification and severity
+    event_type = Column(String(50), nullable=False, index=True,
+                       doc="Type of security event for classification and filtering")
+    severity = Column(String(20), nullable=False, index=True,
+                     doc="Security event severity level (LOW, MEDIUM, HIGH, CRITICAL)")
     
-    # Event classification
-    event_type = db.Column(db.String(100), nullable=False, index=True)
-    severity = db.Column(db.String(20), nullable=False, index=True)  # LOW, MEDIUM, HIGH, CRITICAL
+    # User attribution and session tracking
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True,
+                    doc="Foreign key reference to User model for security attribution")
+    session_id = Column(String(255), nullable=True,
+                       doc="Session identifier for incident correlation")
     
-    # Event description and details
-    title = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text, nullable=False)
+    # Comprehensive security event context using PostgreSQL JSONB
+    event_context = Column(JSONB, nullable=True,
+                          doc="JSON column storing detailed security event data and metadata")
     
-    # Security context
-    user_id = db.Column(db.String(255), nullable=True, index=True)
-    username = db.Column(db.String(255), nullable=True)
-    session_id = db.Column(db.String(255), nullable=True)
+    # Request context and threat analysis
+    ip_address = Column(INET, nullable=True, index=True,
+                       doc="Client IP address for geo-location and threat analysis")
+    user_agent = Column(Text, nullable=True,
+                       doc="Client user agent for device identification and analysis")
+    request_url = Column(String(500), nullable=True,
+                        doc="URL endpoint where security event occurred")
+    request_method = Column(String(10), nullable=True,
+                           doc="HTTP method for security context analysis")
     
-    # Request and network context
-    ip_address = db.Column(db.String(45), nullable=True, index=True)
-    user_agent = db.Column(db.Text, nullable=True)
-    request_method = db.Column(db.String(10), nullable=True)
-    request_path = db.Column(db.String(500), nullable=True)
+    # Threat intelligence and indicators
+    threat_indicators = Column(JSONB, nullable=True,
+                              doc="JSON array of threat indicators and IOCs")
+    risk_score = Column(Integer, nullable=True,
+                       doc="Calculated risk score for the security event (0-100)")
     
-    # Event metadata and context
-    event_data = db.Column(JSONB, nullable=True)  # Flexible storage for event-specific data
-    additional_context = db.Column(JSONB, nullable=True)  # Additional security context
+    # Incident response and resolution
+    response_action = Column(String(100), nullable=True,
+                            doc="Action taken in response to the security event")
+    resolved_at = Column(DateTime, nullable=True,
+                        doc="Timestamp when security incident was resolved")
+    resolved_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True,
+                        doc="User who resolved the security incident")
+    incident_id = Column(String(100), nullable=True,
+                        doc="Reference to related security incident for correlation")
     
-    # Event timing
-    event_timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    # Additional security metadata
+    detection_method = Column(String(50), nullable=True,
+                             doc="Method used to detect the security event")
+    false_positive = Column(Boolean, default=False, nullable=False,
+                           doc="Flag indicating if event was determined to be false positive")
     
-    # Incident tracking
-    incident_id = db.Column(db.String(255), nullable=True, index=True)
-    correlation_id = db.Column(db.String(255), nullable=True, index=True)
+    # Relationship with User model for security attribution
+    user = relationship('User', foreign_keys=[user_id],
+                       backref=backref('security_events', lazy='dynamic'),
+                       doc="Many-to-one relationship with User model for security attribution")
+    resolver = relationship('User', foreign_keys=[resolved_by],
+                           doc="User who resolved the security incident")
     
-    # Response tracking
-    resolved = db.Column(db.Boolean, default=False, nullable=False, index=True)
-    resolved_at = db.Column(db.DateTime, nullable=True)
-    resolved_by = db.Column(db.String(255), nullable=True)
-    resolution_notes = db.Column(db.Text, nullable=True)
-    
-    # Risk assessment
-    risk_score = db.Column(db.Integer, nullable=True)  # 0-100 risk score
-    threat_indicators = db.Column(JSONB, nullable=True)  # Array of threat indicators
-    
-    # Composite indexes for security monitoring
+    # Database constraints and indexes for optimal security monitoring
     __table_args__ = (
-        # Primary security monitoring patterns
-        Index('idx_security_severity_time', 'severity', 'event_timestamp'),
-        Index('idx_security_type_time', 'event_type', 'event_timestamp'),
-        Index('idx_security_user_time', 'user_id', 'event_timestamp'),
+        # Composite indexes for security monitoring queries
+        Index('idx_security_type_severity_time', 'event_type', 'severity', 'created_at'),
+        Index('idx_security_user_time', 'user_id', 'created_at'),
+        Index('idx_security_ip_time', 'ip_address', 'created_at'),
+        Index('idx_security_severity_time', 'severity', 'created_at'),
         
-        # Incident response indexes
-        Index('idx_security_unresolved', 'resolved', 'severity', 'event_timestamp'),
-        Index('idx_security_incident_tracking', 'incident_id', 'event_timestamp'),
-        Index('idx_security_correlation', 'correlation_id', 'event_timestamp'),
+        # GIN index for JSONB security context queries
+        Index('idx_security_context_gin', 'event_context', postgresql_using='gin'),
+        Index('idx_security_threats_gin', 'threat_indicators', postgresql_using='gin'),
         
-        # Network security monitoring
-        Index('idx_security_ip_time', 'ip_address', 'event_timestamp'),
-        Index('idx_security_ip_type', 'ip_address', 'event_type'),
+        # Security monitoring optimization indexes
+        Index('idx_security_incident_correlation', 'incident_id', 'created_at'),
+        Index('idx_security_response_tracking', 'response_action', 'resolved_at'),
         
-        # JSONB indexes for flexible querying
-        Index('idx_security_event_data_gin', 'event_data', postgresql_using='gin'),
-        Index('idx_security_threat_indicators_gin', 'threat_indicators', postgresql_using='gin'),
+        # Check constraints for data validation
+        CheckConstraint(
+            severity.in_(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+            name='ck_security_severity_valid'
+        ),
+        CheckConstraint(
+            'risk_score >= 0 AND risk_score <= 100',
+            name='ck_security_risk_score_range'
+        ),
+        CheckConstraint(
+            '(resolved_at IS NULL AND resolved_by IS NULL) OR (resolved_at IS NOT NULL)',
+            name='ck_security_resolution_consistency'
+        ),
+        
+        # Performance optimization constraints
+        CheckConstraint(
+            "request_method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS')",
+            name='ck_security_request_method_valid'
+        )
     )
     
-    # Security event type constants
-    EVENT_TYPES = {
-        'AUTHENTICATION_FAILURE': 'authentication_failure',
-        'AUTHORIZATION_VIOLATION': 'authorization_violation',
-        'SUSPICIOUS_ACTIVITY': 'suspicious_activity',
-        'BRUTE_FORCE_ATTEMPT': 'brute_force_attempt',
-        'ACCOUNT_LOCKOUT': 'account_lockout',
-        'PRIVILEGE_ESCALATION': 'privilege_escalation',
-        'DATA_ACCESS_VIOLATION': 'data_access_violation',
-        'SESSION_ANOMALY': 'session_anomaly',
-        'MALICIOUS_REQUEST': 'malicious_request',
-        'SECURITY_BREACH': 'security_breach'
-    }
+    @validates('event_type')
+    def validate_event_type(self, key, event_type):
+        """Validate security event type against allowed values"""
+        if event_type not in [event.value for event in SecurityEventType]:
+            raise ValueError(f"Invalid security event type: {event_type}")
+        return event_type.upper()
     
-    # Severity levels
-    SEVERITY_LEVELS = {
-        'LOW': 'LOW',
-        'MEDIUM': 'MEDIUM', 
-        'HIGH': 'HIGH',
-        'CRITICAL': 'CRITICAL'
-    }
+    @validates('severity')
+    def validate_severity(self, key, severity):
+        """Validate security event severity against allowed values"""
+        if severity not in [sev.value for sev in SecurityEventSeverity]:
+            raise ValueError(f"Invalid security event severity: {severity}")
+        return severity.upper()
     
-    def __init__(self, **kwargs):
-        """Initialize security event with automatic context capture"""
-        super().__init__(**kwargs)
-        self._capture_security_context()
+    @validates('risk_score')
+    def validate_risk_score(self, key, risk_score):
+        """Validate risk score range"""
+        if risk_score is not None:
+            if not isinstance(risk_score, int) or risk_score < 0 or risk_score > 100:
+                raise ValueError("Risk score must be an integer between 0 and 100")
+        return risk_score
     
-    def _capture_security_context(self):
-        """Capture comprehensive security context"""
-        if has_request_context():
-            self.ip_address = self._get_client_ip()
-            self.user_agent = request.headers.get('User-Agent', '')[:1000]
-            self.request_method = request.method
-            self.request_path = request.path[:500]
+    @validates('event_context')
+    def validate_event_context(self, key, event_context):
+        """Validate security event context JSON structure"""
+        if event_context is not None:
+            if not isinstance(event_context, dict):
+                raise ValueError("Event context must be a dictionary")
             
-            # Capture session and user context
-            if hasattr(g, 'session_id'):
-                self.session_id = g.session_id
-            if hasattr(g, 'current_user_id'):
-                self.user_id = str(g.current_user_id)
-            if hasattr(g, 'current_username'):
-                self.username = g.current_username
+            # Validate required security context fields
+            required_fields = ['timestamp', 'event_description']
+            for field in required_fields:
+                if field not in event_context:
+                    logger.warning(f"Security event context missing recommended field: {field}")
+        
+        return event_context
+    
+    @classmethod
+    def create_security_event(cls, event_type: str, severity: str, description: str,
+                             user_id: Optional[int] = None, event_context: Optional[Dict[str, Any]] = None,
+                             threat_indicators: Optional[List[str]] = None,
+                             risk_score: Optional[int] = None) -> 'SecurityEvent':
+        """
+        Create comprehensive security event with automatic context capture.
+        
+        Args:
+            event_type: Type of security event (from SecurityEventType enum)
+            severity: Security event severity level (from SecurityEventSeverity enum)
+            description: Human-readable description of the security event
+            user_id: User ID for security attribution (auto-detected if not provided)
+            event_context: Additional context data for the security event
+            threat_indicators: List of threat indicators and IOCs
+            risk_score: Calculated risk score for the event (0-100)
             
-            # Capture additional security context
-            security_context = {
-                'headers': dict(request.headers),
-                'referrer': request.referrer,
-                'endpoint': request.endpoint,
-                'remote_addr': request.remote_addr
+        Returns:
+            Created SecurityEvent instance
+            
+        Raises:
+            ValueError: If required parameters are invalid or missing
+        """
+        try:
+            # Auto-detect user context if not provided
+            if user_id is None:
+                user_id = cls._get_current_user_id()
+            
+            # Capture request context
+            request_context = cls._capture_request_context()
+            
+            # Build comprehensive event context
+            comprehensive_context = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'event_description': description,
+                'detection_timestamp': datetime.utcnow().isoformat(),
+                'source': 'flask_application'
             }
             
-            # Remove sensitive headers
-            security_context['headers'].pop('Authorization', None)
-            security_context['headers'].pop('Cookie', None)
+            if event_context:
+                comprehensive_context.update(event_context)
             
-            self.additional_context = security_context
+            # Add request context to event data
+            if request_context:
+                comprehensive_context['request_context'] = request_context
+            
+            # Calculate risk score if not provided
+            if risk_score is None:
+                risk_score = cls._calculate_risk_score(event_type, severity, threat_indicators)
+            
+            # Create security event entry
+            security_event = cls(
+                event_type=event_type,
+                severity=severity,
+                user_id=user_id,
+                session_id=request_context.get('session_id'),
+                event_context=comprehensive_context,
+                ip_address=request_context.get('ip_address'),
+                user_agent=request_context.get('user_agent'),
+                request_url=request_context.get('request_url'),
+                request_method=request_context.get('request_method'),
+                threat_indicators=threat_indicators,
+                risk_score=risk_score,
+                detection_method='automated'
+            )
+            
+            db.session.add(security_event)
+            logger.warning(f"Created security event: {event_type} ({severity}) for user {user_id}")
+            
+            # Trigger real-time alerting for high-severity events
+            if severity in ['HIGH', 'CRITICAL']:
+                cls._trigger_security_alert(security_event)
+            
+            return security_event
+            
+        except Exception as e:
+            logger.error(f"Failed to create security event: {e}")
+            raise ValueError(f"Failed to create security event: {str(e)}")
     
-    def _get_client_ip(self) -> Optional[str]:
-        """Extract client IP address handling proxy headers"""
-        if request:
-            # Check for forwarded IP (load balancer/proxy)
-            forwarded_for = request.headers.get('X-Forwarded-For')
-            if forwarded_for:
-                return forwarded_for.split(',')[0].strip()
-            
-            # Check for real IP header
-            real_ip = request.headers.get('X-Real-IP')
-            if real_ip:
-                return real_ip.strip()
-            
-            # Fallback to remote address
-            return request.remote_addr
+    @staticmethod
+    def _get_current_user_id() -> Optional[int]:
+        """Get current user ID from Flask-Login session or Flask g object"""
+        try:
+            # Try Flask-Login current_user
+            if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
+                return current_user.id
+        except (RuntimeError, AttributeError):
+            pass
+        
+        # Try Flask g object
+        if hasattr(g, 'current_user_id'):
+            return g.current_user_id
         
         return None
     
-    def calculate_risk_score(self) -> int:
-        """Calculate risk score based on severity and event type"""
-        base_scores = {
-            'CRITICAL': 90,
-            'HIGH': 70,
-            'MEDIUM': 40,
-            'LOW': 10
+    @staticmethod
+    def _capture_request_context() -> Dict[str, Optional[str]]:
+        """Capture request context for security event logging"""
+        context = {
+            'session_id': None,
+            'ip_address': None,
+            'user_agent': None,
+            'request_url': None,
+            'request_method': None
         }
         
-        base_score = base_scores.get(self.severity, 10)
+        try:
+            if request:
+                context.update({
+                    'session_id': request.cookies.get('session'),
+                    'ip_address': request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
+                    'user_agent': request.headers.get('User-Agent'),
+                    'request_url': request.url,
+                    'request_method': request.method
+                })
+        except RuntimeError:
+            # Outside of request context
+            pass
         
-        # Adjust based on event type
+        return context
+    
+    @staticmethod
+    def _calculate_risk_score(event_type: str, severity: str, threat_indicators: Optional[List[str]] = None) -> int:
+        """Calculate risk score based on event characteristics"""
+        base_scores = {
+            'LOW': 20,
+            'MEDIUM': 40,
+            'HIGH': 70,
+            'CRITICAL': 90
+        }
+        
+        risk_score = base_scores.get(severity, 20)
+        
+        # Adjust score based on event type
         high_risk_events = [
-            'SECURITY_BREACH', 'PRIVILEGE_ESCALATION', 'BRUTE_FORCE_ATTEMPT'
+            'AUTHENTICATION_FAILURE',
+            'AUTHORIZATION_VIOLATION',
+            'PRIVILEGE_ESCALATION',
+            'SQL_INJECTION_ATTEMPT',
+            'SYSTEM_INTEGRITY_VIOLATION'
         ]
         
-        if self.event_type in high_risk_events:
-            base_score = min(100, base_score + 20)
+        if event_type in high_risk_events:
+            risk_score = min(100, risk_score + 15)
         
-        # Adjust for repeat offenders
-        if self.user_id:
-            recent_events = SecurityEvent.query.filter(
-                SecurityEvent.user_id == self.user_id,
-                SecurityEvent.event_timestamp >= datetime.utcnow().replace(hour=0, minute=0, second=0),
-                SecurityEvent.id != self.id
-            ).count()
+        # Adjust score based on threat indicators
+        if threat_indicators:
+            risk_score = min(100, risk_score + len(threat_indicators) * 5)
+        
+        return risk_score
+    
+    @staticmethod
+    def _trigger_security_alert(security_event: 'SecurityEvent') -> None:
+        """Trigger real-time security alert for high-severity events"""
+        try:
+            # Log immediate alert
+            logger.critical(f"HIGH-SEVERITY SECURITY EVENT: {security_event.event_type} "
+                           f"({security_event.severity}) - Risk Score: {security_event.risk_score}")
             
-            if recent_events > 5:
-                base_score = min(100, base_score + 15)
+            # Here you would integrate with your alerting system
+            # Examples: Send to Slack, PagerDuty, email notifications, etc.
+            
+        except Exception as e:
+            logger.error(f"Failed to trigger security alert: {e}")
+    
+    def resolve_event(self, resolved_by_user_id: int, resolution_notes: Optional[str] = None,
+                     false_positive: bool = False) -> None:
+        """
+        Mark security event as resolved with resolution tracking.
         
-        self.risk_score = base_score
-        return base_score
-    
-    def resolve_event(self, resolved_by: str, resolution_notes: str = None):
-        """Mark security event as resolved"""
-        self.resolved = True
+        Args:
+            resolved_by_user_id: ID of user resolving the security event
+            resolution_notes: Optional notes about the resolution
+            false_positive: Whether the event was determined to be a false positive
+        """
         self.resolved_at = datetime.utcnow()
-        self.resolved_by = resolved_by
-        self.resolution_notes = resolution_notes
+        self.resolved_by = resolved_by_user_id
+        self.false_positive = false_positive
+        
+        # Add resolution notes to event context
+        if not self.event_context:
+            self.event_context = {}
+        
+        self.event_context['resolution'] = {
+            'resolved_at': self.resolved_at.isoformat(),
+            'resolved_by': resolved_by_user_id,
+            'notes': resolution_notes,
+            'false_positive': false_positive
+        }
+        
+        logger.info(f"Security event {self.id} resolved by user {resolved_by_user_id}")
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert security event to dictionary for JSON serialization"""
+    @classmethod
+    def get_security_dashboard_data(cls, start_date: Optional[datetime] = None,
+                                   end_date: Optional[datetime] = None) -> Dict[str, Any]:
+        """
+        Get comprehensive security dashboard data for monitoring and analysis.
+        
+        Args:
+            start_date: Start date for analysis period
+            end_date: End date for analysis period
+            
+        Returns:
+            Dictionary containing security metrics and analysis data
+        """
+        if not start_date:
+            start_date = datetime.utcnow() - timedelta(days=30)
+        if not end_date:
+            end_date = datetime.utcnow()
+        
+        query = cls.query.filter(cls.created_at >= start_date, cls.created_at <= end_date)
+        
+        # Event counts by severity
+        severity_counts = db.session.query(
+            cls.severity, db.func.count(cls.id)
+        ).filter(cls.created_at >= start_date, cls.created_at <= end_date).group_by(cls.severity).all()
+        
+        # Event counts by type
+        type_counts = db.session.query(
+            cls.event_type, db.func.count(cls.id)
+        ).filter(cls.created_at >= start_date, cls.created_at <= end_date).group_by(cls.event_type).all()
+        
+        # Top threat IPs
+        ip_counts = db.session.query(
+            cls.ip_address, db.func.count(cls.id)
+        ).filter(
+            cls.created_at >= start_date,
+            cls.created_at <= end_date,
+            cls.ip_address.isnot(None)
+        ).group_by(cls.ip_address).order_by(db.func.count(cls.id).desc()).limit(10).all()
+        
         return {
-            'id': self.id,
-            'event_type': self.event_type,
-            'severity': self.severity,
-            'title': self.title,
-            'description': self.description,
-            'user_id': self.user_id,
-            'username': self.username,
-            'session_id': self.session_id,
-            'ip_address': self.ip_address,
-            'user_agent': self.user_agent,
-            'request_method': self.request_method,
-            'request_path': self.request_path,
-            'event_data': self.event_data,
-            'additional_context': self.additional_context,
-            'event_timestamp': self.event_timestamp.isoformat() if self.event_timestamp else None,
-            'incident_id': self.incident_id,
-            'correlation_id': self.correlation_id,
-            'resolved': self.resolved,
-            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
-            'resolved_by': self.resolved_by,
-            'resolution_notes': self.resolution_notes,
-            'risk_score': self.risk_score,
-            'threat_indicators': self.threat_indicators,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'created_by': self.created_by
+            'period': {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
+            },
+            'total_events': query.count(),
+            'unresolved_events': query.filter(cls.resolved_at.is_(None)).count(),
+            'high_severity_events': query.filter(cls.severity.in_(['HIGH', 'CRITICAL'])).count(),
+            'severity_distribution': dict(severity_counts),
+            'event_type_distribution': dict(type_counts),
+            'top_threat_ips': [{'ip': str(ip), 'count': count} for ip, count in ip_counts],
+            'average_risk_score': db.session.query(db.func.avg(cls.risk_score)).filter(
+                cls.created_at >= start_date, cls.created_at <= end_date
+            ).scalar() or 0
         }
     
     @classmethod
-    def create_security_event(cls, event_type: str, severity: str, title: str, description: str,
-                             event_data: Optional[Dict] = None, incident_id: Optional[str] = None,
-                             correlation_id: Optional[str] = None) -> 'SecurityEvent':
+    def cleanup_old_security_events(cls, retention_days: int = 2555) -> int:
         """
-        Create a new security event with comprehensive context capture.
+        Clean up security events older than retention period.
         
         Args:
-            event_type: Type of security event
-            severity: Severity level (LOW, MEDIUM, HIGH, CRITICAL)
-            title: Brief title describing the event
-            description: Detailed description of the security event
-            event_data: Additional event-specific data
-            incident_id: Related incident ID for correlation
-            correlation_id: Correlation ID for related events
+            retention_days: Number of days to retain security events (default: 7 years)
             
         Returns:
-            SecurityEvent: Created security event
+            Number of security events deleted
         """
-        security_event = cls(
-            event_type=event_type,
-            severity=severity.upper(),
-            title=title,
-            description=description,
-            event_data=event_data,
-            incident_id=incident_id,
-            correlation_id=correlation_id
-        )
+        cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
         
-        # Calculate initial risk score
-        security_event.calculate_risk_score()
+        try:
+            # Only delete resolved events or low-severity events
+            deleted_count = cls.query.filter(
+                cls.created_at < cutoff_date,
+                db.or_(
+                    cls.resolved_at.isnot(None),
+                    cls.severity == 'LOW'
+                )
+            ).delete()
+            
+            db.session.commit()
+            
+            logger.info(f"Cleaned up {deleted_count} security events older than {retention_days} days")
+            return deleted_count
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to cleanup security events: {e}")
+            raise
+    
+    def to_dict(self, include_sensitive: bool = False, include_context: bool = True) -> Dict[str, Any]:
+        """
+        Convert security event to dictionary representation.
         
-        return security_event
-    
-    def __repr__(self):
-        return f"<SecurityEvent(id={self.id}, type='{self.event_type}', severity='{self.severity}', resolved={self.resolved})>"
-
-
-# SQLAlchemy Event Hooks for Automatic Audit Trail Generation
-class AuditEventHandler:
-    """
-    SQLAlchemy event hooks for automatic audit trail generation with user context tracking.
-    
-    Provides comprehensive DML auditing by capturing:
-    - All INSERT, UPDATE, DELETE operations
-    - User context from Flask-Login sessions
-    - Complete change data with before/after values
-    - Transaction context and timing
-    """
-    
-    @staticmethod
-    def get_current_user_context() -> Dict[str, Optional[str]]:
-        """Extract current user context from Flask-Login or Flask globals"""
-        user_context = {
-            'user_id': None,
-            'username': None,
-            'session_id': None
+        Args:
+            include_sensitive: Whether to include sensitive information
+            include_context: Whether to include detailed event context
+            
+        Returns:
+            Dictionary representation of the security event
+        """
+        result = {
+            'id': self.id,
+            'event_type': self.event_type,
+            'severity': self.severity,
+            'user_id': self.user_id,
+            'user_name': self.user.username if self.user else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'risk_score': self.risk_score,
+            'detection_method': self.detection_method,
+            'false_positive': self.false_positive,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+            'resolved_by': self.resolved_by,
+            'incident_id': self.incident_id
         }
         
-        if has_request_context():
-            # Try to get from Flask-Login current_user
-            try:
-                from flask_login import current_user
-                if current_user and hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
-                    user_context['user_id'] = str(getattr(current_user, 'id', None))
-                    user_context['username'] = getattr(current_user, 'username', None)
-            except ImportError:
-                pass
-            
-            # Fallback to Flask globals
-            if hasattr(g, 'current_user_id'):
-                user_context['user_id'] = str(g.current_user_id)
-            if hasattr(g, 'current_username'):
-                user_context['username'] = g.current_username
-            if hasattr(g, 'session_id'):
-                user_context['session_id'] = g.session_id
+        if include_sensitive:
+            result.update({
+                'session_id': self.session_id,
+                'ip_address': str(self.ip_address) if self.ip_address else None,
+                'user_agent': self.user_agent,
+                'request_url': self.request_url,
+                'request_method': self.request_method,
+                'threat_indicators': self.threat_indicators
+            })
         
-        return user_context
+        if include_context and self.event_context:
+            result['event_context'] = self.event_context
+        
+        return result
     
-    @staticmethod
-    def serialize_model_data(obj) -> Dict[str, Any]:
-        """Serialize SQLAlchemy model instance to dictionary for audit storage"""
-        if obj is None:
-            return None
-        
-        data = {}
-        for column in obj.__table__.columns:
-            value = getattr(obj, column.name)
-            
-            # Handle different data types for JSON serialization
-            if isinstance(value, datetime):
-                data[column.name] = value.isoformat()
-            elif hasattr(value, 'isoformat'):  # Handle other datetime-like objects
-                data[column.name] = value.isoformat()
-            elif value is not None:
-                try:
-                    # Ensure value is JSON serializable
-                    json.dumps(value)
-                    data[column.name] = value
-                except (TypeError, ValueError):
-                    # Convert non-serializable values to string
-                    data[column.name] = str(value)
-            else:
-                data[column.name] = None
-        
-        return data
+    def __repr__(self):
+        """String representation of the security event"""
+        return (f"<SecurityEvent(id={self.id}, type={self.event_type}, "
+                f"severity={self.severity}, user={self.user_id}, "
+                f"risk_score={self.risk_score}, timestamp={self.created_at})>")
+
+
+# SQLAlchemy event listeners for automatic audit trail generation
+@event.listens_for(db.session, 'before_commit')
+def capture_audit_changes(session):
+    """
+    SQLAlchemy event hook for automatic audit trail generation.
     
-    @staticmethod
-    @event.listens_for(Session, 'before_commit')
-    def capture_audit_data(session):
-        """Capture audit data before committing transactions"""
+    Captures all database changes (INSERT, UPDATE, DELETE) and creates corresponding
+    audit log entries with user context, change data, and request information.
+    
+    Args:
+        session: SQLAlchemy session about to commit
+    """
+    try:
         # Skip audit logging for audit tables to prevent recursion
         audit_tables = {'audit_logs', 'security_events'}
         
-        # Get current user context
-        user_context = AuditEventHandler.get_current_user_context()
+        # Capture user context
+        user_id = AuditLog._get_current_user_id()
+        request_context = AuditLog._capture_request_context()
         
-        # Collect audit entries for batch processing
-        audit_entries = []
+        # Process new objects (INSERT operations)
+        for obj in session.new:
+            if obj.__tablename__ not in audit_tables:
+                try:
+                    change_data = {
+                        'after': {column.name: getattr(obj, column.name, None) 
+                                for column in obj.__table__.columns}
+                    }
+                    
+                    # Create audit entry (will be added to session after current commit)
+                    audit_entry_data = {
+                        'table_name': obj.__tablename__,
+                        'record_id': str(getattr(obj, 'id', 'unknown')),
+                        'operation_type': 'INSERT',
+                        'user_id': user_id,
+                        'session_id': request_context.get('session_id'),
+                        'change_data': change_data,
+                        'ip_address': request_context.get('ip_address'),
+                        'user_agent': request_context.get('user_agent'),
+                        'request_url': request_context.get('request_url'),
+                        'request_method': request_context.get('request_method'),
+                        'application_version': os.environ.get('APP_VERSION', 'unknown'),
+                        'environment': os.environ.get('FLASK_ENV', 'unknown')
+                    }
+                    
+                    # Store for post-commit processing
+                    if not hasattr(session, '_audit_entries'):
+                        session._audit_entries = []
+                    session._audit_entries.append(audit_entry_data)
+                    
+                except Exception as e:
+                    logger.error(f"Error capturing INSERT audit for {obj.__tablename__}: {e}")
         
-        try:
-            # Process new objects (INSERT operations)
-            for obj in session.new:
-                if hasattr(obj, '__tablename__') and obj.__tablename__ not in audit_tables:
-                    new_values = AuditEventHandler.serialize_model_data(obj)
-                    record_id = getattr(obj, 'id', None)
+        # Process modified objects (UPDATE operations)
+        for obj in session.dirty:
+            if obj.__tablename__ not in audit_tables:
+                try:
+                    # Get original values
+                    original_values = {}
+                    for attr in session.identity_map.all_states():
+                        if attr.object is obj:
+                            for column in obj.__table__.columns:
+                                original_values[column.name] = attr.committed_state.get(column.name)
+                            break
                     
-                    audit_entry = AuditLog.create_audit_entry(
-                        table_name=obj.__tablename__,
-                        record_id=record_id,
-                        operation_type='INSERT',
-                        new_values=new_values
-                    )
+                    # Get current values
+                    current_values = {column.name: getattr(obj, column.name, None) 
+                                    for column in obj.__table__.columns}
                     
-                    # Set user context
-                    audit_entry.user_id = user_context['user_id']
-                    audit_entry.username = user_context['username']
-                    audit_entry.session_id = user_context['session_id']
+                    # Only log if there are actual changes
+                    changes_detected = any(original_values.get(k) != v for k, v in current_values.items())
                     
-                    audit_entries.append(audit_entry)
-            
-            # Process modified objects (UPDATE operations)
-            for obj in session.dirty:
-                if hasattr(obj, '__tablename__') and obj.__tablename__ not in audit_tables:
-                    # Get current (new) values
-                    new_values = AuditEventHandler.serialize_model_data(obj)
-                    
-                    # Get original (old) values from session history
-                    old_values = {}
-                    history = session.get_history(obj, obj.__class__.id.key) if hasattr(obj.__class__, 'id') else None
-                    
-                    # Build old values from attribute history
-                    for column in obj.__table__.columns:
-                        attr_history = session.get_history(obj, column.name)
-                        if attr_history.has_changes():
-                            # Use the original value from history
-                            old_values[column.name] = attr_history.deleted[0] if attr_history.deleted else new_values.get(column.name)
-                        else:
-                            old_values[column.name] = new_values.get(column.name)
-                    
-                    record_id = getattr(obj, 'id', None)
-                    
-                    audit_entry = AuditLog.create_audit_entry(
-                        table_name=obj.__tablename__,
-                        record_id=record_id,
-                        operation_type='UPDATE',
-                        old_values=old_values,
-                        new_values=new_values
-                    )
-                    
-                    # Set user context
-                    audit_entry.user_id = user_context['user_id']
-                    audit_entry.username = user_context['username']
-                    audit_entry.session_id = user_context['session_id']
-                    
-                    audit_entries.append(audit_entry)
-            
-            # Process deleted objects (DELETE operations)
-            for obj in session.deleted:
-                if hasattr(obj, '__tablename__') and obj.__tablename__ not in audit_tables:
-                    old_values = AuditEventHandler.serialize_model_data(obj)
-                    record_id = getattr(obj, 'id', None)
-                    
-                    audit_entry = AuditLog.create_audit_entry(
-                        table_name=obj.__tablename__,
-                        record_id=record_id,
-                        operation_type='DELETE',
-                        old_values=old_values
-                    )
-                    
-                    # Set user context
-                    audit_entry.user_id = user_context['user_id']
-                    audit_entry.username = user_context['username']
-                    audit_entry.session_id = user_context['session_id']
-                    
-                    audit_entries.append(audit_entry)
-            
-            # Bulk add all audit entries
-            if audit_entries:
-                session.add_all(audit_entries)
-                
-                # Log audit activity
-                audit_logger.info(f"Created {len(audit_entries)} audit log entries for user {user_context.get('username', 'unknown')}")
+                    if changes_detected:
+                        change_data = {
+                            'before': original_values,
+                            'after': current_values
+                        }
+                        
+                        # Create audit entry (will be added to session after current commit)
+                        audit_entry_data = {
+                            'table_name': obj.__tablename__,
+                            'record_id': str(getattr(obj, 'id', 'unknown')),
+                            'operation_type': 'UPDATE',
+                            'user_id': user_id,
+                            'session_id': request_context.get('session_id'),
+                            'change_data': change_data,
+                            'ip_address': request_context.get('ip_address'),
+                            'user_agent': request_context.get('user_agent'),
+                            'request_url': request_context.get('request_url'),
+                            'request_method': request_context.get('request_method'),
+                            'application_version': os.environ.get('APP_VERSION', 'unknown'),
+                            'environment': os.environ.get('FLASK_ENV', 'unknown')
+                        }
+                        
+                        # Store for post-commit processing
+                        if not hasattr(session, '_audit_entries'):
+                            session._audit_entries = []
+                        session._audit_entries.append(audit_entry_data)
+                        
+                except Exception as e:
+                    logger.error(f"Error capturing UPDATE audit for {obj.__tablename__}: {e}")
         
-        except Exception as e:
-            # Log audit error but don't fail the transaction
-            audit_logger.error(f"Error creating audit logs: {str(e)}")
+        # Process deleted objects (DELETE operations)
+        for obj in session.deleted:
+            if obj.__tablename__ not in audit_tables:
+                try:
+                    change_data = {
+                        'before': {column.name: getattr(obj, column.name, None) 
+                                 for column in obj.__table__.columns}
+                    }
+                    
+                    # Create audit entry (will be added to session after current commit)
+                    audit_entry_data = {
+                        'table_name': obj.__tablename__,
+                        'record_id': str(getattr(obj, 'id', 'unknown')),
+                        'operation_type': 'DELETE',
+                        'user_id': user_id,
+                        'session_id': request_context.get('session_id'),
+                        'change_data': change_data,
+                        'ip_address': request_context.get('ip_address'),
+                        'user_agent': request_context.get('user_agent'),
+                        'request_url': request_context.get('request_url'),
+                        'request_method': request_context.get('request_method'),
+                        'application_version': os.environ.get('APP_VERSION', 'unknown'),
+                        'environment': os.environ.get('FLASK_ENV', 'unknown')
+                    }
+                    
+                    # Store for post-commit processing
+                    if not hasattr(session, '_audit_entries'):
+                        session._audit_entries = []
+                    session._audit_entries.append(audit_entry_data)
+                    
+                except Exception as e:
+                    logger.error(f"Error capturing DELETE audit for {obj.__tablename__}: {e}")
+                    
+    except Exception as e:
+        logger.error(f"Error in audit capture event hook: {e}")
+
+
+@event.listens_for(db.session, 'after_commit')
+def process_audit_entries(session):
+    """
+    SQLAlchemy event hook for processing audit entries after successful commit.
+    
+    Creates audit log entries in a separate transaction to avoid interfering
+    with the main business transaction.
+    
+    Args:
+        session: SQLAlchemy session that was committed
+    """
+    try:
+        if hasattr(session, '_audit_entries'):
+            audit_entries = session._audit_entries
+            
+            # Create new session for audit entries
+            with DatabaseManager.transaction():
+                for audit_data in audit_entries:
+                    try:
+                        audit_entry = AuditLog(**audit_data)
+                        db.session.add(audit_entry)
+                    except Exception as e:
+                        logger.error(f"Failed to create audit entry: {e}")
+                        continue
+            
+            # Clean up
+            delattr(session, '_audit_entries')
+            
+            logger.debug(f"Processed {len(audit_entries)} audit entries")
+            
+    except Exception as e:
+        logger.error(f"Error processing audit entries: {e}")
+
+
+@event.listens_for(db.session, 'after_rollback')
+def cleanup_audit_entries(session):
+    """
+    SQLAlchemy event hook for cleaning up audit entries after rollback.
+    
+    Args:
+        session: SQLAlchemy session that was rolled back
+    """
+    try:
+        if hasattr(session, '_audit_entries'):
+            delattr(session, '_audit_entries')
+            logger.debug("Cleaned up audit entries after rollback")
+    except Exception as e:
+        logger.error(f"Error cleaning up audit entries: {e}")
 
 
 # Utility functions for audit and security event management
-class AuditQueryHelper:
-    """Helper class for common audit and security event queries"""
+class AuditManager:
+    """
+    Utility class for comprehensive audit and security event management.
+    
+    Provides high-level methods for audit trail analysis, security monitoring,
+    and compliance reporting functionality.
+    """
     
     @staticmethod
-    def get_user_activity(user_id: str, start_date: datetime = None, end_date: datetime = None) -> Dict[str, Any]:
-        """Get comprehensive user activity summary"""
-        query_filter = AuditLog.user_id == user_id
+    def get_comprehensive_audit_report(start_date: datetime, end_date: datetime,
+                                     include_security_events: bool = True) -> Dict[str, Any]:
+        """
+        Generate comprehensive audit report for specified time period.
         
-        if start_date:
-            query_filter = query_filter & (AuditLog.operation_timestamp >= start_date)
-        if end_date:
-            query_filter = query_filter & (AuditLog.operation_timestamp <= end_date)
-        
-        audit_logs = AuditLog.query.filter(query_filter).order_by(AuditLog.operation_timestamp.desc()).all()
-        
-        # Get security events for the same period
-        security_filter = SecurityEvent.user_id == user_id
-        if start_date:
-            security_filter = security_filter & (SecurityEvent.event_timestamp >= start_date)
-        if end_date:
-            security_filter = security_filter & (SecurityEvent.event_timestamp <= end_date)
-        
-        security_events = SecurityEvent.query.filter(security_filter).order_by(SecurityEvent.event_timestamp.desc()).all()
-        
-        return {
-            'user_id': user_id,
-            'audit_logs': [log.to_dict() for log in audit_logs],
-            'security_events': [event.to_dict() for event in security_events],
-            'summary': {
-                'total_operations': len(audit_logs),
-                'security_events_count': len(security_events),
-                'high_risk_events': len([e for e in security_events if e.severity in ['HIGH', 'CRITICAL']]),
-                'unresolved_events': len([e for e in security_events if not e.resolved])
-            }
+        Args:
+            start_date: Start date for audit report
+            end_date: End date for audit report
+            include_security_events: Whether to include security events in report
+            
+        Returns:
+            Dictionary containing comprehensive audit report data
+        """
+        # Audit log statistics
+        audit_stats = {
+            'total_operations': AuditLog.query.filter(
+                AuditLog.created_at >= start_date,
+                AuditLog.created_at <= end_date
+            ).count(),
+            'operations_by_type': dict(
+                db.session.query(AuditLog.operation_type, db.func.count(AuditLog.id))
+                .filter(AuditLog.created_at >= start_date, AuditLog.created_at <= end_date)
+                .group_by(AuditLog.operation_type).all()
+            ),
+            'operations_by_table': dict(
+                db.session.query(AuditLog.table_name, db.func.count(AuditLog.id))
+                .filter(AuditLog.created_at >= start_date, AuditLog.created_at <= end_date)
+                .group_by(AuditLog.table_name).all()
+            ),
+            'unique_users': db.session.query(AuditLog.user_id).filter(
+                AuditLog.created_at >= start_date,
+                AuditLog.created_at <= end_date,
+                AuditLog.user_id.isnot(None)
+            ).distinct().count()
         }
+        
+        report = {
+            'report_period': {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
+            },
+            'audit_statistics': audit_stats
+        }
+        
+        # Include security events if requested
+        if include_security_events:
+            report['security_statistics'] = SecurityEvent.get_security_dashboard_data(
+                start_date, end_date
+            )
+        
+        return report
     
     @staticmethod
-    def get_table_audit_trail(table_name: str, record_id: str = None) -> Dict[str, Any]:
-        """Get complete audit trail for a table or specific record"""
-        query = AuditLog.query.filter(AuditLog.table_name == table_name)
+    def detect_anomalous_activity(user_id: Optional[int] = None,
+                                 lookback_hours: int = 24) -> List[Dict[str, Any]]:
+        """
+        Detect anomalous activity patterns in audit logs.
         
-        if record_id:
-            query = query.filter(AuditLog.record_id == str(record_id))
+        Args:
+            user_id: Specific user ID to analyze (None for all users)
+            lookback_hours: Hours to look back for anomaly detection
+            
+        Returns:
+            List of detected anomalies with details
+        """
+        start_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        anomalies = []
         
-        audit_logs = query.order_by(AuditLog.operation_timestamp.desc()).all()
+        # Query for suspicious patterns
+        query = AuditLog.query.filter(AuditLog.created_at >= start_time)
+        if user_id:
+            query = query.filter(AuditLog.user_id == user_id)
         
-        return {
-            'table_name': table_name,
-            'record_id': record_id,
-            'audit_trail': [log.to_dict() for log in audit_logs],
-            'summary': {
-                'total_changes': len(audit_logs),
-                'insert_count': len([log for log in audit_logs if log.operation_type == 'INSERT']),
-                'update_count': len([log for log in audit_logs if log.operation_type == 'UPDATE']),
-                'delete_count': len([log for log in audit_logs if log.operation_type == 'DELETE'])
-            }
-        }
+        # Detect high-frequency operations
+        operation_counts = db.session.query(
+            AuditLog.user_id, AuditLog.operation_type, db.func.count(AuditLog.id)
+        ).filter(AuditLog.created_at >= start_time).group_by(
+            AuditLog.user_id, AuditLog.operation_type
+        ).having(db.func.count(AuditLog.id) > 100).all()
+        
+        for user_id, operation_type, count in operation_counts:
+            anomalies.append({
+                'type': 'high_frequency_operations',
+                'user_id': user_id,
+                'operation_type': operation_type,
+                'count': count,
+                'threshold': 100,
+                'severity': 'MEDIUM'
+            })
+        
+        # Detect unusual table access patterns
+        table_counts = db.session.query(
+            AuditLog.user_id, AuditLog.table_name, db.func.count(AuditLog.id)
+        ).filter(AuditLog.created_at >= start_time).group_by(
+            AuditLog.user_id, AuditLog.table_name
+        ).having(db.func.count(AuditLog.id) > 50).all()
+        
+        for user_id, table_name, count in table_counts:
+            if table_name in ['users', 'security_events', 'audit_logs']:  # Sensitive tables
+                anomalies.append({
+                    'type': 'unusual_sensitive_table_access',
+                    'user_id': user_id,
+                    'table_name': table_name,
+                    'count': count,
+                    'threshold': 50,
+                    'severity': 'HIGH'
+                })
+        
+        return anomalies
     
     @staticmethod
-    def get_security_dashboard_data(time_period_hours: int = 24) -> Dict[str, Any]:
-        """Get security dashboard data for monitoring"""
-        start_time = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - \
-                    datetime.timedelta(hours=time_period_hours)
+    def ensure_audit_compliance() -> Dict[str, Any]:
+        """
+        Ensure audit system compliance and data integrity.
         
-        # Get recent security events
-        security_events = SecurityEvent.query.filter(
-            SecurityEvent.event_timestamp >= start_time
-        ).order_by(SecurityEvent.event_timestamp.desc()).all()
-        
-        # Get audit activity summary
-        audit_activity = db.session.query(
-            AuditLog.table_name,
-            AuditLog.operation_type,
-            db.func.count(AuditLog.id).label('count')
-        ).filter(
-            AuditLog.operation_timestamp >= start_time
-        ).group_by(
-            AuditLog.table_name,
-            AuditLog.operation_type
-        ).all()
-        
-        # Aggregate security metrics
-        security_metrics = {
-            'total_events': len(security_events),
-            'critical_events': len([e for e in security_events if e.severity == 'CRITICAL']),
-            'high_events': len([e for e in security_events if e.severity == 'HIGH']),
-            'unresolved_events': len([e for e in security_events if not e.resolved]),
-            'unique_users_affected': len(set([e.user_id for e in security_events if e.user_id])),
-            'unique_ips': len(set([e.ip_address for e in security_events if e.ip_address]))
+        Returns:
+            Dictionary containing compliance status and recommendations
+        """
+        compliance_status = {
+            'audit_coverage': True,
+            'retention_compliance': True,
+            'data_integrity': True,
+            'recommendations': []
         }
         
-        return {
-            'time_period_hours': time_period_hours,
-            'start_time': start_time.isoformat(),
-            'security_events': [event.to_dict() for event in security_events[:50]],  # Latest 50 events
-            'security_metrics': security_metrics,
-            'audit_activity': [
-                {
-                    'table_name': activity.table_name,
-                    'operation_type': activity.operation_type,
-                    'count': activity.count
-                }
-                for activity in audit_activity
-            ]
-        }
+        # Check audit coverage
+        tables_with_audit = db.session.query(AuditLog.table_name).distinct().all()
+        tables_with_audit = [table[0] for table in tables_with_audit]
+        
+        # Check for tables that should have audit coverage
+        expected_tables = ['users', 'business_entities', 'user_sessions']
+        missing_coverage = [table for table in expected_tables if table not in tables_with_audit]
+        
+        if missing_coverage:
+            compliance_status['audit_coverage'] = False
+            compliance_status['recommendations'].append(
+                f"Enable audit coverage for tables: {', '.join(missing_coverage)}"
+            )
+        
+        # Check retention compliance (should have logs from at least 1 year ago)
+        one_year_ago = datetime.utcnow() - timedelta(days=365)
+        old_logs_count = AuditLog.query.filter(AuditLog.created_at < one_year_ago).count()
+        
+        if old_logs_count == 0:
+            compliance_status['recommendations'].append(
+                "Consider implementing audit log archival for long-term retention"
+            )
+        
+        # Check for audit log gaps
+        latest_log = AuditLog.query.order_by(AuditLog.created_at.desc()).first()
+        if latest_log:
+            hours_since_last_log = (datetime.utcnow() - latest_log.created_at).total_seconds() / 3600
+            if hours_since_last_log > 24:
+                compliance_status['data_integrity'] = False
+                compliance_status['recommendations'].append(
+                    f"No audit logs in last {hours_since_last_log:.1f} hours - investigate audit system"
+                )
+        
+        return compliance_status
 
 
-# Export main components
+# Export models and utilities for application use
 __all__ = [
     'AuditLog',
-    'SecurityEvent', 
-    'AuditEventHandler',
-    'AuditQueryHelper'
+    'SecurityEvent',
+    'AuditOperationType',
+    'SecurityEventSeverity',
+    'SecurityEventType',
+    'AuditManager'
 ]
