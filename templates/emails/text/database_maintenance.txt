@@ -1,227 +1,280 @@
-DATABASE MAINTENANCE AND MIGRATION NOTIFICATION
-================================================
+DATABASE MAINTENANCE NOTIFICATION
+=====================================
 
-{{ subject or "Database Maintenance and Migration Alert" }}
+Subject: [SCHEDULED] Database Maintenance for Flask Application Migration - {{maintenance_date}}
 
-MAINTENANCE SUMMARY
--------------------
-{{ maintenance_type or "Database Migration" }} - {{ maintenance_id or "MAINT-" + timestamp }}
+Dear Administrator,
 
-Scheduled Start:  {{ start_time or "TBD" }}
-Estimated Duration: {{ duration or "TBD" }}
-Expected End:     {{ end_time or "TBD" }}
-Environment:      {{ environment or "Production" }}
+This notification provides comprehensive details regarding the scheduled database maintenance operation for our Flask application migration system. Please review all operational procedures and coordinate with your team accordingly.
 
-MIGRATION DETAILS
------------------
-Migration Type:   {{ migration_type or "Flask-Migrate Schema Update" }}
-Migration Version: {{ migration_version or "Latest" }}
-Database Engine:  {{ database_engine or "PostgreSQL" }}
-Migration Command: {{ migration_command or "flask db upgrade" }}
+MAINTENANCE OVERVIEW
+====================
 
-Affected Tables:
-{% if affected_tables %}
-{% for table in affected_tables %}
-  - {{ table.name }} ({{ table.operation }})
-    {% if table.estimated_rows %}Estimated Rows: {{ table.estimated_rows }}{% endif %}
-    {% if table.downtime_estimate %}Est. Downtime: {{ table.downtime_estimate }}{% endif %}
-{% endfor %}
-{% else %}
-  - Table information will be provided in pre-migration analysis
-{% endif %}
-
-Schema Changes:
-{% if schema_changes %}
-{% for change in schema_changes %}
-  - {{ change.type }}: {{ change.description }}
-    {% if change.impact %}Impact: {{ change.impact }}{% endif %}
-{% endfor %}
-{% else %}
-  - Schema change details will be documented in migration scripts
-  - Review migration files in /migrations/versions/ for complete changes
-{% endif %}
-
-PERFORMANCE IMPACT ANALYSIS
-----------------------------
-Expected Query Performance:
-  - Target Response Time: <100ms (per SLA requirements)
-  - Database Connection Pool: {{ pool_size or "20" }} connections
-  - Connection Timeout: {{ pool_timeout or "30" }}s
-  - Pool Recycle: {{ pool_recycle or "3600" }}s
-
-Pre-Migration Baselines:
-  - API Response Time: {{ baseline_api_response or "<200ms" }}
-  - Database Query Time: {{ baseline_db_query or "<100ms" }}
-  - Active Connections: {{ baseline_connections or "Monitor current usage" }}
-  - Throughput: {{ baseline_throughput or "Monitor current load" }}
+Operation Type: {{operation_type}}
+Scheduled Date: {{maintenance_date}}
+Estimated Duration: {{estimated_duration}}
+Maintenance Window: {{maintenance_window}}
+Environment: {{environment}}
+Application: {{application_name}}
+Database System: PostgreSQL with Flask-SQLAlchemy 3.1.1
 
 FLASK-MIGRATE OPERATION DETAILS
---------------------------------
-Migration Environment Variables:
-  DATABASE_URL: {{ database_url_masked or "[CONFIGURED]" }}
-  DATABASE_POOL_SIZE: {{ pool_size or "20" }}
-  DATABASE_MAX_OVERFLOW: {{ max_overflow or "30" }}
-  DATABASE_POOL_TIMEOUT: {{ pool_timeout or "30" }}
-  DATABASE_POOL_RECYCLE: {{ pool_recycle or "3600" }}
-  DATABASE_POOL_PRE_PING: {{ pool_pre_ping or "True" }}
+================================
 
-Migration Commands Sequence:
-  1. Pre-migration backup: pg_dump with timestamp verification
-  2. Migration validation: flask db show (review pending migrations)
-  3. Execute migration: {{ migration_command or "flask db upgrade" }}
-  4. Post-migration validation: Schema consistency check
-  5. Performance benchmarking: Query response time validation
+Migration Command: {{migration_command}}
+Target Schema Version: {{target_version}}
+Current Schema Version: {{current_version}}
+Migration Script: {{migration_script}}
 
-SQLALCHEMY CONNECTION POOL MONITORING
---------------------------------------
-During Migration:
-  - Connection Pool Utilization: Monitor >90% threshold
-  - Connection Acquisition Time: Alert if >1000ms
-  - Pool Overflow Usage: Track overflow connections
-  - Connection Lifecycle: Monitor connection recycling patterns
+Affected Database Components:
+{{#affected_tables}}
+- Table: {{table_name}}
+  Operation: {{operation}}
+  Estimated Records: {{record_count}}
+  Impact Level: {{impact_level}}
+{{/affected_tables}}
 
-Connection Pool Health Checks:
-  - Active Connection Count vs Pool Capacity
-  - Connection Queue Depth and Wait Times
-  - Pool Overflow Utilization Metrics
-  - Connection Timeout and Error Rates
+Schema Changes Summary:
+{{#schema_changes}}
+- {{change_type}}: {{description}}
+  Rollback Available: {{rollback_supported}}
+{{/schema_changes}}
+
+PRE-MAINTENANCE REQUIREMENTS
+============================
+
+1. Database Backup Validation
+   - Full PostgreSQL dump created and verified
+   - Backup location: {{backup_location}}
+   - Backup size: {{backup_size}}
+   - Backup checksum: {{backup_checksum}}
+   - Verification status: {{backup_verified}}
+
+2. Application Status Verification
+   - Flask application health check: {{app_health_status}}
+   - Active connections: {{active_connections}}
+   - Current load: {{current_load}}
+   - Queue depth: {{queue_depth}}
+
+3. Infrastructure Readiness
+   - Container orchestration status: {{container_status}}
+   - Load balancer configuration: {{lb_status}}
+   - Monitoring systems active: {{monitoring_status}}
+   - Alert channels verified: {{alert_status}}
+
+MAINTENANCE EXECUTION PROCEDURE
+===============================
+
+Phase 1: Pre-Migration Preparation ({{phase1_duration}})
+--------------------------------------------------------
+1. Enable maintenance mode on Flask application
+2. Gracefully drain active connections
+3. Stop background job processing
+4. Verify backup integrity and accessibility
+5. Confirm monitoring and alerting systems ready
+
+Flask Commands to Execute:
+- flask maintenance enable
+- flask db backup --verify
+- flask db validate --target-version {{target_version}}
+
+Phase 2: Schema Migration Execution ({{phase2_duration}})
+----------------------------------------------------------
+1. Execute Flask-Migrate upgrade operation
+2. Monitor migration progress and performance
+3. Validate schema changes against specification
+4. Verify data integrity post-migration
+5. Update application configuration if required
+
+Flask-Migrate Commands:
+- flask db upgrade {{target_version}}
+- flask db validate --check-integrity
+- flask db performance-test --post-migration
+
+Phase 3: Post-Migration Validation ({{phase3_duration}})
+---------------------------------------------------------
+1. Execute comprehensive application test suite
+2. Verify API endpoint functionality
+3. Validate authentication and authorization systems
+4. Confirm monitoring and logging operations
+5. Disable maintenance mode and restore service
+
+Validation Commands:
+- flask test --security-validation
+- flask auth test --auth0-integration
+- flask health-check --comprehensive
+- flask maintenance disable
+
+DOWNTIME IMPACT ASSESSMENT
+===========================
+
+Service Availability:
+- Planned downtime: {{planned_downtime}}
+- User-facing services affected: {{affected_services}}
+- API endpoints impacted: {{affected_endpoints}}
+- Authentication services: {{auth_impact}}
+
+Business Impact:
+- Peak usage hours: {{peak_hours}}
+- Expected user impact: {{user_impact}}
+- Revenue impact estimate: {{revenue_impact}}
+- Customer notification required: {{customer_notification}}
+
+Recovery Time Objectives:
+- Maximum tolerable downtime: {{max_downtime}}
+- Recovery time objective: {{rto}}
+- Recovery point objective: {{rpo}}
 
 ROLLBACK PROCEDURES
--------------------
-Automatic Rollback Triggers:
-  - Migration execution time exceeds {{ rollback_timeout or "30 minutes" }}
-  - Database connection pool exhaustion (>95% utilization)
-  - Query performance degradation >{{ performance_threshold or "50%" }}
-  - Application error rate exceeds {{ error_threshold or "1%" }}
+===================
 
-Rollback Execution Steps:
-  1. Immediate: Stop migration process (Ctrl+C if interactive)
-  2. Database: flask db downgrade {{ previous_version or "[previous_revision]" }}
-  3. Verification: Validate schema rollback completion
-  4. Health Check: Confirm application connectivity
-  5. Performance: Validate query response times
-  6. Monitoring: Enable enhanced monitoring for 24h post-rollback
+Emergency Rollback Triggers:
+- Migration execution time exceeds {{max_execution_time}}
+- Data integrity validation failures detected
+- Application health checks fail post-migration
+- Critical error rate exceeds {{error_threshold}}%
+- Manual rollback decision by {{rollback_authority}}
 
-Emergency Rollback (Critical Failures):
-  1. Stop Flask application instances
-  2. Restore database from backup snapshot
-  3. Verify data integrity with checksum validation
-  4. Restart application services
-  5. Notify incident response team
+Automated Rollback Process:
+1. Immediate migration halt: flask db migration halt
+2. Database restoration: flask db restore --backup-id {{backup_id}}
+3. Application configuration revert: flask config rollback
+4. Service health validation: flask health-check --post-rollback
+5. Monitoring system notification: flask alert rollback-complete
 
-SYSTEM IMPACT AND SERVICE STATUS
----------------------------------
-Affected Services:
-{% if affected_services %}
-{% for service in affected_services %}
-  - {{ service.name }}: {{ service.impact }}
-    {% if service.alternative %}Alternative: {{ service.alternative }}{% endif %}
-{% endfor %}
-{% else %}
-  - All Flask application endpoints (temporary unavailability)
-  - Database read/write operations (migration duration)
-  - Background job processing (if applicable)
-  - API integrations (connection dependent)
-{% endif %}
+Manual Rollback Commands:
+- flask db downgrade {{rollback_version}}
+- flask db validate --rollback-integrity
+- flask cache clear --all
+- flask maintenance disable
 
-Monitoring During Maintenance:
-  - Health Check Endpoints: /health/liveness, /health/readiness
-  - Performance Metrics: CloudWatch Container Insights
-  - Error Tracking: Sentry real-time monitoring
-  - Infrastructure: AWS ECS/EKS container status
+Estimated Rollback Time: {{rollback_time}}
+Rollback Testing Status: {{rollback_tested}}
 
-Expected Service Availability:
-  - API Endpoints: {{ api_availability or "Unavailable during migration window" }}
-  - Database Queries: {{ db_availability or "Unavailable during schema changes" }}
-  - Authentication: {{ auth_availability or "Auth0 integration maintained" }}
-  - File Operations: {{ file_availability or "Unaffected" }}
+MONITORING AND COMMUNICATION
+=============================
 
-PREPARATION CHECKLIST
-----------------------
-Pre-Migration Requirements:
-  □ Database backup completed and verified
-  □ Migration scripts reviewed and approved
-  □ Rollback procedures tested in staging
-  □ Performance baselines documented
-  □ Monitoring alerts configured
-  □ Team communication channels established
+Real-Time Monitoring Dashboards:
+- Database performance: {{db_dashboard_url}}
+- Application metrics: {{app_dashboard_url}}
+- Infrastructure status: {{infra_dashboard_url}}
+- Security monitoring: {{security_dashboard_url}}
 
-Required Approvals:
-  □ Database Administrator: {{ dba_approval or "Pending" }}
-  □ Engineering Manager: {{ eng_approval or "Pending" }}
-  □ Operations Team: {{ ops_approval or "Pending" }}
-  □ Security Team (if schema changes): {{ sec_approval or "N/A" }}
+Communication Channels:
+- Primary contact: {{primary_contact}}
+- Escalation contact: {{escalation_contact}}
+- Operations team: {{ops_team_contact}}
+- Emergency hotline: {{emergency_contact}}
 
-NOTIFICATION RECIPIENTS
------------------------
-Primary Contacts:
-  - Database Team: {{ db_team_contact or "db-team@company.com" }}
-  - Engineering Manager: {{ eng_manager_contact or "engineering@company.com" }}
-  - Operations Team: {{ ops_team_contact or "ops@company.com" }}
-  - On-Call Engineer: {{ oncall_contact or "oncall@company.com" }}
+Status Update Schedule:
+- Pre-maintenance: {{pre_update_time}}
+- During execution: Every {{update_interval}} minutes
+- Post-completion: {{post_update_time}}
+- Final report: {{final_report_time}}
 
-Escalation Contacts:
-  - Incident Response: {{ incident_contact or "incident-response@company.com" }}
-  - Technical Lead: {{ tech_lead_contact or "tech-lead@company.com" }}
-  - CTO (Critical Issues): {{ cto_contact or "cto@company.com" }}
+Notification Methods:
+- Email updates to: {{notification_email_list}}
+- Slack channel: {{slack_channel}}
+- SMS alerts for critical issues: {{sms_recipients}}
+- Status page updates: {{status_page_url}}
 
-MONITORING AND VALIDATION
---------------------------
-Real-time Monitoring:
-  - CloudWatch Dashboard: {{ monitoring_dashboard or "[Dashboard URL]" }}
-  - Grafana Metrics: {{ grafana_dashboard or "[Grafana URL]" }}
-  - Application Logs: {{ log_dashboard or "[CloudWatch Logs URL]" }}
-  - Error Tracking: {{ sentry_dashboard or "[Sentry Project URL]" }}
+RISK MITIGATION
+================
 
-Post-Migration Validation:
-  1. Schema Integrity: Validate all tables and constraints
-  2. Data Consistency: Row count and checksum verification
-  3. Performance Benchmarking: Compare against pre-migration baselines
-  4. Relationship Validation: Foreign key and referential integrity
-  5. Index Performance: Query execution plan analysis
-  6. Connection Pool Health: Monitor pool utilization patterns
+Identified Risks and Mitigation Strategies:
 
-Success Criteria:
-  □ Migration completed without errors
-  □ All affected tables accessible and functional
-  □ Query performance within SLA requirements (<100ms)
-  □ API response times maintained (<200ms)
-  □ No data loss or corruption detected
-  □ Connection pool operating within normal parameters
+1. Migration Script Failure
+   Risk Level: {{script_failure_risk}}
+   Mitigation: Pre-tested migration scripts, automated rollback triggers
+   Contingency: Manual intervention procedures documented
 
-COMMUNICATION SCHEDULE
------------------------
-Pre-Migration ({{ pre_migration_notice or "24 hours" }} before):
-  - Detailed migration plan distribution
-  - Final preparation checklist verification
-  - Team coordination and role assignments
+2. Extended Downtime
+   Risk Level: {{downtime_risk}}
+   Mitigation: Phased migration approach, real-time monitoring
+   Contingency: Service degradation mode, partial restoration
 
-During Migration:
-  - 15-minute status updates via {{ communication_channel or "Slack #operations" }}
-  - Immediate notification of any issues or delays
-  - Progress updates at major milestones
+3. Data Integrity Issues
+   Risk Level: {{integrity_risk}}
+   Mitigation: Comprehensive backup strategy, validation checkpoints
+   Contingency: Point-in-time recovery, data reconciliation procedures
 
-Post-Migration:
-  - Completion notification with success confirmation
-  - Performance validation results
-  - Any issues encountered and resolutions
-  - 24-hour follow-up status report
+4. Authentication System Impact
+   Risk Level: {{auth_risk}}
+   Mitigation: Auth0 integration testing, session preservation
+   Contingency: Emergency authentication bypass, user re-authentication
 
-ADDITIONAL INFORMATION
-----------------------
-Migration Documentation:
-  - Technical Specification: Section 4.4 DATABASE MIGRATION WORKFLOW
-  - Monitoring Architecture: Section 6.5 MONITORING AND OBSERVABILITY
-  - Rollback Procedures: Emergency response runbooks
-  - Performance SLAs: <200ms API response, <100ms database queries
+POST-MAINTENANCE ACTIVITIES
+============================
 
-For Questions or Concerns:
-  Contact the Database Administration team at {{ support_contact or "database-support@company.com" }}
-  Emergency Contact: {{ emergency_contact or "emergency@company.com" }}
-  
-Migration Request ID: {{ migration_id or "AUTO-GENERATED" }}
-Notification Generated: {{ timestamp or "[AUTO-TIMESTAMP]" }}
+Immediate Post-Maintenance (0-2 hours):
+- System performance monitoring and optimization
+- User access verification and support
+- Error log analysis and resolution
+- Backup cleanup and archival
+- Documentation updates
+
+Extended Monitoring Period (2-48 hours):
+- Application performance baseline re-establishment
+- User behavior pattern analysis
+- Security posture validation
+- Capacity planning assessment
+- Lessons learned documentation
+
+Reporting Requirements:
+- Maintenance execution report: {{report_deadline}}
+- Performance impact analysis: {{analysis_deadline}}
+- User experience assessment: {{ux_assessment_deadline}}
+- Technical recommendations: {{recommendations_deadline}}
+
+CONTACT INFORMATION
+===================
+
+Database Administration Team:
+- Primary DBA: {{primary_dba_name}} - {{primary_dba_email}} - {{primary_dba_phone}}
+- Backup DBA: {{backup_dba_name}} - {{backup_dba_email}} - {{backup_dba_phone}}
+
+Application Development Team:
+- Lead Developer: {{lead_dev_name}} - {{lead_dev_email}} - {{lead_dev_phone}}
+- Flask Specialist: {{flask_specialist_name}} - {{flask_specialist_email}} - {{flask_specialist_phone}}
+
+Operations Team:
+- Operations Manager: {{ops_manager_name}} - {{ops_manager_email}} - {{ops_manager_phone}}
+- On-Call Engineer: {{oncall_engineer}} - {{oncall_email}} - {{oncall_phone}}
+
+Management:
+- Technical Director: {{tech_director_name}} - {{tech_director_email}}
+- Engineering Manager: {{eng_manager_name}} - {{eng_manager_email}}
+
+APPROVAL AND AUTHORIZATION
+===========================
+
+This maintenance operation has been reviewed and approved by:
+
+Database Administrator: {{dba_approval}} - Date: {{dba_approval_date}}
+Engineering Manager: {{eng_approval}} - Date: {{eng_approval_date}}
+Operations Manager: {{ops_approval}} - Date: {{ops_approval_date}}
+Change Advisory Board: {{cab_approval}} - Date: {{cab_approval_date}}
+
+Change Request ID: {{change_request_id}}
+Maintenance Window ID: {{maintenance_window_id}}
+Risk Assessment Score: {{risk_score}}/10
+
+IMPORTANT REMINDERS
+===================
+
+1. All personnel involved must be available during the maintenance window
+2. Emergency contact procedures must be tested prior to maintenance
+3. Rollback decision authority rests with: {{rollback_authority}}
+4. No other system changes permitted during maintenance window
+5. Customer communication must be coordinated through: {{customer_comms_lead}}
+
+For questions regarding this maintenance operation, please contact the Database Administration team or refer to the comprehensive maintenance documentation at: {{documentation_url}}
+
+This notification was generated automatically by the Flask Application Maintenance System.
+Generation time: {{generation_timestamp}}
+Notification ID: {{notification_id}}
 
 ---
-This is an automated notification from the Flask Database Migration System.
-For technical details, refer to the Flask-Migrate documentation and monitoring dashboards.
+Flask Application Database Maintenance System
+Technical Operations Team
+Company IT Infrastructure Division
