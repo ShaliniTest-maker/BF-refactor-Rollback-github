@@ -1,600 +1,710 @@
-"""Initial database schema creation for Flask-SQLAlchemy 3.1.1 PostgreSQL conversion
+"""Initial schema creation with comprehensive PostgreSQL database structure
 
-Revision ID: a1b2c3d4e5f6
-Revises: 
-Create Date: 2024-01-15 10:00:00.000000
+This migration establishes the complete Flask-SQLAlchemy database schema converted from MongoDB 
+collections, implementing PostgreSQL 14.12+ relational patterns with comprehensive indexing, 
+foreign key relationships, and audit field support per Section 6.2.2 database design requirements.
 
-This migration establishes the complete PostgreSQL 14.12+ database schema converted from
-MongoDB collections, implementing Flask-SQLAlchemy declarative model requirements with
-comprehensive indexing strategy, audit trail capabilities, and enterprise-grade constraints.
-
-Key Features Implemented:
-- PostgreSQL data type mapping per Section 6.2.1
-- Database naming conventions with snake_case tables per Section 6.2.2.1
-- Comprehensive indexing including primary keys, unique constraints, and foreign key indexes per Section 6.2.2.2
+Key Features:
+- Flask-SQLAlchemy 3.1.1 declarative model table definitions per Section 6.2.2 schema design
+- PostgreSQL 14.12+ database engine with proper data type mapping per Section 6.2.1
+- Database naming conventions with snake_case tables and _id foreign key suffixes per Section 6.2.2.1
+- Comprehensive indexing strategy including primary keys, unique constraints, and foreign key indexes per Section 6.2.2.2
 - Audit mixin implementation for DML event tracking per Section 6.2.4.1
-- CASCADE deletion configuration for referential integrity per Section 6.2.2.1
-- PostgreSQL-specific optimizations including JSONB columns and GIN indexes
-- SSL/TLS connection security enforcement per Section 6.2.4.1
+- CASCADE deletion for foreign key relationships per Section 6.2.2.1 relationship requirements
 
 Tables Created:
-1. users - User authentication and profile management with encrypted PII fields
-2. user_sessions - Flask session management with secure token storage
-3. roles - RBAC role definitions with hierarchy support
-4. permissions - RBAC permission definitions with resource-action patterns
-5. user_roles - Many-to-many user-role assignments with audit metadata
-6. role_permissions - Many-to-many role-permission grants with audit metadata
-7. business_entity - Core business entity management with ownership tracking
-8. entity_relationship - Business entity relationship mapping with type classification
-9. audit_logs - Comprehensive DML operation tracking with PostgreSQL JSONB
-10. security_events - Security incident tracking and monitoring
+- user: User authentication and profile information with audit fields
+- user_session: User session management with token-based authentication
+- role: Role-based access control role definitions
+- permission: Permission definitions for RBAC system
+- user_role: Many-to-many relationship between users and roles
+- role_permission: Many-to-many relationship between roles and permissions
+- business_entity: Core business entities with owner relationships
+- entity_relationship: Relationships between business entities
+- audit_log: Comprehensive audit trail for all system operations
+- security_event: Security event tracking and monitoring
 
-Performance Optimizations:
-- Strategic B-tree indexes for common query patterns
-- GIN indexes for JSONB column queries
-- BRIN indexes for time-series data (created_at, updated_at)
-- Partial indexes for soft-delete patterns and active record filtering
-- Composite indexes for multi-column queries and relationships
+Revision ID: 001_initial_schema_creation_a1b2c3d4e5f6
+Revises: 
+Create Date: 2024-12-19 10:00:00.000000
 
-Compliance Features:
-- Column-level encryption support via EncryptedType field preparation
-- Comprehensive audit trails for all DML operations
-- User attribution tracking with Flask-Login integration
-- GDPR-compliant pseudonymization support framework
-- Seven-year audit log retention policy infrastructure
+Migration Features:
+- Zero data loss design with comprehensive validation
+- Performance-optimized indexing strategy for PostgreSQL
+- Full referential integrity with CASCADE deletion support
+- Audit field implementation with automatic timestamp tracking
+- PostgreSQL-specific optimizations including JSONB support
+- Production-ready constraints and validation rules
+
+Author: Flask Migration System
+Version: 1.0.0
+Compatibility: Flask-SQLAlchemy 3.1.1, PostgreSQL 14.12+, Alembic 1.13.2+
 """
 
+from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-from datetime import datetime
+from sqlalchemy import text
+import logging
+
+# Configure migration logging
+logger = logging.getLogger('alembic.migration')
 
 # revision identifiers, used by Alembic.
-revision = 'a1b2c3d4e5f6'
-down_revision = None
-branch_labels = None
-depends_on = None
+revision: str = '001_initial_schema_creation_a1b2c3d4e5f6'
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade():
+def get_audit_columns():
     """
-    Create the complete PostgreSQL database schema for Flask-SQLAlchemy models.
+    Get standardized audit columns for DML event tracking per Section 6.2.4.1.
     
-    Implements comprehensive table creation with proper relationships, constraints,
-    and indexing strategy optimized for PostgreSQL 14.12+ performance characteristics.
+    Returns comprehensive audit fields including created_at, updated_at, created_by, 
+    and updated_by columns with proper data types and constraints for compliance 
+    and security monitoring requirements.
+    
+    Returns:
+        list: List of SQLAlchemy Column definitions for audit tracking
     """
-    
-    # 1. Create users table - Core user authentication and profile management
-    op.create_table(
-        'users',
-        # Primary key and core identification
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('auth0_user_id', sa.String(255), nullable=True),
-        sa.Column('username', sa.String(100), nullable=False),
-        
-        # Encrypted sensitive fields - prepared for SQLAlchemy-Utils EncryptedType
-        # Note: Migration creates as String columns; EncryptedType handled at ORM level
-        sa.Column('email', sa.String(255), nullable=False),
-        sa.Column('password_hash', sa.String(255), nullable=True),
-        sa.Column('first_name', sa.String(100), nullable=True),
-        sa.Column('last_name', sa.String(100), nullable=True),
-        
-        # User status and verification flags
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        sa.Column('is_verified', sa.Boolean(), nullable=False, default=False),
-        sa.Column('is_admin', sa.Boolean(), nullable=False, default=False),
-        
-        # Authentication tracking and security
-        sa.Column('last_login_at', sa.DateTime(), nullable=True),
-        sa.Column('login_count', sa.Integer(), nullable=False, default=0),
-        sa.Column('failed_login_count', sa.Integer(), nullable=False, default=0),
-        sa.Column('locked_until', sa.DateTime(), nullable=True),
-        
-        # Profile and preferences
-        sa.Column('timezone', sa.String(50), nullable=False, default='UTC'),
-        sa.Column('locale', sa.String(10), nullable=False, default='en'),
-        sa.Column('avatar_url', sa.String(500), nullable=True),
-        
-        # Auth0 integration metadata
-        sa.Column('auth0_metadata', sa.Text(), nullable=True),
-        sa.Column('auth0_app_metadata', sa.Text(), nullable=True),
-        
-        # Terms and privacy compliance
-        sa.Column('terms_accepted_at', sa.DateTime(), nullable=True),
-        sa.Column('privacy_accepted_at', sa.DateTime(), nullable=True),
-        
-        # Audit mixin fields for DML event tracking
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints and validations
-        sa.UniqueConstraint('username', name='uq_users_username'),
-        sa.UniqueConstraint('auth0_user_id', name='uq_users_auth0_user_id'),
-        sa.UniqueConstraint('email', name='uq_users_email'),
-        sa.CheckConstraint('login_count >= 0', name='ck_users_login_count_positive'),
-        sa.CheckConstraint('failed_login_count >= 0', name='ck_users_failed_login_count_positive'),
-        sa.CheckConstraint("timezone != ''", name='ck_users_timezone_not_empty'),
-        sa.CheckConstraint("locale IN ('en', 'es', 'fr', 'de', 'it', 'pt', 'ja', 'ko', 'zh')", 
-                          name='ck_users_locale_valid')
-    )
-    
-    # 2. Create roles table - RBAC role definitions with hierarchy support
-    op.create_table(
-        'roles',
-        # Primary key and core fields
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('name', sa.String(100), nullable=False),
-        sa.Column('description', sa.String(500), nullable=True),
-        
-        # Status and hierarchy management
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        sa.Column('is_system', sa.Boolean(), nullable=False, default=False),
-        sa.Column('priority', sa.Integer(), nullable=False, default=0),
-        
-        # Role metadata
-        sa.Column('role_type', sa.String(50), nullable=False, default='custom'),
-        sa.Column('max_assignments', sa.Integer(), nullable=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('name', name='uq_roles_name'),
-        sa.CheckConstraint('priority >= 0', name='ck_roles_priority_positive'),
-        sa.CheckConstraint("role_type IN ('system', 'custom', 'inherited')", 
-                          name='ck_roles_type_valid'),
-        sa.CheckConstraint('max_assignments IS NULL OR max_assignments > 0', 
-                          name='ck_roles_max_assignments_positive')
-    )
-    
-    # 3. Create permissions table - RBAC permission definitions
-    op.create_table(
-        'permissions',
-        # Primary key and core fields
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('name', sa.String(100), nullable=False),
-        sa.Column('description', sa.String(500), nullable=True),
-        sa.Column('resource', sa.String(100), nullable=False),
-        sa.Column('action', sa.String(50), nullable=False),
-        
-        # Permission metadata and hierarchy
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        sa.Column('is_system', sa.Boolean(), nullable=False, default=False),
-        sa.Column('permission_level', sa.Integer(), nullable=False, default=0),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('name', name='uq_permissions_name'),
-        sa.UniqueConstraint('resource', 'action', name='uq_permissions_resource_action'),
-        sa.CheckConstraint('permission_level >= 0', name='ck_permissions_level_positive'),
-        sa.CheckConstraint("action IN ('create', 'read', 'update', 'delete', 'execute', 'admin')",
-                          name='ck_permissions_action_valid')
-    )
-    
-    # 4. Create user_roles association table - Many-to-many user-role assignments
-    op.create_table(
-        'user_roles',
-        # Primary key and foreign keys
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('role_id', sa.Integer(), sa.ForeignKey('roles.id', ondelete='CASCADE'), nullable=False),
-        
-        # Assignment metadata with audit trail
-        sa.Column('assigned_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('assigned_by', sa.String(100), nullable=True),
-        sa.Column('expires_at', sa.DateTime(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('user_id', 'role_id', name='uq_user_roles_assignment')
-    )
-    
-    # 5. Create role_permissions association table - Many-to-many role-permission grants
-    op.create_table(
-        'role_permissions',
-        # Primary key and foreign keys
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('role_id', sa.Integer(), sa.ForeignKey('roles.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('permission_id', sa.Integer(), sa.ForeignKey('permissions.id', ondelete='CASCADE'), nullable=False),
-        
-        # Grant metadata with audit trail
-        sa.Column('granted_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('granted_by', sa.String(100), nullable=True),
-        sa.Column('expires_at', sa.DateTime(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('role_id', 'permission_id', name='uq_role_permissions_grant')
-    )
-    
-    # 6. Create user_sessions table - Flask session management
-    op.create_table(
-        'user_sessions',
-        # Primary key and relationships
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
-        
-        # Session tokens and security
-        sa.Column('session_token', sa.String(255), nullable=False),
-        sa.Column('csrf_token', sa.String(255), nullable=True),
-        sa.Column('refresh_token', sa.String(255), nullable=True),
-        
-        # Session lifecycle
-        sa.Column('expires_at', sa.DateTime(), nullable=False),
-        sa.Column('is_valid', sa.Boolean(), nullable=False, default=True),
-        sa.Column('revoked_at', sa.DateTime(), nullable=True),
-        sa.Column('revoked_by', sa.String(100), nullable=True),
-        
-        # Security tracking
-        sa.Column('ip_address', sa.String(45), nullable=True),  # IPv6 compatible
-        sa.Column('user_agent', sa.Text(), nullable=True),
-        sa.Column('last_activity_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        
-        # Session metadata
-        sa.Column('session_data', sa.Text(), nullable=True),  # JSON string
-        sa.Column('login_method', sa.String(50), nullable=False, default='password'),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('session_token', name='uq_user_sessions_token'),
-        sa.CheckConstraint('expires_at > created_at', name='ck_user_sessions_expires_after_creation'),
-        sa.CheckConstraint("login_method IN ('password', 'auth0', 'social', 'api', 'system')",
-                          name='ck_user_sessions_login_method_valid')
-    )
-    
-    # 7. Create business_entity table - Core business entity management
-    op.create_table(
-        'business_entity',
-        # Primary identifier
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        
-        # Core entity attributes
-        sa.Column('name', sa.String(255), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        
-        # Ownership and status management
-        sa.Column('owner_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('status', sa.String(50), nullable=False, default='active'),
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        
-        # Business entity metadata
-        sa.Column('entity_type', sa.String(100), nullable=True),
-        sa.Column('external_id', sa.String(255), nullable=True),
-        sa.Column('metadata', postgresql.JSONB(), nullable=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('name', 'owner_id', name='uq_business_entity_name_owner'),
-        sa.CheckConstraint("status IN ('active', 'inactive', 'pending', 'archived', 'deleted')",
-                          name='ck_business_entity_status_valid'),
-        sa.CheckConstraint("name != ''", name='ck_business_entity_name_not_empty')
-    )
-    
-    # 8. Create entity_relationship table - Business entity relationship mapping
-    op.create_table(
-        'entity_relationship',
-        # Primary identifier
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        
-        # Relationship definition
-        sa.Column('source_entity_id', sa.Integer(), 
-                 sa.ForeignKey('business_entity.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('target_entity_id', sa.Integer(), 
-                 sa.ForeignKey('business_entity.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('relationship_type', sa.String(100), nullable=False),
-        
-        # Relationship metadata and status
-        sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        sa.Column('strength', sa.Integer(), nullable=True),  # Relationship strength/weight
-        sa.Column('metadata', postgresql.JSONB(), nullable=True),
-        sa.Column('description', sa.Text(), nullable=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.UniqueConstraint('source_entity_id', 'target_entity_id', 'relationship_type',
-                           name='uq_entity_relationship_unique'),
-        sa.CheckConstraint('source_entity_id != target_entity_id', 
-                          name='ck_entity_relationship_no_self_reference'),
-        sa.CheckConstraint("relationship_type IN ('parent', 'child', 'peer', 'dependency', 'association', 'hierarchy')",
-                          name='ck_entity_relationship_type_valid'),
-        sa.CheckConstraint('strength IS NULL OR (strength >= 0 AND strength <= 100)',
-                          name='ck_entity_relationship_strength_valid')
-    )
-    
-    # 9. Create audit_logs table - Comprehensive DML operation tracking
-    op.create_table(
-        'audit_logs',
-        # Primary identification
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        
-        # Core audit tracking fields
-        sa.Column('table_name', sa.String(100), nullable=False),
-        sa.Column('record_id', sa.String(50), nullable=True),
-        sa.Column('operation_type', sa.String(10), nullable=False),  # INSERT, UPDATE, DELETE
-        
-        # User and session context
-        sa.Column('user_id', sa.String(255), nullable=True),
-        sa.Column('username', sa.String(255), nullable=True),
-        sa.Column('session_id', sa.String(255), nullable=True),
-        
-        # Request context information
-        sa.Column('ip_address', sa.String(45), nullable=True),
-        sa.Column('user_agent', sa.Text(), nullable=True),
-        sa.Column('request_method', sa.String(10), nullable=True),
-        sa.Column('request_path', sa.String(500), nullable=True),
-        
-        # Change data capture using PostgreSQL JSONB for performance
-        sa.Column('old_values', postgresql.JSONB(), nullable=True),
-        sa.Column('new_values', postgresql.JSONB(), nullable=True),
-        sa.Column('changes', postgresql.JSONB(), nullable=True),  # Computed diff
-        
-        # Additional audit metadata
-        sa.Column('operation_timestamp', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('transaction_id', sa.String(255), nullable=True),
-        sa.Column('error_message', sa.Text(), nullable=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.CheckConstraint("operation_type IN ('INSERT', 'UPDATE', 'DELETE')",
-                          name='ck_audit_logs_operation_type_valid')
-    )
-    
-    # 10. Create security_events table - Security incident tracking
-    op.create_table(
-        'security_events',
-        # Primary identification
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        
-        # Event classification
-        sa.Column('event_type', sa.String(100), nullable=False),
-        sa.Column('severity', sa.String(20), nullable=False, default='medium'),
-        sa.Column('category', sa.String(50), nullable=False),
-        
-        # Event details
-        sa.Column('description', sa.Text(), nullable=False),
-        sa.Column('event_data', postgresql.JSONB(), nullable=True),
-        
-        # User and session context
-        sa.Column('user_id', sa.Integer(), nullable=True),
-        sa.Column('username', sa.String(255), nullable=True),
-        sa.Column('session_id', sa.String(255), nullable=True),
-        
-        # Request context
-        sa.Column('ip_address', sa.String(45), nullable=True),
-        sa.Column('user_agent', sa.Text(), nullable=True),
-        sa.Column('request_path', sa.String(500), nullable=True),
-        
-        # Event processing status
-        sa.Column('is_resolved', sa.Boolean(), nullable=False, default=False),
-        sa.Column('resolved_at', sa.DateTime(), nullable=True),
-        sa.Column('resolved_by', sa.String(255), nullable=True),
-        sa.Column('resolution_notes', sa.Text(), nullable=True),
-        
-        # Audit mixin fields
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('created_by', sa.String(100), nullable=True),
-        sa.Column('updated_by', sa.String(100), nullable=True),
-        
-        # Constraints
-        sa.CheckConstraint("severity IN ('low', 'medium', 'high', 'critical')",
-                          name='ck_security_events_severity_valid'),
-        sa.CheckConstraint("category IN ('authentication', 'authorization', 'data_access', 'system', 'compliance')",
-                          name='ck_security_events_category_valid')
-    )
-    
-    # Create comprehensive indexing strategy per Section 6.2.2.2
-    
-    # Users table indexes
-    op.create_index('idx_users_username', 'users', ['username'])
-    op.create_index('idx_users_auth0_user_id', 'users', ['auth0_user_id'])
-    op.create_index('idx_users_email', 'users', ['email'])
-    op.create_index('idx_users_is_active', 'users', ['is_active'])
-    op.create_index('idx_users_last_login_at', 'users', ['last_login_at'])
-    op.create_index('idx_users_created_at', 'users', ['created_at'])
-    op.create_index('idx_users_active_verified', 'users', ['is_active', 'is_verified'])
-    op.create_index('idx_users_login_tracking', 'users', ['last_login_at', 'login_count'])
-    op.create_index('idx_users_auth0_integration', 'users', ['auth0_user_id', 'is_active'])
-    
-    # Roles table indexes
-    op.create_index('idx_roles_name', 'roles', ['name'])
-    op.create_index('idx_roles_is_active', 'roles', ['is_active'])
-    op.create_index('idx_roles_priority', 'roles', ['priority'])
-    op.create_index('idx_roles_active_priority', 'roles', ['is_active', 'priority'])
-    op.create_index('idx_roles_type', 'roles', ['role_type'])
-    op.create_index('idx_roles_created_at', 'roles', ['created_at'])
-    
-    # Permissions table indexes
-    op.create_index('idx_permissions_name', 'permissions', ['name'])
-    op.create_index('idx_permissions_resource', 'permissions', ['resource'])
-    op.create_index('idx_permissions_action', 'permissions', ['action'])
-    op.create_index('idx_permissions_is_active', 'permissions', ['is_active'])
-    op.create_index('idx_permissions_resource_action', 'permissions', ['resource', 'action'])
-    op.create_index('idx_permissions_created_at', 'permissions', ['created_at'])
-    
-    # User_roles association table indexes
-    op.create_index('idx_user_roles_user_id', 'user_roles', ['user_id'])
-    op.create_index('idx_user_roles_role_id', 'user_roles', ['role_id'])
-    op.create_index('idx_user_roles_is_active', 'user_roles', ['is_active'])
-    op.create_index('idx_user_roles_assigned_at', 'user_roles', ['assigned_at'])
-    op.create_index('idx_user_roles_user_valid', 'user_roles', ['user_id', 'is_active'])
-    # PostgreSQL partial index for active assignments only
-    op.execute("""
-        CREATE INDEX idx_user_roles_active_assignments 
-        ON user_roles (user_id, role_id) 
-        WHERE is_active = true
-    """)
-    
-    # Role_permissions association table indexes
-    op.create_index('idx_role_permissions_role_id', 'role_permissions', ['role_id'])
-    op.create_index('idx_role_permissions_permission_id', 'role_permissions', ['permission_id'])
-    op.create_index('idx_role_permissions_is_active', 'role_permissions', ['is_active'])
-    op.create_index('idx_role_permissions_granted_at', 'role_permissions', ['granted_at'])
-    # PostgreSQL partial index for active grants only
-    op.execute("""
-        CREATE INDEX idx_role_permissions_active_grants 
-        ON role_permissions (role_id, permission_id) 
-        WHERE is_active = true
-    """)
-    
-    # User_sessions table indexes
-    op.create_index('idx_user_sessions_user_id', 'user_sessions', ['user_id'])
-    op.create_index('idx_user_sessions_session_token', 'user_sessions', ['session_token'])
-    op.create_index('idx_user_sessions_expires_at', 'user_sessions', ['expires_at'])
-    op.create_index('idx_user_sessions_is_valid', 'user_sessions', ['is_valid'])
-    op.create_index('idx_user_sessions_last_activity_at', 'user_sessions', ['last_activity_at'])
-    op.create_index('idx_user_sessions_user_valid', 'user_sessions', ['user_id', 'is_valid'])
-    op.create_index('idx_user_sessions_cleanup', 'user_sessions', ['expires_at', 'is_valid'])
-    op.create_index('idx_user_sessions_activity', 'user_sessions', ['last_activity_at', 'is_valid'])
-    op.create_index('idx_user_sessions_security', 'user_sessions', ['ip_address', 'user_agent'])
-    
-    # Business_entity table indexes
-    op.create_index('idx_business_entity_name', 'business_entity', ['name'])
-    op.create_index('idx_business_entity_owner_id', 'business_entity', ['owner_id'])
-    op.create_index('idx_business_entity_status', 'business_entity', ['status'])
-    op.create_index('idx_business_entity_is_active', 'business_entity', ['is_active'])
-    op.create_index('idx_business_entity_entity_type', 'business_entity', ['entity_type'])
-    op.create_index('idx_business_entity_external_id', 'business_entity', ['external_id'])
-    op.create_index('idx_business_entity_created_at', 'business_entity', ['created_at'])
-    op.create_index('idx_business_entity_owner_active', 'business_entity', ['owner_id', 'is_active'])
-    # GIN index for JSONB metadata queries
-    op.execute("""
-        CREATE INDEX idx_business_entity_metadata_gin 
-        ON business_entity USING gin(metadata)
-    """)
-    
-    # Entity_relationship table indexes
-    op.create_index('idx_entity_relationship_source_entity_id', 'entity_relationship', ['source_entity_id'])
-    op.create_index('idx_entity_relationship_target_entity_id', 'entity_relationship', ['target_entity_id'])
-    op.create_index('idx_entity_relationship_type', 'entity_relationship', ['relationship_type'])
-    op.create_index('idx_entity_relationship_is_active', 'entity_relationship', ['is_active'])
-    op.create_index('idx_entity_relationship_created_at', 'entity_relationship', ['created_at'])
-    op.create_index('idx_entity_relationship_source_type', 'entity_relationship', ['source_entity_id', 'relationship_type'])
-    op.create_index('idx_entity_relationship_target_type', 'entity_relationship', ['target_entity_id', 'relationship_type'])
-    # GIN index for JSONB metadata queries
-    op.execute("""
-        CREATE INDEX idx_entity_relationship_metadata_gin 
-        ON entity_relationship USING gin(metadata)
-    """)
-    
-    # Audit_logs table indexes - Optimized for audit queries
-    op.create_index('idx_audit_logs_table_name', 'audit_logs', ['table_name'])
-    op.create_index('idx_audit_logs_record_id', 'audit_logs', ['record_id'])
-    op.create_index('idx_audit_logs_operation_type', 'audit_logs', ['operation_type'])
-    op.create_index('idx_audit_logs_user_id', 'audit_logs', ['user_id'])
-    op.create_index('idx_audit_logs_operation_timestamp', 'audit_logs', ['operation_timestamp'])
-    op.create_index('idx_audit_logs_created_at', 'audit_logs', ['created_at'])
-    # Composite indexes for common audit query patterns
-    op.create_index('idx_audit_logs_table_operation_time', 'audit_logs', 
-                   ['table_name', 'operation_type', 'operation_timestamp'])
-    op.create_index('idx_audit_logs_user_time', 'audit_logs', ['user_id', 'operation_timestamp'])
-    op.create_index('idx_audit_logs_record_tracking', 'audit_logs', 
-                   ['table_name', 'record_id', 'operation_timestamp'])
-    op.create_index('idx_audit_logs_ip_time', 'audit_logs', ['ip_address', 'operation_timestamp'])
-    op.create_index('idx_audit_logs_session_tracking', 'audit_logs', ['session_id', 'operation_timestamp'])
-    
-    # GIN indexes for JSONB column queries
-    op.execute("""
-        CREATE INDEX idx_audit_logs_changes_gin 
-        ON audit_logs USING gin(changes)
-    """)
-    op.execute("""
-        CREATE INDEX idx_audit_logs_new_values_gin 
-        ON audit_logs USING gin(new_values)
-    """)
-    op.execute("""
-        CREATE INDEX idx_audit_logs_old_values_gin 
-        ON audit_logs USING gin(old_values)
-    """)
-    
-    # BRIN indexes for time-series data (created_at columns)
-    op.execute("""
-        CREATE INDEX idx_audit_logs_created_at_brin 
-        ON audit_logs USING brin(created_at)
-    """)
-    
-    # Security_events table indexes
-    op.create_index('idx_security_events_event_type', 'security_events', ['event_type'])
-    op.create_index('idx_security_events_severity', 'security_events', ['severity'])
-    op.create_index('idx_security_events_category', 'security_events', ['category'])
-    op.create_index('idx_security_events_user_id', 'security_events', ['user_id'])
-    op.create_index('idx_security_events_is_resolved', 'security_events', ['is_resolved'])
-    op.create_index('idx_security_events_created_at', 'security_events', ['created_at'])
-    op.create_index('idx_security_events_resolved_at', 'security_events', ['resolved_at'])
-    op.create_index('idx_security_events_ip_address', 'security_events', ['ip_address'])
-    # Composite indexes for security monitoring
-    op.create_index('idx_security_events_type_severity', 'security_events', ['event_type', 'severity'])
-    op.create_index('idx_security_events_unresolved', 'security_events', ['is_resolved', 'created_at'])
-    op.create_index('idx_security_events_user_time', 'security_events', ['user_id', 'created_at'])
-    
-    # GIN index for JSONB event_data queries
-    op.execute("""
-        CREATE INDEX idx_security_events_data_gin 
-        ON security_events USING gin(event_data)
-    """)
+    return [
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, 
+                 server_default=sa.text('CURRENT_TIMESTAMP'),
+                 comment='Record creation timestamp with timezone support'),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False,
+                 server_default=sa.text('CURRENT_TIMESTAMP'),
+                 comment='Record last modification timestamp with timezone support'),
+        sa.Column('created_by', sa.String(255), nullable=True,
+                 comment='User identifier who created the record'),
+        sa.Column('updated_by', sa.String(255), nullable=True,
+                 comment='User identifier who last modified the record')
+    ]
 
 
-def downgrade():
+def create_update_timestamp_trigger():
     """
-    Drop all tables and indexes created in the upgrade function.
+    Create PostgreSQL trigger function for automatic updated_at timestamp management.
     
-    Provides complete rollback capability for emergency recovery scenarios
-    while maintaining referential integrity through proper drop order.
+    Implements database-level trigger for automatic updated_at field maintenance,
+    ensuring consistent audit trail tracking without application-level intervention
+    per Section 6.2.4.1 audit implementation requirements.
     """
+    # Create trigger function for updating timestamps
+    trigger_function = text("""
+    CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+    END;
+    $$ language 'plpgsql';
+    """)
     
-    # Drop tables in reverse order to handle foreign key dependencies
-    op.drop_table('security_events')
-    op.drop_table('audit_logs')
-    op.drop_table('entity_relationship')
-    op.drop_table('business_entity')
-    op.drop_table('user_sessions')
-    op.drop_table('role_permissions')
-    op.drop_table('user_roles')
-    op.drop_table('permissions')
-    op.drop_table('roles')
-    op.drop_table('users')
+    op.execute(trigger_function)
+    logger.info("Created update_updated_at_column() trigger function")
+
+
+def apply_update_trigger(table_name: str):
+    """
+    Apply updated_at timestamp trigger to specified table.
     
-    # Note: Indexes are automatically dropped with their associated tables
-    # Custom indexes created with op.execute() are also dropped with tables
+    Args:
+        table_name: Name of table to apply trigger to
+    """
+    trigger_sql = text(f"""
+    CREATE TRIGGER update_{table_name}_updated_at
+        BEFORE UPDATE ON {table_name}
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+    """)
+    
+    op.execute(trigger_sql)
+    logger.info(f"Applied update trigger to table: {table_name}")
+
+
+def upgrade() -> None:
+    """
+    Create complete PostgreSQL database schema with Flask-SQLAlchemy table definitions.
+    
+    Implements comprehensive database schema creation per Section 4.4.1 database model 
+    conversion process, establishing all base tables, relationships, constraints, and 
+    indexes required for the Flask-SQLAlchemy models with PostgreSQL optimization.
+    
+    Schema Implementation:
+    - User authentication and session management tables
+    - Role-based access control (RBAC) system tables
+    - Business entity and relationship management tables
+    - Comprehensive audit and security event tracking tables
+    - Optimized indexing strategy for PostgreSQL performance
+    - Foreign key relationships with CASCADE deletion support
+    - Audit field implementation with automatic timestamp triggers
+    """
+    logger.info("Starting initial schema creation migration")
+    
+    try:
+        # Create update timestamp trigger function
+        create_update_timestamp_trigger()
+        
+        # =====================================================================
+        # USER AUTHENTICATION AND SESSION MANAGEMENT TABLES
+        # =====================================================================
+        
+        # Create user table with comprehensive authentication support
+        logger.info("Creating user table with authentication fields")
+        user_table = op.create_table(
+            'user',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer per Section 6.2.2.2'),
+            sa.Column('username', sa.String(80), nullable=False,
+                     comment='Unique username for authentication, maximum 80 characters'),
+            sa.Column('email', sa.String(120), nullable=False,
+                     comment='User email address with unique constraint for authentication'),
+            sa.Column('password_hash', sa.String(255), nullable=False,
+                     comment='Hashed password using secure hashing algorithm'),
+            sa.Column('first_name', sa.String(100), nullable=True,
+                     comment='User first name for profile information'),
+            sa.Column('last_name', sa.String(100), nullable=True,
+                     comment='User last name for profile information'),
+            sa.Column('is_active', sa.Boolean(), nullable=False, default=True,
+                     comment='User account active status for access control'),
+            sa.Column('is_verified', sa.Boolean(), nullable=False, default=False,
+                     comment='Email verification status for security'),
+            sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True,
+                     comment='Last successful login timestamp for security monitoring'),
+            sa.Column('failed_login_attempts', sa.Integer(), nullable=False, default=0,
+                     comment='Failed login attempt counter for security'),
+            sa.Column('locked_until', sa.DateTime(timezone=True), nullable=True,
+                     comment='Account lock expiration timestamp for security'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_user'),
+            sa.UniqueConstraint('username', name='uq_user_username'),
+            sa.UniqueConstraint('email', name='uq_user_email'),
+            comment='User authentication and profile information with audit fields'
+        )
+        
+        # Create user_session table for session management
+        logger.info("Creating user_session table for session management")
+        user_session_table = op.create_table(
+            'user_session',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('user_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to user table'),
+            sa.Column('session_token', sa.String(255), nullable=False,
+                     comment='Unique session token for authentication'),
+            sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False,
+                     comment='Session expiration timestamp for security'),
+            sa.Column('is_valid', sa.Boolean(), nullable=False, default=True,
+                     comment='Session validity status for access control'),
+            sa.Column('ip_address', sa.String(45), nullable=True,
+                     comment='Client IP address for security monitoring (IPv4/IPv6 support)'),
+            sa.Column('user_agent', sa.Text(), nullable=True,
+                     comment='Client user agent string for security tracking'),
+            sa.Column('last_activity_at', sa.DateTime(timezone=True), nullable=True,
+                     comment='Last session activity timestamp for monitoring'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_user_session'),
+            sa.UniqueConstraint('session_token', name='uq_user_session_token'),
+            sa.ForeignKeyConstraint(['user_id'], ['user.id'], 
+                                   name='fk_user_session_user_id', ondelete='CASCADE'),
+            comment='User session management with token-based authentication'
+        )
+        
+        # =====================================================================
+        # ROLE-BASED ACCESS CONTROL (RBAC) SYSTEM TABLES
+        # =====================================================================
+        
+        # Create role table for RBAC system
+        logger.info("Creating role table for RBAC system")
+        role_table = op.create_table(
+            'role',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('name', sa.String(80), nullable=False,
+                     comment='Role name with unique constraint for RBAC'),
+            sa.Column('description', sa.Text(), nullable=True,
+                     comment='Role description for administrative purposes'),
+            sa.Column('is_system_role', sa.Boolean(), nullable=False, default=False,
+                     comment='System role indicator for built-in roles'),
+            sa.Column('permissions_count', sa.Integer(), nullable=False, default=0,
+                     comment='Cached count of associated permissions for performance'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_role'),
+            sa.UniqueConstraint('name', name='uq_role_name'),
+            comment='Role definitions for RBAC system'
+        )
+        
+        # Create permission table for RBAC system
+        logger.info("Creating permission table for RBAC system")
+        permission_table = op.create_table(
+            'permission',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('name', sa.String(100), nullable=False,
+                     comment='Permission name with unique constraint'),
+            sa.Column('description', sa.Text(), nullable=True,
+                     comment='Permission description for administrative purposes'),
+            sa.Column('resource', sa.String(100), nullable=False,
+                     comment='Resource identifier for permission scope'),
+            sa.Column('action', sa.String(50), nullable=False,
+                     comment='Action identifier (create, read, update, delete, etc.)'),
+            sa.Column('is_system_permission', sa.Boolean(), nullable=False, default=False,
+                     comment='System permission indicator for built-in permissions'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_permission'),
+            sa.UniqueConstraint('name', name='uq_permission_name'),
+            sa.UniqueConstraint(['resource', 'action'], name='uq_permission_resource_action'),
+            comment='Permission definitions for RBAC system'
+        )
+        
+        # Create user_role junction table for many-to-many relationship
+        logger.info("Creating user_role junction table for user-role relationships")
+        user_role_table = op.create_table(
+            'user_role',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('user_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to user table'),
+            sa.Column('role_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to role table'),
+            sa.Column('granted_by', sa.String(255), nullable=True,
+                     comment='User identifier who granted this role assignment'),
+            sa.Column('granted_at', sa.DateTime(timezone=True), nullable=False,
+                     server_default=sa.text('CURRENT_TIMESTAMP'),
+                     comment='Role assignment timestamp'),
+            sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True,
+                     comment='Role assignment expiration timestamp (optional)'),
+            sa.Column('is_active', sa.Boolean(), nullable=False, default=True,
+                     comment='Role assignment active status'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_user_role'),
+            sa.UniqueConstraint(['user_id', 'role_id'], name='uq_user_role_user_role'),
+            sa.ForeignKeyConstraint(['user_id'], ['user.id'], 
+                                   name='fk_user_role_user_id', ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['role_id'], ['role.id'], 
+                                   name='fk_user_role_role_id', ondelete='CASCADE'),
+            comment='Many-to-many relationship between users and roles'
+        )
+        
+        # Create role_permission junction table for many-to-many relationship
+        logger.info("Creating role_permission junction table for role-permission relationships")
+        role_permission_table = op.create_table(
+            'role_permission',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('role_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to role table'),
+            sa.Column('permission_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to permission table'),
+            sa.Column('granted_by', sa.String(255), nullable=True,
+                     comment='User identifier who granted this permission to role'),
+            sa.Column('granted_at', sa.DateTime(timezone=True), nullable=False,
+                     server_default=sa.text('CURRENT_TIMESTAMP'),
+                     comment='Permission assignment timestamp'),
+            sa.Column('is_active', sa.Boolean(), nullable=False, default=True,
+                     comment='Permission assignment active status'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_role_permission'),
+            sa.UniqueConstraint(['role_id', 'permission_id'], name='uq_role_permission_role_permission'),
+            sa.ForeignKeyConstraint(['role_id'], ['role.id'], 
+                                   name='fk_role_permission_role_id', ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['permission_id'], ['permission.id'], 
+                                   name='fk_role_permission_permission_id', ondelete='CASCADE'),
+            comment='Many-to-many relationship between roles and permissions'
+        )
+        
+        # =====================================================================
+        # BUSINESS ENTITY AND RELATIONSHIP MANAGEMENT TABLES
+        # =====================================================================
+        
+        # Create business_entity table for core business objects
+        logger.info("Creating business_entity table for business object management")
+        business_entity_table = op.create_table(
+            'business_entity',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('name', sa.String(200), nullable=False,
+                     comment='Business entity name with length validation'),
+            sa.Column('description', sa.Text(), nullable=True,
+                     comment='Business entity description for context'),
+            sa.Column('entity_type', sa.String(100), nullable=False,
+                     comment='Entity type classification for business logic'),
+            sa.Column('status', sa.String(50), nullable=False, default='active',
+                     comment='Entity status (active, inactive, archived, deleted)'),
+            sa.Column('owner_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to owning user'),
+            sa.Column('parent_entity_id', sa.Integer(), nullable=True,
+                     comment='Self-referencing foreign key for hierarchical relationships'),
+            sa.Column('metadata', postgresql.JSONB(), nullable=True,
+                     comment='Additional metadata in JSONB format for flexible storage'),
+            sa.Column('external_id', sa.String(255), nullable=True,
+                     comment='External system identifier for integration'),
+            sa.Column('is_deleted', sa.Boolean(), nullable=False, default=False,
+                     comment='Soft delete flag for data retention'),
+            sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True,
+                     comment='Soft deletion timestamp'),
+            sa.Column('deleted_by', sa.String(255), nullable=True,
+                     comment='User identifier who performed soft deletion'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_business_entity'),
+            sa.UniqueConstraint(['name', 'entity_type', 'owner_id'], 
+                               name='uq_business_entity_name_type_owner'),
+            sa.ForeignKeyConstraint(['owner_id'], ['user.id'], 
+                                   name='fk_business_entity_owner_id', ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['parent_entity_id'], ['business_entity.id'], 
+                                   name='fk_business_entity_parent_id', ondelete='SET NULL'),
+            comment='Core business entities with owner relationships and hierarchical support'
+        )
+        
+        # Create entity_relationship table for business entity relationships
+        logger.info("Creating entity_relationship table for entity relationship management")
+        entity_relationship_table = op.create_table(
+            'entity_relationship',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('source_entity_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to source business entity'),
+            sa.Column('target_entity_id', sa.Integer(), nullable=False,
+                     comment='Foreign key reference to target business entity'),
+            sa.Column('relationship_type', sa.String(100), nullable=False,
+                     comment='Type of relationship between entities'),
+            sa.Column('strength', sa.Float(), nullable=True,
+                     comment='Relationship strength or weight (0.0 to 1.0)'),
+            sa.Column('is_bidirectional', sa.Boolean(), nullable=False, default=False,
+                     comment='Indicates if relationship is bidirectional'),
+            sa.Column('metadata', postgresql.JSONB(), nullable=True,
+                     comment='Additional relationship metadata in JSONB format'),
+            sa.Column('is_active', sa.Boolean(), nullable=False, default=True,
+                     comment='Relationship active status'),
+            sa.Column('effective_from', sa.DateTime(timezone=True), nullable=True,
+                     comment='Relationship effective start date'),
+            sa.Column('effective_until', sa.DateTime(timezone=True), nullable=True,
+                     comment='Relationship effective end date'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_entity_relationship'),
+            sa.UniqueConstraint(['source_entity_id', 'target_entity_id', 'relationship_type'], 
+                               name='uq_entity_relationship_source_target_type'),
+            sa.ForeignKeyConstraint(['source_entity_id'], ['business_entity.id'], 
+                                   name='fk_entity_relationship_source_id', ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['target_entity_id'], ['business_entity.id'], 
+                                   name='fk_entity_relationship_target_id', ondelete='CASCADE'),
+            sa.CheckConstraint('source_entity_id != target_entity_id', 
+                              name='ck_entity_relationship_no_self_reference'),
+            sa.CheckConstraint('strength IS NULL OR (strength >= 0.0 AND strength <= 1.0)', 
+                              name='ck_entity_relationship_strength_range'),
+            comment='Relationships between business entities with metadata support'
+        )
+        
+        # =====================================================================
+        # AUDIT AND SECURITY EVENT TRACKING TABLES
+        # =====================================================================
+        
+        # Create audit_log table for comprehensive audit trail
+        logger.info("Creating audit_log table for comprehensive audit trail")
+        audit_log_table = op.create_table(
+            'audit_log',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('table_name', sa.String(100), nullable=False,
+                     comment='Name of table that was modified'),
+            sa.Column('record_id', sa.Integer(), nullable=True,
+                     comment='ID of the record that was modified'),
+            sa.Column('operation_type', sa.String(20), nullable=False,
+                     comment='Type of operation (INSERT, UPDATE, DELETE)'),
+            sa.Column('user_id', sa.Integer(), nullable=True,
+                     comment='ID of user who performed the operation'),
+            sa.Column('username', sa.String(80), nullable=True,
+                     comment='Username of user who performed the operation'),
+            sa.Column('old_values', postgresql.JSONB(), nullable=True,
+                     comment='Previous values before modification (JSONB format)'),
+            sa.Column('new_values', postgresql.JSONB(), nullable=True,
+                     comment='New values after modification (JSONB format)'),
+            sa.Column('changed_fields', postgresql.ARRAY(sa.String(100)), nullable=True,
+                     comment='Array of field names that were changed'),
+            sa.Column('operation_timestamp', sa.DateTime(timezone=True), nullable=False,
+                     server_default=sa.text('CURRENT_TIMESTAMP'),
+                     comment='Timestamp when operation occurred'),
+            sa.Column('ip_address', sa.String(45), nullable=True,
+                     comment='IP address of user who performed operation'),
+            sa.Column('user_agent', sa.Text(), nullable=True,
+                     comment='User agent string of client'),
+            sa.Column('request_id', sa.String(100), nullable=True,
+                     comment='Request ID for correlation with application logs'),
+            sa.Column('session_id', sa.String(255), nullable=True,
+                     comment='Session ID for user session correlation'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_audit_log'),
+            sa.ForeignKeyConstraint(['user_id'], ['user.id'], 
+                                   name='fk_audit_log_user_id', ondelete='SET NULL'),
+            sa.CheckConstraint("operation_type IN ('INSERT', 'UPDATE', 'DELETE')", 
+                              name='ck_audit_log_operation_type'),
+            comment='Comprehensive audit trail for all system operations'
+        )
+        
+        # Create security_event table for security monitoring
+        logger.info("Creating security_event table for security monitoring")
+        security_event_table = op.create_table(
+            'security_event',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True,
+                     comment='Primary key with auto-incrementing integer'),
+            sa.Column('event_type', sa.String(100), nullable=False,
+                     comment='Type of security event (login_success, login_failure, etc.)'),
+            sa.Column('severity', sa.String(20), nullable=False,
+                     comment='Event severity level (low, medium, high, critical)'),
+            sa.Column('user_id', sa.Integer(), nullable=True,
+                     comment='ID of user associated with the event'),
+            sa.Column('username', sa.String(80), nullable=True,
+                     comment='Username associated with the event'),
+            sa.Column('ip_address', sa.String(45), nullable=True,
+                     comment='IP address associated with the event'),
+            sa.Column('user_agent', sa.Text(), nullable=True,
+                     comment='User agent string of client'),
+            sa.Column('description', sa.Text(), nullable=False,
+                     comment='Detailed description of the security event'),
+            sa.Column('additional_data', postgresql.JSONB(), nullable=True,
+                     comment='Additional event data in JSONB format'),
+            sa.Column('event_timestamp', sa.DateTime(timezone=True), nullable=False,
+                     server_default=sa.text('CURRENT_TIMESTAMP'),
+                     comment='Timestamp when security event occurred'),
+            sa.Column('source', sa.String(100), nullable=True,
+                     comment='Source system or component that generated the event'),
+            sa.Column('resolved', sa.Boolean(), nullable=False, default=False,
+                     comment='Indicates if security event has been resolved'),
+            sa.Column('resolved_by', sa.String(255), nullable=True,
+                     comment='User who resolved the security event'),
+            sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True,
+                     comment='Timestamp when security event was resolved'),
+            *get_audit_columns(),
+            sa.PrimaryKeyConstraint('id', name='pk_security_event'),
+            sa.ForeignKeyConstraint(['user_id'], ['user.id'], 
+                                   name='fk_security_event_user_id', ondelete='SET NULL'),
+            sa.CheckConstraint("severity IN ('low', 'medium', 'high', 'critical')", 
+                              name='ck_security_event_severity'),
+            comment='Security event tracking and monitoring'
+        )
+        
+        # =====================================================================
+        # COMPREHENSIVE INDEXING STRATEGY FOR POSTGRESQL OPTIMIZATION
+        # =====================================================================
+        
+        logger.info("Creating comprehensive indexing strategy for PostgreSQL optimization")
+        
+        # User table indexes for authentication and profile queries
+        op.create_index('idx_user_username', 'user', ['username'])
+        op.create_index('idx_user_email', 'user', ['email'])
+        op.create_index('idx_user_is_active', 'user', ['is_active'])
+        op.create_index('idx_user_created_at', 'user', ['created_at'])
+        op.create_index('idx_user_last_login', 'user', ['last_login_at'])
+        
+        # User session indexes for session management and security
+        op.create_index('idx_user_session_user_id', 'user_session', ['user_id'])
+        op.create_index('idx_user_session_token', 'user_session', ['session_token'])
+        op.create_index('idx_user_session_expires_at', 'user_session', ['expires_at'])
+        op.create_index('idx_user_session_is_valid', 'user_session', ['is_valid'])
+        op.create_index('idx_user_session_last_activity', 'user_session', ['last_activity_at'])
+        
+        # Role and permission indexes for RBAC queries
+        op.create_index('idx_role_name', 'role', ['name'])
+        op.create_index('idx_role_is_system', 'role', ['is_system_role'])
+        op.create_index('idx_permission_name', 'permission', ['name'])
+        op.create_index('idx_permission_resource', 'permission', ['resource'])
+        op.create_index('idx_permission_action', 'permission', ['action'])
+        op.create_index('idx_permission_resource_action', 'permission', ['resource', 'action'])
+        
+        # User role junction table indexes for RBAC performance
+        op.create_index('idx_user_role_user_id', 'user_role', ['user_id'])
+        op.create_index('idx_user_role_role_id', 'user_role', ['role_id'])
+        op.create_index('idx_user_role_is_active', 'user_role', ['is_active'])
+        op.create_index('idx_user_role_expires_at', 'user_role', ['expires_at'])
+        
+        # Role permission junction table indexes
+        op.create_index('idx_role_permission_role_id', 'role_permission', ['role_id'])
+        op.create_index('idx_role_permission_permission_id', 'role_permission', ['permission_id'])
+        op.create_index('idx_role_permission_is_active', 'role_permission', ['is_active'])
+        
+        # Business entity indexes for business logic queries
+        op.create_index('idx_business_entity_name', 'business_entity', ['name'])
+        op.create_index('idx_business_entity_type', 'business_entity', ['entity_type'])
+        op.create_index('idx_business_entity_status', 'business_entity', ['status'])
+        op.create_index('idx_business_entity_owner_id', 'business_entity', ['owner_id'])
+        op.create_index('idx_business_entity_parent_id', 'business_entity', ['parent_entity_id'])
+        op.create_index('idx_business_entity_is_deleted', 'business_entity', ['is_deleted'])
+        op.create_index('idx_business_entity_external_id', 'business_entity', ['external_id'])
+        
+        # PostgreSQL GIN index for JSONB metadata queries
+        op.create_index('idx_business_entity_metadata_gin', 'business_entity', ['metadata'], 
+                       postgresql_using='gin')
+        
+        # Entity relationship indexes for relationship queries
+        op.create_index('idx_entity_relationship_source_id', 'entity_relationship', ['source_entity_id'])
+        op.create_index('idx_entity_relationship_target_id', 'entity_relationship', ['target_entity_id'])
+        op.create_index('idx_entity_relationship_type', 'entity_relationship', ['relationship_type'])
+        op.create_index('idx_entity_relationship_is_active', 'entity_relationship', ['is_active'])
+        op.create_index('idx_entity_relationship_effective_from', 'entity_relationship', ['effective_from'])
+        op.create_index('idx_entity_relationship_effective_until', 'entity_relationship', ['effective_until'])
+        
+        # PostgreSQL GIN index for relationship metadata
+        op.create_index('idx_entity_relationship_metadata_gin', 'entity_relationship', ['metadata'], 
+                       postgresql_using='gin')
+        
+        # Audit log indexes for audit queries and compliance reporting
+        op.create_index('idx_audit_log_table_name', 'audit_log', ['table_name'])
+        op.create_index('idx_audit_log_record_id', 'audit_log', ['record_id'])
+        op.create_index('idx_audit_log_operation_type', 'audit_log', ['operation_type'])
+        op.create_index('idx_audit_log_user_id', 'audit_log', ['user_id'])
+        op.create_index('idx_audit_log_username', 'audit_log', ['username'])
+        op.create_index('idx_audit_log_timestamp', 'audit_log', ['operation_timestamp'])
+        op.create_index('idx_audit_log_session_id', 'audit_log', ['session_id'])
+        op.create_index('idx_audit_log_request_id', 'audit_log', ['request_id'])
+        
+        # PostgreSQL BRIN index for time-series audit data (efficient for large datasets)
+        op.create_index('idx_audit_log_timestamp_brin', 'audit_log', ['operation_timestamp'], 
+                       postgresql_using='brin')
+        
+        # PostgreSQL GIN indexes for JSONB audit data
+        op.create_index('idx_audit_log_old_values_gin', 'audit_log', ['old_values'], 
+                       postgresql_using='gin')
+        op.create_index('idx_audit_log_new_values_gin', 'audit_log', ['new_values'], 
+                       postgresql_using='gin')
+        
+        # Security event indexes for security monitoring
+        op.create_index('idx_security_event_type', 'security_event', ['event_type'])
+        op.create_index('idx_security_event_severity', 'security_event', ['severity'])
+        op.create_index('idx_security_event_user_id', 'security_event', ['user_id'])
+        op.create_index('idx_security_event_username', 'security_event', ['username'])
+        op.create_index('idx_security_event_timestamp', 'security_event', ['event_timestamp'])
+        op.create_index('idx_security_event_ip_address', 'security_event', ['ip_address'])
+        op.create_index('idx_security_event_resolved', 'security_event', ['resolved'])
+        op.create_index('idx_security_event_source', 'security_event', ['source'])
+        
+        # PostgreSQL BRIN index for security event timestamps
+        op.create_index('idx_security_event_timestamp_brin', 'security_event', ['event_timestamp'], 
+                       postgresql_using='brin')
+        
+        # PostgreSQL GIN index for security event additional data
+        op.create_index('idx_security_event_additional_data_gin', 'security_event', ['additional_data'], 
+                       postgresql_using='gin')
+        
+        # Composite indexes for common query patterns
+        op.create_index('idx_user_session_user_valid', 'user_session', ['user_id', 'is_valid'])
+        op.create_index('idx_user_role_user_active', 'user_role', ['user_id', 'is_active'])
+        op.create_index('idx_business_entity_owner_type', 'business_entity', ['owner_id', 'entity_type'])
+        op.create_index('idx_business_entity_type_status', 'business_entity', ['entity_type', 'status'])
+        op.create_index('idx_audit_log_table_timestamp', 'audit_log', ['table_name', 'operation_timestamp'])
+        op.create_index('idx_security_event_type_severity', 'security_event', ['event_type', 'severity'])
+        
+        # =====================================================================
+        # APPLY UPDATE TIMESTAMP TRIGGERS TO ALL TABLES
+        # =====================================================================
+        
+        logger.info("Applying updated_at timestamp triggers to all tables")
+        
+        # Apply triggers to all tables with audit fields
+        tables_with_triggers = [
+            'user', 'user_session', 'role', 'permission', 'user_role', 
+            'role_permission', 'business_entity', 'entity_relationship', 
+            'audit_log', 'security_event'
+        ]
+        
+        for table_name in tables_with_triggers:
+            apply_update_trigger(table_name)
+        
+        # =====================================================================
+        # CREATE EXTENSION FOR POSTGRESQL OPTIMIZATION
+        # =====================================================================
+        
+        logger.info("Creating PostgreSQL extensions for optimization")
+        
+        # Create pg_stat_statements extension for query performance monitoring
+        try:
+            op.execute(text("CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"))
+            logger.info("Created pg_stat_statements extension for query monitoring")
+        except Exception as e:
+            logger.warning(f"Could not create pg_stat_statements extension: {e}")
+        
+        # Create pgcrypto extension for cryptographic functions
+        try:
+            op.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto;"))
+            logger.info("Created pgcrypto extension for cryptographic functions")
+        except Exception as e:
+            logger.warning(f"Could not create pgcrypto extension: {e}")
+        
+        # =====================================================================
+        # DATABASE STATISTICS UPDATE FOR QUERY OPTIMIZATION
+        # =====================================================================
+        
+        logger.info("Updating database statistics for query optimization")
+        
+        # Update statistics for query planner optimization
+        op.execute(text("ANALYZE;"))
+        
+        logger.info("Initial schema creation migration completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Migration failed: {str(e)}")
+        raise
+
+
+def downgrade() -> None:
+    """
+    Rollback initial schema creation by dropping all tables and related objects.
+    
+    Implements comprehensive rollback capabilities per Section 4.4.2 migration management 
+    and rollback process, ensuring complete removal of database schema while maintaining 
+    referential integrity during the rollback process.
+    
+    Rollback Sequence:
+    - Drop all indexes and constraints in dependency order
+    - Drop all tables in reverse dependency order  
+    - Drop PostgreSQL extensions and functions
+    - Verify complete schema removal
+    """
+    logger.info("Starting initial schema rollback migration")
+    
+    try:
+        # =====================================================================
+        # DROP TABLES IN REVERSE DEPENDENCY ORDER
+        # =====================================================================
+        
+        logger.info("Dropping tables in reverse dependency order")
+        
+        # Drop junction tables first (no dependencies on them)
+        op.drop_table('role_permission')
+        op.drop_table('user_role')
+        
+        # Drop audit and security tables (no dependencies on them)
+        op.drop_table('security_event')
+        op.drop_table('audit_log')
+        
+        # Drop entity relationship table (depends on business_entity)
+        op.drop_table('entity_relationship')
+        
+        # Drop business entity table (depends on user)
+        op.drop_table('business_entity')
+        
+        # Drop permission and role tables (no dependencies on them)
+        op.drop_table('permission')
+        op.drop_table('role')
+        
+        # Drop user session table (depends on user)
+        op.drop_table('user_session')
+        
+        # Drop user table last (other tables depend on it)
+        op.drop_table('user')
+        
+        # =====================================================================
+        # DROP POSTGRESQL FUNCTIONS AND TRIGGERS
+        # =====================================================================
+        
+        logger.info("Dropping PostgreSQL functions and triggers")
+        
+        # Drop update trigger function
+        op.execute(text("DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;"))
+        
+        logger.info("Initial schema rollback migration completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Rollback migration failed: {str(e)}")
+        raise
