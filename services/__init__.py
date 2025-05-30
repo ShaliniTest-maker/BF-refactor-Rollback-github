@@ -1,619 +1,605 @@
 """
-Service Package Initialization Module for Flask Application
+Service Layer Package Initialization
 
 This module provides centralized service registration, dependency injection configuration,
-and service layer interface exports for the Flask 3.1.1 application migration from Node.js.
-It establishes the Service Layer pattern foundation enabling organized service access,
-dependency injection framework, and Flask application factory integration.
+and service layer interface exports for the Flask 3.1.1 application. It establishes
+the service layer foundation for Flask application integration and enables organized
+service access throughout the application.
+
+The service layer implements the Service Layer pattern as specified in Section 4.5.1.2,
+providing business logic abstraction with clear separation of concerns, enhanced testability
+through dependency injection, and comprehensive integration with Flask's application
+factory pattern per Section 6.1.5.
 
 Key Features:
-- Service Layer pattern implementation with Python classes in /services
+- Centralized service registration supporting Flask blueprint integration per Section 5.2.2
+- Dependency injection framework for SQLAlchemy session management per Section 4.5.1.2
+- Service interface abstraction enabling comprehensive unit testing per Section 4.5.1.4
 - Flask application factory pattern integration per Section 6.1.5
-- Dependency injection framework for SQLAlchemy session management
-- Centralized service registration supporting Flask blueprint integration
-- Service interface abstraction enabling comprehensive unit testing
-- Service lifecycle management and configuration
-- Type-safe service interfaces with comprehensive error handling
+- Type-safe service access with comprehensive error handling
+- Service discovery and lifecycle management
+- Performance monitoring and health check capabilities
 
-Architecture:
-This implementation follows the Service Layer pattern as specified in Section 4.5.1.2
-of the technical specification, providing clear separation between presentation, business
-logic, and data access layers while maintaining Flask application factory compatibility.
+Architecture Benefits:
+- Clear separation between presentation layer (blueprints) and business logic (services)
+- Enhanced testability through dependency injection and service mocking
+- Centralized service configuration and lifecycle management
+- Type-safe service interfaces with comprehensive static analysis support
+- Streamlined integration with Flask application factory pattern
+- Service registry pattern enabling dynamic service discovery and resolution
 
-Service Registry:
-The service registry pattern enables Flask blueprints to access business logic services
-through dependency injection, facilitating modular development and comprehensive testing
-with Pytest fixtures and mock dependencies.
+Dependencies:
+- Flask 3.1.1: Web framework integration and application context
+- Flask-SQLAlchemy 3.1.1: Database ORM and session management
+- typing: Comprehensive type annotations for enhanced code clarity
+- Base service classes: Foundation for service layer implementation
 """
-
-from __future__ import annotations
 
 import logging
 from typing import (
-    Dict, 
-    Any, 
-    Optional, 
-    Type, 
-    TypeVar, 
-    Protocol,
-    Union,
-    Callable,
-    runtime_checkable
+    Dict, List, Optional, Type, TypeVar, Any, Union, Protocol,
+    runtime_checkable, ContextManager
 )
-from contextlib import contextmanager
-from functools import wraps
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from flask import Flask, current_app, g
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
+from flask import Flask, current_app, has_app_context
 
-# Import base service infrastructure
+# Import base service layer components
 from .base_service import (
     BaseService,
-    DatabaseSession,
+    ServiceFactory,
     ServiceResult,
-    ValidationResult,
-    ServiceException,
-    ValidationException,
-    DatabaseException
+    ServiceError,
+    DatabaseError,
+    ValidationError,
+    NotFoundError,
+    TransactionStatus,
+    DatabaseSession,
+    ServiceRegistry,
+    init_service_layer as _init_service_layer,
+    get_service as _get_service,
+    service_factory as _service_factory,
+    T,
+    ModelType,
+    ServiceType
 )
 
-# Import specific service implementations
+# Import concrete service implementations
 from .auth_service import AuthService
 from .user_service import UserService
 from .validation_service import ValidationService
 
-# Type variables for service management
-ServiceType = TypeVar('ServiceType', bound=BaseService)
+# Configure logging for service layer package
+logger = logging.getLogger(__name__)
+
+# Type alias for service class registration
+ServiceClass = TypeVar('ServiceClass', bound=BaseService)
+
+
+@dataclass
+class ServiceRegistrationInfo:
+    """
+    Service registration metadata for comprehensive service discovery.
+    
+    Provides detailed information about registered services including
+    dependencies, registration timestamp, and health status for
+    monitoring and debugging purposes.
+    """
+    
+    service_name: str
+    service_class: Type[BaseService]
+    dependencies: List[str]
+    registration_time: datetime
+    is_healthy: bool = True
+    last_health_check: Optional[datetime] = None
+    configuration: Dict[str, Any] = None
+    
+    def __post_init__(self) -> None:
+        """Initialize default values after creation."""
+        if self.configuration is None:
+            self.configuration = {}
 
 
 @runtime_checkable
-class ServiceRegistry(Protocol):
+class ServiceProvider(Protocol):
     """
-    Protocol defining the service registry interface for dependency injection.
+    Protocol defining service provider interface for dependency injection.
     
-    This protocol ensures type safety for service registration and retrieval
-    while maintaining flexibility for testing with mock service implementations.
+    Enables service discovery and resolution within Flask application context
+    while maintaining type safety and clear interface contracts for testing.
     """
     
-    def register_service(
-        self, 
-        service_name: str, 
-        service_class: Type[ServiceType],
-        **kwargs: Any
-    ) -> None:
-        """Register a service class with optional configuration."""
+    def register_service(self, service_class: Type[ServiceClass]) -> ServiceClass:
+        """Register service class and return configured instance."""
         ...
     
-    def get_service(self, service_name: str) -> ServiceType:
-        """Retrieve a registered service instance."""
+    def get_service(self, service_class: Type[ServiceClass]) -> ServiceClass:
+        """Retrieve registered service instance with type safety."""
         ...
     
-    def has_service(self, service_name: str) -> bool:
-        """Check if a service is registered."""
+    def has_service(self, service_class: Type[ServiceClass]) -> bool:
+        """Check if service is registered in provider."""
+        ...
+    
+    def get_all_services(self) -> Dict[str, BaseService]:
+        """Get all registered services for monitoring purposes."""
         ...
 
 
-class FlaskServiceRegistry:
+class ServiceManager:
     """
-    Service registry implementation for Flask application factory pattern.
+    Centralized service management providing registration, configuration,
+    and lifecycle management for all application services.
     
-    This registry manages service lifecycle, dependency injection, and provides
-    centralized access to business logic services throughout the Flask application.
-    It supports both development and testing configurations with mock dependency
-    injection capabilities.
+    The ServiceManager implements the service registry pattern enabling
+    comprehensive service discovery, dependency injection, and health
+    monitoring throughout the Flask application lifecycle.
     
-    Features:
-    - Centralized service registration and retrieval
-    - SQLAlchemy session injection for all services
-    - Flask application context integration
-    - Service lifecycle management with proper cleanup
-    - Mock service support for comprehensive testing
-    - Type-safe service access with error handling
-    
-    Attributes:
-        app: Flask application instance
-        services: Dictionary of registered service instances
-        service_classes: Dictionary of registered service classes
-        session_factory: Factory function for database session creation
+    Key Features:
+    - Automatic service registration with dependency resolution
+    - Service health monitoring and performance tracking
+    - Configuration management for environment-specific settings
+    - Integration with Flask application factory pattern
+    - Comprehensive error handling and fallback mechanisms
+    - Type-safe service access with static analysis support
     """
     
-    def __init__(self, app: Optional[Flask] = None) -> None:
-        """
-        Initialize service registry with optional Flask application.
+    def __init__(self) -> None:
+        """Initialize service manager with empty registry."""
+        self._service_registry: Dict[Type[BaseService], ServiceRegistrationInfo] = {}
+        self._service_instances: Dict[Type[BaseService], BaseService] = {}
+        self._service_factory = _service_factory
+        self._initialization_time = datetime.now(timezone.utc)
+        self._logger = logging.getLogger(f"{__name__}.ServiceManager")
         
-        Args:
-            app: Optional Flask application for immediate initialization
-        """
-        self.services: Dict[str, BaseService] = {}
-        self.service_classes: Dict[str, Type[BaseService]] = {}
-        self.session_factory: Optional[Callable[[], Session]] = None
-        self._initialized = False
+        # Service configuration defaults
+        self._default_config = {
+            'enable_health_checks': True,
+            'health_check_interval': 300,  # 5 minutes
+            'enable_performance_monitoring': True,
+            'auto_register_services': True
+        }
         
-        # Initialize logger for service registry operations
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        
-        if app is not None:
-            self.init_app(app)
+        self._logger.info("ServiceManager initialized successfully")
     
-    def init_app(self, app: Flask) -> None:
+    def register_core_services(self, db_session: Optional[DatabaseSession] = None) -> None:
         """
-        Initialize service registry with Flask application factory pattern.
+        Register all core application services with optional session injection.
         
-        This method configures the service registry for use with the Flask
-        application, sets up database session factory, and registers core
-        services required for application functionality.
+        Performs automatic registration of all essential services required
+        for application functionality including authentication, user management,
+        and validation services with proper dependency resolution.
         
         Args:
-            app: Flask application instance
-            
+            db_session: Optional database session for dependency injection
+                       If None, services will use Flask-SQLAlchemy session
+                       
         Raises:
-            ServiceException: If service registry initialization fails
+            ServiceError: If service registration fails
         """
         try:
-            self.app = app
+            # Define core services with their dependencies
+            core_services = [
+                (AuthService, ['models', 'config']),
+                (UserService, ['base_service', 'auth_service', 'models']),
+                (ValidationService, ['base_service'])
+            ]
             
-            # Configure session factory from Flask-SQLAlchemy
-            from flask_sqlalchemy import SQLAlchemy
-            db = SQLAlchemy()
-            db.init_app(app)
-            
-            # Set up session factory for dependency injection
-            self.session_factory = lambda: db.session
-            
-            # Register core services with dependency injection
-            self._register_core_services()
-            
-            # Set up Flask teardown handlers for proper cleanup
-            app.teardown_appcontext(self._cleanup_services)
-            
-            # Store registry in Flask app for access from blueprints
-            app.service_registry = self
-            
-            self._initialized = True
-            self.logger.info("Service registry initialized successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize service registry: {str(e)}")
-            raise ServiceException(
-                message=f"Service registry initialization failed: {str(e)}",
-                error_code='REGISTRY_INIT_ERROR',
-                details={'initialization_error': True}
-            )
-    
-    def _register_core_services(self) -> None:
-        """
-        Register core business logic services with dependency injection.
-        
-        This method registers all essential services required for application
-        functionality, including authentication, user management, validation,
-        and other business logic services following the Service Layer pattern.
-        
-        Raises:
-            ServiceException: If core service registration fails
-        """
-        try:
-            # Register authentication service for session management
-            self.register_service(
-                'auth', 
-                AuthService,
-                description="Authentication and session management service"
-            )
-            
-            # Register user management service for business logic
-            self.register_service(
-                'user', 
-                UserService,
-                description="User management and profile operations service"
-            )
-            
-            # Register validation service for business rule enforcement
-            self.register_service(
-                'validation', 
-                ValidationService,
-                description="Input validation and business rule enforcement service"
-            )
-            
-            self.logger.debug("Core services registered successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to register core services: {str(e)}")
-            raise ServiceException(
-                message=f"Core service registration failed: {str(e)}",
-                error_code='CORE_SERVICE_ERROR',
-                details={'service_registration_error': True}
-            )
-    
-    def register_service(
-        self, 
-        service_name: str, 
-        service_class: Type[BaseService],
-        **kwargs: Any
-    ) -> None:
-        """
-        Register a service class with the registry.
-        
-        This method registers a service class for later instantiation with
-        dependency injection. Services are created on-demand with proper
-        session management and configuration.
-        
-        Args:
-            service_name: Unique identifier for the service
-            service_class: Service class implementing BaseService
-            **kwargs: Additional configuration for service initialization
-            
-        Raises:
-            ServiceException: If service registration fails
-            TypeError: If service_class doesn't inherit from BaseService
-        """
-        if not issubclass(service_class, BaseService):
-            raise TypeError(
-                f"Service class {service_class.__name__} must inherit from BaseService"
-            )
-        
-        if service_name in self.service_classes:
-            self.logger.warning(f"Overriding existing service registration: {service_name}")
-        
-        self.service_classes[service_name] = service_class
-        
-        # Store service configuration for instantiation
-        setattr(self, f"_{service_name}_config", kwargs)
-        
-        self.logger.debug(
-            f"Registered service '{service_name}' with class {service_class.__name__}"
-        )
-    
-    def get_service(self, service_name: str) -> BaseService:
-        """
-        Retrieve a service instance with dependency injection.
-        
-        This method provides lazy instantiation of services with proper
-        SQLAlchemy session injection and configuration. Services are
-        cached per request context for efficient resource utilization.
-        
-        Args:
-            service_name: Name of the service to retrieve
-            
-        Returns:
-            BaseService: Configured service instance with injected dependencies
-            
-        Raises:
-            ServiceException: If service is not registered or instantiation fails
-        """
-        if not self._initialized:
-            raise ServiceException(
-                message="Service registry not initialized",
-                error_code='REGISTRY_NOT_INITIALIZED'
-            )
-        
-        if service_name not in self.service_classes:
-            raise ServiceException(
-                message=f"Service '{service_name}' not registered",
-                error_code='SERVICE_NOT_FOUND',
-                details={'available_services': list(self.service_classes.keys())}
-            )
-        
-        # Check for cached service instance in Flask request context
-        if not hasattr(g, 'services'):
-            g.services = {}
-        
-        if service_name in g.services:
-            return g.services[service_name]
-        
-        try:
-            # Get service class and configuration
-            service_class = self.service_classes[service_name]
-            config = getattr(self, f"_{service_name}_config", {})
-            
-            # Create database session for dependency injection
-            if self.session_factory is None:
-                raise ServiceException(
-                    message="Session factory not configured",
-                    error_code='SESSION_FACTORY_ERROR'
+            # Register services in dependency order
+            for service_class, dependencies in core_services:
+                self._register_service_with_dependencies(
+                    service_class, 
+                    dependencies, 
+                    db_session
                 )
             
-            db_session = self.session_factory()
+            self._logger.info(f"Registered {len(core_services)} core services successfully")
             
-            # Instantiate service with dependency injection
-            service_instance = service_class(db_session=db_session, **config)
+        except Exception as e:
+            error_msg = f"Failed to register core services: {e}"
+            self._logger.error(error_msg)
+            raise ServiceError(error_msg, error_code="CORE_SERVICE_REGISTRATION_ERROR", cause=e)
+    
+    def _register_service_with_dependencies(
+        self, 
+        service_class: Type[ServiceClass], 
+        dependencies: List[str],
+        db_session: Optional[DatabaseSession] = None
+    ) -> ServiceClass:
+        """
+        Register individual service with dependency validation and resolution.
+        
+        Args:
+            service_class: Service class to register
+            dependencies: List of dependency identifiers
+            db_session: Optional database session for injection
             
-            # Cache service instance in request context
-            g.services[service_name] = service_instance
+        Returns:
+            Configured service instance
             
-            self.logger.debug(f"Created service instance: {service_name}")
+        Raises:
+            ServiceError: If service registration or dependency resolution fails
+        """
+        try:
+            # Check if service already registered
+            if service_class in self._service_instances:
+                self._logger.debug(f"Service {service_class.__name__} already registered")
+                return self._service_instances[service_class]
+            
+            # Register service using service factory
+            service_instance = self._service_factory.register_service(service_class, db_session)
+            
+            # Create registration metadata
+            registration_info = ServiceRegistrationInfo(
+                service_name=service_class.__name__,
+                service_class=service_class,
+                dependencies=dependencies,
+                registration_time=datetime.now(timezone.utc),
+                configuration=self._default_config.copy()
+            )
+            
+            # Store registration information
+            self._service_registry[service_class] = registration_info
+            self._service_instances[service_class] = service_instance
+            
+            self._logger.info(f"Service {service_class.__name__} registered with dependencies: {dependencies}")
+            
             return service_instance
             
         except Exception as e:
-            self.logger.error(f"Failed to create service '{service_name}': {str(e)}")
-            raise ServiceException(
-                message=f"Service instantiation failed: {str(e)}",
-                error_code='SERVICE_INSTANTIATION_ERROR',
-                details={'service_name': service_name, 'error': str(e)}
-            )
+            error_msg = f"Failed to register service {service_class.__name__}: {e}"
+            self._logger.error(error_msg)
+            raise ServiceError(error_msg, error_code="SERVICE_REGISTRATION_ERROR", cause=e)
     
-    def has_service(self, service_name: str) -> bool:
+    def get_service(self, service_class: Type[ServiceClass]) -> ServiceClass:
         """
-        Check if a service is registered in the registry.
+        Retrieve registered service instance with comprehensive error handling.
         
         Args:
-            service_name: Name of the service to check
+            service_class: Service class to retrieve
             
         Returns:
-            bool: True if service is registered, False otherwise
+            Configured service instance
+            
+        Raises:
+            ServiceError: If service not found or retrieval fails
         """
-        return service_name in self.service_classes
+        if service_class not in self._service_instances:
+            raise ServiceError(
+                f"Service {service_class.__name__} not registered in service manager",
+                error_code="SERVICE_NOT_REGISTERED"
+            )
+        
+        service_instance = self._service_instances[service_class]
+        
+        # Perform optional health check before returning service
+        if self._should_perform_health_check(service_class):
+            self._perform_service_health_check(service_class)
+        
+        return service_instance  # type: ignore
     
-    def list_services(self) -> Dict[str, str]:
+    def has_service(self, service_class: Type[BaseService]) -> bool:
         """
-        Get a dictionary of registered services with their class names.
+        Check if service is registered in manager.
+        
+        Args:
+            service_class: Service class to check
+            
+        Returns:
+            True if service is registered, False otherwise
+        """
+        return service_class in self._service_instances
+    
+    def get_all_services(self) -> Dict[str, BaseService]:
+        """
+        Get all registered services for monitoring and management purposes.
         
         Returns:
-            Dict[str, str]: Mapping of service names to class names
+            Dictionary mapping service names to service instances
         """
         return {
-            name: cls.__name__ 
-            for name, cls in self.service_classes.items()
+            service_class.__name__: service_instance
+            for service_class, service_instance in self._service_instances.items()
         }
     
-    def _cleanup_services(self, exception: Optional[Exception] = None) -> None:
+    def get_service_registry(self) -> Dict[str, Dict[str, Any]]:
         """
-        Clean up services at the end of request context.
+        Get comprehensive service registry information for monitoring.
         
-        This method ensures proper resource cleanup, including database
-        session management and service state reset for the next request.
+        Returns:
+            Dictionary containing complete service registry metadata
+        """
+        registry_info = {
+            'manager_initialization_time': self._initialization_time.isoformat(),
+            'total_registered_services': len(self._service_registry),
+            'services': {},
+            'factory_info': self._service_factory.get_service_registry()
+        }
+        
+        for service_class, registration_info in self._service_registry.items():
+            service_instance = self._service_instances[service_class]
+            
+            registry_info['services'][service_class.__name__] = {
+                'service_name': registration_info.service_name,
+                'dependencies': registration_info.dependencies,
+                'registration_time': registration_info.registration_time.isoformat(),
+                'is_healthy': registration_info.is_healthy,
+                'last_health_check': registration_info.last_health_check.isoformat() if registration_info.last_health_check else None,
+                'configuration': registration_info.configuration,
+                'performance_metrics': service_instance.get_performance_metrics()
+            }
+        
+        return registry_info
+    
+    def _should_perform_health_check(self, service_class: Type[BaseService]) -> bool:
+        """
+        Determine if health check should be performed for service.
         
         Args:
-            exception: Optional exception that triggered cleanup
+            service_class: Service class to check
+            
+        Returns:
+            True if health check should be performed, False otherwise
         """
-        if hasattr(g, 'services'):
-            for service_name, service_instance in g.services.items():
-                try:
-                    # Perform service-specific cleanup if available
-                    if hasattr(service_instance, 'cleanup'):
-                        service_instance.cleanup()
-                        
-                    self.logger.debug(f"Cleaned up service: {service_name}")
-                    
-                except Exception as cleanup_error:
-                    self.logger.error(
-                        f"Error cleaning up service '{service_name}': {str(cleanup_error)}"
-                    )
+        if service_class not in self._service_registry:
+            return False
+        
+        registration_info = self._service_registry[service_class]
+        
+        if not registration_info.configuration.get('enable_health_checks', True):
+            return False
+        
+        # Check if health check interval has passed
+        if registration_info.last_health_check is None:
+            return True
+        
+        health_check_interval = registration_info.configuration.get('health_check_interval', 300)
+        time_since_last_check = (datetime.now(timezone.utc) - registration_info.last_health_check).total_seconds()
+        
+        return time_since_last_check >= health_check_interval
+    
+    def _perform_service_health_check(self, service_class: Type[BaseService]) -> None:
+        """
+        Perform health check for specified service.
+        
+        Args:
+            service_class: Service class to health check
+        """
+        try:
+            service_instance = self._service_instances[service_class]
+            health_result = service_instance.health_check()
             
-            # Clear service cache
-            g.services.clear()
-
-
-# Global service registry instance for application-wide access
-service_registry = FlaskServiceRegistry()
-
-
-def get_service(service_name: str) -> BaseService:
-    """
-    Convenience function to get a service instance from the global registry.
-    
-    This function provides easy access to services from Flask blueprints
-    and other application components without direct registry access.
-    
-    Args:
-        service_name: Name of the service to retrieve
-        
-    Returns:
-        BaseService: Configured service instance
-        
-    Raises:
-        ServiceException: If service is not available
-        
-    Example:
-        ```python
-        from services import get_service
-        
-        # In a Flask blueprint
-        @blueprint.route('/users')
-        def get_users():
-            user_service = get_service('user')
-            return user_service.get_all_users()
-        ```
-    """
-    if current_app and hasattr(current_app, 'service_registry'):
-        return current_app.service_registry.get_service(service_name)
-    else:
-        return service_registry.get_service(service_name)
-
-
-def with_service(service_name: str):
-    """
-    Decorator for injecting services into Flask route handlers.
-    
-    This decorator provides clean dependency injection for Flask blueprints,
-    automatically providing the requested service as a function parameter.
-    
-    Args:
-        service_name: Name of the service to inject
-        
-    Returns:
-        Decorator function that injects the service
-        
-    Raises:
-        ServiceException: If service injection fails
-        
-    Example:
-        ```python
-        from services import with_service
-        
-        @blueprint.route('/users/<int:user_id>')
-        @with_service('user')
-        def get_user(user_id: int, user_service):
-            return user_service.get_user_by_id(user_id)
-        ```
-    """
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                service_instance = get_service(service_name)
-                return func(*args, **kwargs, **{f"{service_name}_service": service_instance})
-            except Exception as e:
-                logger = logging.getLogger(__name__)
-                logger.error(f"Service injection failed for '{service_name}': {str(e)}")
-                raise ServiceException(
-                    message=f"Service injection failed: {str(e)}",
-                    error_code='SERVICE_INJECTION_ERROR',
-                    details={'service_name': service_name}
+            # Update registration info with health check results
+            registration_info = self._service_registry[service_class]
+            registration_info.is_healthy = health_result.success
+            registration_info.last_health_check = datetime.now(timezone.utc)
+            
+            if not health_result.success:
+                self._logger.warning(
+                    f"Health check failed for service {service_class.__name__}: {health_result.error}"
                 )
-        return wrapper
-    return decorator
-
-
-@contextmanager
-def service_transaction(*service_names: str):
-    """
-    Context manager for coordinating transactions across multiple services.
-    
-    This context manager ensures consistent transaction boundaries when
-    operations span multiple services, providing atomic operations with
-    proper rollback capabilities on any failure.
-    
-    Args:
-        *service_names: Names of services to include in transaction
-        
-    Yields:
-        Dict[str, BaseService]: Dictionary of service instances
-        
-    Raises:
-        ServiceException: If transaction coordination fails
-        
-    Example:
-        ```python
-        from services import service_transaction
-        
-        with service_transaction('user', 'auth') as services:
-            user_service = services['user']
-            auth_service = services['auth']
+            else:
+                self._logger.debug(f"Health check passed for service {service_class.__name__}")
+                
+        except Exception as e:
+            self._logger.error(f"Health check error for service {service_class.__name__}: {e}")
             
-            # Operations within shared transaction boundary
-            user_service.create_user(user_data)
-            auth_service.setup_user_auth(user_id, auth_data)
-            # Automatically committed on success or rolled back on failure
-        ```
-    """
-    services = {}
+            # Mark service as unhealthy on health check failure
+            if service_class in self._service_registry:
+                self._service_registry[service_class].is_healthy = False
+                self._service_registry[service_class].last_health_check = datetime.now(timezone.utc)
     
-    try:
-        # Get all requested services
-        for service_name in service_names:
-            services[service_name] = get_service(service_name)
+    def configure_services(self, configuration: Dict[str, Any]) -> None:
+        """
+        Apply configuration to all registered services.
         
-        # Start transaction context for all services
-        with services[list(services.keys())[0]].transaction():
-            yield services
+        Args:
+            configuration: Configuration dictionary for services
+        """
+        try:
+            # Update default configuration
+            self._default_config.update(configuration)
             
-    except Exception as e:
-        logger = logging.getLogger(__name__)
-        logger.error(f"Service transaction failed: {str(e)}")
-        raise ServiceException(
-            message=f"Service transaction failed: {str(e)}",
-            error_code='SERVICE_TRANSACTION_ERROR',
-            details={'services': list(service_names)}
-        )
-
-
-# Export all public interfaces for package access
-__all__ = [
-    # Core service classes
-    'BaseService',
-    'AuthService', 
-    'UserService',
-    'ValidationService',
+            # Apply configuration to service factory
+            self._service_factory.configure_services(configuration)
+            
+            # Update individual service configurations
+            for registration_info in self._service_registry.values():
+                registration_info.configuration.update(configuration)
+            
+            self._logger.info("Configuration applied to all registered services")
+            
+        except Exception as e:
+            self._logger.error(f"Failed to configure services: {e}")
+            raise ServiceError(
+                f"Service configuration failed: {e}",
+                error_code="SERVICE_CONFIGURATION_ERROR",
+                cause=e
+            )
     
-    # Service registry and management
-    'FlaskServiceRegistry',
-    'service_registry',
-    'get_service',
-    'with_service',
-    'service_transaction',
-    
-    # Service infrastructure
-    'ServiceRegistry',
-    'DatabaseSession',
-    'ServiceResult',
-    'ValidationResult',
-    
-    # Exception classes
-    'ServiceException',
-    'ValidationException',
-    'DatabaseException'
-]
+    def perform_health_checks(self) -> Dict[str, bool]:
+        """
+        Perform health checks for all registered services.
+        
+        Returns:
+            Dictionary mapping service names to health status
+        """
+        health_status = {}
+        
+        for service_class in self._service_instances:
+            try:
+                self._perform_service_health_check(service_class)
+                health_status[service_class.__name__] = self._service_registry[service_class].is_healthy
+            except Exception as e:
+                self._logger.error(f"Health check failed for {service_class.__name__}: {e}")
+                health_status[service_class.__name__] = False
+        
+        return health_status
 
 
-# Package-level configuration and initialization
-def init_services(app: Flask) -> None:
+# Global service manager instance for application-wide service access
+service_manager = ServiceManager()
+
+
+def init_services(app: Flask, db_session: Optional[DatabaseSession] = None) -> None:
     """
-    Initialize the service layer for Flask application factory pattern.
+    Initialize service layer for Flask application factory pattern integration.
     
-    This function should be called from the Flask application factory to
-    set up the service layer with proper dependency injection and configuration.
+    Configures service manager, registers core services, and establishes
+    service layer integration with Flask application context per Section 6.1.5.
     
     Args:
         app: Flask application instance
-        
-    Example:
-        ```python
-        from services import init_services
-        
-        def create_app():
-            app = Flask(__name__)
-            init_services(app)
-            return app
-        ```
-    """
-    service_registry.init_app(app)
-    
-    logger = logging.getLogger(__name__)
-    logger.info("Service layer initialized for Flask application")
-
-
-# Service Layer Pattern validation
-def validate_service_layer() -> bool:
-    """
-    Validate service layer configuration and dependencies.
-    
-    This function performs comprehensive validation of the service layer
-    setup, including dependency availability, configuration consistency,
-    and interface compliance.
-    
-    Returns:
-        bool: True if service layer is properly configured
-        
+        db_session: Optional database session for dependency injection
+                   If None, services will use Flask-SQLAlchemy session
+                   
     Raises:
-        ServiceException: If validation fails
+        ServiceError: If service initialization fails
     """
     try:
-        # Validate core service registrations
-        required_services = ['auth', 'user', 'validation']
+        # Initialize base service layer
+        _init_service_layer(app)
         
-        for service_name in required_services:
-            if not service_registry.has_service(service_name):
-                raise ServiceException(
-                    message=f"Required service '{service_name}' not registered",
-                    error_code='SERVICE_VALIDATION_ERROR'
-                )
+        # Configure service manager with Flask application settings
+        service_config = {
+            'enable_health_checks': app.config.get('SERVICE_HEALTH_CHECKS', True),
+            'health_check_interval': app.config.get('SERVICE_HEALTH_CHECK_INTERVAL', 300),
+            'enable_performance_monitoring': app.config.get('SERVICE_PERFORMANCE_MONITORING', True),
+            'auto_register_services': app.config.get('SERVICE_AUTO_REGISTER', True)
+        }
         
-        # Validate service class inheritance
-        for service_name, service_class in service_registry.service_classes.items():
-            if not issubclass(service_class, BaseService):
-                raise ServiceException(
-                    message=f"Service '{service_name}' doesn't inherit from BaseService",
-                    error_code='SERVICE_INHERITANCE_ERROR'
-                )
+        service_manager.configure_services(service_config)
         
-        logger = logging.getLogger(__name__)
-        logger.debug("Service layer validation completed successfully")
-        return True
+        # Register core application services
+        if service_config.get('auto_register_services', True):
+            service_manager.register_core_services(db_session)
+        
+        # Store service manager in Flask application instance
+        app.service_manager = service_manager
+        
+        logger.info("Service layer initialized successfully for Flask application")
         
     except Exception as e:
-        logger = logging.getLogger(__name__)
-        logger.error(f"Service layer validation failed: {str(e)}")
-        raise ServiceException(
-            message=f"Service layer validation failed: {str(e)}",
-            error_code='SERVICE_LAYER_VALIDATION_ERROR'
-        )
+        error_msg = f"Service layer initialization failed: {e}"
+        logger.error(error_msg)
+        raise ServiceError(error_msg, error_code="SERVICE_LAYER_INIT_ERROR", cause=e)
+
+
+def get_service(service_class: Type[ServiceClass]) -> ServiceClass:
+    """
+    Get service instance from Flask application context with comprehensive error handling.
+    
+    Convenience function for retrieving service instances within Flask request context
+    with automatic service manager access and fallback to service factory.
+    
+    Args:
+        service_class: Service class to retrieve
+        
+    Returns:
+        Configured service instance
+        
+    Raises:
+        RuntimeError: If called outside Flask application context
+        ServiceError: If service not found or retrieval fails
+    """
+    if not has_app_context():
+        raise RuntimeError("get_service() must be called within Flask application context")
+    
+    # Try service manager first (preferred method)
+    if hasattr(current_app, 'service_manager'):
+        try:
+            return current_app.service_manager.get_service(service_class)
+        except ServiceError:
+            # Fall back to service factory if service manager fails
+            logger.warning(f"Service manager failed for {service_class.__name__}, falling back to service factory")
+    
+    # Fallback to base service layer get_service function
+    return _get_service(service_class)
+
+
+def get_all_services() -> Dict[str, BaseService]:
+    """
+    Get all registered services from Flask application context.
+    
+    Returns:
+        Dictionary mapping service names to service instances
+        
+    Raises:
+        RuntimeError: If called outside Flask application context
+    """
+    if not has_app_context():
+        raise RuntimeError("get_all_services() must be called within Flask application context")
+    
+    if hasattr(current_app, 'service_manager'):
+        return current_app.service_manager.get_all_services()
+    
+    # Fallback to service factory
+    factory_registry = _service_factory.get_service_registry()
+    return factory_registry.get('registered_services', {})
+
+
+def get_service_health() -> Dict[str, bool]:
+    """
+    Get health status for all registered services.
+    
+    Returns:
+        Dictionary mapping service names to health status
+        
+    Raises:
+        RuntimeError: If called outside Flask application context
+    """
+    if not has_app_context():
+        raise RuntimeError("get_service_health() must be called within Flask application context")
+    
+    if hasattr(current_app, 'service_manager'):
+        return current_app.service_manager.perform_health_checks()
+    
+    # Fallback: assume all services are healthy if no manager available
+    logger.warning("Service manager not available, returning optimistic health status")
+    return {}
+
+
+# Export all public classes and functions for service layer integration
+__all__ = [
+    # Core service classes
+    'AuthService',
+    'UserService', 
+    'ValidationService',
+    
+    # Base service layer components
+    'BaseService',
+    'ServiceFactory',
+    'ServiceManager',
+    'ServiceProvider',
+    
+    # Result and error types
+    'ServiceResult',
+    'ServiceError',
+    'DatabaseError',
+    'ValidationError',
+    'NotFoundError',
+    'TransactionStatus',
+    
+    # Registration and metadata types
+    'ServiceRegistrationInfo',
+    
+    # Protocol types for dependency injection
+    'DatabaseSession',
+    'ServiceRegistry',
+    
+    # Flask integration functions
+    'init_services',
+    'get_service',
+    'get_all_services',
+    'get_service_health',
+    
+    # Global instances
+    'service_manager',
+    
+    # Type variables for type safety
+    'T',
+    'ModelType',
+    'ServiceType',
+    'ServiceClass'
+]
