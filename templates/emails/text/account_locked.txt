@@ -1,0 +1,130 @@
+SECURITY ALERT: Account Temporarily Locked
+
+Hello {{ user.full_name or user.username }},
+
+Your account has been temporarily locked for security reasons.
+
+=======================================================================
+ACCOUNT LOCKOUT INFORMATION
+=======================================================================
+
+Account:        {{ user.email }}
+Lockout Time:   {{ lockout_timestamp }}
+Lockout Reason: {{ lockout_reason }}
+IP Address:     {{ client_ip }}
+Location:       {{ location or 'Unknown' }}
+
+{% if lockout_reason == 'multiple_failed_attempts' -%}
+Your account was locked due to multiple failed login attempts within a 
+short period. This is a security measure to protect your account from 
+unauthorized access attempts.
+{%- elif lockout_reason == 'suspicious_activity' -%}
+Your account was locked due to suspicious activity detected on your 
+account. This may include unusual login patterns or potential security 
+threats.
+{%- elif lockout_reason == 'policy_violation' -%}
+Your account was locked due to a security policy violation. Please 
+review our terms of service and security guidelines.
+{%- else -%}
+Your account was locked as a security precaution. Our system detected 
+activity that requires additional verification.
+{%- endif %}
+
+=======================================================================
+UNLOCK PROCEDURES
+=======================================================================
+
+{% if auto_unlock_time -%}
+AUTOMATIC UNLOCK:
+Your account will automatically unlock at: {{ auto_unlock_time }}
+Time remaining: {{ time_remaining }}
+
+{%- endif %}
+
+IMMEDIATE UNLOCK OPTIONS:
+
+1. SELF-SERVICE UNLOCK (Recommended):
+   - Visit: {{ unlock_url }}
+   - Enter your email address
+   - Complete security verification
+   - Follow the instructions sent to your email
+
+2. CONTACT SUPPORT:
+   - Email: {{ support_email }}
+   - Phone: {{ support_phone }}
+   - Reference your Account ID: {{ user.id }}
+   - Include this incident reference: {{ incident_id }}
+
+3. SECURITY VERIFICATION:
+   {% if has_backup_email -%}
+   - Check your backup email for verification instructions
+   {%- endif %}
+   {% if has_phone_verification -%}
+   - SMS verification available to {{ masked_phone }}
+   {%- endif %}
+   - Security questions may be required
+
+=======================================================================
+SECURITY RECOMMENDATIONS
+=======================================================================
+
+To prevent future lockouts and secure your account:
+
+• Use a strong, unique password for this account
+• Enable two-factor authentication if available
+• Keep your contact information up to date
+• Avoid accessing your account from shared computers
+• Always log out completely when finished
+• Report any suspicious emails or communications
+• Review your account activity regularly
+
+=======================================================================
+IMPORTANT SECURITY INFORMATION
+=======================================================================
+
+If you did NOT attempt to access your account:
+1. Do NOT use any links in suspicious emails
+2. Change your password immediately after unlock
+3. Review recent account activity
+4. Contact support immediately: {{ security_email }}
+5. Consider enabling additional security features
+
+This lockout was triggered by our automated security system to protect
+your account. If you believe this is an error, please contact our 
+support team with the incident reference number provided above.
+
+=======================================================================
+NEED IMMEDIATE ASSISTANCE?
+=======================================================================
+
+Support Contact Information:
+- Email: {{ support_email }}
+- Phone: {{ support_phone }} (Available {{ support_hours }})
+- Live Chat: {{ support_chat_url }}
+
+Emergency Security Contact:
+- Email: {{ security_email }}
+- Phone: {{ security_phone }} (24/7 for security issues)
+
+When contacting support, please provide:
+- Your username: {{ user.username }}
+- Your email: {{ user.email }}
+- Incident ID: {{ incident_id }}
+- Approximate time of lockout: {{ lockout_timestamp }}
+
+=======================================================================
+
+Thank you for your attention to this security matter.
+
+{{ company_name }} Security Team
+{{ website_url }}
+
+This is an automated security notification. Please do not reply to 
+this email address. For assistance, use the contact information 
+provided above.
+
+Security Notice: This email contains important account security 
+information. If you received this email in error, please delete it 
+immediately and contact {{ security_email }}.
+
+© {{ current_year }} {{ company_name }}. All rights reserved.
