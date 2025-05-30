@@ -1,0 +1,123 @@
+{%- set resource_type = resource.__class__.__name__.lower() -%}
+{%- set resource_id = resource.id if resource.id is defined else resource.get('id') -%}
+{
+  "success": true,
+  "status": 200,
+  "timestamp": "{{ timestamp }}",
+  "request_id": "{{ request_id }}",
+  "message": "Resource retrieved successfully",
+  "data": {
+    "type": "{{ resource_type }}",
+    "id": "{{ resource_id }}",
+    "attributes": {{ resource_data | tojson | safe }},
+    "relationships": {
+      {%- if relationships %}
+      {%- for relationship_name, relationship_data in relationships.items() %}
+      "{{ relationship_name }}": {
+        {%- if relationship_data is iterable and relationship_data is not string %}
+        "data": [
+          {%- for item in relationship_data %}
+          {
+            "type": "{{ item.__class__.__name__.lower() if item.__class__ is defined else relationship_name[:-1] }}",
+            "id": "{{ item.id if item.id is defined else item.get('id') }}"
+          }{% if not loop.last %},{% endif %}
+          {%- endfor %}
+        ],
+        "links": {
+          "self": "{{ url_for('api.get_' + resource_type + '_' + relationship_name, id=resource_id, _external=True) }}",
+          "related": "{{ url_for('api.get_' + relationship_name, _external=True) }}"
+        }
+        {%- else %}
+        "data": {
+          "type": "{{ relationship_data.__class__.__name__.lower() if relationship_data.__class__ is defined else relationship_name }}",
+          "id": "{{ relationship_data.id if relationship_data.id is defined else relationship_data.get('id') }}"
+        },
+        "links": {
+          "self": "{{ url_for('api.get_' + resource_type + '_' + relationship_name, id=resource_id, _external=True) }}",
+          "related": "{{ url_for('api.get_' + relationship_name, id=relationship_data.id if relationship_data.id is defined else relationship_data.get('id'), _external=True) }}"
+        }
+        {%- endif %}
+      }{% if not loop.last %},{% endif %}
+      {%- endfor %}
+      {%- endif %}
+    },
+    "links": {
+      "self": "{{ url_for('api.get_' + resource_type, id=resource_id, _external=True) }}",
+      {%- if resource_type in ['user', 'users'] %}
+      "profile": "{{ url_for('api.get_user_profile', id=resource_id, _external=True) }}",
+      {%- endif %}
+      {%- if resource.__table__ is defined %}
+      {%- for relationship in resource.__table__.foreign_keys %}
+      "{{ relationship.column.table.name }}": "{{ url_for('api.get_' + relationship.column.table.name, id=getattr(resource, relationship.parent.name), _external=True) }}",
+      {%- endfor %}
+      {%- endif %}
+      "collection": "{{ url_for('api.get_' + resource_type + 's' if not resource_type.endswith('s') else 'api.get_' + resource_type, _external=True) }}"
+    },
+    "meta": {
+      "created_at": "{{ resource.created_at.isoformat() if resource.created_at is defined else None }}",
+      "updated_at": "{{ resource.updated_at.isoformat() if resource.updated_at is defined else None }}",
+      {%- if resource.version is defined %}
+      "version": {{ resource.version }},
+      {%- endif %}
+      {%- if resource.__table__ is defined %}
+      "schema_version": "{{ resource.__table__.schema or 'public' }}",
+      "table_name": "{{ resource.__table__.name }}",
+      {%- endif %}
+      "resource_url": "{{ request.url }}",
+      "permissions": {
+        "can_read": {{ can_read | default(true) | tojson }},
+        "can_update": {{ can_update | default(false) | tojson }},
+        "can_delete": {{ can_delete | default(false) | tojson }}
+      },
+      {%- if etag %}
+      "etag": "{{ etag }}",
+      {%- endif %}
+      "cache_control": {
+        "max_age": {{ cache_max_age | default(300) }},
+        "public": {{ cache_public | default(false) | tojson }},
+        "no_cache": {{ no_cache | default(false) | tojson }}
+      }
+    }
+  },
+  "included": [
+    {%- if included_resources %}
+    {%- for included_resource in included_resources %}
+    {
+      "type": "{{ included_resource.__class__.__name__.lower() if included_resource.__class__ is defined else 'resource' }}",
+      "id": "{{ included_resource.id if included_resource.id is defined else included_resource.get('id') }}",
+      "attributes": {{ included_resource | tojson | safe }},
+      "links": {
+        "self": "{{ url_for('api.get_' + included_resource.__class__.__name__.lower(), id=included_resource.id if included_resource.id is defined else included_resource.get('id'), _external=True) }}"
+      }
+    }{% if not loop.last %},{% endif %}
+    {%- endfor %}
+    {%- endif %}
+  ],
+  "links": {
+    "self": "{{ request.url }}",
+    "canonical": "{{ url_for('api.get_' + resource_type, id=resource_id, _external=True) }}",
+    {%- if api_version %}
+    "api_version": "{{ url_for('api.get_api_info', _external=True) }}",
+    {%- endif %}
+    "documentation": "{{ url_for('api.get_docs', _external=True) if url_for('api.get_docs', _external=True) else '/docs' }}"
+  },
+  "meta": {
+    "api_version": "{{ api_version | default('1.0.0') }}",
+    "response_time_ms": {{ response_time_ms | default(0) }},
+    "server_time": "{{ timestamp }}",
+    "query_count": {{ query_count | default(1) }},
+    "cache_hit": {{ cache_hit | default(false) | tojson }},
+    {%- if user_context %}
+    "user_context": {
+      "user_id": "{{ user_context.id if user_context.id is defined else user_context.get('id') }}",
+      "permissions": {{ user_context.permissions | default([]) | tojson | safe }},
+      "role": "{{ user_context.role if user_context.role is defined else user_context.get('role', 'user') }}"
+    },
+    {%- endif %}
+    "pagination": null,
+    "filters_applied": {{ filters_applied | default([]) | tojson | safe }},
+    "sort_applied": "{{ sort_applied | default('id') }}",
+    "fields_included": {{ fields_included | default([]) | tojson | safe }},
+    "fields_excluded": {{ fields_excluded | default([]) | tojson | safe }}
+  }
+}
