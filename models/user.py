@@ -1,1142 +1,1031 @@
 """
-User Authentication and Profile Models
+User authentication and profile models implementing Flask-SQLAlchemy declarative classes for user management, Auth0 integration, and session handling.
 
-This module implements Flask-SQLAlchemy declarative classes for comprehensive user management,
-Auth0 integration, and session handling. Provides the foundation for user authentication,
-profile management, and session tracking capabilities essential for security and user management.
-
-The user system supports:
-- Auth0 Python SDK 4.9.0 integration for external authentication
-- Flask-Login user loader integration for session-based authentication flows
-- SQLAlchemy-Utils EncryptedType for PII protection and compliance
+This module provides comprehensive user management capabilities including:
+- User model with Auth0 integration fields for external authentication
+- UserSession model for Flask session management and tracking
+- Encrypted sensitive field storage using SQLAlchemy-Utils EncryptedType
 - RBAC relationship integration with Role and Permission models
-- Comprehensive audit trails and session management
-- Flask-Migrate 4.1.0 compatible schema definitions
+- Flask-Login user loader integration for session-based authentication
+- Comprehensive audit trails and validation for security compliance
 
-Dependencies:
-- Flask-SQLAlchemy 3.1.1: ORM functionality and declarative models
-- SQLAlchemy-Utils: EncryptedType for sensitive field protection
-- Flask-Login: Session-based authentication integration
-- Auth0 Python SDK 4.9.0: External authentication provider integration
-- python-dotenv: Secure environment variable management
+The implementation ensures zero security regression during migration from Node.js
+while enhancing security through Flask's authentication framework and encrypted
+data storage capabilities.
 """
 
 import os
-import secrets
+import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional, Union
-from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, Text, ForeignKey,
-    Index, UniqueConstraint, CheckConstraint, event, text
-)
-from sqlalchemy.orm import relationship, validates, backref
-from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy_utils import EncryptedType, FernetEngine
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import UserMixin
+from typing import Dict, Any, Optional, List, Union
 from werkzeug.security import generate_password_hash, check_password_hash
-import json
+from werkzeug.exceptions import ValidationError
+from flask import current_app, g
+from flask_login import UserMixin
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, Index, event
+from sqlalchemy.orm import relationship, validates
+from sqlalchemy_utils import EncryptedType, FernetEngine
+from sqlalchemy.exc import IntegrityError
 
-# Initialize SQLAlchemy instance
-db = SQLAlchemy()
+# Import base model and database instance
+from models.base import BaseModel, EncryptedMixin, db, AuditMixin
+from models.rbac import UserRole, Role
+
+# Configure logging for user model operations
+logger = logging.getLogger(__name__)
 
 
-class AuditMixin:
+class User(BaseModel, EncryptedMixin, UserMixin):
     """
-    Audit mixin providing standardized audit fields for user-related models.
+    User model implementing Flask-SQLAlchemy declarative class for user management
+    with Auth0 integration, encrypted sensitive data, and RBAC relationships.
     
-    Implements automatic timestamp tracking and user attribution for comprehensive
-    audit trails required by security and compliance frameworks.
-    """
+    Features:
+    - Auth0 Python SDK 4.9.0 integration fields for external authentication
+    - Flask-Login UserMixin for session-based authentication flows
+    - Encrypted sensitive field storage using SQLAlchemy-Utils EncryptedType
+    - Bidirectional relationships with Role models for RBAC integration
+    - Comprehensive validation and business logic for user management
+    - Audit trail support through AuditMixin inheritance
     
-    @declared_attr
-    def created_at(cls):
-        """Timestamp when record was created"""
-        return Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    
-    @declared_attr
-    def updated_at(cls):
-        """Timestamp when record was last updated"""
-        return Column(
-            DateTime, 
-            default=datetime.utcnow, 
-            onupdate=datetime.utcnow, 
-            nullable=False,
-            index=True
-        )
-    
-    @declared_attr
-    def created_by(cls):
-        """User ID or system identifier who created the record"""
-        return Column(String(100), nullable=True)
-    
-    @declared_attr
-    def updated_by(cls):
-        """User ID or system identifier who last updated the record"""
-        return Column(String(100), nullable=True)
-
-
-class EncryptedMixin:
-    """
-    Mixin providing encrypted field support using SQLAlchemy-Utils EncryptedType.
-    
-    Implements field-level encryption for sensitive data using FernetEngine for
-    maximum security with PII protection and compliance requirements.
-    """
-    
-    @staticmethod
-    def get_encryption_key():
-        """
-        Get encryption key from environment variables for SQLAlchemy-Utils EncryptedType.
-        
-        Returns:
-            Encryption key from FIELD_ENCRYPTION_KEY environment variable
-            
-        Raises:
-            ValueError: If encryption key is not configured
-        """
-        key = os.environ.get('FIELD_ENCRYPTION_KEY')
-        if not key:
-            raise ValueError("FIELD_ENCRYPTION_KEY environment variable is required for encrypted fields")
-        
-        # Ensure key is bytes for Fernet
-        if isinstance(key, str):
-            key = key.encode('utf-8')
-        
-        return key
-
-
-class User(db.Model, UserMixin, AuditMixin, EncryptedMixin):
-    """
-    User model implementing comprehensive user management with Auth0 integration.
-    
-    Supports Auth0 external authentication, encrypted sensitive data storage,
-    RBAC integration, and Flask-Login session management. Provides the foundation
-    for all user authentication and authorization workflows.
-    
-    Attributes:
-        id: Primary key for user identification
-        auth0_user_id: Auth0 external user identifier for SSO integration
-        username: Unique username for user identification
-        email: Encrypted email address for PII protection
-        password_hash: Encrypted password hash for fallback authentication
-        first_name: Encrypted first name for PII protection
-        last_name: Encrypted last name for PII protection
-        is_active: Account status flag
-        is_verified: Email verification status
-        last_login_at: Timestamp of last successful login
-        login_count: Total number of successful logins
-        roles: Many-to-many relationship with Role model for RBAC
-        
-    Database Indexes:
-        - Primary key index on id
-        - Unique index on username
-        - Unique index on auth0_user_id (for Auth0 integration)
-        - Index on is_active for filtering
-        - Index on last_login_at for activity tracking
-        - Composite index on (is_active, is_verified) for user queries
+    Security Implementation:
+    - Password hashing using Werkzeug's secure password utilities
+    - Email and personal data encryption using FernetEngine
+    - Auth0 user synchronization for external identity management
+    - Session tracking and security validation
     """
     
     __tablename__ = 'users'
     
-    # Primary key and core identification
-    id = Column(Integer, primary_key=True)
-    auth0_user_id = Column(String(255), unique=True, nullable=True, index=True)
+    # Core user identification fields
     username = Column(String(100), unique=True, nullable=False, index=True)
     
-    # Encrypted sensitive fields using SQLAlchemy-Utils EncryptedType with FernetEngine
+    # Encrypted sensitive data fields using SQLAlchemy-Utils EncryptedType
     email = Column(
         EncryptedType(String(255), lambda: EncryptedMixin.get_encryption_key(), FernetEngine),
-        nullable=False,
-        index=True  # Note: Encrypted fields have limited index utility
+        unique=True, nullable=False, index=True
     )
     
+    # Password storage - encrypted for additional security layer
     password_hash = Column(
         EncryptedType(String(255), lambda: EncryptedMixin.get_encryption_key(), FernetEngine),
         nullable=True  # Nullable for Auth0-only users
     )
     
+    # Auth0 integration fields for external authentication provider support
+    auth0_user_id = Column(String(100), unique=True, nullable=True, index=True)
+    auth0_nickname = Column(String(100), nullable=True)
+    auth0_picture_url = Column(String(500), nullable=True)
+    auth0_email_verified = Column(Boolean, default=False, nullable=False)
+    auth0_last_login = Column(DateTime, nullable=True)
+    auth0_login_count = Column(Integer, default=0, nullable=False)
+    
+    # User profile and status fields
     first_name = Column(
         EncryptedType(String(100), lambda: EncryptedMixin.get_encryption_key(), FernetEngine),
         nullable=True
     )
-    
     last_name = Column(
         EncryptedType(String(100), lambda: EncryptedMixin.get_encryption_key(), FernetEngine),
         nullable=True
     )
+    display_name = Column(String(200), nullable=True)
     
-    # User status and verification
+    # Account status and security fields
     is_active = Column(Boolean, default=True, nullable=False, index=True)
-    is_verified = Column(Boolean, default=False, nullable=False, index=True)
+    is_verified = Column(Boolean, default=False, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
+    email_verification_token = Column(String(255), nullable=True)
+    email_verification_sent_at = Column(DateTime, nullable=True)
+    password_reset_token = Column(String(255), nullable=True)
+    password_reset_sent_at = Column(DateTime, nullable=True)
     
-    # Authentication tracking
+    # Authentication tracking fields
     last_login_at = Column(DateTime, nullable=True, index=True)
+    last_login_ip = Column(String(45), nullable=True)  # IPv6 compatible
     login_count = Column(Integer, default=0, nullable=False)
-    failed_login_count = Column(Integer, default=0, nullable=False)
-    locked_until = Column(DateTime, nullable=True)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    account_locked_at = Column(DateTime, nullable=True)
+    account_locked_until = Column(DateTime, nullable=True)
     
-    # Profile and preferences (non-encrypted)
+    # User preferences and metadata
     timezone = Column(String(50), default='UTC', nullable=False)
-    locale = Column(String(10), default='en', nullable=False)
-    avatar_url = Column(String(500), nullable=True)
+    language = Column(String(10), default='en', nullable=False)
+    date_format = Column(String(20), default='YYYY-MM-DD', nullable=False)
+    time_format = Column(String(10), default='24h', nullable=False)
     
-    # Auth0 integration metadata
-    auth0_metadata = Column(Text, nullable=True)  # JSON string for Auth0 user metadata
-    auth0_app_metadata = Column(Text, nullable=True)  # JSON string for Auth0 app metadata
-    
-    # Terms and privacy
-    terms_accepted_at = Column(DateTime, nullable=True)
-    privacy_accepted_at = Column(DateTime, nullable=True)
+    # Privacy and compliance fields
+    privacy_policy_accepted_at = Column(DateTime, nullable=True)
+    terms_of_service_accepted_at = Column(DateTime, nullable=True)
+    marketing_consent = Column(Boolean, default=False, nullable=False)
+    data_processing_consent = Column(Boolean, default=True, nullable=False)
     
     # RBAC relationship integration with Role models using back_populates
+    user_roles = relationship(
+        "UserRole", 
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
+    
+    # Convenience relationship for direct role access
     roles = relationship(
-        'Role',
-        secondary='user_roles',
-        back_populates='users',
-        lazy='dynamic',  # Enable filtering on the relationship
-        cascade='all'
+        "Role",
+        secondary="user_roles",
+        primaryjoin="and_(User.id == UserRole.user_id, UserRole.is_active == True)",
+        secondaryjoin="and_(Role.id == UserRole.role_id, Role.is_active == True)",
+        viewonly=True,
+        lazy="select"
     )
     
-    # User sessions relationship
-    sessions = relationship(
-        'UserSession',
-        back_populates='user',
-        lazy='dynamic',
-        cascade='all, delete-orphan'
+    # User session relationship for Flask session management
+    user_sessions = relationship(
+        "UserSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="select"
     )
     
-    # Additional indexes for performance optimization
+    # Database constraints and indexes for performance optimization
     __table_args__ = (
-        Index('idx_users_active_verified', 'is_active', 'is_verified'),
+        Index('idx_users_email_active', 'is_active'),
+        Index('idx_users_auth0_verified', 'auth0_user_id', 'auth0_email_verified'),
         Index('idx_users_login_tracking', 'last_login_at', 'login_count'),
-        Index('idx_users_auth0_integration', 'auth0_user_id', 'is_active'),
-        UniqueConstraint('email', name='uq_users_email'),  # Note: Limited utility with encryption
-        CheckConstraint('login_count >= 0', name='ck_user_login_count_positive'),
-        CheckConstraint('failed_login_count >= 0', name='ck_user_failed_login_count_positive'),
-        CheckConstraint("timezone != ''", name='ck_user_timezone_not_empty'),
-        CheckConstraint("locale IN ('en', 'es', 'fr', 'de', 'it', 'pt', 'ja', 'ko', 'zh')", 
-                       name='ck_user_locale_valid')
+        Index('idx_users_account_status', 'is_active', 'is_verified', 'account_locked_at'),
     )
     
-    @validates('username')
-    def validate_username(self, key, username):
-        """Validate username format and constraints"""
-        if not username or len(username.strip()) == 0:
-            raise ValueError("Username cannot be empty")
-        if len(username) < 3:
-            raise ValueError("Username must be at least 3 characters")
-        if len(username) > 100:
-            raise ValueError("Username cannot exceed 100 characters")
-        if not username.replace('_', '').replace('-', '').replace('.', '').isalnum():
-            raise ValueError("Username can only contain alphanumeric characters, hyphens, underscores, and periods")
-        return username.strip().lower()
+    def __repr__(self) -> str:
+        """String representation for debugging and logging."""
+        return f"<User(id={self.id}, username='{self.username}', email='[ENCRYPTED]', is_active={self.is_active})>"
     
-    @validates('email')
-    def validate_email(self, key, email):
-        """Validate email format before encryption"""
-        if not email:
-            raise ValueError("Email cannot be empty")
-        if '@' not in email or '.' not in email.split('@')[1]:
-            raise ValueError("Invalid email format")
-        if len(email) > 255:
-            raise ValueError("Email cannot exceed 255 characters")
-        return email.strip().lower()
+    # Flask-Login UserMixin implementation
+    @property
+    def is_authenticated(self) -> bool:
+        """Return True if user is authenticated."""
+        return True
     
-    @validates('auth0_user_id')
-    def validate_auth0_user_id(self, key, auth0_user_id):
-        """Validate Auth0 user ID format"""
-        if auth0_user_id is not None:
-            if len(auth0_user_id) > 255:
-                raise ValueError("Auth0 user ID cannot exceed 255 characters")
-            if not auth0_user_id.strip():
-                return None
-        return auth0_user_id
+    @property
+    def is_anonymous(self) -> bool:
+        """Return True if user is anonymous."""
+        return False
     
+    def get_id(self) -> str:
+        """Return user ID as string for Flask-Login."""
+        return str(self.id)
+    
+    # Password management methods
     def set_password(self, password: str) -> None:
         """
-        Set user password with secure hashing.
+        Set password hash using secure hashing.
         
         Args:
-            password: Plain text password to hash and store
-            
-        Raises:
-            ValueError: If password doesn't meet security requirements
+            password: Plain text password to hash
         """
-        if not password:
-            raise ValueError("Password cannot be empty")
-        if len(password) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if len(password) > 128:
-            raise ValueError("Password cannot exceed 128 characters")
+        if not password or len(password) < 8:
+            raise ValidationError("Password must be at least 8 characters long")
         
-        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+        self.password_hash = generate_password_hash(password, method='scrypt')
     
     def check_password(self, password: str) -> bool:
         """
-        Verify password against stored hash.
+        Check password against stored hash.
         
         Args:
             password: Plain text password to verify
             
         Returns:
-            Boolean indicating if password is correct
+            True if password matches, False otherwise
         """
-        if not self.password_hash or not password:
+        if not self.password_hash:
             return False
-        return check_password_hash(self.password_hash, password)
+        
+        try:
+            return check_password_hash(self.password_hash, password)
+        except Exception as e:
+            logger.error(f"Password check failed for user {self.id}: {e}")
+            return False
     
-    def update_login_tracking(self) -> None:
-        """Update login tracking information"""
-        self.last_login_at = datetime.utcnow()
-        self.login_count += 1
-        self.failed_login_count = 0  # Reset failed login count on successful login
-        self.locked_until = None  # Clear any account locks
-    
-    def record_failed_login(self, max_attempts: int = 5, lockout_duration: int = 30) -> bool:
+    # Auth0 integration methods
+    def sync_with_auth0(self, auth0_profile: Dict[str, Any]) -> None:
         """
-        Record failed login attempt and potentially lock account.
+        Synchronize user data with Auth0 profile information.
         
         Args:
-            max_attempts: Maximum failed attempts before locking
-            lockout_duration: Lockout duration in minutes
-            
-        Returns:
-            Boolean indicating if account is now locked
+            auth0_profile: Auth0 user profile data
         """
-        self.failed_login_count += 1
+        try:
+            # Update Auth0 specific fields
+            self.auth0_user_id = auth0_profile.get('user_id')
+            self.auth0_nickname = auth0_profile.get('nickname')
+            self.auth0_picture_url = auth0_profile.get('picture')
+            self.auth0_email_verified = auth0_profile.get('email_verified', False)
+            self.auth0_last_login = datetime.utcnow()
+            self.auth0_login_count = auth0_profile.get('logins_count', 0)
+            
+            # Update email if provided and verified
+            if auth0_profile.get('email') and self.auth0_email_verified:
+                self.email = auth0_profile['email']
+            
+            # Update name fields if provided
+            if auth0_profile.get('given_name'):
+                self.first_name = auth0_profile['given_name']
+            if auth0_profile.get('family_name'):
+                self.last_name = auth0_profile['family_name']
+            if auth0_profile.get('name'):
+                self.display_name = auth0_profile['name']
+            
+            logger.info(f"Synchronized user {self.id} with Auth0 profile")
+            
+        except Exception as e:
+            logger.error(f"Failed to sync user {self.id} with Auth0: {e}")
+            raise ValidationError(f"Auth0 synchronization failed: {str(e)}")
+    
+    def update_login_tracking(self, ip_address: str = None) -> None:
+        """
+        Update login tracking information.
         
-        if self.failed_login_count >= max_attempts:
-            self.locked_until = datetime.utcnow() + timedelta(minutes=lockout_duration)
-            return True
+        Args:
+            ip_address: Client IP address for login tracking
+        """
+        self.last_login_at = datetime.utcnow()
+        self.last_login_ip = ip_address
+        self.login_count += 1
+        self.failed_login_attempts = 0  # Reset on successful login
         
-        return False
+        # Clear account lock on successful login
+        if self.account_locked_until and datetime.utcnow() > self.account_locked_until:
+            self.account_locked_at = None
+            self.account_locked_until = None
+    
+    def increment_failed_login(self, max_attempts: int = 5, lockout_duration: int = 30) -> None:
+        """
+        Increment failed login attempts and lock account if necessary.
+        
+        Args:
+            max_attempts: Maximum failed attempts before lockout
+            lockout_duration: Lockout duration in minutes
+        """
+        self.failed_login_attempts += 1
+        
+        if self.failed_login_attempts >= max_attempts:
+            self.account_locked_at = datetime.utcnow()
+            self.account_locked_until = datetime.utcnow() + timedelta(minutes=lockout_duration)
+            logger.warning(f"Account locked for user {self.id} due to {self.failed_login_attempts} failed attempts")
     
     def is_account_locked(self) -> bool:
         """
-        Check if account is currently locked due to failed login attempts.
+        Check if account is currently locked.
         
         Returns:
-            Boolean indicating if account is locked
+            True if account is locked, False otherwise
         """
-        if not self.locked_until:
+        if not self.account_locked_until:
             return False
-        return datetime.utcnow() < self.locked_until
-    
-    def unlock_account(self) -> None:
-        """Unlock account and reset failed login count"""
-        self.locked_until = None
-        self.failed_login_count = 0
-    
-    def get_active_roles(self) -> List['Role']:
-        """
-        Get all active roles assigned to this user.
         
-        Returns:
-            List of active Role objects
-        """
-        from .rbac import user_roles
-        return self.roles.filter_by(is_active=True).all()
+        if datetime.utcnow() > self.account_locked_until:
+            # Auto-unlock expired locks
+            self.account_locked_at = None
+            self.account_locked_until = None
+            self.failed_login_attempts = 0
+            return False
+        
+        return True
     
+    # RBAC integration methods
     def has_role(self, role_name: str) -> bool:
         """
-        Check if user has a specific role.
+        Check if user has specific role.
         
         Args:
-            role_name: Name of the role to check
+            role_name: Name of role to check
             
         Returns:
-            Boolean indicating if user has the role
+            True if user has role, False otherwise
         """
-        return self.roles.filter_by(name=role_name, is_active=True).first() is not None
+        return any(role.name == role_name for role in self.roles if role.is_active)
     
-    def has_permission(self, permission_name: str) -> bool:
+    def has_permission(self, resource: str, action: str) -> bool:
         """
-        Check if user has a specific permission through their roles.
+        Check if user has specific permission through their roles.
         
         Args:
-            permission_name: Name of the permission to check
+            resource: Resource name to check access for
+            action: Action to check permission for
             
         Returns:
-            Boolean indicating if user has the permission
+            True if user has permission, False otherwise
         """
-        for role in self.get_active_roles():
-            if role.has_permission(permission_name):
+        for role in self.roles:
+            if role.is_active and role.has_permission(resource, action):
                 return True
         return False
     
-    def get_permissions(self) -> List[str]:
+    def assign_role(self, role: Union[Role, str], assigned_by: str = None, reason: str = None) -> Optional[UserRole]:
         """
-        Get all permission names for this user across all their roles.
-        
-        Returns:
-            List of unique permission names
-        """
-        permissions = set()
-        for role in self.get_active_roles():
-            permissions.update(role.get_permission_names())
-        return list(permissions)
-    
-    def assign_role(self, role: 'Role', assigned_by: str = None) -> bool:
-        """
-        Assign a role to this user.
+        Assign role to user with audit trail.
         
         Args:
-            role: Role object to assign
-            assigned_by: User ID who assigned the role
+            role: Role object or role name to assign
+            assigned_by: User who is assigning the role
+            reason: Reason for role assignment
             
         Returns:
-            Boolean indicating if role was successfully assigned
+            UserRole instance if successful, None otherwise
         """
-        if not role.is_active:
+        try:
+            if isinstance(role, str):
+                role_obj = Role.query.filter_by(name=role, is_active=True).first()
+                if not role_obj:
+                    raise ValidationError(f"Role '{role}' not found")
+            else:
+                role_obj = role
+            
+            return role_obj.assign_to_user(
+                self.id, 
+                assigned_by=assigned_by or getattr(g, 'current_user_id', 'system'),
+                reason=reason
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to assign role to user {self.id}: {e}")
+            return None
+    
+    def remove_role(self, role_name: str, revoked_by: str = None, reason: str = None) -> bool:
+        """
+        Remove role from user with audit trail.
+        
+        Args:
+            role_name: Name of role to remove
+            revoked_by: User who is revoking the role
+            reason: Reason for role removal
+            
+        Returns:
+            True if removal was successful, False otherwise
+        """
+        try:
+            user_role = UserRole.query.filter_by(
+                user_id=self.id,
+                is_active=True
+            ).join(Role).filter(Role.name == role_name).first()
+            
+            if user_role:
+                return user_role.revoke_role(
+                    revoked_by=revoked_by or getattr(g, 'current_user_id', 'system'),
+                    reason=reason
+                )
+            
             return False
-        
-        if not role.can_be_assigned_to_user(self.id):
+            
+        except Exception as e:
+            logger.error(f"Failed to remove role from user {self.id}: {e}")
             return False
+    
+    def get_permissions(self) -> List[str]:
+        """
+        Get list of all permissions for user through their roles.
         
-        # Check if role is already assigned
-        if self.has_role(role.name):
-            return True
+        Returns:
+            List of permission names in 'resource.action' format
+        """
+        permissions = set()
+        for role in self.roles:
+            if role.is_active:
+                for permission in role.permissions:
+                    if permission.is_active:
+                        permissions.add(f"{permission.resource}.{permission.action}")
+        return list(permissions)
+    
+    # Session management methods
+    def create_session(self, session_data: Dict[str, Any] = None, expires_hours: int = 24) -> 'UserSession':
+        """
+        Create new user session for Flask session management.
         
-        # Insert into association table with audit information
-        db.session.execute(
-            text("""
-                INSERT INTO user_roles (user_id, role_id, assigned_at, assigned_by, is_active)
-                VALUES (:user_id, :role_id, :assigned_at, :assigned_by, :is_active)
-            """),
-            {
-                'user_id': self.id,
-                'role_id': role.id,
-                'assigned_at': datetime.utcnow(),
-                'assigned_by': assigned_by or 'system',
-                'is_active': True
-            }
+        Args:
+            session_data: Additional session metadata
+            expires_hours: Session expiration in hours
+            
+        Returns:
+            UserSession instance
+        """
+        from models.user import UserSession
+        
+        session = UserSession(
+            user_id=self.id,
+            expires_at=datetime.utcnow() + timedelta(hours=expires_hours),
+            session_data=session_data or {},
+            created_by=getattr(g, 'current_user_id', str(self.id))
         )
+        
+        db.session.add(session)
+        return session
+    
+    def invalidate_sessions(self, except_session_id: int = None) -> int:
+        """
+        Invalidate all user sessions except optionally specified one.
+        
+        Args:
+            except_session_id: Session ID to preserve (usually current session)
+            
+        Returns:
+            Number of sessions invalidated
+        """
+        query = UserSession.query.filter_by(user_id=self.id, is_valid=True)
+        
+        if except_session_id:
+            query = query.filter(UserSession.id != except_session_id)
+        
+        sessions = query.all()
+        
+        for session in sessions:
+            session.invalidate(revoked_by=getattr(g, 'current_user_id', str(self.id)))
+        
+        return len(sessions)
+    
+    def get_active_sessions(self) -> List['UserSession']:
+        """
+        Get all active sessions for user.
+        
+        Returns:
+            List of active UserSession objects
+        """
+        return UserSession.query.filter_by(
+            user_id=self.id,
+            is_valid=True
+        ).filter(
+            UserSession.expires_at > datetime.utcnow()
+        ).all()
+    
+    # Validation methods
+    def validate(self) -> bool:
+        """
+        Comprehensive user validation.
+        
+        Returns:
+            True if validation passes
+            
+        Raises:
+            ValidationError: If validation fails
+        """
+        # Call parent validation
+        super().validate()
+        
+        # Username validation
+        if not self.username or len(self.username.strip()) < 3:
+            raise ValidationError("Username must be at least 3 characters long")
+        
+        if len(self.username) > 100:
+            raise ValidationError("Username cannot exceed 100 characters")
+        
+        # Email validation (basic check)
+        if self.email and '@' not in self.email:
+            raise ValidationError("Invalid email format")
+        
+        # Auth0 user ID validation
+        if self.auth0_user_id and len(self.auth0_user_id) > 100:
+            raise ValidationError("Auth0 user ID cannot exceed 100 characters")
+        
+        # Password validation for local users
+        if not self.auth0_user_id and not self.password_hash:
+            raise ValidationError("Password is required for local users")
         
         return True
     
-    def revoke_role(self, role: 'Role', revoked_by: str = None) -> bool:
+    @validates('username')
+    def validate_username(self, key: str, username: str) -> str:
+        """Validate username format and uniqueness."""
+        if not username:
+            raise ValidationError("Username is required")
+        
+        username = username.strip().lower()
+        
+        # Check for valid characters
+        import re
+        if not re.match(r'^[a-z0-9_.-]+$', username):
+            raise ValidationError("Username can only contain letters, numbers, underscores, dots, and hyphens")
+        
+        return username
+    
+    @validates('email')
+    def validate_email(self, key: str, email: str) -> str:
+        """Validate email format."""
+        if not email:
+            raise ValidationError("Email is required")
+        
+        email = email.strip().lower()
+        
+        # Basic email validation
+        import re
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            raise ValidationError("Invalid email format")
+        
+        return email
+    
+    @validates('timezone')
+    def validate_timezone(self, key: str, timezone: str) -> str:
+        """Validate timezone string."""
+        if not timezone:
+            return 'UTC'
+        
+        # Basic timezone validation
+        try:
+            import pytz
+            pytz.timezone(timezone)
+            return timezone
+        except:
+            logger.warning(f"Invalid timezone {timezone}, defaulting to UTC")
+            return 'UTC'
+    
+    def to_dict(self, include_sensitive: bool = False, exclude_fields: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Revoke a role from this user.
+        Convert user to dictionary representation with sensitive data protection.
         
         Args:
-            role: Role object to revoke
-            revoked_by: User ID who revoked the role
+            include_sensitive: Whether to include sensitive/encrypted fields
+            exclude_fields: List of field names to exclude from output
             
         Returns:
-            Boolean indicating if role was successfully revoked
+            Dictionary representation of user
         """
-        # Update association table to mark as inactive
-        result = db.session.execute(
-            text("""
-                UPDATE user_roles 
-                SET is_active = false, updated_by = :revoked_by
-                WHERE user_id = :user_id AND role_id = :role_id AND is_active = true
-            """),
-            {
-                'user_id': self.id,
-                'role_id': role.id,
-                'revoked_by': revoked_by or 'system'
-            }
-        )
+        exclude_fields = exclude_fields or []
+        exclude_fields.extend(['password_hash', 'email_verification_token', 'password_reset_token'])
         
-        return result.rowcount > 0
-    
-    def sync_with_auth0(self, auth0_user_data: Dict[str, Any]) -> None:
-        """
-        Synchronize user data with Auth0 user information.
+        result = super().to_dict(include_sensitive=include_sensitive, exclude_fields=exclude_fields)
         
-        Args:
-            auth0_user_data: Auth0 user data dictionary
-        """
-        # Update Auth0 user ID if provided
-        if 'user_id' in auth0_user_data:
-            self.auth0_user_id = auth0_user_data['user_id']
-        
-        # Update email if provided and different
-        if 'email' in auth0_user_data and auth0_user_data['email']:
-            self.email = auth0_user_data['email']
-        
-        # Update verification status
-        if 'email_verified' in auth0_user_data:
-            self.is_verified = auth0_user_data['email_verified']
-        
-        # Update name information if provided
-        if 'given_name' in auth0_user_data:
-            self.first_name = auth0_user_data['given_name']
-        if 'family_name' in auth0_user_data:
-            self.last_name = auth0_user_data['family_name']
-        
-        # Update avatar URL if provided
-        if 'picture' in auth0_user_data:
-            self.avatar_url = auth0_user_data['picture']
-        
-        # Store Auth0 metadata as JSON
-        if 'user_metadata' in auth0_user_data:
-            self.auth0_metadata = json.dumps(auth0_user_data['user_metadata'])
-        if 'app_metadata' in auth0_user_data:
-            self.auth0_app_metadata = json.dumps(auth0_user_data['app_metadata'])
-        
-        # Update login tracking
-        if 'last_login' in auth0_user_data:
-            try:
-                # Parse Auth0 datetime format
-                from dateutil.parser import parse
-                self.last_login_at = parse(auth0_user_data['last_login'])
-            except (ValueError, TypeError):
-                pass
-        
-        if 'logins_count' in auth0_user_data:
-            self.login_count = max(self.login_count, auth0_user_data['logins_count'])
-    
-    def get_auth0_metadata(self) -> Dict[str, Any]:
-        """
-        Get Auth0 user metadata as dictionary.
-        
-        Returns:
-            Dictionary of Auth0 user metadata
-        """
-        if not self.auth0_metadata:
-            return {}
-        try:
-            return json.loads(self.auth0_metadata)
-        except (ValueError, TypeError):
-            return {}
-    
-    def get_auth0_app_metadata(self) -> Dict[str, Any]:
-        """
-        Get Auth0 app metadata as dictionary.
-        
-        Returns:
-            Dictionary of Auth0 app metadata
-        """
-        if not self.auth0_app_metadata:
-            return {}
-        try:
-            return json.loads(self.auth0_app_metadata)
-        except (ValueError, TypeError):
-            return {}
-    
-    def get_full_name(self) -> str:
-        """
-        Get user's full name from encrypted fields.
-        
-        Returns:
-            Full name string or username if names not available
-        """
-        if self.first_name and self.last_name:
-            return f"{self.first_name} {self.last_name}"
-        elif self.first_name:
-            return self.first_name
-        elif self.last_name:
-            return self.last_name
-        else:
-            return self.username
-    
-    def to_dict(self, include_sensitive: bool = False, include_roles: bool = False) -> Dict[str, Any]:
-        """
-        Convert user to dictionary representation.
-        
-        Args:
-            include_sensitive: Whether to include sensitive information
-            include_roles: Whether to include role information
-            
-        Returns:
-            Dictionary representation of the user
-        """
-        result = {
-            'id': self.id,
-            'username': self.username,
-            'is_active': self.is_active,
-            'is_verified': self.is_verified,
-            'is_admin': self.is_admin,
-            'timezone': self.timezone,
-            'locale': self.locale,
-            'avatar_url': self.avatar_url,
-            'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
-            'login_count': self.login_count,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        }
-        
-        if include_sensitive:
-            result.update({
-                'email': self.email,
-                'first_name': self.first_name,
-                'last_name': self.last_name,
-                'full_name': self.get_full_name(),
-                'auth0_user_id': self.auth0_user_id,
-                'auth0_metadata': self.get_auth0_metadata(),
-                'auth0_app_metadata': self.get_auth0_app_metadata(),
-                'terms_accepted_at': self.terms_accepted_at.isoformat() if self.terms_accepted_at else None,
-                'privacy_accepted_at': self.privacy_accepted_at.isoformat() if self.privacy_accepted_at else None
-            })
-        
-        if include_roles:
-            result['roles'] = [role.to_dict() for role in self.get_active_roles()]
-            result['permissions'] = self.get_permissions()
+        # Add computed fields
+        result['full_name'] = self.get_full_name()
+        result['role_names'] = [role.name for role in self.roles if role.is_active]
+        result['permission_count'] = len(self.get_permissions())
+        result['active_sessions_count'] = len(self.get_active_sessions())
+        result['is_locked'] = self.is_account_locked()
         
         return result
     
-    # Flask-Login required methods
-    def get_id(self):
-        """Return user ID as string for Flask-Login"""
-        return str(self.id)
-    
-    @property
-    def is_authenticated(self):
-        """Return True if user is authenticated"""
-        return True
-    
-    @property
-    def is_anonymous(self):
-        """Return False since this is an authenticated user"""
-        return False
-    
-    def __repr__(self):
-        return f"<User {self.username} (ID: {self.id}, Active: {self.is_active})>"
-
-
-class UserSession(db.Model, AuditMixin):
-    """
-    User session model for Flask session management with secure token storage.
-    
-    Replaces Node.js session patterns with Flask-compatible session tracking
-    including secure session token storage, expiration tracking, and session
-    validation capabilities for comprehensive session management.
-    
-    Attributes:
-        id: Primary key for session identification
-        user_id: Foreign key reference to User model
-        session_token: Unique secure session token
-        csrf_token: CSRF protection token
-        expires_at: Session expiration timestamp
-        is_valid: Session validity flag
-        ip_address: Client IP address for security tracking
-        user_agent: Client user agent for security tracking
-        last_activity_at: Timestamp of last session activity
+    def get_full_name(self) -> str:
+        """
+        Get user's full name.
         
-    Database Indexes:
-        - Primary key index on id
-        - Unique index on session_token
-        - Foreign key index on user_id
-        - Index on expires_at for cleanup queries
-        - Index on is_valid for filtering
-        - Composite index on (user_id, is_valid) for user session queries
+        Returns:
+            Full name or display name or username
+        """
+        if self.display_name:
+            return self.display_name
+        
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        
+        if self.first_name:
+            return self.first_name
+        
+        return self.username
+    
+    # Class methods for user management
+    @classmethod
+    def create_user(cls, username: str, email: str, password: str = None, 
+                   auth0_user_id: str = None, **kwargs) -> 'User':
+        """
+        Create new user with validation.
+        
+        Args:
+            username: Unique username
+            email: User email address
+            password: Password for local users (optional for Auth0 users)
+            auth0_user_id: Auth0 user identifier
+            **kwargs: Additional user attributes
+            
+        Returns:
+            Created User instance
+            
+        Raises:
+            ValidationError: If creation fails
+        """
+        try:
+            user = cls(
+                username=username,
+                email=email,
+                auth0_user_id=auth0_user_id,
+                **kwargs
+            )
+            
+            if password:
+                user.set_password(password)
+            
+            user.validate()
+            db.session.add(user)
+            db.session.flush()  # Get user ID
+            
+            logger.info(f"Created user: {user.username} (ID: {user.id})")
+            return user
+            
+        except IntegrityError as e:
+            db.session.rollback()
+            if 'username' in str(e):
+                raise ValidationError("Username already exists")
+            elif 'email' in str(e):
+                raise ValidationError("Email already exists")
+            else:
+                raise ValidationError("User creation failed due to constraint violation")
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to create user {username}: {e}")
+            raise ValidationError(f"User creation failed: {str(e)}")
+    
+    @classmethod
+    def find_by_username(cls, username: str) -> Optional['User']:
+        """Find user by username."""
+        return cls.query.filter_by(username=username.lower()).first()
+    
+    @classmethod
+    def find_by_email(cls, email: str) -> Optional['User']:
+        """Find user by email (requires decryption)."""
+        # Note: This is a simplified example. In practice, you might need
+        # to implement a more sophisticated search for encrypted fields
+        users = cls.query.all()
+        for user in users:
+            if user.email and user.email.lower() == email.lower():
+                return user
+        return None
+    
+    @classmethod
+    def find_by_auth0_id(cls, auth0_user_id: str) -> Optional['User']:
+        """Find user by Auth0 user ID."""
+        return cls.query.filter_by(auth0_user_id=auth0_user_id).first()
+
+
+class UserSession(BaseModel):
+    """
+    UserSession model for Flask session management replacing Node.js session patterns
+    with secure session token storage and expiration tracking.
+    
+    Features:
+    - Secure session token generation with cryptographic randomness
+    - Session expiration tracking with automatic cleanup
+    - Session metadata storage for enhanced security monitoring
+    - Integration with Flask-Login session management
+    - Comprehensive audit trails for session lifecycle events
+    - Support for device and location tracking for security analysis
     """
     
     __tablename__ = 'user_sessions'
     
-    # Primary key and relationships
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    # Foreign key relationship to User
+    user_id = Column(Integer, db.ForeignKey('users.id', ondelete='CASCADE'), 
+                     nullable=False, index=True)
     
-    # Session tokens and security
+    # Session identification and security
     session_token = Column(String(255), unique=True, nullable=False, index=True)
+    session_id = Column(String(100), nullable=True, index=True)  # Flask session ID
     csrf_token = Column(String(255), nullable=True)
-    refresh_token = Column(String(255), nullable=True)
     
-    # Session lifecycle
+    # Session lifecycle management
     expires_at = Column(DateTime, nullable=False, index=True)
     is_valid = Column(Boolean, default=True, nullable=False, index=True)
-    revoked_at = Column(DateTime, nullable=True)
-    revoked_by = Column(String(100), nullable=True)
+    invalidated_at = Column(DateTime, nullable=True)
+    invalidated_by = Column(String(100), nullable=True)
+    invalidation_reason = Column(String(255), nullable=True)
     
-    # Security tracking
+    # Security and tracking information
     ip_address = Column(String(45), nullable=True)  # IPv6 compatible
     user_agent = Column(Text, nullable=True)
-    last_activity_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    device_fingerprint = Column(String(255), nullable=True)
+    location_country = Column(String(2), nullable=True)
+    location_city = Column(String(100), nullable=True)
     
-    # Session metadata
-    session_data = Column(Text, nullable=True)  # JSON string for session data
-    login_method = Column(String(50), default='password', nullable=False)  # password, auth0, etc.
+    # Session activity tracking
+    last_activity_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    activity_count = Column(Integer, default=0, nullable=False)
     
-    # Relationship with User model
-    user = relationship('User', back_populates='sessions')
+    # Session metadata and preferences
+    session_data = Column(db.JSON, nullable=True)  # PostgreSQL JSON column
+    remember_me = Column(Boolean, default=False, nullable=False)
+    is_mobile = Column(Boolean, default=False, nullable=False)
     
-    # Additional indexes for performance optimization
+    # Relationship back to User model using back_populates
+    user = relationship("User", back_populates="user_sessions")
+    
+    # Database constraints and indexes for performance
     __table_args__ = (
         Index('idx_user_sessions_user_valid', 'user_id', 'is_valid'),
-        Index('idx_user_sessions_cleanup', 'expires_at', 'is_valid'),
+        Index('idx_user_sessions_expiry', 'expires_at', 'is_valid'),
         Index('idx_user_sessions_activity', 'last_activity_at', 'is_valid'),
-        Index('idx_user_sessions_security', 'ip_address', 'user_agent'),
-        CheckConstraint('expires_at > created_at', name='ck_session_expires_after_creation'),
-        CheckConstraint("login_method IN ('password', 'auth0', 'social', 'api', 'system')",
-                       name='ck_session_login_method_valid')
+        Index('idx_user_sessions_token_valid', 'session_token', 'is_valid'),
     )
     
+    def __repr__(self) -> str:
+        """String representation for debugging and logging."""
+        return f"<UserSession(id={self.id}, user_id={self.user_id}, token='[REDACTED]', valid={self.is_valid})>"
+    
     @classmethod
-    def create_session(cls, user: User, expires_in: int = 3600, ip_address: str = None,
-                      user_agent: str = None, login_method: str = 'password') -> 'UserSession':
+    def create_session(cls, user_id: int, ip_address: str = None, user_agent: str = None,
+                      expires_hours: int = 24, remember_me: bool = False, 
+                      session_data: Dict[str, Any] = None) -> 'UserSession':
         """
-        Create a new user session with secure tokens.
+        Create new user session with secure token generation.
         
         Args:
-            user: User object for the session
-            expires_in: Session duration in seconds (default: 1 hour)
+            user_id: ID of user to create session for
             ip_address: Client IP address
-            user_agent: Client user agent
-            login_method: Method used for login
+            user_agent: Client user agent string
+            expires_hours: Session expiration in hours
+            remember_me: Whether this is a persistent session
+            session_data: Additional session metadata
             
         Returns:
-            New UserSession instance
+            Created UserSession instance
         """
-        session = cls(
-            user_id=user.id,
-            session_token=secrets.token_urlsafe(32),
-            csrf_token=secrets.token_urlsafe(24),
-            refresh_token=secrets.token_urlsafe(32),
-            expires_at=datetime.utcnow() + timedelta(seconds=expires_in),
-            ip_address=ip_address,
-            user_agent=user_agent,
-            login_method=login_method,
-            last_activity_at=datetime.utcnow()
-        )
+        import secrets
         
-        return session
+        try:
+            # Generate secure session token
+            session_token = secrets.token_urlsafe(32)
+            
+            # Set expiration based on remember_me preference
+            if remember_me:
+                expires_at = datetime.utcnow() + timedelta(days=30)  # 30 days for remember me
+            else:
+                expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
+            
+            # Create session instance
+            session = cls(
+                user_id=user_id,
+                session_token=session_token,
+                expires_at=expires_at,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                remember_me=remember_me,
+                session_data=session_data or {},
+                is_mobile=cls._detect_mobile_device(user_agent),
+                created_by=str(user_id)
+            )
+            
+            # Extract location information if possible
+            session._update_location_info(ip_address)
+            
+            db.session.add(session)
+            db.session.flush()  # Get session ID
+            
+            logger.info(f"Created session {session.id} for user {user_id}")
+            return session
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to create session for user {user_id}: {e}")
+            raise ValidationError(f"Session creation failed: {str(e)}")
+    
+    @staticmethod
+    def _detect_mobile_device(user_agent: str) -> bool:
+        """
+        Detect if request is from mobile device.
+        
+        Args:
+            user_agent: User agent string
+            
+        Returns:
+            True if mobile device detected
+        """
+        if not user_agent:
+            return False
+        
+        mobile_patterns = [
+            'Mobile', 'Android', 'iPhone', 'iPad', 'BlackBerry', 
+            'Windows Phone', 'Opera Mini', 'IEMobile'
+        ]
+        
+        user_agent_lower = user_agent.lower()
+        return any(pattern.lower() in user_agent_lower for pattern in mobile_patterns)
+    
+    def _update_location_info(self, ip_address: str) -> None:
+        """
+        Update location information based on IP address.
+        
+        Args:
+            ip_address: Client IP address for geolocation
+        """
+        # This is a placeholder for geolocation implementation
+        # In production, you would integrate with a geolocation service
+        # such as MaxMind GeoIP2 or similar
+        
+        if ip_address and ip_address not in ['127.0.0.1', 'localhost']:
+            try:
+                # Placeholder for actual geolocation implementation
+                # geoip_data = get_geolocation(ip_address)
+                # self.location_country = geoip_data.get('country_code')
+                # self.location_city = geoip_data.get('city')
+                pass
+            except Exception as e:
+                logger.warning(f"Failed to get location for IP {ip_address}: {e}")
+    
+    def update_activity(self) -> None:
+        """Update session activity tracking."""
+        self.last_activity_at = datetime.utcnow()
+        self.activity_count += 1
     
     def is_expired(self) -> bool:
         """
         Check if session is expired.
         
         Returns:
-            Boolean indicating if session is expired
+            True if session is expired
         """
         return datetime.utcnow() > self.expires_at
     
     def is_active(self) -> bool:
         """
-        Check if session is active (valid and not expired).
+        Check if session is active and valid.
         
         Returns:
-            Boolean indicating if session is active
+            True if session is active
         """
         return self.is_valid and not self.is_expired()
     
-    def extend_session(self, extend_by: int = 3600) -> None:
+    def extend_session(self, hours: int = 24) -> None:
         """
         Extend session expiration time.
         
         Args:
-            extend_by: Additional seconds to extend the session
+            hours: Number of hours to extend session
         """
-        if self.is_active():
-            self.expires_at = max(
-                self.expires_at,
-                datetime.utcnow() + timedelta(seconds=extend_by)
-            )
-            self.last_activity_at = datetime.utcnow()
+        if self.is_valid:
+            self.expires_at = datetime.utcnow() + timedelta(hours=hours)
+            logger.info(f"Extended session {self.id} by {hours} hours")
     
-    def update_activity(self, ip_address: str = None, user_agent: str = None) -> None:
+    def invalidate(self, reason: str = None, revoked_by: str = None) -> None:
         """
-        Update session activity tracking.
+        Invalidate session with audit trail.
         
         Args:
-            ip_address: Current client IP address
-            user_agent: Current client user agent
-        """
-        self.last_activity_at = datetime.utcnow()
-        
-        if ip_address and ip_address != self.ip_address:
-            # Log potential session hijacking attempt
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Session IP change detected: {self.ip_address} -> {ip_address} for user {self.user_id}")
-        
-        if ip_address:
-            self.ip_address = ip_address
-        if user_agent:
-            self.user_agent = user_agent
-    
-    def revoke_session(self, revoked_by: str = None) -> None:
-        """
-        Revoke session and mark as invalid.
-        
-        Args:
-            revoked_by: User ID who revoked the session
+            reason: Reason for session invalidation
+            revoked_by: User who invalidated the session
         """
         self.is_valid = False
-        self.revoked_at = datetime.utcnow()
-        self.revoked_by = revoked_by or 'system'
-    
-    def get_session_data(self) -> Dict[str, Any]:
-        """
-        Get session data as dictionary.
+        self.invalidated_at = datetime.utcnow()
+        self.invalidation_reason = reason or 'Manual invalidation'
+        self.invalidated_by = revoked_by or getattr(g, 'current_user_id', 'system')
         
-        Returns:
-            Dictionary of session data
-        """
-        if not self.session_data:
-            return {}
-        try:
-            return json.loads(self.session_data)
-        except (ValueError, TypeError):
-            return {}
+        logger.info(f"Invalidated session {self.id} for user {self.user_id}: {self.invalidation_reason}")
     
-    def set_session_data(self, data: Dict[str, Any]) -> None:
+    def update_session_data(self, data: Dict[str, Any]) -> None:
         """
-        Set session data from dictionary.
+        Update session metadata.
         
         Args:
-            data: Dictionary of session data to store
+            data: Dictionary of session data to update
         """
-        self.session_data = json.dumps(data) if data else None
+        if self.session_data is None:
+            self.session_data = {}
+        
+        self.session_data.update(data)
+        self.update_activity()
     
-    def to_dict(self, include_tokens: bool = False) -> Dict[str, Any]:
+    def get_session_data(self, key: str = None) -> Union[Any, Dict[str, Any]]:
+        """
+        Get session data.
+        
+        Args:
+            key: Specific key to retrieve, or None for all data
+            
+        Returns:
+            Session data value or entire data dictionary
+        """
+        if self.session_data is None:
+            return None if key else {}
+        
+        if key:
+            return self.session_data.get(key)
+        
+        return self.session_data
+    
+    def to_dict(self, include_sensitive: bool = False, exclude_fields: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Convert session to dictionary representation.
         
         Args:
-            include_tokens: Whether to include sensitive token information
+            include_sensitive: Whether to include sensitive fields
+            exclude_fields: List of field names to exclude
             
         Returns:
-            Dictionary representation of the session
+            Dictionary representation of session
         """
-        result = {
-            'id': self.id,
-            'user_id': self.user_id,
-            'expires_at': self.expires_at.isoformat(),
-            'is_valid': self.is_valid,
-            'is_expired': self.is_expired(),
-            'is_active': self.is_active(),
-            'ip_address': self.ip_address,
-            'user_agent': self.user_agent,
-            'last_activity_at': self.last_activity_at.isoformat(),
-            'login_method': self.login_method,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
-            'revoked_by': self.revoked_by
-        }
+        exclude_fields = exclude_fields or []
         
-        if include_tokens:
-            result.update({
-                'session_token': self.session_token,
-                'csrf_token': self.csrf_token,
-                'refresh_token': self.refresh_token,
-                'session_data': self.get_session_data()
-            })
+        if not include_sensitive:
+            exclude_fields.extend(['session_token', 'csrf_token'])
+        
+        result = super().to_dict(include_sensitive=include_sensitive, exclude_fields=exclude_fields)
+        
+        # Add computed fields
+        result['is_expired'] = self.is_expired()
+        result['is_active'] = self.is_active()
+        result['duration_hours'] = (datetime.utcnow() - self.created_at).total_seconds() / 3600
+        result['time_until_expiry'] = (self.expires_at - datetime.utcnow()).total_seconds() if not self.is_expired() else 0
         
         return result
     
     @classmethod
-    def cleanup_expired_sessions(cls, batch_size: int = 1000) -> int:
+    def find_by_token(cls, session_token: str) -> Optional['UserSession']:
         """
-        Clean up expired sessions from the database.
+        Find session by token.
         
         Args:
-            batch_size: Number of sessions to delete per batch
+            session_token: Session token to search for
             
         Returns:
-            Number of sessions deleted
+            UserSession instance or None if not found
         """
-        deleted_count = 0
-        
-        while True:
-            # Delete expired sessions in batches
-            result = db.session.execute(
-                text("""
-                    DELETE FROM user_sessions 
-                    WHERE expires_at < :now 
-                    AND id IN (
-                        SELECT id FROM user_sessions 
-                        WHERE expires_at < :now 
-                        LIMIT :batch_size
-                    )
-                """),
-                {
-                    'now': datetime.utcnow(),
-                    'batch_size': batch_size
-                }
-            )
-            
-            batch_deleted = result.rowcount
-            deleted_count += batch_deleted
-            
-            if batch_deleted == 0:
-                break
-            
-            db.session.commit()
-        
-        return deleted_count
+        return cls.query.filter_by(session_token=session_token, is_valid=True).first()
     
-    def __repr__(self):
-        return f"<UserSession {self.session_token[:8]}... for User {self.user_id} (Valid: {self.is_valid})>"
-
-
-# SQLAlchemy event listeners for automatic audit field population
-@event.listens_for(db.session, 'before_commit')
-def populate_user_audit_fields(session):
-    """
-    Automatically populate audit fields before database commit.
+    @classmethod
+    def cleanup_expired_sessions(cls, batch_size: int = 1000) -> int:
+        """
+        Clean up expired sessions from database.
+        
+        Args:
+            batch_size: Number of sessions to process in each batch
+            
+        Returns:
+            Number of sessions cleaned up
+        """
+        try:
+            cutoff_time = datetime.utcnow()
+            
+            # Get expired sessions in batches
+            expired_sessions = cls.query.filter(
+                cls.expires_at < cutoff_time,
+                cls.is_valid == True
+            ).limit(batch_size).all()
+            
+            count = 0
+            for session in expired_sessions:
+                session.invalidate(reason='Expired', revoked_by='system')
+                count += 1
+            
+            if count > 0:
+                db.session.commit()
+                logger.info(f"Cleaned up {count} expired sessions")
+            
+            return count
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to cleanup expired sessions: {e}")
+            return 0
     
-    Captures user context from Flask-Login sessions and populates created_by
-    and updated_by fields for comprehensive audit trail tracking.
-    """
-    try:
-        # Import here to avoid circular imports
-        from flask import g
-        from flask_login import current_user
+    @classmethod
+    def get_active_sessions_for_user(cls, user_id: int) -> List['UserSession']:
+        """
+        Get all active sessions for a user.
         
-        # Get current user information
-        user_id = None
-        if hasattr(g, 'current_user_id'):
-            user_id = str(g.current_user_id)
-        elif hasattr(current_user, 'id') and current_user.is_authenticated:
-            user_id = str(current_user.id)
-        else:
-            user_id = 'system'
-        
-        # Populate audit fields for new objects
-        for obj in session.new:
-            if hasattr(obj, 'created_by') and obj.created_by is None:
-                obj.created_by = user_id
-            if hasattr(obj, 'updated_by') and obj.updated_by is None:
-                obj.updated_by = user_id
-        
-        # Populate audit fields for modified objects
-        for obj in session.dirty:
-            if hasattr(obj, 'updated_by'):
-                obj.updated_by = user_id
-    
-    except Exception as e:
-        # Log the error but don't break the transaction
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to populate user audit fields: {e}")
+        Args:
+            user_id: User ID to get sessions for
+            
+        Returns:
+            List of active UserSession objects
+        """
+        return cls.query.filter_by(
+            user_id=user_id,
+            is_valid=True
+        ).filter(
+            cls.expires_at > datetime.utcnow()
+        ).order_by(cls.last_activity_at.desc()).all()
 
 
-# Flask-Login user loader function
-def load_user(user_id):
+# Flask-Login user loader function integration
+def load_user(user_id: str) -> Optional[User]:
     """
-    Flask-Login user loader function for session-based authentication.
+    Flask-Login user loader callback for session-based authentication flows.
     
     Args:
-        user_id: User ID from session
+        user_id: User ID as string
         
     Returns:
-        User object or None if not found
+        User instance or None if not found
     """
     try:
-        return User.query.filter_by(id=int(user_id), is_active=True).first()
+        user = User.query.get(int(user_id))
+        if user and user.is_active and not user.is_account_locked():
+            return user
+        return None
     except (ValueError, TypeError):
         return None
 
 
-# Utility functions for user management
-class UserUtils:
-    """
-    Utility class providing helper methods for user management operations.
-    
-    Includes methods for user creation, authentication, session management,
-    and Auth0 integration to support Flask application user workflows.
-    """
-    
-    @staticmethod
-    def create_user(username: str, email: str, password: str = None, 
-                   auth0_user_id: str = None, **kwargs) -> User:
-        """
-        Create a new user with proper validation and setup.
-        
-        Args:
-            username: Unique username
-            email: Email address
-            password: Password (optional for Auth0 users)
-            auth0_user_id: Auth0 user identifier
-            **kwargs: Additional user attributes
-            
-        Returns:
-            New User instance
-            
-        Raises:
-            ValueError: If validation fails
-        """
-        # Validate required fields
-        if not username or not email:
-            raise ValueError("Username and email are required")
-        
-        # Check for existing user
-        existing_user = User.query.filter(
-            (User.username == username.lower()) | (User.email == email.lower())
-        ).first()
-        
-        if existing_user:
-            raise ValueError("User with this username or email already exists")
-        
-        # Create user
-        user = User(
-            username=username.lower(),
-            email=email.lower(),
-            auth0_user_id=auth0_user_id,
-            **kwargs
-        )
-        
-        # Set password if provided
-        if password:
-            user.set_password(password)
-        
-        return user
-    
-    @staticmethod
-    def authenticate_user(username_or_email: str, password: str) -> Optional[User]:
-        """
-        Authenticate user with username/email and password.
-        
-        Args:
-            username_or_email: Username or email address
-            password: Password
-            
-        Returns:
-            User object if authentication successful, None otherwise
-        """
-        # Find user by username or email
-        user = User.query.filter(
-            (User.username == username_or_email.lower()) | 
-            (User.email == username_or_email.lower())
-        ).filter_by(is_active=True).first()
-        
-        if not user:
-            return None
-        
-        # Check if account is locked
-        if user.is_account_locked():
-            return None
-        
-        # Verify password
-        if not user.check_password(password):
-            user.record_failed_login()
-            db.session.commit()
-            return None
-        
-        # Update login tracking
-        user.update_login_tracking()
-        db.session.commit()
-        
-        return user
-    
-    @staticmethod
-    def find_or_create_auth0_user(auth0_user_data: Dict[str, Any]) -> User:
-        """
-        Find existing Auth0 user or create new one from Auth0 data.
-        
-        Args:
-            auth0_user_data: Auth0 user data dictionary
-            
-        Returns:
-            User object (existing or newly created)
-        """
-        auth0_user_id = auth0_user_data.get('user_id')
-        email = auth0_user_data.get('email')
-        
-        if not auth0_user_id:
-            raise ValueError("Auth0 user ID is required")
-        
-        # Try to find existing user by Auth0 ID
-        user = User.query.filter_by(auth0_user_id=auth0_user_id).first()
-        
-        if user:
-            # Update existing user with latest Auth0 data
-            user.sync_with_auth0(auth0_user_data)
-            return user
-        
-        # Try to find by email if no Auth0 ID match
-        if email:
-            user = User.query.filter_by(email=email.lower()).first()
-            if user:
-                # Link existing user to Auth0
-                user.auth0_user_id = auth0_user_id
-                user.sync_with_auth0(auth0_user_data)
-                return user
-        
-        # Create new user from Auth0 data
-        username = auth0_user_data.get('username') or auth0_user_data.get('nickname')
-        if not username and email:
-            username = email.split('@')[0]
-        
-        # Ensure username is unique
-        base_username = username.lower()
-        counter = 1
-        while User.query.filter_by(username=username.lower()).first():
-            username = f"{base_username}{counter}"
-            counter += 1
-        
-        user = UserUtils.create_user(
-            username=username,
-            email=email,
-            auth0_user_id=auth0_user_id,
-            is_verified=auth0_user_data.get('email_verified', False)
-        )
-        
-        # Sync with Auth0 data
-        user.sync_with_auth0(auth0_user_data)
-        
-        return user
-    
-    @staticmethod
-    def create_session_for_user(user: User, **session_kwargs) -> UserSession:
-        """
-        Create a new session for authenticated user.
-        
-        Args:
-            user: User object
-            **session_kwargs: Additional session parameters
-            
-        Returns:
-            New UserSession instance
-        """
-        session = UserSession.create_session(user, **session_kwargs)
-        db.session.add(session)
-        db.session.commit()
-        return session
-    
-    @staticmethod
-    def validate_session_token(session_token: str) -> Optional[UserSession]:
-        """
-        Validate session token and return active session.
-        
-        Args:
-            session_token: Session token to validate
-            
-        Returns:
-            UserSession object if valid, None otherwise
-        """
-        if not session_token:
-            return None
-        
-        session = UserSession.query.filter_by(
-            session_token=session_token,
-            is_valid=True
-        ).first()
-        
-        if not session or session.is_expired():
-            return None
-        
-        return session
-    
-    @staticmethod
-    def get_user_by_session_token(session_token: str) -> Optional[User]:
-        """
-        Get user by session token.
-        
-        Args:
-            session_token: Session token
-            
-        Returns:
-            User object if session is valid, None otherwise
-        """
-        session = UserUtils.validate_session_token(session_token)
-        if session:
-            return session.user
-        return None
+# SQLAlchemy event listeners for automatic session cleanup and user audit
+@event.listens_for(User, 'before_update')
+def user_before_update_handler(mapper, connection, target):
+    """Update user modification timestamp and audit fields."""
+    target.updated_at = datetime.utcnow()
+    target.updated_by = getattr(g, 'current_user_id', 'system')
 
 
-# Export models and utilities for application use
+@event.listens_for(UserSession, 'before_update')
+def session_before_update_handler(mapper, connection, target):
+    """Update session modification timestamp."""
+    target.updated_at = datetime.utcnow()
+    target.updated_by = getattr(g, 'current_user_id', 'system')
+
+
+# Export main components for easy importing
 __all__ = [
     'User',
-    'UserSession',
-    'AuditMixin',
-    'EncryptedMixin',
-    'UserUtils',
-    'load_user',
-    'db'
+    'UserSession', 
+    'load_user'
 ]
