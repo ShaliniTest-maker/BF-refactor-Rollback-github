@@ -1,0 +1,459 @@
+{% extends "emails/base/layout.html" %}
+
+{# Authentication Failure Security Notification Email Template #}
+{# Flask-Login integration with Auth0 monitoring and security incident response #}
+{# Provides comprehensive security context for incident investigation #}
+
+{% set email_title = "Security Alert: Authentication Failure Detected" %}
+{% set email_subject = "Security Alert - Failed Authentication Attempt" %}
+
+{% block email_main_content %}
+<!-- Security Alert Header -->
+<div class="security-alert-header" style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin-bottom: 25px;">
+  <div style="display: flex; align-items: center; margin-bottom: 10px;">
+    <span style="color: #856404; font-size: 20px; margin-right: 10px;">⚠️</span>
+    <h3 style="margin: 0; color: #856404; font-size: 18px; font-weight: 600;">
+      Authentication Security Alert
+    </h3>
+  </div>
+  <p style="margin: 0; color: #856404; font-size: 14px;">
+    <strong>Alert Type:</strong> {{ failure_type|default('Authentication Failure') }}<br>
+    <strong>Severity:</strong> {{ severity|default('Medium') }}<br>
+    <strong>Incident ID:</strong> {{ incident_id|default('N/A') }}
+  </p>
+</div>
+
+<!-- Main Alert Message -->
+<div class="alert-message" style="margin-bottom: 25px;">
+  <p style="margin: 0 0 15px 0; font-size: 16px; color: #333333; line-height: 1.6;">
+    We detected {{ failure_count|default(1) }} failed authentication attempt{% if failure_count > 1 %}s{% endif %} 
+    {% if username %}for account <strong>{{ username }}</strong>{% endif %} 
+    {% if company_name %}on {{ company_name }}{% endif %}.
+    {% if failure_count > 3 %}
+    <span style="color: #dc3545; font-weight: 600;">This appears to be a potential brute force attack.</span>
+    {% endif %}
+  </p>
+  
+  {% if user_account_locked %}
+  <div style="background-color: #f8d7da; color: #721c24; padding: 12px; border-radius: 4px; margin: 15px 0;">
+    <strong>Account Security Action:</strong> The user account has been temporarily locked due to repeated authentication failures.
+  </div>
+  {% endif %}
+</div>
+
+<!-- Security Incident Details -->
+<div class="incident-details" style="background-color: #f8f9fa; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 16px; font-weight: 600;">
+    🔍 Incident Details
+  </h4>
+  
+  <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #333333;">
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef; font-weight: 600; width: 30%;">
+        Timestamp
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef;">
+        {{ failure_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if failure_timestamp else 'N/A' }}
+      </td>
+    </tr>
+    {% if username %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; font-weight: 600;">
+        Target Account
+      </td>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef;">
+        {{ username }}
+      </td>
+    </tr>
+    {% endif %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef; font-weight: 600;">
+        Source IP Address
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef;">
+        {{ source_ip|default('Unknown') }}
+        {% if ip_location %}
+        <br><small style="color: #6c757d;">{{ ip_location }}</small>
+        {% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; font-weight: 600;">
+        User Agent
+      </td>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; word-break: break-all;">
+        {{ user_agent|default('Unknown')|truncate(100) }}
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef; font-weight: 600;">
+        Failure Reason
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef;">
+        {{ failure_reason|default('Invalid credentials provided') }}
+      </td>
+    </tr>
+    {% if auth_method %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; font-weight: 600;">
+        Authentication Method
+      </td>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef;">
+        {{ auth_method }}
+      </td>
+    </tr>
+    {% endif %}
+    {% if session_id %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef; font-weight: 600;">
+        Session ID
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #e9ecef; font-family: monospace; font-size: 12px;">
+        {{ session_id }}
+      </td>
+    </tr>
+    {% endif %}
+    {% if request_id %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; font-weight: 600;">
+        Request ID
+      </td>
+      <td style="padding: 8px 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; font-family: monospace; font-size: 12px;">
+        {{ request_id }}
+      </td>
+    </tr>
+    {% endif %}
+  </table>
+</div>
+
+<!-- Auth0 Integration Context -->
+{% if auth0_event_id or auth0_correlation_id %}
+<div class="auth0-context" style="background-color: #e3f2fd; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: #1565c0; font-size: 16px; font-weight: 600;">
+    🔐 Auth0 Integration Details
+  </h4>
+  
+  <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #333333;">
+    {% if auth0_event_id %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #bbdefb; font-weight: 600; width: 30%;">
+        Auth0 Event ID
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #bbdefb; font-family: monospace; font-size: 12px;">
+        {{ auth0_event_id }}
+      </td>
+    </tr>
+    {% endif %}
+    {% if auth0_correlation_id %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #e3f2fd; border: 1px solid #bbdefb; font-weight: 600;">
+        Correlation ID
+      </td>
+      <td style="padding: 8px 12px; background-color: #e3f2fd; border: 1px solid #bbdefb; font-family: monospace; font-size: 12px;">
+        {{ auth0_correlation_id }}
+      </td>
+    </tr>
+    {% endif %}
+    {% if auth0_tenant %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #bbdefb; font-weight: 600;">
+        Auth0 Tenant
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #bbdefb;">
+        {{ auth0_tenant }}
+      </td>
+    </tr>
+    {% endif %}
+    {% if auth0_application %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #e3f2fd; border: 1px solid #bbdefb; font-weight: 600;">
+        Application
+      </td>
+      <td style="padding: 8px 12px; background-color: #e3f2fd; border: 1px solid #bbdefb;">
+        {{ auth0_application }}
+      </td>
+    </tr>
+    {% endif %}
+  </table>
+</div>
+{% endif %}
+
+<!-- Recent Activity Pattern -->
+{% if recent_failures or failure_pattern %}
+<div class="activity-pattern" style="background-color: #fff8e1; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: #f57c00; font-size: 16px; font-weight: 600;">
+    📊 Recent Activity Pattern
+  </h4>
+  
+  {% if failure_pattern %}
+  <p style="margin: 0 0 15px 0; font-size: 14px; color: #333333;">
+    <strong>Pattern Analysis:</strong> {{ failure_pattern }}
+  </p>
+  {% endif %}
+  
+  {% if recent_failures %}
+  <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #333333;">
+    <thead>
+      <tr style="background-color: #ffcc02; color: #333333;">
+        <th style="padding: 8px 12px; border: 1px solid #ffd54f; text-align: left;">Timestamp</th>
+        <th style="padding: 8px 12px; border: 1px solid #ffd54f; text-align: left;">IP Address</th>
+        <th style="padding: 8px 12px; border: 1px solid #ffd54f; text-align: left;">Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for failure in recent_failures[:5] %}
+      <tr>
+        <td style="padding: 6px 12px; border: 1px solid #ffd54f; background-color: #ffffff; font-size: 12px;">
+          {{ failure.timestamp.strftime('%m/%d %H:%M') if failure.timestamp else 'N/A' }}
+        </td>
+        <td style="padding: 6px 12px; border: 1px solid #ffd54f; background-color: #ffffff; font-family: monospace; font-size: 12px;">
+          {{ failure.ip_address|default('Unknown') }}
+        </td>
+        <td style="padding: 6px 12px; border: 1px solid #ffd54f; background-color: #ffffff; font-size: 12px;">
+          <span style="color: #dc3545;">{{ failure.reason|default('Failed') }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  
+  {% if failure_count > 5 %}
+  <p style="margin: 10px 0 0 0; font-size: 12px; color: #666666; font-style: italic;">
+    Showing 5 most recent failures. Total failures in last 24 hours: {{ failure_count }}
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Risk Assessment -->
+<div class="risk-assessment" style="background-color: {% if risk_level == 'high' %}#ffebee{% elif risk_level == 'medium' %}#fff3e0{% else %}#f3e5f5{% endif %}; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: {% if risk_level == 'high' %}#c62828{% elif risk_level == 'medium' %}#ef6c00{% else %}#7b1fa2{% endif %}; font-size: 16px; font-weight: 600;">
+    ⚡ Risk Assessment
+  </h4>
+  
+  <div style="margin-bottom: 15px;">
+    <strong>Risk Level:</strong> 
+    <span style="color: {% if risk_level == 'high' %}#c62828{% elif risk_level == 'medium' %}#ef6c00{% else %}#7b1fa2{% endif %}; font-weight: 600; text-transform: uppercase;">
+      {{ risk_level|default('Medium') }}
+    </span>
+  </div>
+  
+  {% if risk_factors %}
+  <div style="margin-bottom: 15px;">
+    <strong>Risk Factors:</strong>
+    <ul style="margin: 5px 0 0 20px; padding: 0;">
+      {% for factor in risk_factors %}
+      <li style="margin: 5px 0; font-size: 14px; color: #333333;">{{ factor }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  
+  {% if recommended_actions %}
+  <div>
+    <strong>Recommended Actions:</strong>
+    <ul style="margin: 5px 0 0 20px; padding: 0;">
+      {% for action in recommended_actions %}
+      <li style="margin: 5px 0; font-size: 14px; color: #333333;">{{ action }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Flask-Login Session Context -->
+{% if flask_session_data %}
+<div class="flask-session-context" style="background-color: #f1f8e9; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: #388e3c; font-size: 16px; font-weight: 600;">
+    🔒 Flask Session Information
+  </h4>
+  
+  <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #333333;">
+    {% if flask_session_data.session_token %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #c8e6c9; font-weight: 600; width: 30%;">
+        Session Token
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #c8e6c9; font-family: monospace; font-size: 11px; word-break: break-all;">
+        {{ flask_session_data.session_token[:32] }}...
+      </td>
+    </tr>
+    {% endif %}
+    {% if flask_session_data.csrf_token %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #f1f8e9; border: 1px solid #c8e6c9; font-weight: 600;">
+        CSRF Token
+      </td>
+      <td style="padding: 8px 12px; background-color: #f1f8e9; border: 1px solid #c8e6c9; font-family: monospace; font-size: 11px; word-break: break-all;">
+        {{ flask_session_data.csrf_token[:32] }}...
+      </td>
+    </tr>
+    {% endif %}
+    {% if flask_session_data.login_attempts %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #c8e6c9; font-weight: 600;">
+        Session Login Attempts
+      </td>
+      <td style="padding: 8px 12px; background-color: #ffffff; border: 1px solid #c8e6c9;">
+        {{ flask_session_data.login_attempts }}
+      </td>
+    </tr>
+    {% endif %}
+    {% if flask_session_data.last_activity %}
+    <tr>
+      <td style="padding: 8px 12px; background-color: #f1f8e9; border: 1px solid #c8e6c9; font-weight: 600;">
+        Last Session Activity
+      </td>
+      <td style="padding: 8px 12px; background-color: #f1f8e9; border: 1px solid #c8e6c9;">
+        {{ flask_session_data.last_activity.strftime('%Y-%m-%d %H:%M:%S UTC') if flask_session_data.last_activity else 'N/A' }}
+      </td>
+    </tr>
+    {% endif %}
+  </table>
+</div>
+{% endif %}
+
+<!-- Security Team Actions -->
+<div class="security-actions" style="background-color: #e8f5e8; border: 2px solid #4caf50; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: #2e7d32; font-size: 16px; font-weight: 600;">
+    🛡️ Immediate Security Actions Taken
+  </h4>
+  
+  <ul style="margin: 0; padding: 0 0 0 20px;">
+    <li style="margin: 8px 0; font-size: 14px; color: #333333;">
+      Authentication failure logged and tracked
+    </li>
+    {% if user_account_locked %}
+    <li style="margin: 8px 0; font-size: 14px; color: #333333;">
+      User account temporarily locked after repeated failures
+    </li>
+    {% endif %}
+    {% if ip_blocked %}
+    <li style="margin: 8px 0; font-size: 14px; color: #333333;">
+      Source IP address temporarily blocked
+    </li>
+    {% endif %}
+    {% if rate_limit_applied %}
+    <li style="margin: 8px 0; font-size: 14px; color: #333333;">
+      Rate limiting applied to authentication endpoints
+    </li>
+    {% endif %}
+    <li style="margin: 8px 0; font-size: 14px; color: #333333;">
+      Security team automatically notified
+    </li>
+    <li style="margin: 8px 0; font-size: 14px; color: #333333;">
+      Incident logged in security monitoring system
+    </li>
+  </ul>
+</div>
+
+<!-- Investigation Resources -->
+<div class="investigation-resources" style="background-color: #f3e5f5; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+  <h4 style="margin: 0 0 15px 0; color: #7b1fa2; font-size: 16px; font-weight: 600;">
+    🔍 Investigation Resources
+  </h4>
+  
+  <div style="margin-bottom: 15px;">
+    <p style="margin: 0 0 10px 0; font-size: 14px; color: #333333;">
+      <strong>For detailed investigation, review the following:</strong>
+    </p>
+    <ul style="margin: 0; padding: 0 0 0 20px;">
+      {% if log_query_url %}
+      <li style="margin: 5px 0; font-size: 14px;">
+        <a href="{{ log_query_url }}" style="color: #7b1fa2; text-decoration: none;">
+          View detailed logs in monitoring system
+        </a>
+      </li>
+      {% endif %}
+      {% if security_dashboard_url %}
+      <li style="margin: 5px 0; font-size: 14px;">
+        <a href="{{ security_dashboard_url }}" style="color: #7b1fa2; text-decoration: none;">
+          Open security dashboard
+        </a>
+      </li>
+      {% endif %}
+      {% if incident_report_url %}
+      <li style="margin: 5px 0; font-size: 14px;">
+        <a href="{{ incident_report_url }}" style="color: #7b1fa2; text-decoration: none;">
+          Create incident report
+        </a>
+      </li>
+      {% endif %}
+      <li style="margin: 5px 0; font-size: 14px;">
+        Review user authentication history and patterns
+      </li>
+      <li style="margin: 5px 0; font-size: 14px;">
+        Check for additional suspicious activity from this IP
+      </li>
+      <li style="margin: 5px 0; font-size: 14px;">
+        Correlate with other security events in the same timeframe
+      </li>
+    </ul>
+  </div>
+</div>
+
+<!-- Contact Information for Immediate Response -->
+<div class="emergency-contact" style="background-color: #ffebee; border: 2px solid #f44336; border-radius: 5px; padding: 20px;">
+  <h4 style="margin: 0 0 15px 0; color: #c62828; font-size: 16px; font-weight: 600;">
+    🚨 Emergency Security Contact
+  </h4>
+  
+  <p style="margin: 0 0 15px 0; font-size: 14px; color: #333333;">
+    If this represents a critical security incident requiring immediate attention:
+  </p>
+  
+  <ul style="margin: 0; padding: 0 0 0 20px;">
+    {% if security_team_email %}
+    <li style="margin: 5px 0; font-size: 14px;">
+      <strong>Security Team:</strong> 
+      <a href="mailto:{{ security_team_email }}?subject=URGENT: Authentication Failure - {{ incident_id|default('') }}" 
+         style="color: #c62828; text-decoration: none;">
+        {{ security_team_email }}
+      </a>
+    </li>
+    {% endif %}
+    {% if security_team_phone %}
+    <li style="margin: 5px 0; font-size: 14px;">
+      <strong>Security Hotline:</strong> {{ security_team_phone }}
+    </li>
+    {% endif %}
+    {% if on_call_contact %}
+    <li style="margin: 5px 0; font-size: 14px;">
+      <strong>On-Call Engineer:</strong> {{ on_call_contact }}
+    </li>
+    {% endif %}
+  </ul>
+  
+  <p style="margin: 15px 0 0 0; font-size: 12px; color: #666666; font-style: italic;">
+    This notification was generated automatically by the Flask security monitoring system.
+    Incident ID: {{ incident_id|default('N/A') }}
+  </p>
+</div>
+{% endblock email_main_content %}
+
+{% block email_cta %}
+  {% if security_dashboard_url %}
+    {% set cta_url = security_dashboard_url %}
+    {% set cta_text = "Open Security Dashboard" %}
+  {% elif incident_report_url %}
+    {% set cta_url = incident_report_url %}
+    {% set cta_text = "Create Incident Report" %}
+  {% endif %}
+  {{ super() }}
+{% endblock email_cta %}
+
+<!-- Email-specific metadata for tracking -->
+{% set email_category = "security" %}
+{% set email_type = "authentication_failure" %}
+{% set email_priority = "high" %}
+
+<!-- Security notification disclaimer -->
+{% block email_additional_content %}
+<div style="background-color: #f8f9fa; border-left: 4px solid #6c757d; padding: 15px; margin: 20px 0; font-size: 13px; color: #6c757d;">
+  <strong>Security Notice:</strong> This email contains sensitive security information. 
+  Please handle according to your organization's security policies. Do not forward this 
+  email to unauthorized personnel. If you received this email in error, please delete 
+  it immediately and contact the security team.
+</div>
+{% endblock email_additional_content %}
