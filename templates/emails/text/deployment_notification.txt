@@ -1,261 +1,234 @@
-DEPLOYMENT NOTIFICATION - Flask Application Migration
-================================================================
+DEPLOYMENT NOTIFICATION - FLASK APPLICATION
+============================================
+
+Deployment Status: {{ deployment_status | upper }}
+Deployment ID: {{ deployment_id }}
+Environment: {{ environment | upper }}
+Timestamp: {{ deployment_timestamp }}
+Version: {{ app_version }}
+Git Commit: {{ git_commit_hash }}
 
 DEPLOYMENT SUMMARY
-------------------
-Application: {{ application_name | default('Flask Application') }}
-Version: {{ version | default('Unknown') }}
-Environment: {{ environment | upper | default('UNKNOWN') }}
-Deployment ID: {{ deployment_id | default('N/A') }}
-Timestamp: {{ deployment_timestamp | default(current_timestamp) }}
-Deployed By: {{ deployed_by | default('Automated CI/CD') }}
-Duration: {{ deployment_duration | default('N/A') }}
+==================
 
-DEPLOYMENT STATUS: {{ deployment_status | upper | default('UNKNOWN') }}
+Application: Flask Backend System (Node.js to Python Migration)
+Framework: Flask {{ flask_version }} with Python {{ python_version }}
+Deployment Type: {{ deployment_type }}
+Duration: {{ deployment_duration }}
+Change Scope: {{ change_scope }}
 
-{% if deployment_status == 'SUCCESS' %}
-✓ Deployment completed successfully
-{% elif deployment_status == 'FAILED' %}
-✗ Deployment failed - see details below
-{% elif deployment_status == 'IN_PROGRESS' %}
-⚡ Deployment currently in progress
-{% else %}
-⚠ Deployment status unknown
-{% endif %}
+PRIMARY CHANGES
+===============
 
-================================================================
-RELEASE INFORMATION
-================================================================
-
-Build Information:
-------------------
-Build Number: {{ build_number | default('N/A') }}
-Commit Hash: {{ commit_hash | default('N/A') }}
-Branch: {{ branch_name | default('N/A') }}
-GitHub Actions Run: {{ github_actions_url | default('N/A') }}
-
-Change Summary:
----------------
-{% if changes %}
-{% for change in changes %}
+{% for change in primary_changes %}
 • {{ change }}
 {% endfor %}
-{% else %}
-• No change summary available
+
+TECHNICAL DETAILS
+=================
+
+Container Image:
+- Registry: {{ container_registry }}
+- Image Tag: {{ image_tag }}
+- Build Number: {{ build_number }}
+- Security Scan: {{ security_scan_status }}
+
+Database Migrations:
+- Migration Status: {{ migration_status }}
+- Schema Version: {{ schema_version }}
+{% if migration_scripts %}
+- Applied Scripts:
+{% for script in migration_scripts %}
+  * {{ script }}
+{% endfor %}
 {% endif %}
 
-Migration Components:
----------------------
-• Node.js to Flask 3.1.1 migration
-• Database schema migration (Flask-SQLAlchemy)
-• Authentication system migration (Auth0 integration)
-• API endpoint conversion to Flask blueprints
-• Service layer implementation
+Infrastructure:
+- AWS Region: {{ aws_region }}
+- Load Balancer: {{ load_balancer_status }}
+- Health Checks: {{ health_check_status }}
+- Auto Scaling: {{ autoscaling_status }}
+- Blue-Green Strategy: {{ blue_green_status }}
 
-================================================================
-TECHNICAL VALIDATION
-================================================================
+PERFORMANCE METRICS
+===================
 
-Database Migration Status:
----------------------------
-Flask-Migrate Execution: {{ migration_status | default('N/A') }}
-{% if migration_status == 'SUCCESS' %}
-✓ Schema migration completed successfully
-✓ Foreign key constraints validated
-✓ Index consistency verified
-✓ Data integrity confirmed
-{% elif migration_status == 'FAILED' %}
-✗ Migration failed - rollback initiated
-✗ Check migration logs for details
-{% else %}
-⚠ Migration status unknown
-{% endif %}
+Baseline Measurements:
+- API Response Time: {{ api_response_time }}ms (Target: <200ms)
+- Database Query Time: {{ db_query_time }}ms (Target: <100ms)
+- Memory Usage: {{ memory_usage }}MB
+- CPU Utilization: {{ cpu_utilization }}%
+- Active Connections: {{ active_connections }}
 
-Schema Version: {{ schema_version | default('N/A') }}
-Migration Duration: {{ migration_duration | default('N/A') }}
+Node.js vs Flask Comparison:
+- Response Time Delta: {{ response_time_delta }}
+- Memory Usage Delta: {{ memory_delta }}
+- Performance Status: {{ performance_comparison_status }}
 
-Performance Validation:
------------------------
-{% if performance_results %}
-API Response Time (P95): {{ performance_results.response_time_p95 | default('N/A') }}ms
-{% if performance_results.response_time_p95 and performance_results.response_time_p95 <= 220 %}
-✓ Response time within acceptable range (≤220ms)
-{% elif performance_results.response_time_p95 and performance_results.response_time_p95 > 220 %}
-✗ Response time exceeds baseline tolerance
-{% endif %}
+POST-DEPLOYMENT VALIDATION
+===========================
 
-Memory Utilization: {{ performance_results.memory_usage | default('N/A') }}MB
-{% if performance_results.memory_usage and performance_results.memory_usage <= 537 %}
-✓ Memory usage within acceptable range (≤537MB)
-{% elif performance_results.memory_usage and performance_results.memory_usage > 537 %}
-✗ Memory usage exceeds baseline tolerance
-{% endif %}
+Health Check Results:
+✓ Application Load Balancer: {{ alb_health_status }}
+✓ Flask Application Health: {{ app_health_status }}
+✓ Database Connectivity: {{ db_connectivity_status }}
+✓ Auth0 Integration: {{ auth0_integration_status }}
+✓ External API Endpoints: {{ external_api_status }}
 
-Concurrent Users Supported: {{ performance_results.concurrent_users | default('N/A') }}
-Database Query Performance: {{ performance_results.db_query_time | default('N/A') }}ms
-{% else %}
-⚠ Performance validation results not available
-{% endif %}
+Quality Gates Passed:
+{% for gate in quality_gates %}
+✓ {{ gate }}
+{% endfor %}
 
-Infrastructure Status:
-----------------------
-Terraform Plan Status: {{ terraform_status | default('N/A') }}
-Container Registry: {{ container_registry_status | default('N/A') }}
-Load Balancer Health: {{ load_balancer_status | default('N/A') }}
-Blue-Green Switch: {{ blue_green_status | default('N/A') }}
+MONITORING RECOMMENDATIONS
+===========================
 
-================================================================
-OPERATIONAL INFORMATION
-================================================================
+Critical Metrics to Monitor (First 24 Hours):
+1. HTTP 5xx Error Rate: Monitor for >1% in 5-minute windows
+2. Database Query Performance: Alert if >100ms average
+3. Memory Usage: Watch for memory leaks or unusual growth
+4. Authentication Failures: Alert if >10 failures in 5 minutes
+5. Response Time Degradation: Alert if >200ms sustained
 
-Deployment URLs:
-----------------
-{% if environment == 'production' %}
-Application URL: {{ production_url | default('https://app.production.domain.com') }}
-Admin Dashboard: {{ admin_url | default('https://admin.production.domain.com') }}
-Health Check: {{ health_check_url | default('https://app.production.domain.com/health') }}
-Metrics Endpoint: {{ metrics_url | default('https://app.production.domain.com/metrics') }}
-{% elif environment == 'staging' %}
-Application URL: {{ staging_url | default('https://app.staging.domain.com') }}
-Admin Dashboard: {{ admin_url | default('https://admin.staging.domain.com') }}
-Health Check: {{ health_check_url | default('https://app.staging.domain.com/health') }}
-Metrics Endpoint: {{ metrics_url | default('https://app.staging.domain.com/metrics') }}
-{% else %}
-Application URL: {{ application_url | default('N/A') }}
-Health Check: {{ health_check_url | default('N/A') }}
-{% endif %}
+CloudWatch Dashboards:
+- Flask Application Metrics: {{ cloudwatch_dashboard_url }}
+- Infrastructure Health: {{ infrastructure_dashboard_url }}
+- Database Performance: {{ database_dashboard_url }}
 
-Monitoring Links:
------------------
-CloudWatch Dashboard: {{ cloudwatch_dashboard_url | default('N/A') }}
-Grafana Metrics: {{ grafana_dashboard_url | default('N/A') }}
-Application Logs: {{ logs_url | default('N/A') }}
-Performance Metrics: {{ performance_dashboard_url | default('N/A') }}
+Key Log Groups to Monitor:
+- Application Logs: /aws/flask/{{ environment }}
+- Database Logs: /aws/flask/database
+- Security Events: /aws/flask/security
+- Performance Logs: /aws/flask/performance
 
-================================================================
-{% if deployment_status == 'FAILED' or rollback_required %}
-ROLLBACK PROCEDURES
-================================================================
+EMERGENCY ROLLBACK PROCEDURES
+==============================
 
-IMMEDIATE ROLLBACK ACTIONS:
----------------------------
-{% if rollback_required %}
-⚠ ROLLBACK INITIATED AUTOMATICALLY
-{% endif %}
+IMMEDIATE ROLLBACK (< 5 minutes):
+1. Access AWS Console or use CLI
+2. Navigate to Application Load Balancer
+3. Switch traffic back to blue environment:
+   aws elbv2 modify-listener --listener-arn {{ listener_arn }} --default-actions Type=forward,TargetGroupArn={{ blue_target_group_arn }}
+4. Verify traffic routing in CloudWatch
 
-1. Application Rollback:
-   a) Access AWS Load Balancer console
-   b) Switch traffic back to previous blue/green environment
-   c) Command: aws elbv2 modify-target-group --target-group-arn <previous-tg>
-   
-2. Database Rollback:
-   a) Connect to database server
-   b) Execute: flask db downgrade {{ previous_schema_version | default('<previous-version>') }}
-   c) Verify schema consistency
-   d) Validate data integrity
+DATABASE ROLLBACK (Critical Issues Only):
+1. Connect to deployment server
+2. Navigate to application directory: cd /opt/flask-app
+3. Execute emergency rollback:
+   flask emergency-database-rollback --revision {{ previous_migration_revision }} --reason "Emergency rollback - {{ incident_reason }}"
+4. Verify database health:
+   flask database-health-check --detailed
 
-3. Infrastructure Rollback:
-   a) Navigate to deployment directory
-   b) Execute: terraform apply -var-file="previous.tfvars"
-   c) Verify resource state restoration
-   d) Confirm network connectivity
+INFRASTRUCTURE ROLLBACK (Severe Issues):
+1. Access GitHub Actions or deployment pipeline
+2. Trigger infrastructure rollback workflow
+3. Use previous stable commit: {{ previous_stable_commit }}
+4. Monitor Terraform apply progress
+5. Alternative CLI method:
+   cd /opt/terraform && git checkout {{ previous_stable_commit }} && terraform plan && terraform apply
 
-EMERGENCY PROCEDURES:
----------------------
-If automated rollback fails:
+CONTACT INFORMATION
+===================
 
-1. Manual Blue-Green Switch:
-   - Access AWS Console → EC2 → Load Balancers
-   - Update target group to previous stable version
-   - Monitor health checks until stable
+Primary Contacts:
+- On-Call Engineer: {{ oncall_engineer_contact }}
+- DevOps Team Lead: {{ devops_lead_contact }}
+- Database Administrator: {{ dba_contact }}
+- Security Team: {{ security_team_contact }}
 
-2. Database Emergency Restore:
-   - Stop Flask application instances
-   - Restore from latest backup: {{ backup_location | default('<backup-location>') }}
-   - Restart with previous application version
-   - Verify service functionality
+Escalation Path:
+1. On-Call Engineer (Immediate response)
+2. Technical Lead (Within 15 minutes)
+3. Engineering Manager (Within 30 minutes)
+4. CTO (Critical incidents only)
 
-3. Complete System Restore:
-   - If Flask rollback fails, restore to Node.js baseline
-   - Deploy previous Node.js version from backup
-   - Synchronize data between systems
-   - Update DNS/load balancer configuration
+Incident Response:
+- PagerDuty: {{ pagerduty_service_url }}
+- Slack Channel: #incident-response
+- Emergency Hotline: {{ emergency_hotline }}
 
-ROLLBACK VALIDATION:
---------------------
-After rollback completion, verify:
-✓ Application responds successfully at health check endpoint
-✓ Database connections established and queries successful
-✓ Authentication system functional (Auth0 integration)
-✓ API endpoints returning expected responses
-✓ Performance metrics within acceptable ranges
-✓ No error alerts in monitoring systems
-
-{% endif %}
-
-================================================================
-MONITORING AND ALERTS
-================================================================
-
-Post-Deployment Monitoring:
-----------------------------
-• Monitor CloudWatch alarms for 24 hours post-deployment
-• Track API response times and error rates
-• Validate database query performance metrics
-• Monitor memory usage and connection pool health
-• Check Auth0 integration and authentication flows
-
-Alert Thresholds:
------------------
-• HTTP 5xx errors: >1% error rate triggers immediate alert
-• API response time: >220ms P95 for 2+ minutes
-• Database queries: >110ms average for 1+ minute
-• Memory usage: >537MB sustained for 5+ minutes
-• Authentication failures: >10 failures in 5 minutes
-
-Escalation Contacts:
---------------------
-Primary: DevOps Team - {{ devops_contact | default('devops@company.com') }}
-Secondary: Platform Team - {{ platform_contact | default('platform@company.com') }}
-Database Issues: DBA Team - {{ dba_contact | default('dba@company.com') }}
-Security Issues: Security Team - {{ security_contact | default('security@company.com') }}
-
-Emergency Hotline: {{ emergency_contact | default('+1-XXX-XXX-XXXX') }}
-Incident Response: {{ incident_response_url | default('https://incident.company.com') }}
-
-================================================================
-ADDITIONAL INFORMATION
-================================================================
+ADDITIONAL RESOURCES
+====================
 
 Documentation:
---------------
-• Deployment Guide: {{ deployment_guide_url | default('https://docs.company.com/deployment') }}
-• Rollback Procedures: {{ rollback_guide_url | default('https://docs.company.com/rollback') }}
-• Monitoring Dashboard: {{ monitoring_guide_url | default('https://docs.company.com/monitoring') }}
-• API Documentation: {{ api_docs_url | default('https://docs.company.com/api') }}
+- Runbook: {{ runbook_url }}
+- Architecture Docs: {{ architecture_docs_url }}
+- Migration Guide: {{ migration_guide_url }}
+- Troubleshooting: {{ troubleshooting_guide_url }}
 
-CI/CD Pipeline:
----------------
-GitHub Repository: {{ repository_url | default('N/A') }}
-Actions Workflow: {{ workflow_url | default('N/A') }}
-Artifact Registry: {{ artifact_url | default('N/A') }}
-Terraform State: {{ terraform_state_url | default('N/A') }}
+Monitoring Tools:
+- Grafana Dashboard: {{ grafana_dashboard_url }}
+- AWS CloudWatch: {{ cloudwatch_console_url }}
+- Application Logs: {{ logs_aggregation_url }}
+- Performance Metrics: {{ metrics_dashboard_url }}
 
-Notes:
-------
-{% if notes %}
-{{ notes }}
-{% else %}
-• This is an automated deployment notification
-• Verify all systems operational before business hours
-• Contact DevOps team for any deployment-related issues
-• Monitor performance metrics for 24-48 hours post-deployment
-{% endif %}
+Git References:
+- Repository: {{ git_repository_url }}
+- Release Tag: {{ release_tag }}
+- Changelog: {{ changelog_url }}
+- Previous Release: {{ previous_release_tag }}
 
-================================================================
-END OF DEPLOYMENT NOTIFICATION
-================================================================
+SECURITY INFORMATION
+=====================
 
-This notification was generated automatically by the CI/CD pipeline.
-For technical support, contact: {{ support_email | default('support@company.com') }}
-Generated at: {{ notification_timestamp | default(current_timestamp) }}
+Security Validations:
+✓ Container Security Scan: {{ security_scan_results }}
+✓ Dependency Vulnerability Check: {{ dependency_scan_results }}
+✓ Authentication System: {{ auth_validation_status }}
+✓ HTTPS/TLS Configuration: {{ tls_validation_status }}
+✓ API Security: {{ api_security_status }}
+
+Security Considerations:
+- New Flask session management using ItsDangerous {{ itsdangerous_version }}
+- Auth0 Python SDK {{ auth0_sdk_version }} integration validated
+- Database connection encryption verified
+- GDPR compliance maintained during migration
+
+NEXT ACTIONS
+============
+
+Immediate (0-1 hour):
+1. Monitor critical error rates and performance metrics
+2. Validate user authentication flows
+3. Check database migration completion
+4. Verify external integrations
+
+Short-term (1-24 hours):
+1. Monitor performance trends vs. Node.js baseline
+2. Review error logs for migration-related issues
+3. Validate backup and rollback procedures
+4. Performance benchmark analysis
+
+Long-term (24+ hours):
+1. Comprehensive performance comparison report
+2. User feedback collection and analysis
+3. Technical debt assessment
+4. Migration lessons learned documentation
+
+AUTOMATED MONITORING
+====================
+
+Alerts Configured:
+- HTTP 5xx errors >1% in 5 minutes
+- Database query time >100ms average
+- Memory usage >80% for 10 minutes
+- Authentication failures >10 in 5 minutes
+- Load balancer health check failures
+
+Auto-Recovery Actions:
+- Container restart on health check failure
+- Database connection pool reset on exhaustion
+- Automatic scaling on high CPU/memory usage
+- Emergency rollback trigger on critical failures
+
+This notification was automatically generated by the Flask CI/CD Pipeline.
+For technical issues with this deployment, please follow the escalation path above.
+
+Deployment Pipeline: {{ ci_cd_pipeline_url }}
+Build Log: {{ build_log_url }}
+Deployment Artifacts: {{ artifacts_url }}
+
+---
+Generated at: {{ notification_timestamp }}
+Pipeline Version: {{ pipeline_version }}
+Template Version: 1.0.0
