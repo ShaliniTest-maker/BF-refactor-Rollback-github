@@ -1,380 +1,394 @@
 {% extends "emails/base/email_base.html" %}
 
-{% block title %}Verify Your Account - Secure Account Access{% endblock %}
-
-{% block header_title %}Account Verification{% endblock %}
-{% block header_subtitle %}Complete your secure account setup{% endblock %}
+{% block title %}Verify Your Account - Secure Access Required{% endblock %}
 
 {% block additional_styles %}
 <style>
     /* Account verification specific styles */
-    .verification-code-container {
-        background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
-        border: 2px solid #2196f3;
+    .verification-header {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    }
+    
+    .verification-icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 20px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .verification-icon svg {
+        width: 32px;
+        height: 32px;
+        fill: #ffffff;
+    }
+    
+    .verification-details {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
         border-radius: 8px;
         padding: 25px;
         margin: 30px 0;
-        text-align: center;
+        text-align: left;
     }
-
+    
     .verification-code {
-        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-family: 'Courier New', monospace;
         font-size: 24px;
         font-weight: bold;
-        color: #1565c0;
-        letter-spacing: 3px;
-        margin: 15px 0;
-        padding: 15px;
-        background-color: #ffffff;
+        color: #2e7d2e;
+        text-align: center;
+        background: #e8f5e8;
+        border: 2px solid #4caf50;
         border-radius: 6px;
-        border: 1px solid #90caf9;
-        display: inline-block;
-        min-width: 200px;
+        padding: 15px;
+        margin: 20px 0;
+        letter-spacing: 3px;
     }
-
-    .code-label {
-        font-size: 14px;
-        color: #1976d2;
-        font-weight: 600;
-        margin: 0 0 10px 0;
-        text-transform: uppercase;
-        letter-spacing: 1px;
+    
+    .verification-steps {
+        margin: 25px 0;
     }
-
-    .auth0-branding {
-        display: inline-flex;
+    
+    .verification-step {
+        display: flex;
+        align-items: flex-start;
+        margin: 15px 0;
+        padding: 12px 0;
+    }
+    
+    .step-number {
+        background: #4CAF50;
+        color: white;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: flex;
         align-items: center;
         justify-content: center;
-        margin: 20px 0;
-        padding: 10px 20px;
-        background-color: #f8f9fa;
-        border-radius: 20px;
         font-size: 12px;
-        color: #6c757d;
+        font-weight: bold;
+        margin-right: 15px;
+        flex-shrink: 0;
     }
-
-    .auth0-logo {
-        width: 16px;
-        height: 16px;
-        margin-right: 8px;
-        opacity: 0.7;
+    
+    .step-content {
+        flex: 1;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #495057;
     }
-
-    .timer-warning {
-        background: linear-gradient(135deg, #fff3e0 0%, #ffecb3 100%);
-        border: 1px solid #ff9800;
+    
+    .expiration-warning {
+        background: linear-gradient(135deg, #FFF3CD 0%, #FFEAA7 100%);
+        border: 1px solid #FFE08A;
         border-radius: 6px;
         padding: 20px;
         margin: 25px 0;
         text-align: center;
     }
-
-    .timer-icon {
-        width: 24px;
-        height: 24px;
-        fill: #f57c00;
-        margin: 0 auto 10px auto;
-        display: block;
-    }
-
-    .timer-text {
-        font-size: 14px;
-        color: #e65100;
+    
+    .expiration-timer {
+        font-size: 18px;
         font-weight: 600;
-        margin: 0;
+        color: #856404;
+        margin: 10px 0;
     }
-
-    .verification-steps {
-        background-color: #f8f9fa;
+    
+    .verification-button {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: #ffffff !important;
+        padding: 18px 40px;
+        font-size: 18px;
+        font-weight: 600;
         border-radius: 8px;
-        padding: 25px;
+        text-decoration: none;
+        display: inline-block;
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        transition: all 0.3s ease;
+    }
+    
+    .verification-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+    }
+    
+    .alternative-method {
+        background: #ffffff;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        padding: 20px;
+        margin: 25px 0;
+        text-align: center;
+    }
+    
+    .token-display {
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 10px;
+        margin: 15px 0;
+        word-break: break-all;
+        color: #495057;
+    }
+    
+    .security-tips {
         margin: 30px 0;
     }
-
-    .step {
+    
+    .security-tip {
         display: flex;
         align-items: flex-start;
-        margin: 15px 0;
-        padding: 0;
+        margin: 12px 0;
+        font-size: 13px;
+        color: #6c757d;
+        line-height: 1.4;
     }
-
-    .step-number {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: #ffffff;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 14px;
-        font-weight: 600;
-        margin-right: 15px;
+    
+    .security-tip-icon {
+        width: 16px;
+        height: 16px;
+        margin-right: 10px;
         flex-shrink: 0;
+        margin-top: 2px;
     }
-
-    .step-text {
-        font-size: 15px;
-        color: #495057;
-        line-height: 1.5;
-        margin: 0;
-        padding-top: 2px;
-    }
-
-    .troubleshooting {
-        background-color: #e3f2fd;
+    
+    .support-contact {
+        background: #e3f2fd;
         border-left: 4px solid #2196f3;
-        border-radius: 0 6px 6px 0;
         padding: 20px;
-        margin: 30px 0;
+        margin: 25px 0;
+        border-radius: 0 6px 6px 0;
     }
-
-    .troubleshooting-title {
-        font-size: 16px;
-        font-weight: 600;
-        color: #1565c0;
-        margin: 0 0 10px 0;
-    }
-
-    .troubleshooting-text {
-        font-size: 14px;
-        color: #1976d2;
-        line-height: 1.5;
-        margin: 0;
-    }
-
-    /* Mobile optimizations for verification */
+    
+    /* Mobile optimization for verification elements */
     @media only screen and (max-width: 600px) {
-        .verification-code {
-            font-size: 20px;
-            letter-spacing: 2px;
-            min-width: auto;
-            width: 100%;
-        }
-        
-        .verification-steps {
+        .verification-details {
             padding: 20px 15px;
         }
         
-        .step {
-            margin: 12px 0;
+        .verification-code {
+            font-size: 20px;
+            letter-spacing: 2px;
+            padding: 12px;
+        }
+        
+        .verification-button {
+            width: 100%;
+            padding: 16px 20px;
+            font-size: 16px;
         }
         
         .step-number {
-            width: 24px;
-            height: 24px;
-            font-size: 12px;
+            width: 20px;
+            height: 20px;
+            font-size: 11px;
             margin-right: 12px;
         }
         
-        .step-text {
-            font-size: 14px;
+        .step-content {
+            font-size: 13px;
         }
-    }
-
-    /* Security enhancement styles */
-    .security-badge {
-        display: inline-flex;
-        align-items: center;
-        background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%);
-        color: #2e7d2e;
-        padding: 8px 15px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 600;
-        margin: 15px 0;
-    }
-
-    .security-badge-icon {
-        width: 16px;
-        height: 16px;
-        fill: #4caf50;
-        margin-right: 6px;
-    }
-
-    .link-preview {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 6px;
-        padding: 15px;
-        margin: 20px 0;
-        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-        font-size: 12px;
-        color: #6c757d;
-        word-break: break-all;
-        text-align: center;
     }
 </style>
 {% endblock %}
 
+{% block header %}
+<div class="verification-header email-header">
+    <div class="header-content">
+        <div class="verification-icon">
+            <svg viewBox="0 0 24 24">
+                <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M10,17L6,13L7.41,11.59L10,14.17L16.59,7.58L18,9L10,17Z"/>
+            </svg>
+        </div>
+        <h1 class="header-title">Verify Your Account</h1>
+        <p class="header-subtitle">Secure your access and complete your registration</p>
+    </div>
+</div>
+{% endblock %}
+
 {% block content %}
-<!-- Welcome Message -->
-<h2 class="content-title">Welcome! Verify Your Account</h2>
+<h2 class="content-title">Welcome! Please Verify Your Email Address</h2>
 
 <p class="content-text">
-    Thank you for creating your account! To ensure the security of your account and complete your registration, 
-    please verify your email address using one of the methods below.
+    Thank you for creating an account with us. To ensure the security of your account and complete 
+    your registration, please verify your email address by clicking the button below.
 </p>
 
-<!-- Auth0 Integration Notice -->
-<div class="auth0-branding">
-    <svg class="auth0-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
-        <circle cx="12" cy="12" r="3"/>
-    </svg>
-    Powered by Auth0 Secure Authentication
+<div class="verification-details">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #495057;">Account Information</h3>
+    <p style="margin: 5px 0; font-size: 14px; color: #6c757d;">
+        <strong>Email:</strong> {{ user_email|default('your-email@example.com') }}
+    </p>
+    <p style="margin: 5px 0; font-size: 14px; color: #6c757d;">
+        <strong>Registration Date:</strong> {{ registration_date|default('Just now') }}
+    </p>
+    <p style="margin: 5px 0; font-size: 14px; color: #6c757d;">
+        <strong>Account ID:</strong> {{ user_id|default('USR-XXXXXXXX') }}
+    </p>
 </div>
 
-<!-- Primary Verification Button -->
 <div class="button-container">
-    <a href="{{ verification_url if verification_url else '#' }}" class="button" 
-       style="text-decoration: none; color: #ffffff !important;">
-        ✓ Verify My Account
+    <a href="{{ verification_url|default('#') }}" class="verification-button">
+        Verify Your Email Address
     </a>
 </div>
 
-<!-- Alternative Verification Code (if provided) -->
-{% if verification_code %}
-<div class="verification-code-container">
-    <p class="code-label">Verification Code</p>
-    <div class="verification-code">{{ verification_code }}</div>
-    <p style="font-size: 14px; color: #1976d2; margin: 10px 0 0 0;">
-        Enter this code in the application to verify your account
+<div class="expiration-warning">
+    <h4 style="margin: 0 0 10px 0; color: #856404; font-size: 16px;">⏰ Time-Sensitive Verification</h4>
+    <p class="expiration-timer">
+        This verification link expires in {{ expiration_time|default('24 hours') }}
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 13px; color: #856404;">
+        After expiration, you'll need to request a new verification email
+    </p>
+</div>
+
+<div class="verification-steps">
+    <h4 style="margin: 0 0 20px 0; color: #495057; font-size: 16px;">Verification Steps:</h4>
+    
+    <div class="verification-step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+            <strong>Click the verification button above</strong> or copy the link to your browser
+        </div>
+    </div>
+    
+    <div class="verification-step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+            <strong>Complete the verification process</strong> on our secure verification page
+        </div>
+    </div>
+    
+    <div class="verification-step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+            <strong>Access your account</strong> and start using all available features
+        </div>
+    </div>
+</div>
+
+{% if verification_token %}
+<div class="alternative-method">
+    <h4 style="margin: 0 0 15px 0; color: #495057; font-size: 14px;">Alternative Verification Method</h4>
+    <p style="margin: 0 0 10px 0; font-size: 13px; color: #6c757d;">
+        If the button doesn't work, visit our verification page and enter this code:
+    </p>
+    <div class="verification-code">{{ verification_token }}</div>
+    <p style="margin: 10px 0 0 0; font-size: 12px; color: #6c757d;">
+        Verification Page: <a href="{{ manual_verification_url|default('#') }}" style="color: #4CAF50;">{{ manual_verification_url|default('https://yourapp.com/verify') }}</a>
     </p>
 </div>
 {% endif %}
 
-<!-- Expiration Warning -->
-<div class="timer-warning">
-    <svg class="timer-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
-    </svg>
-    <p class="timer-text">
-        This verification link expires in {{ expiry_time if expiry_time else '24 hours' }}
-    </p>
-</div>
-
-<!-- Step-by-Step Instructions -->
-<div class="verification-steps">
-    <h3 style="font-size: 18px; color: #495057; margin: 0 0 20px 0; text-align: center;">
-        How to Verify Your Account
-    </h3>
-    
-    <div class="step">
-        <div class="step-number">1</div>
-        <p class="step-text">
-            Click the "Verify My Account" button above to be securely redirected to our verification page
-        </p>
-    </div>
-    
-    <div class="step">
-        <div class="step-number">2</div>
-        <p class="step-text">
-            {% if verification_code %}
-            Alternatively, copy and paste the verification code into the application when prompted
-            {% else %}
-            Complete the verification process by confirming your identity
-            {% endif %}
-        </p>
-    </div>
-    
-    <div class="step">
-        <div class="step-number">3</div>
-        <p class="step-text">
-            Once verified, you'll have full access to your account and all features
-        </p>
-    </div>
-</div>
-
-<!-- Security Information -->
 <div class="security-info">
     <h4 class="security-title">
-        <svg class="security-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,7C13.4,7 14.8,8.6 14.8,10V11.5C15.4,11.5 16,12.4 16,13V16C16,17.4 15.4,18 14.8,18H9.2C8.6,18 8,17.4 8,16V13C8,12.4 8.6,11.5 9.2,11.5V10C9.2,8.6 10.6,7 12,7M12,8.2C11.2,8.2 10.5,8.7 10.5,10V11.5H13.5V10C13.5,8.7 12.8,8.2 12,8.2Z"/>
+        <svg class="security-icon" viewBox="0 0 24 24">
+            <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M10,17L6,13L7.41,11.59L10,14.17L16.59,7.58L18,9L10,17Z"/>
         </svg>
-        Security & Privacy
+        Security Information
     </h4>
-    <p class="security-text">
-        Your account security is our top priority. This verification process helps protect your account from 
-        unauthorized access. We use industry-standard encryption and secure authentication protocols powered by Auth0.
-    </p>
-    
-    <div class="security-badge">
-        <svg class="security-badge-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M10,17L5,12L6.41,10.58L10,14.17L17.59,6.58L19,8M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-        </svg>
-        SSL Encrypted & Secure
+    <div class="security-tips">
+        <div class="security-tip">
+            <svg class="security-tip-icon" viewBox="0 0 24 24" fill="#28a745">
+                <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+            </svg>
+            This verification link is unique to your account and cannot be used by others
+        </div>
+        <div class="security-tip">
+            <svg class="security-tip-icon" viewBox="0 0 24 24" fill="#28a745">
+                <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+            </svg>
+            The link is secured with cryptographic protection and expires automatically
+        </div>
+        <div class="security-tip">
+            <svg class="security-tip-icon" viewBox="0 0 24 24" fill="#28a745">
+                <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+            </svg>
+            Always verify the sender address matches our official domain
+        </div>
+        <div class="security-tip">
+            <svg class="security-tip-icon" viewBox="0 0 24 24" fill="#ffc107">
+                <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+            </svg>
+            Never share this verification link or code with anyone else
+        </div>
     </div>
 </div>
 
-<!-- Alternative Link Preview (for email clients that don't support buttons) -->
-{% if verification_url %}
 <div class="alert alert-info">
-    <p style="margin: 0 0 10px 0; font-weight: 600;">
-        Can't click the button? Copy and paste this link into your browser:
-    </p>
-    <div class="link-preview">{{ verification_url }}</div>
-</div>
-{% endif %}
-
-<!-- Troubleshooting Section -->
-<div class="troubleshooting">
-    <h4 class="troubleshooting-title">Need Help?</h4>
-    <p class="troubleshooting-text">
-        If you're having trouble verifying your account, or if you didn't request this verification, 
-        please contact our support team. We're here to help ensure your account remains secure.
-    </p>
-</div>
-
-<!-- Additional Security Notice -->
-<div class="alert alert-warning">
     <p style="margin: 0; font-size: 14px;">
-        <strong>Security Notice:</strong> If you didn't create an account, please ignore this email. 
-        Your email address will not be used for any purpose without your explicit consent.
+        <strong>Didn't request this verification?</strong> If you didn't create an account with us, 
+        please ignore this email. Your email address will not be used unless you complete the 
+        verification process.
     </p>
 </div>
 
-<!-- Contact Information -->
-<div style="text-align: center; margin: 40px 0 20px 0;">
-    <p class="content-text" style="margin: 0;">
-        Questions about your account? We're here to help.
+<div class="support-contact">
+    <h4 style="margin: 0 0 10px 0; color: #1565c0; font-size: 15px;">Need Help?</h4>
+    <p style="margin: 0 0 10px 0; font-size: 13px; color: #1976d2;">
+        If you're having trouble with verification or have questions about your account, 
+        our support team is here to help.
     </p>
-    <div class="button-container" style="margin: 20px 0;">
-        <a href="mailto:{{ support_email if support_email else 'support@company.com' }}" 
-           class="button button-secondary">
-            Contact Support
+    <p style="margin: 0; font-size: 13px;">
+        <strong>Support:</strong> 
+        <a href="mailto:{{ support_email|default('support@yourcompany.com') }}" style="color: #1976d2;">
+            {{ support_email|default('support@yourcompany.com') }}
         </a>
-    </div>
+    </p>
 </div>
 
-<!-- User Information (if available) -->
-{% if user_info %}
-<div style="background-color: #f8f9fa; border-radius: 6px; padding: 20px; margin: 30px 0; font-size: 14px; color: #6c757d;">
-    <p style="margin: 0 0 10px 0; font-weight: 600; color: #495057;">Account Details:</p>
-    {% if user_info.email %}
-    <p style="margin: 5px 0;">Email: {{ user_info.email }}</p>
-    {% endif %}
-    {% if user_info.registration_date %}
-    <p style="margin: 5px 0;">Registration Date: {{ user_info.registration_date }}</p>
-    {% endif %}
-    {% if user_info.ip_address %}
-    <p style="margin: 5px 0;">Registration IP: {{ user_info.ip_address }}</p>
-    {% endif %}
+{% if technical_details %}
+<div class="token-display">
+    <strong>Technical Details:</strong><br>
+    Request ID: {{ request_id|default('REQ-' + timestamp|default('XXXXXXXXXX')) }}<br>
+    Token Type: Auth0 Email Verification<br>
+    Issued: {{ issued_timestamp|default('Just now') }}<br>
+    Expires: {{ expiration_timestamp|default('In 24 hours') }}
 </div>
 {% endif %}
+
+<p class="content-text mt-35" style="font-size: 14px; color: #6c757d;">
+    This verification email was generated automatically by our secure authentication system. 
+    The verification process uses industry-standard security protocols including encrypted 
+    tokens and time-based expiration for your protection.
+</p>
 {% endblock %}
+
+{% block header_title %}Account Verification{% endblock %}
+{% block header_subtitle %}Secure Email Verification Required{% endblock %}
 
 {% block footer_links %}
-<a href="{{ privacy_url if privacy_url else '#' }}" class="footer-link">Privacy Policy</a>
-<a href="{{ terms_url if terms_url else '#' }}" class="footer-link">Terms of Service</a>
-<a href="{{ unsubscribe_url if unsubscribe_url else '#' }}" class="footer-link">Unsubscribe</a>
-<a href="mailto:{{ support_email if support_email else 'support@company.com' }}" class="footer-link">Contact Support</a>
+<a href="{{ privacy_policy_url|default('#') }}" class="footer-link">Privacy Policy</a>
+<a href="{{ terms_of_service_url|default('#') }}" class="footer-link">Terms of Service</a>
+<a href="{{ support_url|default('#') }}" class="footer-link">Contact Support</a>
+<a href="{{ security_center_url|default('#') }}" class="footer-link">Security Center</a>
 {% endblock %}
 
-{% block copyright %}
-© {{ current_year if current_year else '2024' }} {{ company_name if company_name else 'Your Company' }}. All rights reserved.
-<br>
-<span style="font-size: 11px; opacity: 0.8;">
-    This email was sent to {{ recipient_email if recipient_email else 'your registered email address' }}.
-</span>
+{% block footer %}
+<p class="footer-text">
+    This email contains a secure verification link for your account. Please do not forward 
+    this email or share the verification link with others. If you did not request this 
+    verification, please contact our support team immediately.
+</p>
+
+<div class="footer-links">
+    {{ super() }}
+</div>
+
+<p class="footer-text" style="font-size: 12px; margin: 15px 0 5px 0;">
+    <strong>Security Notice:</strong> This email was sent from our authenticated mail system. 
+    Verification tokens are protected with ItsDangerous cryptographic signatures and Auth0 security protocols.
+</p>
+
+<p class="footer-copyright">
+    © {% if current_year %}{{ current_year }}{% else %}2024{% endif %} {{ company_name|default('Your Company Name') }}. All rights reserved.<br>
+    Powered by Auth0 and Flask-based secure authentication system.
+</p>
 {% endblock %}
