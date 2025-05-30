@@ -1,0 +1,101 @@
+{#
+    Common Text Email Layout Template
+    
+    This template extends the base text template and provides standardized 
+    header and footer sections for consistent plain-text email structure 
+    across all text-formatted emails in the Flask application.
+    
+    Features:
+    - Extends base.txt template using Jinja2 inheritance patterns
+    - Standardized text email header with application branding
+    - Consistent plain-text footer with contact and unsubscribe information
+    - Accessibility compliance for screen readers and text-only clients
+    - Compatible with multipart email structure alongside HTML layouts
+    
+    Template Usage:
+    {% extends "emails/base/layout.txt" %}
+    {% block email_content %}
+    Your email content here...
+    {% endblock %}
+#}
+
+{% extends "emails/base/base.txt" %}
+
+{# Override the email header block to provide standardized branding #}
+{% block email_header %}
+================================================================================
+                            {{ application_name or "Flask Application" }}
+================================================================================
+
+{% if email_title %}{{ email_title }}{% endif %}
+{% if email_subtitle %}
+{{ email_subtitle }}
+{% endif %}
+
+Dear {% if recipient_name %}{{ recipient_name }}{% else %}Valued User{% endif %},
+
+{% endblock %}
+
+{# Main content area - to be overridden by specific email templates #}
+{% block email_content %}
+{# This block should be overridden by specific email templates #}
+{% endblock %}
+
+{# Override the email footer block to provide consistent contact information #}
+{% block email_footer %}
+
+________________________________________________________________________________
+
+Contact Information:
+Support: {{ support_email or "support@company.com" }}
+Phone: {{ support_phone or "(555) 123-4567" }}
+Website: {{ company_website or "https://www.company.com" }}
+
+{# Unsubscribe section for compliance #}
+{% if unsubscribe_url %}
+To unsubscribe from these emails, please visit:
+{{ unsubscribe_url }}
+{% endif %}
+
+{# Legal disclaimer and branding footer #}
+{% if legal_disclaimer %}
+{{ legal_disclaimer }}
+{% endif %}
+
+This email was sent by {{ application_name or "Flask Application" }}.
+{% if company_address %}
+{{ company_address }}
+{% endif %}
+
+{# Privacy and accessibility notice #}
+If you are using a screen reader or assistive technology and need help 
+accessing this email, please contact us at {{ accessibility_email or support_email or "support@company.com" }}.
+
+================================================================================
+                     © {% now 'Y' %} {{ company_name or "Company Name" }}. All rights reserved.
+================================================================================
+{% endblock %}
+
+{# Email-specific metadata block for tracking and categorization #}
+{% block email_metadata %}
+{# Optional metadata block for email tracking, categories, or custom headers #}
+{% if email_category %}
+Category: {{ email_category }}
+{% endif %}
+{% if email_priority %}
+Priority: {{ email_priority }}
+{% endif %}
+{% endblock %}
+
+{# Template customization blocks for specific use cases #}
+{% block pre_header %}
+{# Optional pre-header block for additional context #}
+{% endblock %}
+
+{% block post_content %}
+{# Optional post-content block for additional information #}
+{% endblock %}
+
+{% block custom_footer %}
+{# Optional custom footer block for specific email types #}
+{% endblock %}
