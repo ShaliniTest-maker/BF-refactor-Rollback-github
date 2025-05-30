@@ -1,0 +1,55 @@
+{
+  "status": "{% block status %}{{ health_status | default('healthy') }}{% endblock %}",
+  "timestamp": "{{ timestamp | default(moment().utcnow().isoformat()) }}",
+  "environment": "{{ config.FLASK_ENV | default('development') }}",
+  "version": "{{ config.APP_VERSION | default('1.0.0') }}",
+  "service": {
+    "name": "{{ config.APP_NAME | default('flask-application') }}",
+    "instance_id": "{{ instance_id | default(hostname) }}",
+    "uptime_seconds": {{ uptime_seconds | default(0) }},
+    "request_id": "{{ g.request_id | default('') if g is defined else '' }}"
+  },
+  "system": {
+    "hostname": "{{ hostname | default('unknown') }}",
+    "process_id": {{ process_id | default(0) }},
+    "worker_id": "{{ worker_id | default('main') }}",
+    "container_id": "{{ container_id | default('') }}"
+  },
+  "performance": {
+    "response_time_ms": {{ response_time_ms | default(0) }},
+    "memory_usage_mb": {{ memory_usage_mb | default(0) }},
+    "cpu_usage_percent": {{ cpu_usage_percent | default(0) }}
+  },
+  "checks": {
+    {% block health_checks %}
+    "application": {
+      "status": "{{ application_status | default('healthy') }}",
+      "details": "Flask application running normally"
+    }
+    {% endblock %}
+  },
+  "metadata": {
+    "check_type": "{% block check_type %}basic{% endblock %}",
+    "check_duration_ms": {{ check_duration_ms | default(0) }},
+    "flask_version": "{{ flask_version | default('3.1.1') }}",
+    "python_version": "{{ python_version | default('3.13.3') }}",
+    {% block additional_metadata %}{% endblock %}
+    "monitoring": {
+      "alb_compatible": true,
+      "ec2_compatible": true,
+      "container_orchestration": "{{ orchestration_platform | default('docker') }}"
+    }
+  },
+  {% block custom_fields %}{% endblock %}
+  "links": {
+    "self": "{{ request.url if request is defined else '/health' }}",
+    "related": {
+      {% block related_links %}
+      "liveness": "/health/liveness",
+      "readiness": "/health/readiness",
+      "detailed": "/health/detailed",
+      "metrics": "/metrics"
+      {% endblock %}
+    }
+  }
+}
