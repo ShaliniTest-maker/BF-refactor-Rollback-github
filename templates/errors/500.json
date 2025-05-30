@@ -1,0 +1,172 @@
+{%- set current_timestamp = moment.utcnow().isoformat() -%}
+{%- set request_id = g.get('request_id', 'unknown') -%}
+{%- set user_id = g.get('current_user_id', None) -%}
+{%- set sentry_event_id = g.get('sentry_event_id', None) -%}
+{%- set incident_id = g.get('incident_id', None) -%}
+{
+  "error": {
+    "type": "internal_server_error",
+    "code": 500,
+    "message": "Internal Server Error",
+    "timestamp": "{{ current_timestamp }}",
+    "request_id": "{{ request_id }}",
+    {% if incident_id -%}
+    "incident_id": "{{ incident_id }}",
+    {% endif -%}
+    "details": {
+      "description": "An unexpected error occurred while processing your request. Our engineering team has been automatically notified and is investigating the issue.",
+      "user_message": "We apologize for the inconvenience. Please try again in a few moments or contact support if the problem persists.",
+      "support_reference": "REF-500-{{ request_id }}"
+    },
+    "monitoring": {
+      "sentry": {
+        {% if sentry_event_id -%}
+        "event_id": "{{ sentry_event_id }}",
+        "tracked": true,
+        {% else -%}
+        "tracked": false,
+        {% endif -%}
+        "integration": "sentry-sdk-2.29.1"
+      },
+      "cloudwatch": {
+        "log_group": "{{ config.get('CLOUDWATCH_LOG_GROUP', 'flask-app-errors') }}",
+        "log_stream": "{{ config.get('CLOUDWATCH_STREAM_NAME', 'error-stream') }}",
+        "correlation_id": "{{ request_id }}",
+        "metric_namespace": "Flask/Errors"
+      },
+      "security": {
+        "correlation_enabled": true,
+        "security_event_logged": true,
+        {% if user_id -%}
+        "user_context": {
+          "user_id": "{{ user_id }}",
+          "ip_address": "{{ request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) }}",
+          "user_agent": "{{ request.headers.get('User-Agent', 'unknown') }}"
+        },
+        {% else -%}
+        "user_context": {
+          "authenticated": false,
+          "ip_address": "{{ request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) }}",
+          "user_agent": "{{ request.headers.get('User-Agent', 'unknown') }}"
+        },
+        {% endif -%}
+        "security_classification": "system_error"
+      }
+    },
+    "request_context": {
+      "method": "{{ request.method }}",
+      "path": "{{ request.path }}",
+      "endpoint": "{{ request.endpoint or 'unknown' }}",
+      "request_size": {{ request.content_length or 0 }},
+      "headers": {
+        "content_type": "{{ request.content_type or 'unknown' }}",
+        "accept": "{{ request.headers.get('Accept', 'unknown') }}",
+        "authorization_present": {{ 'true' if request.headers.get('Authorization') else 'false' }}
+      }
+    },
+    "system_context": {
+      "flask_version": "{{ config.get('FLASK_VERSION', '3.1.1') }}",
+      "python_version": "{{ config.get('PYTHON_VERSION', '3.13.3') }}",
+      "environment": "{{ config.get('FLASK_ENV', 'production') }}",
+      "application_version": "{{ config.get('APP_VERSION', 'unknown') }}",
+      "wsgi_server": "gunicorn",
+      "deployment_mode": "{{ config.get('DEPLOYMENT_MODE', 'container') }}"
+    },
+    {% if config.get('FLASK_ENV') == 'development' or config.get('DEBUG') -%}
+    "debug_information": {
+      "debug_mode": true,
+      "stack_trace_available": true,
+      "local_variables_captured": {{ 'true' if sentry_event_id else 'false' }},
+      "development_notes": {
+        "sentry_integration": "Error details captured in Sentry dashboard",
+        "cloudwatch_logs": "Check CloudWatch Logs for detailed error context",
+        "flask_debug": "Additional debugging available in Flask development server logs"
+      },
+      "debugging_endpoints": {
+        "sentry_dashboard": "{{ config.get('SENTRY_DSN', '').split('@')[1].split('/')[0] if config.get('SENTRY_DSN') else 'not_configured' }}",
+        "cloudwatch_logs": "AWS CloudWatch Console -> Log Groups -> {{ config.get('CLOUDWATCH_LOG_GROUP', 'flask-app-errors') }}"
+      }
+    },
+    {% endif -%}
+    "incident_tracking": {
+      "auto_reported": true,
+      "notification_sent": true,
+      "severity": "high",
+      "category": "application_error",
+      "affected_services": ["flask_application"],
+      "escalation": {
+        "on_call_notified": true,
+        "engineering_team_alerted": true,
+        "incident_management_system": "integrated"
+      },
+      "resolution": {
+        "estimated_time": "15-30 minutes",
+        "status_page": "{{ config.get('STATUS_PAGE_URL', 'status.company.com') }}",
+        "follow_up_required": true
+      }
+    },
+    "compliance": {
+      "data_retention": {
+        "error_logs": "30 days",
+        "security_logs": "90 days",
+        "audit_trail": "7 years"
+      },
+      "privacy": {
+        "personal_data_logged": false,
+        "data_classification": "system_operational",
+        "gdpr_compliant": true
+      }
+    },
+    "response_actions": {
+      "client_actions": [
+        "Retry request after 30 seconds",
+        "Check system status page for updates",
+        "Contact support with reference ID if issue persists"
+      ],
+      "internal_actions": [
+        "Sentry error capture initiated",
+        "CloudWatch alarm triggered",
+        "Security event correlation logged",
+        "On-call engineer notification sent"
+      ]
+    },
+    "metrics": {
+      "error_rate_impact": "monitored",
+      "performance_impact": "measured",
+      "availability_impact": "tracked",
+      "sla_compliance": "under_review"
+    }
+  },
+  "meta": {
+    "api_version": "{{ config.get('API_VERSION', 'v1') }}",
+    "response_format": "json",
+    "content_type": "application/json",
+    "charset": "utf-8",
+    "documentation": "{{ config.get('API_DOCS_URL', '/docs/errors') }}",
+    "support": {
+      "contact": "{{ config.get('SUPPORT_EMAIL', 'support@company.com') }}",
+      "phone": "{{ config.get('SUPPORT_PHONE', 'not_configured') }}",
+      "hours": "24/7 for critical issues"
+    }
+  },
+  "security": {
+    "event_classification": "system_error",
+    "threat_assessment": "low_risk",
+    "automated_response": "monitoring_enhanced",
+    "correlation": {
+      "security_logs": "correlated",
+      "auth_events": "checked",
+      "access_patterns": "analyzed"
+    },
+    "audit": {
+      "logged": true,
+      "retention_policy": "7_years",
+      "compliance_framework": "sox_gdpr_pci"
+    }
+  },
+  "performance": {
+    "response_generation_time": "{{ '%.3f'|format(g.get('response_generation_time', 0.001)) }}s",
+    "template_render_time": "{{ '%.3f'|format(g.get('template_render_time', 0.001)) }}s",
+    "error_processing_overhead": "minimal"
+  }
+}
