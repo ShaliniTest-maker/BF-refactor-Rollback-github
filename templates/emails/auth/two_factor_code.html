@@ -1,404 +1,394 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>Two-Factor Authentication Code</title>
-    <!--[if mso]>
-    <noscript>
-        <xml>
-            <o:OfficeDocumentSettings>
-                <o:PixelsPerInch>96</o:PixelsPerInch>
-            </o:OfficeDocumentSettings>
-        </xml>
-    </noscript>
-    <![endif]-->
-    <style>
-        /* Email client compatibility styles */
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: #f4f7fa;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            color: #2c3e50;
-        }
-        
-        /* Container and layout styles */
-        .email-container {
-            width: 100%;
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-        }
-        
-        /* Header styles */
-        .email-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 30px 40px;
-            text-align: center;
-            color: #ffffff;
-        }
-        
-        .email-header h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-        }
-        
-        .security-icon {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 15px;
-            background-color: rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-        }
-        
-        /* Main content styles */
-        .email-content {
-            padding: 40px;
-        }
-        
-        .greeting {
-            font-size: 18px;
-            margin-bottom: 20px;
-            color: #2c3e50;
-        }
-        
-        .content-text {
-            font-size: 16px;
-            margin-bottom: 25px;
-            color: #5a6c7d;
-            line-height: 1.6;
-        }
-        
-        /* OTP code display styles */
-        .otp-container {
-            background: linear-gradient(135deg, #f8f9ff 0%, #e8f0fe 100%);
-            border: 2px solid #4285f4;
-            border-radius: 12px;
-            padding: 30px;
-            text-align: center;
-            margin: 30px 0;
-            position: relative;
-        }
-        
-        .otp-label {
-            font-size: 14px;
-            font-weight: 600;
-            color: #4285f4;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 10px;
-        }
-        
-        .otp-code {
+{% extends "templates/emails/base/email_base.html" %}
+
+{% block title %}Two-Factor Authentication Code{% endblock %}
+
+{% block additional_styles %}
+<style>
+    /* Two-Factor Authentication Specific Styles */
+    .auth-code-container {
+        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        color: #ffffff;
+        text-align: center;
+        padding: 40px 30px;
+        border-radius: 12px;
+        margin: 30px 0;
+        box-shadow: 0 8px 32px rgba(79, 70, 229, 0.3);
+    }
+
+    .auth-code {
+        font-size: 48px;
+        font-weight: 700;
+        letter-spacing: 8px;
+        font-family: 'Courier New', Courier, monospace;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 20px 30px;
+        border-radius: 8px;
+        margin: 20px 0;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        display: inline-block;
+        min-width: 280px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .auth-code-label {
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+        opacity: 0.9;
+    }
+
+    .expiration-info {
+        background-color: #fef3c7;
+        border-left: 4px solid #f59e0b;
+        color: #92400e;
+        padding: 20px;
+        border-radius: 6px;
+        margin: 25px 0;
+        font-weight: 500;
+    }
+
+    .security-warning {
+        background-color: #fee2e2;
+        border-left: 4px solid #ef4444;
+        color: #991b1b;
+        padding: 20px;
+        border-radius: 6px;
+        margin: 25px 0;
+    }
+
+    .auth-instructions {
+        background-color: #f0f9ff;
+        border: 1px solid #0ea5e9;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .instruction-step {
+        display: flex;
+        align-items: flex-start;
+        margin: 15px 0;
+        padding: 10px 0;
+    }
+
+    .step-number {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #ffffff;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 14px;
+        margin-right: 15px;
+        flex-shrink: 0;
+    }
+
+    .step-content {
+        flex: 1;
+        font-size: 15px;
+        line-height: 1.5;
+        color: #374151;
+    }
+
+    .security-tips {
+        background-color: #f3f4f6;
+        border-radius: 8px;
+        padding: 25px;
+        margin: 30px 0;
+    }
+
+    .security-tip {
+        display: flex;
+        align-items: flex-start;
+        margin: 12px 0;
+    }
+
+    .security-icon {
+        color: #059669;
+        margin-right: 12px;
+        font-size: 18px;
+        flex-shrink: 0;
+        margin-top: 2px;
+    }
+
+    .auth-branding {
+        text-align: center;
+        margin: 25px 0;
+        padding: 20px;
+        background-color: #f8fafc;
+        border-radius: 8px;
+    }
+
+    .auth-logo {
+        max-width: 120px;
+        height: auto;
+        margin-bottom: 10px;
+    }
+
+    .auth-provider {
+        font-size: 12px;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 500;
+    }
+
+    /* Mobile Optimization */
+    @media only screen and (max-width: 600px) {
+        .auth-code {
             font-size: 36px;
-            font-weight: 700;
-            color: #1a73e8;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            letter-spacing: 8px;
-            margin: 15px 0;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            letter-spacing: 6px;
+            padding: 15px 20px;
+            min-width: 240px;
         }
-        
-        .otp-expiry {
-            font-size: 14px;
-            color: #ea4335;
-            font-weight: 500;
-            margin-top: 15px;
+
+        .auth-code-container {
+            padding: 30px 20px;
         }
-        
-        .otp-timer {
-            font-weight: 700;
-            color: #d33b00;
+
+        .instruction-step {
+            flex-direction: column;
+            align-items: flex-start;
         }
-        
-        /* Instructions section */
-        .instructions {
-            background-color: #f8f9fa;
-            border-left: 4px solid #34a853;
-            padding: 20px;
-            margin: 25px 0;
-            border-radius: 0 8px 8px 0;
-        }
-        
-        .instructions h3 {
-            margin: 0 0 15px 0;
-            font-size: 16px;
-            color: #137333;
-            font-weight: 600;
-        }
-        
-        .instructions ul {
-            margin: 0;
-            padding-left: 20px;
-            color: #5f6368;
-        }
-        
-        .instructions li {
-            margin-bottom: 8px;
-            font-size: 14px;
-        }
-        
-        /* Security warning section */
-        .security-warning {
-            background-color: #fef7e0;
-            border: 1px solid #fbbc04;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 25px 0;
-        }
-        
-        .security-warning h3 {
-            margin: 0 0 10px 0;
-            font-size: 16px;
-            color: #ea8600;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-        }
-        
-        .warning-icon {
-            margin-right: 8px;
-            font-size: 18px;
-        }
-        
-        .security-warning p {
-            margin: 0;
-            font-size: 14px;
-            color: #b06000;
-            line-height: 1.5;
-        }
-        
-        /* Auth0 integration info */
-        .auth0-info {
-            background-color: #f0f4ff;
-            border: 1px solid #4285f4;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-            font-size: 13px;
-            color: #1a73e8;
-        }
-        
-        /* Call-to-action button */
-        .cta-button {
-            display: inline-block;
-            background: linear-gradient(135deg, #4285f4 0%, #1a73e8 100%);
-            color: #ffffff;
-            text-decoration: none;
-            padding: 14px 28px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 16px;
-            text-align: center;
-            margin: 20px 0;
-            box-shadow: 0 2px 4px rgba(66, 133, 244, 0.3);
-            transition: all 0.3s ease;
-        }
-        
-        .cta-button:hover {
-            background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
-            box-shadow: 0 4px 8px rgba(66, 133, 244, 0.4);
-        }
-        
-        /* Footer styles */
-        .email-footer {
-            background-color: #f8f9fa;
-            padding: 30px 40px;
-            text-align: center;
-            border-top: 1px solid #e8eaed;
-        }
-        
-        .footer-text {
-            font-size: 12px;
-            color: #5f6368;
+
+        .step-number {
             margin-bottom: 10px;
-            line-height: 1.4;
+            margin-right: 0;
         }
-        
-        .footer-links {
-            margin-top: 15px;
+
+        .auth-instructions,
+        .security-tips {
+            padding: 20px 15px;
         }
-        
-        .footer-links a {
-            color: #1a73e8;
-            text-decoration: none;
-            font-size: 12px;
-            margin: 0 10px;
+    }
+
+    /* High Contrast Mode Support */
+    @media (prefers-contrast: high) {
+        .auth-code {
+            background: #000000;
+            color: #ffffff;
+            border: 3px solid #ffffff;
         }
-        
-        .footer-links a:hover {
-            text-decoration: underline;
+
+        .auth-code-container {
+            background: #1a1a1a;
+            border: 2px solid #ffffff;
         }
-        
-        /* Responsive design for mobile devices */
-        @media only screen and (max-width: 600px) {
-            .email-container {
-                width: 100% !important;
-                margin: 0 !important;
-                border-radius: 0 !important;
-            }
-            
-            .email-header, .email-content, .email-footer {
-                padding: 25px 20px !important;
-            }
-            
-            .email-header h1 {
-                font-size: 22px !important;
-            }
-            
-            .otp-container {
-                padding: 20px !important;
-                margin: 20px 0 !important;
-            }
-            
-            .otp-code {
-                font-size: 32px !important;
-                letter-spacing: 6px !important;
-            }
-            
-            .greeting {
-                font-size: 16px !important;
-            }
-            
-            .content-text {
-                font-size: 15px !important;
-            }
+    }
+
+    /* Dark Mode Support */
+    @media (prefers-color-scheme: dark) {
+        .auth-instructions {
+            background-color: #374151;
+            border-color: #6b7280;
         }
-        
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {
-            .email-container {
-                background-color: #1f1f1f !important;
-            }
-            
-            .email-content {
-                color: #e8eaed !important;
-            }
-            
-            .content-text {
-                color: #bdc1c6 !important;
-            }
-            
-            .instructions {
-                background-color: #2d2d2d !important;
-                color: #e8eaed !important;
-            }
+
+        .step-content {
+            color: #d1d5db;
         }
-    </style>
-</head>
-<body>
-    <div class="email-container">
-        <!-- Email Header -->
-        <div class="email-header">
-            <div class="security-icon">
-                🔒
-            </div>
-            <h1>Two-Factor Authentication</h1>
-        </div>
-        
-        <!-- Main Email Content -->
-        <div class="email-content">
-            <div class="greeting">
-                Hello {{ user_name or 'User' }},
-            </div>
-            
-            <div class="content-text">
-                We received a request to sign in to your account. To complete the login process and ensure your account security, please use the verification code below.
-            </div>
-            
-            <!-- OTP Code Display -->
-            <div class="otp-container">
-                <div class="otp-label">Your Verification Code</div>
-                <div class="otp-code">{{ otp_code or '123456' }}</div>
-                <div class="otp-expiry">
-                    This code expires in <span class="otp-timer">{{ expiry_minutes or '10' }} minutes</span>
-                </div>
-            </div>
-            
-            <!-- Auth0 MFA Integration Info -->
-            <div class="auth0-info">
-                <strong>🔐 Enhanced Security:</strong> This code was generated by our secure Auth0 multi-factor authentication system to protect your account.
-            </div>
-            
-            <!-- Usage Instructions -->
-            <div class="instructions">
-                <h3>📋 How to Use This Code</h3>
-                <ul>
-                    <li>Enter this 6-digit code in the verification field on your login screen</li>
-                    <li>Complete the process within {{ expiry_minutes or '10' }} minutes before it expires</li>
-                    <li>Use this code only once - it cannot be reused</li>
-                    <li>If you don't see the verification field, return to the login page and try again</li>
-                    <li>For mobile apps, you can copy and paste this code directly</li>
-                </ul>
-            </div>
-            
-            <!-- Security Warning -->
-            <div class="security-warning">
-                <h3>
-                    <span class="warning-icon">⚠️</span>
-                    Important Security Information
-                </h3>
-                <p>
-                    <strong>Never share this code with anyone.</strong> Our support team will never ask for your verification code. 
-                    If you didn't request this code, someone may be trying to access your account. 
-                    Please contact our security team immediately and consider changing your password.
-                </p>
-            </div>
-            
-            <div class="content-text">
-                If you're having trouble with the verification process, you can also use alternative MFA methods 
-                configured in your account settings, such as authenticator apps or backup codes.
-            </div>
-            
-            <!-- Call-to-Action -->
-            <div style="text-align: center;">
-                <a href="{{ login_url or '#' }}" class="cta-button">
-                    Complete Login Process
-                </a>
-            </div>
-            
-            <div class="content-text" style="margin-top: 30px; font-size: 14px; color: #5f6368;">
-                <strong>Didn't request this code?</strong> If you didn't try to sign in, you can safely ignore this email. 
-                Your account remains secure, and no action is required.
-            </div>
-        </div>
-        
-        <!-- Email Footer -->
-        <div class="email-footer">
-            <div class="footer-text">
-                This is an automated security notification from {{ company_name or 'Your Application' }}.
-                <br>
-                Sent on {{ timestamp or 'now' }} from our secure authentication system.
-            </div>
-            
-            <div class="footer-text">
-                <strong>Security Tip:</strong> Always verify the sender's email address and never enter verification codes on suspicious websites.
-            </div>
-            
-            <div class="footer-links">
-                <a href="{{ help_url or '#' }}">Help Center</a>
-                <a href="{{ security_url or '#' }}">Security Settings</a>
-                <a href="{{ contact_url or '#' }}">Contact Support</a>
-            </div>
-            
-            <div class="footer-text" style="margin-top: 15px; font-size: 11px;">
-                {{ company_name or 'Your Application' }} | Secured by Auth0 Multi-Factor Authentication
-                <br>
-                This email was sent to {{ user_email or 'your email address' }}
-            </div>
+
+        .security-tips {
+            background-color: #374151;
+        }
+
+        .expiration-info {
+            background-color: #451a03;
+            color: #fcd34d;
+        }
+
+        .security-warning {
+            background-color: #450a0a;
+            color: #fca5a5;
+        }
+
+        .auth-branding {
+            background-color: #374151;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header_title %}Secure Access{% endblock %}
+{% block header_subtitle %}Two-Factor Authentication{% endblock %}
+
+{% block content %}
+<div class="content-title">
+    🔐 Your Authentication Code
+</div>
+
+<p class="content-text">
+    We've generated a secure authentication code for your account. Enter this code to complete your login process.
+</p>
+
+<!-- Authentication Code Display -->
+<div class="auth-code-container">
+    <div class="auth-code-label">Your Authentication Code</div>
+    <div class="auth-code">{{ code | default('123456') }}</div>
+    <div style="font-size: 14px; margin-top: 15px; opacity: 0.9;">
+        Valid for {{ expiration_minutes | default('10') }} minutes
+    </div>
+</div>
+
+<!-- Expiration Warning -->
+<div class="expiration-info">
+    <strong>⏰ Time Sensitive:</strong> This authentication code expires in 
+    <strong>{{ expiration_minutes | default('10') }} minutes</strong> 
+    (at {{ expiration_time | default('00:00 UTC') }}). 
+    If you don't use it within this time, you'll need to request a new code.
+</div>
+
+<!-- Usage Instructions -->
+<div class="auth-instructions">
+    <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 18px;">
+        📋 How to Use This Code
+    </h3>
+    
+    <div class="instruction-step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+            Return to the login page where you were prompted for the authentication code
         </div>
     </div>
-</body>
-</html>
+    
+    <div class="instruction-step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+            Enter the 6-digit code exactly as shown above (without spaces)
+        </div>
+    </div>
+    
+    <div class="instruction-step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+            Click "Verify" or "Continue" to complete your secure login
+        </div>
+    </div>
+    
+    <div class="instruction-step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+            Delete this email immediately after use for security
+        </div>
+    </div>
+</div>
+
+<!-- Security Warning -->
+<div class="security-warning">
+    <strong>🚨 Security Alert:</strong> This code provides access to your account. 
+    Never share it with anyone, including our support team. We will never ask for 
+    your authentication codes via email, phone, or any other method.
+</div>
+
+<!-- Security Best Practices -->
+<div class="security-tips">
+    <h3 style="color: #374151; margin: 0 0 20px 0; font-size: 18px;">
+        🛡️ Security Best Practices
+    </h3>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Only enter this code on our official website or application</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Verify the website URL matches our official domain before entering the code</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>If you didn't request this code, secure your account immediately</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Use a secure, private device and network connection</span>
+    </div>
+    
+    <div class="security-tip">
+        <span class="security-icon">✓</span>
+        <span>Log out completely when finished using shared or public devices</span>
+    </div>
+</div>
+
+<!-- Didn't Request This? -->
+<div class="alert alert-warning">
+    <strong>Didn't request this code?</strong><br>
+    If you didn't try to log in to your account, someone else might have your password. 
+    Please <a href="{{ secure_account_url | default('#') }}" style="color: #d97706; text-decoration: underline;">
+    secure your account immediately</a> and change your password.
+</div>
+
+<!-- Auth0 Integration Branding -->
+{% if auth0_enabled %}
+<div class="auth-branding">
+    <div class="auth-provider">Secured by Auth0</div>
+    <div style="font-size: 12px; color: #9ca3af; margin-top: 5px;">
+        Enterprise-grade authentication and security
+    </div>
+</div>
+{% endif %}
+
+<!-- Alternative Access Methods -->
+<div class="alert alert-info">
+    <strong>Having trouble?</strong><br>
+    If you're not receiving codes or experiencing issues:
+    <ul style="margin: 10px 0 0 20px; padding: 0;">
+        <li>Check your spam/junk folder</li>
+        <li>Try requesting a new code</li>
+        {% if backup_codes_enabled %}
+        <li>Use one of your backup recovery codes</li>
+        {% endif %}
+        {% if support_url %}
+        <li>Contact our support team at <a href="{{ support_url }}" style="color: #2563eb;">{{ support_url }}</a></li>
+        {% endif %}
+    </ul>
+</div>
+
+<!-- Session Information -->
+{% if session_info %}
+<div style="background-color: #f8fafc; padding: 20px; border-radius: 6px; margin: 25px 0; font-size: 14px; color: #6b7280;">
+    <strong style="color: #374151;">Login Attempt Details:</strong><br>
+    <strong>Time:</strong> {{ session_info.timestamp | default('N/A') }}<br>
+    <strong>Location:</strong> {{ session_info.location | default('Unknown') }}<br>
+    <strong>Device:</strong> {{ session_info.device | default('Unknown device') }}<br>
+    <strong>IP Address:</strong> {{ session_info.ip_address | default('Hidden for security') }}
+</div>
+{% endif %}
+
+<p class="content-text">
+    Thank you for using two-factor authentication to keep your account secure. 
+    This additional security step helps protect your data and ensures only you can access your account.
+</p>
+{% endblock %}
+
+{% block footer %}
+<p class="footer-text">
+    This authentication code was generated by our secure system for account: 
+    <strong>{{ user_email | default('[Protected]') }}</strong>
+</p>
+
+<p class="footer-text">
+    For your security, this email contains sensitive information and should be deleted after use.
+</p>
+
+<div class="footer-links">
+    {% block footer_links %}
+    <a href="{{ privacy_policy_url | default('#') }}" class="footer-link">Privacy Policy</a>
+    <a href="{{ security_center_url | default('#') }}" class="footer-link">Security Center</a>
+    <a href="{{ help_url | default('#') }}" class="footer-link">Help & Support</a>
+    {% endblock %}
+</div>
+
+<p class="footer-copyright">
+    {% block copyright %}
+    © {{ current_year | default('2024') }} {{ company_name | default('Your Company') }}. All rights reserved.<br>
+    Secured with enterprise-grade encryption and authentication technology.
+    {% endblock %}
+</p>
+{% endblock %}
