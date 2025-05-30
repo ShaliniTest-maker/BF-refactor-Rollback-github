@@ -1,133 +1,159 @@
 USER ACCOUNT STATUS CHANGE NOTIFICATION
-==========================================
+=====================================================
 
 ADMINISTRATIVE ALERT: User Account Status Modified
 
-Dear Administrator,
+Date/Time: {{ timestamp }}
+Alert ID: {{ alert_id }}
+System: Flask Application Security Monitor
 
-This is an automated notification to inform you that a user account status has been changed in the system.
-
-CHANGE DETAILS
---------------
-User ID: {{ user.id }}
-Username: {{ user.username }}
-Email: {{ user.email }}
-Full Name: {{ user.full_name if user.full_name else 'Not specified' }}
-
-STATUS CHANGE INFORMATION
--------------------------
-Previous Status: {{ previous_status }}
-Current Status: {{ current_status }}
-Change Type: {{ change_type }}
-Status Description: {{ status_description }}
-
-ADMINISTRATIVE DETAILS
------------------------
-Change Timestamp: {{ change_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-Changed By: {{ changed_by_admin.username }} ({{ changed_by_admin.email }})
-Administrator Role: {{ changed_by_admin.role if changed_by_admin.role else 'System Administrator' }}
-Change Reason: {{ change_reason if change_reason else 'No reason specified' }}
-Reference ID: {{ reference_id if reference_id else 'AUTO-' + change_timestamp.strftime('%Y%m%d%H%M%S') }}
-
-ACCOUNT INFORMATION
--------------------
-Account Created: {{ user.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if user.created_at else 'Unknown' }}
-Last Login: {{ user.last_login.strftime('%Y-%m-%d %H:%M:%S UTC') if user.last_login else 'Never' }}
-User Roles: {{ user_roles if user_roles else 'No roles assigned' }}
-Account Type: {{ user.account_type if user.account_type else 'Standard User' }}
-
-IMPACT ASSESSMENT
+USER INFORMATION:
 -----------------
-Access Level: {{ access_level_change }}
-System Permissions: {{ permission_changes if permission_changes else 'No permission changes' }}
-Active Sessions: {{ active_sessions_count }} session(s) affected
-Data Access: {{ data_access_impact }}
+User ID: {{ user_id }}
+Username: {{ username }}
+Email: {{ user_email }}
+Previous Status: {{ previous_status }}
+New Status: {{ new_status }}
 
-ADMINISTRATIVE ACTIONS REQUIRED
---------------------------------
-{% if requires_approval %}
-APPROVAL REQUIRED: This change requires administrative approval.
-- Review the change details above
-- Verify the authorization for this status change
-- Approve or reject the change in the admin panel
-- Approval deadline: {{ approval_deadline.strftime('%Y-%m-%d %H:%M:%S UTC') if approval_deadline else 'No deadline specified' }}
-{% endif %}
+CHANGE DETAILS:
+---------------
+Change Type: {{ change_type }}
+Change Reason: {{ change_reason }}
+Affected Components: {{ affected_components }}
+Risk Level: {{ risk_level }}
 
-{% if requires_notification %}
-USER NOTIFICATION: The affected user has been automatically notified of this status change.
-{% else %}
-USER NOTIFICATION: The affected user has NOT been notified of this change.
-- Consider whether manual notification is required
-- User contact information is available above
-{% endif %}
-
-{% if requires_audit %}
-AUDIT TRAIL: This change has been logged for compliance purposes.
-- Audit Reference: {{ audit_reference }}
-- Compliance Category: {{ compliance_category if compliance_category else 'User Management' }}
-{% endif %}
-
-NEXT STEPS AND RECOMMENDATIONS
--------------------------------
-{% if current_status == 'ACTIVE' %}
-1. Verify that the user has appropriate access permissions
-2. Confirm user training completion if required
-3. Monitor initial system usage for any issues
-4. Ensure proper role assignments are in place
-{% elif current_status == 'INACTIVE' or current_status == 'SUSPENDED' %}
-1. Verify that all active sessions have been terminated
-2. Review any pending work assignments for the user
-3. Consider data backup if account will be permanently disabled
-4. Update team members about user availability changes
-5. Review access to shared resources and documents
-{% elif current_status == 'PENDING' %}
-1. Complete required verification procedures
-2. Schedule user onboarding if applicable
-3. Prepare account activation materials
-4. Assign temporary access if immediate access is needed
-{% elif current_status == 'DELETED' or current_status == 'ARCHIVED' %}
-1. Confirm data retention compliance requirements
-2. Transfer ownership of user-created content if needed
-3. Update system documentation and user directories
-4. Verify removal from all distribution lists and groups
-{% endif %}
-
-SECURITY CONSIDERATIONS
+ADMINISTRATIVE DETAILS:
 -----------------------
-- All status changes are logged for security audit purposes
-- Multi-factor authentication settings: {{ mfa_status if mfa_status else 'Not configured' }}
-- IP access restrictions: {{ ip_restrictions if ip_restrictions else 'None' }}
-- Account lockout status: {{ lockout_status if lockout_status else 'No lockouts' }}
+Administrator: {{ admin_name }} ({{ admin_email }})
+Administrator ID: {{ admin_id }}
+IP Address: {{ admin_ip_address }}
+Session ID: {{ admin_session_id }}
+Authentication Method: {{ admin_auth_method }}
 
-{% if security_alerts %}
-SECURITY ALERTS:
-{{ security_alerts }}
+APPROVAL WORKFLOW:
+------------------
+Approval Required: {{ approval_required }}
+Approval Status: {{ approval_status }}
+{% if approval_required == "Yes" %}
+Pending Approvers: {{ pending_approvers }}
+Approval Deadline: {{ approval_deadline }}
 {% endif %}
 
-SYSTEM INFORMATION
+NEXT ACTIONS REQUIRED:
+----------------------
+{% if change_type == "ACTIVATION" %}
+1. Verify user identity documentation
+2. Confirm role assignments and permissions
+3. Send welcome communication to user
+4. Schedule account review in 30 days
+{% elif change_type == "DEACTIVATION" %}
+1. Verify all user sessions terminated
+2. Review and archive user data per retention policy
+3. Notify relevant department heads
+4. Update access control lists and security groups
+{% elif change_type == "ROLE_MODIFICATION" %}
+1. Validate new role permissions alignment
+2. Test user access to modified resources
+3. Update security group memberships
+4. Document role change justification
+{% elif change_type == "SUSPENSION" %}
+1. Immediate security review required
+2. Preserve user data for investigation
+3. Notify compliance and security teams
+4. Schedule reactivation review process
+{% else %}
+1. Review change details for compliance
+2. Verify all security controls updated
+3. Document change in audit trail
+4. Monitor account activity for 48 hours
+{% endif %}
+
+SECURITY IMPACT ASSESSMENT:
+---------------------------
+Data Access Changes: {{ data_access_impact }}
+System Permissions Modified: {{ permission_changes }}
+Security Groups Updated: {{ security_groups_updated }}
+Compliance Requirements: {{ compliance_requirements }}
+
+AUDIT TRAIL REFERENCE:
+-----------------------
+Audit Log ID: {{ audit_log_id }}
+Transaction ID: {{ transaction_id }}
+Change Request ID: {{ change_request_id }}
+Related Incident ID: {{ incident_id }}
+
+SYSTEM MONITORING:
 ------------------
-Application: Flask User Management System
-Environment: {{ environment if environment else 'Production' }}
-Server: {{ server_name if server_name else 'Primary Application Server' }}
-Notification ID: {{ notification_id }}
-Template Version: 1.0
+Real-time Monitoring: ACTIVE
+Session Tracking: {{ session_tracking_status }}
+Access Logging: {{ access_logging_status }}
+Anomaly Detection: {{ anomaly_detection_status }}
 
-ADMINISTRATIVE CONTACT INFORMATION
------------------------------------
-For questions about this notification:
-- System Administrator: {{ system_admin_email if system_admin_email else 'admin@company.com' }}
-- Security Team: {{ security_team_email if security_team_email else 'security@company.com' }}
-- Help Desk: {{ helpdesk_email if helpdesk_email else 'help@company.com' }}
+COMPLIANCE VERIFICATION:
+------------------------
+GDPR Compliance: {{ gdpr_compliance_status }}
+SOX Compliance: {{ sox_compliance_status }}
+HIPAA Compliance: {{ hipaa_compliance_status }}
+Data Retention Policy: {{ data_retention_compliance }}
 
-IMPORTANT NOTICE
-----------------
-This is an automated system notification. Please do not reply directly to this email.
-All user status changes are subject to company policy and regulatory compliance requirements.
-For urgent security concerns, contact the security team immediately.
+ROLLBACK PROCEDURES:
+--------------------
+{% if rollback_available == "Yes" %}
+Rollback Available: Yes
+Rollback Window: {{ rollback_window }}
+Rollback Command: flask admin rollback-user-status {{ user_id }} {{ previous_status }}
+Rollback Authorization: {{ rollback_authorization_required }}
+{% else %}
+Rollback Available: No - Changes are permanent
+Alternative Recovery: {{ recovery_procedure }}
+{% endif %}
 
-If you believe this notification was sent in error, please contact the system administrator immediately.
+ESCALATION CONTACTS:
+--------------------
+Primary: Security Operations Center - security@company.com
+Secondary: Compliance Officer - compliance@company.com
+Emergency: IT Security Manager - itsecurity@company.com
+Phone: +1-800-SECURITY (24/7 Support)
 
-======================================================================
-This notification was generated automatically by the Flask User Management System.
-Timestamp: {{ notification_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-======================================================================
+AUTOMATED RESPONSES:
+--------------------
+{% if automated_actions_taken %}
+Automated Actions Executed:
+{{ automated_actions_taken }}
+{% endif %}
+
+Follow-up Actions Scheduled:
+{{ scheduled_follow_ups }}
+
+ADDITIONAL CONTEXT:
+-------------------
+Business Justification: {{ business_justification }}
+Risk Mitigation Steps: {{ risk_mitigation }}
+Stakeholder Notifications: {{ stakeholder_notifications }}
+Related Tickets: {{ related_tickets }}
+
+IMPORTANT REMINDERS:
+--------------------
+- All user status changes must be documented in the administrative audit log
+- Access reviews must be conducted within 24 hours of status changes
+- Any unauthorized status changes should be reported immediately
+- User data handling must comply with applicable privacy regulations
+- Security incident procedures may apply for suspicious status changes
+
+For technical support regarding this notification system:
+- Email: flask-admin@company.com
+- Documentation: https://internal.company.com/flask-admin-guide
+- Support Portal: https://support.company.com/admin-tools
+
+---
+
+This notification was automatically generated by the Flask Application
+Administrative Monitoring System. Please do not reply to this message.
+
+Generated at: {{ system_timestamp }}
+Message ID: {{ message_id }}
+System Version: Flask {{ flask_version }}
+Notification System: Administrative Alert Service v{{ notification_system_version }}
+
+END OF NOTIFICATION
+=====================================================
