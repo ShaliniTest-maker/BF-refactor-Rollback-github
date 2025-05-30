@@ -1,0 +1,292 @@
+SECURITY INCIDENT NOTIFICATION - FLASK APPLICATION SECURITY MONITORING SYSTEM
+
+================================================================================
+                               INCIDENT ALERT
+================================================================================
+
+INCIDENT ID: {{ incident_id }}
+TIMESTAMP: {{ timestamp }}
+SEVERITY: {{ severity }}
+INCIDENT TYPE: {{ incident_type }}
+DETECTION SOURCE: {{ detection_source }}
+
+================================================================================
+                            INCIDENT SUMMARY
+================================================================================
+
+{{ incident_summary }}
+
+AFFECTED SYSTEMS:
+- Application: Flask Security Application
+- Environment: {{ environment }}
+- Container Platform: {{ container_platform if container_platform else "N/A" }}
+- Database: PostgreSQL with Flask-SQLAlchemy
+- Authentication: Auth0 Python SDK Integration
+
+{% if affected_containers %}
+AFFECTED CONTAINERS:
+{% for container in affected_containers %}
+- Container ID: {{ container.id }}
+  Image: {{ container.image }}
+  Status: {{ container.status }}
+  Instance: {{ container.instance_id if container.instance_id else "N/A" }}
+{% endfor %}
+{% endif %}
+
+{% if affected_users %}
+IMPACTED USERS/ACCOUNTS:
+{% for user in affected_users %}
+- User ID: {{ user.id }}
+  Username: {{ user.username if user.username else "N/A" }}
+  Role: {{ user.role if user.role else "N/A" }}
+  Last Activity: {{ user.last_activity if user.last_activity else "N/A" }}
+{% endfor %}
+{% endif %}
+
+================================================================================
+                        THREAT INTELLIGENCE DETAILS
+================================================================================
+
+{% if guardduty_findings %}
+AWS GUARDDUTY FINDINGS:
+{% for finding in guardduty_findings %}
+- Finding Type: {{ finding.type }}
+  Severity: {{ finding.severity }}
+  Confidence: {{ finding.confidence }}
+  Description: {{ finding.description }}
+  Affected Resource: {{ finding.resource }}
+  Region: {{ finding.region }}
+  
+{% endfor %}
+{% endif %}
+
+SECURITY INDICATORS:
+- Source IP Address: {{ source_ip if source_ip else "Multiple/Unknown" }}
+- User Agent: {{ user_agent if user_agent else "N/A" }}
+- Request Pattern: {{ attack_pattern if attack_pattern else "Under Investigation" }}
+- Authentication Status: {{ auth_status if auth_status else "N/A" }}
+
+{% if vulnerability_details %}
+VULNERABILITY INFORMATION:
+- CVE Reference: {{ vulnerability_details.cve if vulnerability_details.cve else "N/A" }}
+- CVSS Score: {{ vulnerability_details.cvss_score if vulnerability_details.cvss_score else "N/A" }}
+- Attack Vector: {{ vulnerability_details.attack_vector if vulnerability_details.attack_vector else "N/A" }}
+- Exploit Availability: {{ vulnerability_details.exploit_available if vulnerability_details.exploit_available else "Unknown" }}
+{% endif %}
+
+================================================================================
+                        IMMEDIATE RESPONSE ACTIONS
+================================================================================
+
+AUTOMATED RESPONSES INITIATED:
+{% if automated_actions %}
+{% for action in automated_actions %}
+- {{ action.description }} (Status: {{ action.status }})
+{% endfor %}
+{% else %}
+- No automated responses configured for this incident type
+{% endif %}
+
+CONTAINER ISOLATION STATUS:
+{% if container_isolation %}
+- Isolation Initiated: {{ container_isolation.initiated }}
+- Affected Containers: {{ container_isolation.container_count }}
+- Network Quarantine: {{ container_isolation.network_quarantine }}
+- ECS/EKS Actions: {{ container_isolation.orchestration_actions }}
+{% else %}
+- Container isolation assessment in progress
+{% endif %}
+
+IAM CREDENTIAL REVOCATION:
+{% if iam_revocation %}
+- Access Keys Revoked: {{ iam_revocation.access_keys_count }}
+- Roles Suspended: {{ iam_revocation.roles_count }}
+- Emergency Policies Applied: {{ iam_revocation.deny_policies }}
+- Quarantine Groups: {{ iam_revocation.quarantine_status }}
+{% else %}
+- IAM credential review initiated
+{% endif %}
+
+================================================================================
+                         REQUIRED MANUAL ACTIONS
+================================================================================
+
+IMMEDIATE ACTIONS (WITHIN 15 MINUTES):
+1. VERIFY INCIDENT SCOPE
+   - Review CloudWatch security metrics dashboard
+   - Validate GuardDuty findings correlation
+   - Check Sentry error tracking for related exceptions
+   - Confirm container orchestration status (ECS/EKS)
+
+2. ASSESS IMPACT
+   - Verify Flask application functionality
+   - Test Auth0 authentication integration
+   - Check SQLAlchemy database connections
+   - Validate user session integrity
+
+3. CONTAINMENT VERIFICATION
+   - Confirm automated container isolation effectiveness
+   - Verify IAM credential revocation completion
+   - Check AWS WAF and security group configurations
+   - Review Nginx reverse proxy logs for attack patterns
+
+SHORT-TERM ACTIONS (WITHIN 1 HOUR):
+1. THREAT ANALYSIS
+   - Correlate security logs across all systems
+   - Analyze Gunicorn WSGI server access patterns
+   - Review Flask-JWT-Extended token validation logs
+   - Examine python-dotenv environment variable access
+
+2. COMMUNICATION
+   - Notify affected users if applicable
+   - Update incident status in monitoring dashboard
+   - Coordinate with infrastructure team for Terraform remediation
+   - Brief executive team if business impact confirmed
+
+3. EVIDENCE PRESERVATION
+   - Capture CloudWatch logs for forensic analysis
+   - Export Sentry error context and stack traces
+   - Document container state before remediation
+   - Preserve SQLAlchemy audit trail evidence
+
+================================================================================
+                        ESCALATION PROCEDURES
+================================================================================
+
+INCIDENT ESCALATION MATRIX:
+
+CRITICAL SEVERITY (Current: {{ severity }}):
+- Primary Contact: Security Team (security@company.com)
+- Response Time: Immediate (24/7)
+- Escalation: CTO notification within 15 minutes
+- Business Impact: All hands response required
+
+HIGH SEVERITY:
+- Primary Contact: Security Team Leader
+- Response Time: 15 minutes during business hours
+- Escalation: Engineering Manager within 1 hour
+- Business Impact: Service disruption possible
+
+MEDIUM SEVERITY:
+- Primary Contact: On-call Engineer
+- Response Time: 1 hour during business hours
+- Escalation: Team Lead within 4 hours
+- Business Impact: Monitoring and investigation required
+
+CONTACT INFORMATION:
+- Security Hotline: +1-XXX-XXX-XXXX (24/7)
+- Emergency Email: security-emergency@company.com
+- Incident Response Team: incident-response@company.com
+- Infrastructure Team: infrastructure@company.com
+
+EXTERNAL CONTACTS:
+- Cloud Security (AWS): Account Team
+- Auth0 Support: Enterprise Support Channel
+- Incident Response Vendor: [If applicable]
+
+================================================================================
+                          SYSTEM CONTEXT
+================================================================================
+
+APPLICATION ARCHITECTURE:
+- Platform: Flask 3.1.1 with Python 3.13.3
+- WSGI Server: Gunicorn with security-hardened configuration
+- Container Runtime: Docker on AWS ECS/EKS
+- Database: PostgreSQL with encryption at rest (TDE)
+- Authentication: Auth0 Python SDK 4.9.0
+
+SECURITY MONITORING STACK:
+- Event Aggregation: AWS CloudWatch Logs with structured JSON
+- Error Tracking: Sentry SDK 2.29.1 with Flask integration
+- Threat Detection: AWS GuardDuty with EventBridge correlation
+- Metrics Collection: Prometheus with container metrics
+- Alerting: CloudWatch Alarms with SNS integration
+
+SECURITY CONTROLS ACTIVE:
+- TLS 1.3 encryption for all communications
+- Flask-JWT-Extended 4.7.1 for token management
+- SQLAlchemy-Utils field-level encryption for PII
+- AWS KMS for key management and data protection
+- Container network policies and security groups
+
+================================================================================
+                        MONITORING DASHBOARDS
+================================================================================
+
+ACCESS SECURITY DASHBOARDS:
+- CloudWatch Security Dashboard: {{ cloudwatch_dashboard_url if cloudwatch_dashboard_url else "[Contact Security Team]" }}
+- Grafana Security Metrics: {{ grafana_dashboard_url if grafana_dashboard_url else "[Contact Infrastructure Team]" }}
+- Sentry Error Tracking: {{ sentry_dashboard_url if sentry_dashboard_url else "[Contact Development Team]" }}
+- GuardDuty Findings: {{ guardduty_console_url if guardduty_console_url else "[AWS Console > GuardDuty]" }}
+
+MONITORING QUERIES:
+- CloudWatch Logs Insights: Use filter patterns for incident correlation
+- Prometheus Queries: Access container and WSGI metrics
+- Flask Monitoring Dashboard: Review endpoint performance impact
+- AWS X-Ray: Trace authentication and database request patterns
+
+================================================================================
+                         COMPLIANCE REPORTING
+================================================================================
+
+REGULATORY CONSIDERATIONS:
+- Data Protection: Review PII exposure risk assessment
+- Audit Trail: Ensure SQLAlchemy audit log preservation
+- Incident Reporting: Prepare regulatory notification if required
+- Documentation: Maintain chain of custody for evidence
+
+COMPLIANCE ACTIONS:
+- Generate incident report for audit committee
+- Document security control effectiveness
+- Review insurance notification requirements
+- Prepare customer communication if data exposure confirmed
+
+================================================================================
+                          ADDITIONAL RESOURCES
+================================================================================
+
+DOCUMENTATION REFERENCES:
+- Flask Security Architecture: [Internal Wiki]
+- Container Security Runbooks: [Security Documentation]
+- AWS Security Response Procedures: [Cloud Operations Guide]
+- Auth0 Incident Response: [Authentication Documentation]
+
+TOOLS AND ACCESS:
+- AWS Console: {{ aws_console_url if aws_console_url else "[Request Emergency Access]" }}
+- Terraform Configuration: [Infrastructure Repository]
+- Security Monitoring Tools: [Security Team Credentials Required]
+- Emergency Access Procedures: [Security Escalation Guide]
+
+================================================================================
+                           INCIDENT TRACKING
+================================================================================
+
+INCIDENT WORKFLOW:
+1. Acknowledgment Required: Respond to this alert within 15 minutes
+2. Status Updates: Provide updates every 30 minutes during active response
+3. Resolution Confirmation: Notify when incident fully contained
+4. Post-Incident Review: Schedule within 24 hours of resolution
+
+TRACKING REFERENCES:
+- Incident ID: {{ incident_id }}
+- CloudWatch Alarm: {{ alarm_name if alarm_name else "Multiple Alarms" }}
+- Sentry Issue: {{ sentry_issue_url if sentry_issue_url else "N/A" }}
+- GitHub Issue: [To be created for remediation tracking]
+
+================================================================================
+
+This is an automated security incident notification from the Flask Application 
+Security Monitoring System. This message was generated at {{ timestamp }} and 
+transmitted via AWS SNS for reliable delivery across multiple communication 
+channels.
+
+For immediate assistance or to acknowledge this incident, reply to this email 
+or contact the security hotline immediately.
+
+REMEMBER: During security incidents, all actions should be documented and 
+coordinated through the incident response team to maintain evidence integrity 
+and ensure comprehensive threat mitigation.
+
+================================================================================
+                         END OF INCIDENT NOTIFICATION
+================================================================================
