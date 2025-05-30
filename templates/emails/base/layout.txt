@@ -1,101 +1,467 @@
 {#
-    Common Text Email Layout Template
-    
-    This template extends the base text template and provides standardized 
-    header and footer sections for consistent plain-text email structure 
-    across all text-formatted emails in the Flask application.
-    
-    Features:
-    - Extends base.txt template using Jinja2 inheritance patterns
-    - Standardized text email header with application branding
-    - Consistent plain-text footer with contact and unsubscribe information
-    - Accessibility compliance for screen readers and text-only clients
-    - Compatible with multipart email structure alongside HTML layouts
-    
-    Template Usage:
-    {% extends "emails/base/layout.txt" %}
-    {% block email_content %}
-    Your email content here...
-    {% endblock %}
+Common Text Email Layout Template for Flask Application
+======================================================
+
+This template provides a standardized text email layout that extends the base text template
+and offers consistent branding, header, and footer sections for all plain-text emails
+in the Flask application. It implements Jinja2 template inheritance patterns while
+ensuring accessibility compliance and multipart email consistency.
+
+Template Features:
+- Extends base.txt template with common layout structure
+- Standardized application branding and header design
+- Consistent plain-text footer with contact and legal information
+- Accessibility-compliant text formatting for screen readers
+- Structured blocks for content organization and customization
+- Multipart email compatibility with HTML layout templates
+- Professional appearance with proper text formatting
+
+Usage:
+{% extends "emails/base/layout.txt" %}
+{% block email_title %}Your Custom Email Title{% endblock %}
+{% block main_content %}Your specific email content here{% endblock %}
+
+This layout template serves as an intermediate layer between base.txt and specific
+email templates, providing common structural elements while maintaining flexibility
+for customization in child templates.
 #}
 
+{#- Extend the base text email template -#}
 {% extends "emails/base/base.txt" %}
 
-{# Override the email header block to provide standardized branding #}
-{% block email_header %}
-================================================================================
-                            {{ application_name or "Flask Application" }}
-================================================================================
+{#- Application Information Block - Override for custom branding -#}
+{% block app_info -%}
+Flask Application - Secure, Reliable, Scalable Web Platform
+{%- endblock %}
 
-{% if email_title %}{{ email_title }}{% endif %}
-{% if email_subtitle %}
-{{ email_subtitle }}
-{% endif %}
+{#- Email Title Block - Override in child templates for specific titles -#}
+{% block email_title -%}
+System Notification
+{%- endblock %}
 
-Dear {% if recipient_name %}{{ recipient_name }}{% else %}Valued User{% endif %},
+{#- Override the subject block with layout-specific formatting -#}
+{% block subject -%}
+{{ self.app_info() }} - {{ self.email_title() }}
+{%- endblock %}
 
+{#- Enhanced Header Section with Branding -#}
+{% block header -%}
+===============================================================================
+{{ self.app_info() }}
+===============================================================================
+
+{{ self.email_title() }}
+{{ create_section_divider('-', self.email_title()|length) }}
+
+{%- endblock %}
+
+{#- Pre-header Text Block for Email Clients -#}
+{% block preheader -%}
+{{ self.email_title() }} from {{ self.app_info() }}
+{%- endblock %}
+
+{#- Main Content Wrapper Block -#}
+{% block content -%}
+{%- block greeting -%}
+Hello,
+{%- endblock %}
+
+{%- block main_content -%}
+This is a notification from your Flask Application.
+
+We're reaching out to keep you informed about your account and our services.
+
+{%- endblock %}
+
+{%- block closing -%}
+
+Thank you for using our platform.
+
+Best regards,
+The Flask Application Team
+{%- endblock %}
+{%- endblock %}
+
+{#- Content Separator with Visual Enhancement -#}
+{% block separator -%}
+
+{{ create_section_divider('=', 78) }}
+
+{%- endblock %}
+
+{#- Additional Information Block for Supplementary Content -#}
+{% block additional_info -%}
+{%- block account_info -%}
+{#- Override in child templates for account-specific information -#}
+{%- endblock -%}
+
+{%- block notification_details -%}
+{#- Override in child templates for specific notification details -#}
+{%- endblock -%}
+
+{%- block system_info -%}
+{#- Override in child templates for system-related information -#}
+{%- endblock -%}
+{%- endblock %}
+
+{#- Action Items Block for Call-to-Action Content -#}
+{% block action_items -%}
+{%- block primary_actions -%}
+{#- Override in child templates for primary action items -#}
+{%- endblock -%}
+
+{%- block secondary_actions -%}
+{#- Override in child templates for secondary action items -#}
+{%- endblock -%}
+
+{%- block help_resources -%}
+{#- Override in child templates for help and resource links -#}
+{%- endblock -%}
+{%- endblock %}
+
+{#- Enhanced Contact Information Block -#}
+{% block contact_info -%}
+Need assistance? Our support team is here to help:
+
+CONTACT INFORMATION
+{{ create_section_divider('-', 19) }}
+{{ format_key_value('Email Support', 'support@flaskapp.com') }}
+{{ format_key_value('Phone Support', '1-800-FLASK-APP (1-800-352-7527)') }}
+{{ format_key_value('Help Center', 'https://help.flaskapp.com') }}
+{{ format_key_value('Knowledge Base', 'https://docs.flaskapp.com') }}
+
+SUPPORT HOURS
+{{ create_section_divider('-', 13) }}
+{{ format_key_value('Business Hours', 'Monday - Friday, 9:00 AM - 6:00 PM EST') }}
+{{ format_key_value('Emergency Support', '24/7 for critical issues') }}
+{{ format_key_value('Response Time', 'Within 24 hours for standard inquiries') }}
+
+{%- endblock %}
+
+{#- Enhanced Footer Section with Complete Information -#}
+{% block footer -%}
+
+{{ create_section_divider('=', 78) }}
+{{ self.app_info() }}
+{{ create_section_divider('=', 78) }}
+
+ACCOUNT & PREFERENCES
+{{ create_section_divider('-', 21) }}
+This email was sent to you because you have an active account with Flask
+Application. You are receiving this message based on your account settings
+and notification preferences.
+
+{%- block email_preferences -%}
+
+EMAIL PREFERENCES
+{{ create_section_divider('-', 17) }}
+To manage your email preferences, update your notification settings, or
+unsubscribe from specific types of emails:
+
+{{ format_url_for_text('https://app.flaskapp.com/preferences', 'Manage Email Preferences') }}
+
+To unsubscribe from all emails:
+{{ format_url_for_text('https://app.flaskapp.com/unsubscribe', 'Unsubscribe from All Emails') }}
+
+{%- endblock %}
+
+{%- block security_notice -%}
+
+SECURITY & PRIVACY
+{{ create_section_divider('-', 18) }}
+If you believe this email was sent to you in error or if you have security
+concerns about your account, please contact our security team immediately:
+
+{{ format_key_value('Security Email', 'security@flaskapp.com') }}
+{{ format_key_value('Report Phishing', 'phishing@flaskapp.com') }}
+
+{%- endblock %}
+
+{%- block legal_information -%}
+
+LEGAL INFORMATION
+{{ create_section_divider('-', 17) }}
+© {% now 'Y' %} Flask Application Platform. All rights reserved.
+
+This message contains information that may be confidential and is intended
+solely for the use of the individual or entity named above. If you have
+received this message in error, please delete it immediately and notify
+the sender.
+
+{%- endblock %}
+
+{%- block company_address -%}
+
+COMPANY INFORMATION
+{{ create_section_divider('-', 19) }}
+Flask Application Platform
+123 Technology Boulevard, Suite 500
+Innovation City, Tech State 12345
+United States
+
+{{ format_key_value('Business Registration', 'Tech State Corp ID: FA-2024-001') }}
+{{ format_key_value('Tax ID', 'EIN: 12-3456789') }}
+
+{%- endblock %}
+
+{%- block compliance_info -%}
+
+COMPLIANCE & ACCESSIBILITY
+{{ create_section_divider('-', 27) }}
+This email is designed to be accessible to all users, including those using
+screen readers and text-only email clients. If you experience any
+accessibility issues with this email, please contact our support team.
+
+{{ format_key_value('Accessibility Support', 'accessibility@flaskapp.com') }}
+{{ format_key_value('Compliance Officer', 'compliance@flaskapp.com') }}
+
+For information about our privacy practices:
+{{ format_url_for_text('https://flaskapp.com/privacy', 'Privacy Policy') }}
+
+For our terms of service:
+{{ format_url_for_text('https://flaskapp.com/terms', 'Terms of Service') }}
+
+{%- endblock %}
+
+{%- block email_footer_technical -%}
+
+{{ create_section_divider('-', 78) }}
+EMAIL DELIVERY INFORMATION
+{{ screen_reader_text('Technical email delivery details for accessibility') }}
+
+This email was sent via Flask Application's automated email system.
+Email ID: {{ "FL-" + now('%Y%m%d%H%M%S') + "-" + range(1000, 9999) | random | string }}
+Sent: {{ now('%B %d, %Y at %I:%M %p %Z') }}
+
+{%- endblock %}
+{%- endblock %}
+
+{#- Technical Headers Block for Email Metadata -#}
+{% block technical_headers -%}
+{#- Technical information for email processing and tracking -#}
+X-Flask-Email-Type: Layout
+X-Flask-Email-Template: layout.txt
+X-Flask-Email-Version: 1.0
+X-Flask-Accessibility-Compliant: true
+X-Flask-Multipart-Compatible: true
+{%- endblock %}
+
+{#- Extended Configuration Variables for Layout -#}
+{%- set layout_config = {
+    'brand_name': 'Flask Application Platform',
+    'support_email': 'support@flaskapp.com',
+    'security_email': 'security@flaskapp.com',
+    'help_center_url': 'https://help.flaskapp.com',
+    'preferences_url': 'https://app.flaskapp.com/preferences',
+    'unsubscribe_url': 'https://app.flaskapp.com/unsubscribe',
+    'company_address': '123 Technology Boulevard, Suite 500, Innovation City, Tech State 12345',
+    'phone_number': '1-800-FLASK-APP (1-800-352-7527)',
+    'business_hours': 'Monday - Friday, 9:00 AM - 6:00 PM EST'
+} -%}
+
+{#- Layout-Specific Macros for Common Patterns -#}
+{%- macro format_notification_header(title, icon='', priority='normal') -%}
+{% if icon -%}
+{{ icon }} {{ title }}
+{{ create_section_divider('-', (icon + ' ' + title)|length) }}
+{% else -%}
+{{ title }}
+{{ create_section_divider('-', title|length) }}
+{% endif -%}
+{%- endmacro -%}
+
+{%- macro format_contact_section(title, items) -%}
+{{ title.upper() }}
+{{ create_section_divider('-', title|length) }}
+{%- for item in items %}
+{{ format_key_value(item.label, item.value) }}
+{%- endfor %}
+{%- endmacro -%}
+
+{%- macro format_action_list(actions, title='NEXT STEPS') -%}
+{{ title }}
+{{ create_section_divider('-', title|length) }}
+{%- for action in actions %}
+{{ format_list_item(action.description) }}
+{%- if action.url %}
+{{ '  Link: ' + action.url }}
+{%- endif %}
+{%- endfor %}
+{%- endmacro -%}
+
+{%- macro format_data_table(data, title='') -%}
+{%- if title %}
+{{ title.upper() }}
+{{ create_section_divider('-', title|length) }}
+{%- endif %}
+{%- for row in data %}
+{{ format_key_value(row.label, row.value) }}
+{%- endfor %}
+{%- endmacro -%}
+
+{%- macro format_security_notice(message, level='info') -%}
+{%- if level == 'urgent' %}
+{{ screen_reader_text('URGENT SECURITY NOTICE') }}
+URGENT SECURITY NOTICE
+{{ create_section_divider('!', 23) }}
+{% elif level == 'warning' %}
+{{ screen_reader_text('SECURITY WARNING') }}
+SECURITY WARNING
+{{ create_section_divider('!', 16) }}
+{% else %}
+{{ screen_reader_text('Security Information') }}
+SECURITY INFORMATION
+{{ create_section_divider('-', 20) }}
+{%- endif %}
+{{ message }}
+{%- endmacro -%}
+
+{%- macro format_email_signature(sender_name='Flask Application Team', sender_title='', department='') -%}
+
+Best regards,
+{%- if sender_title and department %}
+{{ sender_name }}
+{{ sender_title }}
+{{ department }}
+{{ layout_config.brand_name }}
+{%- elif sender_title %}
+{{ sender_name }}
+{{ sender_title }}
+{{ layout_config.brand_name }}
+{%- else %}
+{{ sender_name }}
+{%- endif %}
+{%- endmacro -%}
+
+{#-
+Template Usage Examples for Layout Extensions:
+============================================
+
+1. Welcome Email:
+{% extends "emails/base/layout.txt" %}
+{% block email_title %}Welcome to Flask Application{% endblock %}
+{% block main_content %}
+Welcome to Flask Application! We're excited to have you join our platform.
+
+Your account has been successfully created and is ready to use. You can now
+access all the features and services we offer.
+{% endblock %}
+{% block primary_actions %}
+{{ format_action_list([
+    {'description': 'Complete your profile setup', 'url': 'https://app.flaskapp.com/profile'},
+    {'description': 'Take a tour of the platform', 'url': 'https://app.flaskapp.com/tour'},
+    {'description': 'Read our getting started guide', 'url': 'https://docs.flaskapp.com/getting-started'}
+]) }}
 {% endblock %}
 
-{# Main content area - to be overridden by specific email templates #}
-{% block email_content %}
-{# This block should be overridden by specific email templates #}
+2. Security Alert Email:
+{% extends "emails/base/layout.txt" %}
+{% block email_title %}Security Alert{% endblock %}
+{% block main_content %}
+{{ format_security_notice('We detected a new login to your account from an unrecognized device.', 'warning') }}
+
+{{ format_data_table([
+    {'label': 'Login Time', 'value': '2024-01-15 14:30:00 UTC'},
+    {'label': 'Location', 'value': 'New York, NY, United States'},
+    {'label': 'Device', 'value': 'Chrome on Windows 10'},
+    {'label': 'IP Address', 'value': '192.168.1.1'}
+], 'LOGIN DETAILS') }}
+
+If this was you, no action is needed. If you don't recognize this activity,
+please secure your account immediately.
+{% endblock %}
+{% block primary_actions %}
+{{ format_action_list([
+    {'description': 'Change your password now', 'url': 'https://app.flaskapp.com/change-password'},
+    {'description': 'Review account activity', 'url': 'https://app.flaskapp.com/activity'},
+    {'description': 'Enable two-factor authentication', 'url': 'https://app.flaskapp.com/2fa'}
+], 'SECURE YOUR ACCOUNT') }}
 {% endblock %}
 
-{# Override the email footer block to provide consistent contact information #}
-{% block email_footer %}
+3. Order Confirmation Email:
+{% extends "emails/base/layout.txt" %}
+{% block email_title %}Order Confirmation{% endblock %}
+{% block main_content %}
+Thank you for your order! We've received your request and are processing it now.
 
-________________________________________________________________________________
+{{ format_data_table([
+    {'label': 'Order Number', 'value': '#FA-2024-001234'},
+    {'label': 'Order Date', 'value': 'January 15, 2024'},
+    {'label': 'Total Amount', 'value': '$99.99'},
+    {'label': 'Payment Method', 'value': 'Credit Card ending in 1234'},
+    {'label': 'Estimated Delivery', 'value': 'January 18-20, 2024'}
+], 'ORDER DETAILS') }}
 
-Contact Information:
-Support: {{ support_email or "support@company.com" }}
-Phone: {{ support_phone or "(555) 123-4567" }}
-Website: {{ company_website or "https://www.company.com" }}
-
-{# Unsubscribe section for compliance #}
-{% if unsubscribe_url %}
-To unsubscribe from these emails, please visit:
-{{ unsubscribe_url }}
-{% endif %}
-
-{# Legal disclaimer and branding footer #}
-{% if legal_disclaimer %}
-{{ legal_disclaimer }}
-{% endif %}
-
-This email was sent by {{ application_name or "Flask Application" }}.
-{% if company_address %}
-{{ company_address }}
-{% endif %}
-
-{# Privacy and accessibility notice #}
-If you are using a screen reader or assistive technology and need help 
-accessing this email, please contact us at {{ accessibility_email or support_email or "support@company.com" }}.
-
-================================================================================
-                     © {% now 'Y' %} {{ company_name or "Company Name" }}. All rights reserved.
-================================================================================
+Your order will ship within 1-2 business days. You'll receive a tracking
+number once your order is on its way.
+{% endblock %}
+{% block primary_actions %}
+{{ format_action_list([
+    {'description': 'Track your order', 'url': 'https://app.flaskapp.com/orders/FA-2024-001234'},
+    {'description': 'View order details', 'url': 'https://app.flaskapp.com/orders/FA-2024-001234/details'},
+    {'description': 'Contact support', 'url': 'https://help.flaskapp.com/contact'}
+], 'ORDER TRACKING') }}
 {% endblock %}
 
-{# Email-specific metadata block for tracking and categorization #}
-{% block email_metadata %}
-{# Optional metadata block for email tracking, categories, or custom headers #}
-{% if email_category %}
-Category: {{ email_category }}
-{% endif %}
-{% if email_priority %}
-Priority: {{ email_priority }}
-{% endif %}
+4. System Maintenance Email:
+{% extends "emails/base/layout.txt" %}
+{% block email_title %}Scheduled Maintenance Notification{% endblock %}
+{% block main_content %}
+We will be performing scheduled maintenance on our systems to improve
+performance and add new features.
+
+{{ format_data_table([
+    {'label': 'Maintenance Start', 'value': 'January 20, 2024 at 2:00 AM EST'},
+    {'label': 'Expected Duration', 'value': '2 hours'},
+    {'label': 'Affected Services', 'value': 'Web application, mobile app, API'},
+    {'label': 'Expected Completion', 'value': 'January 20, 2024 at 4:00 AM EST'}
+], 'MAINTENANCE DETAILS') }}
+
+During this time, you may experience temporary service interruptions.
+{% endblock %}
+{% block primary_actions %}
+{{ format_action_list([
+    {'description': 'Monitor our status page for updates', 'url': 'https://status.flaskapp.com'},
+    {'description': 'Download the mobile app for offline access', 'url': 'https://flaskapp.com/mobile'},
+    {'description': 'Read about the improvements', 'url': 'https://blog.flaskapp.com/maintenance-updates'}
+], 'STAY INFORMED') }}
 {% endblock %}
 
-{# Template customization blocks for specific use cases #}
-{% block pre_header %}
-{# Optional pre-header block for additional context #}
+5. Password Reset Email:
+{% extends "emails/base/layout.txt" %}
+{% block email_title %}Password Reset Request{% endblock %}
+{% block main_content %}
+We received a request to reset the password for your Flask Application account.
+
+If you made this request, click the link below to reset your password. This
+link will expire in 1 hour for security purposes.
+
+If you did not request this password reset, please ignore this email and
+contact our security team if you have concerns.
+{% endblock %}
+{% block primary_actions %}
+{{ format_action_list([
+    {'description': 'Reset your password', 'url': 'https://app.flaskapp.com/reset-password?token=abc123'},
+    {'description': 'Contact security team', 'url': 'mailto:security@flaskapp.com'}
+], 'PASSWORD RESET') }}
+{% endblock %}
+{% block security_notice %}
+{{ format_security_notice('This password reset link expires in 1 hour. For your security, only use this link if you requested the password reset.', 'info') }}
+
+If you continue to have problems accessing your account, please contact our
+support team for assistance.
 {% endblock %}
 
-{% block post_content %}
-{# Optional post-content block for additional information #}
-{% endblock %}
-
-{% block custom_footer %}
-{# Optional custom footer block for specific email types #}
-{% endblock %}
+Template Design Principles for Layout:
+=====================================
+1. Consistent branding and visual hierarchy across all email types
+2. Accessibility-first design with proper text formatting and screen reader support
+3. Modular block structure enabling easy customization while maintaining consistency
+4. Professional appearance with clear information organization
+5. Multipart email compatibility ensuring consistent experience across HTML and text formats
+6. Comprehensive contact information and legal compliance
+7. Security-conscious design with appropriate notices and contact information
+8. Flexible macro system for common email patterns and formatting
+9. Responsive text formatting that works across all email clients
+10. Complete integration with Flask application infrastructure and branding guidelines
+-#}
