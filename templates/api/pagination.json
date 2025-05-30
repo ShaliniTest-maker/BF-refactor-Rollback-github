@@ -1,89 +1,196 @@
-{
-  "timestamp": "{{ timestamp | default(moment().format('YYYY-MM-DDTHH:mm:ss.SSSZ')) }}",
-  "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', generate_uuid())) }}",
-  "request_id": "{{ request_id | default(g.get('request_id', generate_uuid())) }}",
-  "success": {{ success | default(true) | tojson }},
-  "status": {{ status | default(200) }},
-  "message": "{{ message | default('Paginated data retrieved successfully') }}",
-  
-  {%- if data is defined %}
-  "data": {{ data | tojson }},
-  {%- endif %}
-  
+{% extends "templates/api/base_response.json" %}
+
+{# 
+Pagination Response Template for Flask API
+Provides standardized pagination metadata, navigation links, and dataset statistics
+for paginated API responses with Flask-SQLAlchemy integration.
+
+This template ensures consistent pagination handling across all Flask blueprints
+and maintains API contract compliance per Section 4.3.1.4 response formatting.
+
+Template Variables Expected:
+- page_number: Current page number (1-based)
+- page_size: Number of items per page
+- total_items: Total number of items in the dataset
+- total_pages: Total number of pages
+- items: Array of paginated items/data
+- has_prev: Boolean indicating if previous page exists
+- has_next: Boolean indicating if next page exists
+- prev_page: Previous page number (null if no previous page)
+- next_page: Next page number (null if no next page)
+- endpoint: Current endpoint name for URL generation
+- url_params: Additional URL parameters to preserve in navigation links
+- offset: Zero-based offset for current page
+- limit: Page size limit (alias for page_size)
+#}
+
+{% block pagination %}{
   "pagination": {
-    "current_page": {{ current_page | default(pagination.page if pagination else 1) }},
-    "per_page": {{ per_page | default(pagination.per_page if pagination else 10) }},
-    "total_items": {{ total_items | default(pagination.total if pagination else 0) }},
-    "total_pages": {{ total_pages | default(pagination.pages if pagination else 1) }},
-    
-    "has_prev": {{ has_prev | default(pagination.has_prev if pagination else false) | tojson }},
-    "has_next": {{ has_next | default(pagination.has_next if pagination else false) | tojson }},
-    "prev_page": {{ prev_page | default(pagination.prev_num if pagination else null) | tojson }},
-    "next_page": {{ next_page | default(pagination.next_num if pagination else null) | tojson }},
-    
-    "items_on_page": {{ items_on_page | default(data | length if data else 0) }},
+    "current_page": {{ page_number | default(1) }},
+    "page_size": {{ page_size | default(limit) | default(20) }},
+    "total_items": {{ total_items | default(0) }},
+    "total_pages": {{ total_pages | default(1) }},
+    "offset": {{ offset | default((page_number | default(1) - 1) * (page_size | default(limit) | default(20))) }},
+    "limit": {{ page_size | default(limit) | default(20) }},
+    "has_previous": {{ has_prev | default('false') }},
+    "has_next": {{ has_next | default('false') }},
+    "previous_page": {{ prev_page | default('null') }},
+    "next_page": {{ next_page | default('null') }},
+    "first_page": 1,
+    "last_page": {{ total_pages | default(1) }},
+    "items_on_page": {{ items | length if items else 0 }},
+    "is_first_page": {{ (page_number | default(1)) == 1 }},
+    "is_last_page": {{ (page_number | default(1)) == (total_pages | default(1)) }},
+    "pages_remaining": {{ (total_pages | default(1)) - (page_number | default(1)) }},
+    "items_remaining": {{ (total_items | default(0)) - ((page_number | default(1) - 1) * (page_size | default(limit) | default(20))) - (items | length if items else 0) }},
+    "start_item": {{ ((page_number | default(1) - 1) * (page_size | default(limit) | default(20))) + 1 if total_items | default(0) > 0 else 0 }},
+    "end_item": {{ ((page_number | default(1) - 1) * (page_size | default(limit) | default(20))) + (items | length if items else 0) }},
     "page_range": {
-      "start": {{ ((current_page | default(pagination.page if pagination else 1) - 1) * (per_page | default(pagination.per_page if pagination else 10))) + 1 }},
-      "end": {{ ((current_page | default(pagination.page if pagination else 1) - 1) * (per_page | default(pagination.per_page if pagination else 10))) + (items_on_page | default(data | length if data else 0)) }}
-    }
-  },
-  
-  "links": {
-    "self": "{{ url_for(request.endpoint, page=current_page | default(pagination.page if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
-    
-    {%- if has_prev | default(pagination.has_prev if pagination else false) %}
-    "first": "{{ url_for(request.endpoint, page=1, per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
-    "prev": "{{ url_for(request.endpoint, page=prev_page | default(pagination.prev_num if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
-    {%- endif %}
-    
-    {%- if has_next | default(pagination.has_next if pagination else false) %}
-    "next": "{{ url_for(request.endpoint, page=next_page | default(pagination.next_num if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
-    "last": "{{ url_for(request.endpoint, page=total_pages | default(pagination.pages if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
-    {%- endif %}
-    
-    "resource": "{{ url_for(request.endpoint, **request.args) | replace('?page=' + (current_page | default(pagination.page if pagination else 1) | string), '') | replace('&page=' + (current_page | default(pagination.page if pagination else 1) | string), '') | replace('page=' + (current_page | default(pagination.page if pagination else 1) | string) + '&', '') | replace('page=' + (current_page | default(pagination.page if pagination else 1) | string), '') }}"
-  },
-  
-  "meta": {
-    "api_version": "{{ api_version | default(config.API_VERSION or '1.0') }}",
-    "endpoint": "{{ request.endpoint }}",
-    "method": "{{ request.method }}",
-    "query_params": {{ request.args.to_dict() | tojson }},
-    
-    "pagination_info": {
-      "page_size_limits": {
-        "min": {{ min_per_page | default(config.MIN_PER_PAGE or 1) }},
-        "max": {{ max_per_page | default(config.MAX_PER_PAGE or 100) }},
-        "default": {{ default_per_page | default(config.DEFAULT_PER_PAGE or 10) }}
-      },
-      
-      "navigation_context": {
-        "show_pagination": {{ (total_pages | default(pagination.pages if pagination else 1)) > 1 | tojson }},
-        "is_first_page": {{ (current_page | default(pagination.page if pagination else 1)) == 1 | tojson }},
-        "is_last_page": {{ (current_page | default(pagination.page if pagination else 1)) == (total_pages | default(pagination.pages if pagination else 1)) | tojson }},
-        "pages_remaining": {{ (total_pages | default(pagination.pages if pagination else 1)) - (current_page | default(pagination.page if pagination else 1)) }}
-      },
-      
-      "dataset_statistics": {
-        "total_items_count": {{ total_items | default(pagination.total if pagination else 0) }},
-        "filtered_items_count": {{ filtered_items | default(total_items | default(pagination.total if pagination else 0)) }},
-        "items_per_page": {{ per_page | default(pagination.per_page if pagination else 10) }},
-        "current_page_items": {{ items_on_page | default(data | length if data else 0) }},
-        "empty_result": {{ (total_items | default(pagination.total if pagination else 0)) == 0 | tojson }}
-      }
+      "start": {{ [1, ((page_number | default(1)) - 2)] | max }},
+      "end": {{ [total_pages | default(1), ((page_number | default(1)) + 2)] | min }},
+      "context_pages": {% set current = page_number | default(1) %}{% set total = total_pages | default(1) %}{% set start = [1, current - 2] | max %}{% set end = [total, current + 2] | min %}{{ range(start, end + 1) | list | tojson }}
     },
-    
-    {%- if filters is defined %}
-    "applied_filters": {{ filters | tojson }},
-    {%- endif %}
-    
-    {%- if sorting is defined %}
-    "sorting": {{ sorting | tojson }},
-    {%- endif %}
-    
     "performance": {
-      "query_time_ms": {{ query_time_ms | default(g.get('query_time', 0)) }},
-      "total_response_time_ms": {{ response_time_ms | default(g.get('response_time', 0)) }}
+      "query_time_ms": {{ query_time_ms | default('null') }},
+      "total_query_time_ms": {{ total_query_time_ms | default('null') }},
+      "index_used": {{ index_used | default('true') }},
+      "rows_examined": {{ rows_examined | default('null') }},
+      "cache_hit": {{ cache_hit | default('false') }}
+    },
+    "configuration": {
+      "max_page_size": {{ max_page_size | default(100) }},
+      "default_page_size": {{ default_page_size | default(20) }},
+      "sort_field": "{{ sort_field | default('id') }}",
+      "sort_direction": "{{ sort_direction | default('asc') }}",
+      "filter_count": {{ applied_filters | length if applied_filters else 0 }},
+      "search_query": "{{ search_query | default('') }}"
     }
   }
-}
+}{% endblock %}
+
+{% block links %}{
+  "self": "{{ self_link | default(request.url) }}",
+  "api_root": "{{ api_root | default(url_for('api.root', _external=True) if 'api.root' in url_map else request.url_root + 'api/') }}",
+  "documentation": "{{ documentation_link | default(url_for('api.docs', _external=True) if 'api.docs' in url_map else request.url_root + 'api/docs') }}",
+  "pagination": {
+    "first": {% if total_pages | default(1) > 0 %}"{{ url_for(endpoint, page=1, per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint else request.base_url + '?page=1&per_page=' + (page_size | default(limit) | default(20) | string) }}"{% else %}null{% endif %},
+    "previous": {% if has_prev | default(false) %}"{{ url_for(endpoint, page=prev_page, per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint and prev_page else (request.base_url + '?page=' + (prev_page | string) + '&per_page=' + (page_size | default(limit) | default(20) | string)) if prev_page else null }}"{% else %}null{% endif %},
+    "current": "{{ url_for(endpoint, page=page_number | default(1), per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint else request.url }}",
+    "next": {% if has_next | default(false) %}"{{ url_for(endpoint, page=next_page, per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint and next_page else (request.base_url + '?page=' + (next_page | string) + '&per_page=' + (page_size | default(limit) | default(20) | string)) if next_page else null }}"{% else %}null{% endif %},
+    "last": {% if total_pages | default(1) > 0 %}"{{ url_for(endpoint, page=total_pages, per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint else request.base_url + '?page=' + (total_pages | string) + '&per_page=' + (page_size | default(limit) | default(20) | string) }}"{% else %}null{% endif %},
+    "page_template": "{{ url_for(endpoint, page='{page}', per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint else request.base_url + '?page={page}&per_page=' + (page_size | default(limit) | default(20) | string) }}",
+    "size_template": "{{ url_for(endpoint, page=page_number | default(1), per_page='{per_page}', _external=True, **url_params | default({})) if endpoint else request.base_url + '?page=' + (page_number | default(1) | string) + '&per_page={per_page}' }}"
+  },
+  "navigation": {
+    "context_pages": [
+      {% set current = page_number | default(1) %}
+      {% set total = total_pages | default(1) %}
+      {% set start = [1, current - 2] | max %}
+      {% set end = [total, current + 2] | min %}
+      {% for page_num in range(start, end + 1) %}
+      {
+        "page": {{ page_num }},
+        "url": "{{ url_for(endpoint, page=page_num, per_page=page_size | default(limit) | default(20), _external=True, **url_params | default({})) if endpoint else request.base_url + '?page=' + (page_num | string) + '&per_page=' + (page_size | default(limit) | default(20) | string) }}",
+        "is_current": {{ page_num == current }},
+        "is_gap": false
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ],
+    "page_sizes": [
+      {% for size in [10, 20, 50, 100] %}
+      {
+        "size": {{ size }},
+        "url": "{{ url_for(endpoint, page=1, per_page=size, _external=True, **url_params | default({})) if endpoint else request.base_url + '?page=1&per_page=' + (size | string) }}",
+        "is_current": {{ size == (page_size | default(limit) | default(20)) }}
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ]
+  }
+}{% endblock %}
+
+{# Override data block to include pagination-aware data structure #}
+{% block data %}{% if items is defined %}{{ items | tojson }}{% else %}{{ data | default(null) | tojson }}{% endif %}{% endblock %}
+
+{# Add pagination-specific warnings for edge cases #}
+{% block warnings %}[
+  {% if page_size and page_size > (max_page_size | default(100)) %}
+  {
+    "code": "PAGINATION_LIMIT_EXCEEDED",
+    "message": "Page size {{ page_size }} exceeds maximum allowed {{ max_page_size | default(100) }}. Results limited to maximum page size.",
+    "severity": "warning",
+    "context": {
+      "requested_size": {{ page_size }},
+      "max_allowed": {{ max_page_size | default(100) }},
+      "applied_size": {{ [page_size, max_page_size | default(100)] | min }}
+    }
+  }{% if page_number and page_number > (total_pages | default(1)) %},{% endif %}
+  {% endif %}
+  {% if page_number and page_number > (total_pages | default(1)) %}
+  {
+    "code": "PAGINATION_PAGE_OUT_OF_RANGE",
+    "message": "Requested page {{ page_number }} exceeds total pages {{ total_pages | default(1) }}. Showing last available page.",
+    "severity": "warning", 
+    "context": {
+      "requested_page": {{ page_number }},
+      "total_pages": {{ total_pages | default(1) }},
+      "redirected_to": {{ total_pages | default(1) }}
+    }
+  }{% if total_items and total_items == 0 %},{% endif %}
+  {% endif %}
+  {% if total_items and total_items == 0 %}
+  {
+    "code": "PAGINATION_NO_RESULTS",
+    "message": "No items found matching the specified criteria.",
+    "severity": "info",
+    "context": {
+      "total_items": 0,
+      "search_query": "{{ search_query | default('') }}",
+      "filters_applied": {{ applied_filters | length if applied_filters else 0 }}
+    }
+  }{% if query_time_ms and query_time_ms > 1000 %},{% endif %}
+  {% endif %}
+  {% if query_time_ms and query_time_ms > 1000 %}
+  {
+    "code": "PAGINATION_SLOW_QUERY",
+    "message": "Query execution time {{ query_time_ms }}ms exceeds recommended threshold. Consider adding indexes or refining filters.",
+    "severity": "performance",
+    "context": {
+      "execution_time": {{ query_time_ms }},
+      "threshold": 1000,
+      "suggestion": "Add database indexes or use more specific filters"
+    }
+  }{% endif %}
+  {% for warning in warnings | default([]) %}
+  {% if not loop.first or page_size and page_size > (max_page_size | default(100)) or page_number and page_number > (total_pages | default(1)) or total_items and total_items == 0 or query_time_ms and query_time_ms > 1000 %},{% endif %}
+  {{ warning | tojson }}
+  {% endfor %}
+]{% endblock %}
+
+{# Add pagination-specific notifications for helpful user guidance #}
+{% block notifications %}[
+  {% if total_items and total_items > 10000 %}
+  {
+    "type": "pagination_performance_tip",
+    "message": "Large dataset detected ({{ total_items }} items). Consider using filters to narrow results for better performance.",
+    "action": {
+      "text": "Learn about filtering",
+      "url": "{{ documentation_link | default(url_for('api.docs', _external=True) if 'api.docs' in url_map else request.url_root + 'api/docs#filtering') }}"
+    },
+    "dismissible": true
+  }{% if has_next and (total_pages | default(1)) > 20 %},{% endif %}
+  {% endif %}
+  {% if has_next and (total_pages | default(1)) > 20 %}
+  {
+    "type": "pagination_navigation_tip", 
+    "message": "Many pages available ({{ total_pages }}). Use direct page navigation or increase page size for faster browsing.",
+    "action": {
+      "text": "Increase page size",
+      "url": "{{ url_for(endpoint, page=page_number | default(1), per_page=50, _external=True, **url_params | default({})) if endpoint else request.base_url + '?page=' + (page_number | default(1) | string) + '&per_page=50' }}"
+    },
+    "dismissible": true
+  }{% endif %}
+  {% for notification in notifications | default([]) %}
+  {% if not loop.first or total_items and total_items > 10000 or has_next and (total_pages | default(1)) > 20 %},{% endif %}
+  {{ notification | tojson }}
+  {% endfor %}
+]{% endblock %}
