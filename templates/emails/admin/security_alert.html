@@ -1,0 +1,502 @@
+{% extends "templates/emails/base/base.html" %}
+
+{% block title %}🔒 Critical Security Alert - {{ incident_type | title }}{% endblock %}
+
+{% block email_label %}Critical Security Alert: {{ incident_type | title }}{% endblock %}
+
+{% block header_title %}🔒 Security Alert System{% endblock %}
+
+{% block email_styles %}
+<!-- Security Alert Specific Styling -->
+<style type="text/css">
+    /* Security Alert Severity Colors */
+    .severity-critical {
+        background-color: #dc3545 !important;
+        color: #ffffff !important;
+        border-left: 5px solid #b02a37 !important;
+    }
+    
+    .severity-high {
+        background-color: #fd7e14 !important;
+        color: #ffffff !important;
+        border-left: 5px solid #e8590c !important;
+    }
+    
+    .severity-medium {
+        background-color: #ffc107 !important;
+        color: #212529 !important;
+        border-left: 5px solid #e0a800 !important;
+    }
+    
+    .severity-low {
+        background-color: #17a2b8 !important;
+        color: #ffffff !important;
+        border-left: 5px solid #138496 !important;
+    }
+    
+    /* Alert Box Styling */
+    .alert-box {
+        padding: 20px;
+        margin: 20px 0;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+    
+    .incident-header {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        border-left: 4px solid #6c757d;
+    }
+    
+    .incident-details {
+        background-color: #ffffff;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .affected-users {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .recommended-actions {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .technical-details {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 10px 0;
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+    }
+    
+    /* Data Table Styling */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+    }
+    
+    .data-table th {
+        background-color: #e9ecef;
+        padding: 10px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
+    }
+    
+    .data-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #dee2e6;
+        vertical-align: top;
+    }
+    
+    .data-table tr:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+    
+    /* Action Button Styling */
+    .action-button {
+        display: inline-block;
+        padding: 12px 24px;
+        margin: 8px 4px;
+        background-color: #dc3545;
+        color: #ffffff;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 500;
+        text-align: center;
+    }
+    
+    .action-button:hover {
+        background-color: #c82333;
+        color: #ffffff;
+    }
+    
+    .action-button-secondary {
+        background-color: #6c757d;
+    }
+    
+    .action-button-secondary:hover {
+        background-color: #5a6268;
+    }
+    
+    /* Status Indicators */
+    .status-indicator {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .status-active {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    
+    .status-blocked {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .status-investigating {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    
+    /* Responsive adjustments */
+    @media screen and (max-width: 600px) {
+        .alert-box,
+        .incident-details,
+        .affected-users,
+        .recommended-actions,
+        .technical-details {
+            padding: 12px !important;
+            margin: 8px 0 !important;
+        }
+        
+        .data-table th,
+        .data-table td {
+            padding: 6px !important;
+            font-size: 14px !important;
+        }
+        
+        .action-button {
+            display: block !important;
+            margin: 8px 0 !important;
+            padding: 14px 20px !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block email_content %}
+<!-- Security Alert Header -->
+<div class="alert-box severity-{{ severity | lower }}">
+    <h1 style="margin: 0; font-size: 24px;">
+        {% if severity == 'CRITICAL' %}🚨{% elif severity == 'HIGH' %}⚠️{% elif severity == 'MEDIUM' %}⚡{% else %}ℹ️{% endif %}
+        Security Incident Detected
+    </h1>
+    <p style="margin: 8px 0 0 0; font-size: 16px;">
+        <strong>{{ incident_type | title }}</strong> - {{ severity }} Severity
+    </p>
+</div>
+
+<!-- Incident Overview -->
+<div class="incident-header">
+    <h2 style="margin: 0 0 10px 0; color: #495057;">Incident Overview</h2>
+    <table class="data-table">
+        <tr>
+            <th style="width: 30%;">Incident ID</th>
+            <td><strong>{{ incident_id }}</strong></td>
+        </tr>
+        <tr>
+            <th>Detection Time</th>
+            <td>{{ detection_time | strftime('%Y-%m-%d %H:%M:%S UTC') }}</td>
+        </tr>
+        <tr>
+            <th>Security System</th>
+            <td>{{ detection_system | default('Flask Security Monitor + Auth0') }}</td>
+        </tr>
+        <tr>
+            <th>Current Status</th>
+            <td>
+                <span class="status-indicator status-{{ incident_status | lower }}">
+                    {{ incident_status | default('INVESTIGATING') }}
+                </span>
+            </td>
+        </tr>
+        <tr>
+            <th>Risk Level</th>
+            <td>
+                <span class="status-indicator severity-{{ severity | lower }}">
+                    {{ severity }} RISK
+                </span>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<!-- Incident Description -->
+<div class="incident-details">
+    <h3 style="margin: 0 0 15px 0; color: #495057;">Incident Description</h3>
+    <p style="margin-bottom: 15px;">{{ description }}</p>
+    
+    {% if additional_context %}
+    <h4 style="margin: 15px 0 10px 0; color: #495057;">Additional Context</h4>
+    <p>{{ additional_context }}</p>
+    {% endif %}
+</div>
+
+<!-- Affected Users Section -->
+{% if affected_users %}
+<div class="affected-users">
+    <h3 style="margin: 0 0 15px 0; color: #856404;">👥 Affected Users ({{ affected_users | length }})</h3>
+    
+    {% if affected_users | length <= 10 %}
+    <table class="data-table">
+        <tr>
+            <th>User ID</th>
+            <th>Username</th>
+            <th>Last Activity</th>
+            <th>Status</th>
+        </tr>
+        {% for user in affected_users %}
+        <tr>
+            <td>{{ user.user_id }}</td>
+            <td>{{ user.username | default('N/A') }}</td>
+            <td>{{ user.last_activity | strftime('%Y-%m-%d %H:%M UTC') if user.last_activity else 'Unknown' }}</td>
+            <td>
+                <span class="status-indicator status-{{ user.status | lower if user.status else 'investigating' }}">
+                    {{ user.status | default('Under Review') }}
+                </span>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p><strong>{{ affected_users | length }} users affected.</strong> Full user list available in admin dashboard.</p>
+    <p>Most recent affected users:</p>
+    <ul>
+        {% for user in affected_users[:5] %}
+        <li>{{ user.username | default('User ID: ' + user.user_id | string) }} ({{ user.last_activity | strftime('%H:%M UTC') if user.last_activity else 'Unknown activity' }})</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Technical Details Section -->
+{% if technical_details %}
+<div class="technical-details">
+    <h3 style="margin: 0 0 15px 0; color: #495057;">🔧 Technical Details</h3>
+    
+    <table class="data-table">
+        {% if technical_details.source_ip %}
+        <tr>
+            <th>Source IP Address</th>
+            <td>{{ technical_details.source_ip }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.user_agent %}
+        <tr>
+            <th>User Agent</th>
+            <td style="word-break: break-all;">{{ technical_details.user_agent }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.endpoint %}
+        <tr>
+            <th>Affected Endpoint</th>
+            <td>{{ technical_details.endpoint }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.auth_method %}
+        <tr>
+            <th>Authentication Method</th>
+            <td>{{ technical_details.auth_method }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.failure_count %}
+        <tr>
+            <th>Failure Count</th>
+            <td>{{ technical_details.failure_count }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.time_window %}
+        <tr>
+            <th>Time Window</th>
+            <td>{{ technical_details.time_window }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.flask_session_id %}
+        <tr>
+            <th>Flask Session ID</th>
+            <td style="word-break: break-all;">{{ technical_details.flask_session_id }}</td>
+        </tr>
+        {% endif %}
+        
+        {% if technical_details.auth0_correlation_id %}
+        <tr>
+            <th>Auth0 Correlation ID</th>
+            <td style="word-break: break-all;">{{ technical_details.auth0_correlation_id }}</td>
+        </tr>
+        {% endif %}
+    </table>
+    
+    {% if technical_details.stack_trace %}
+    <h4 style="margin: 15px 0 10px 0;">Stack Trace</h4>
+    <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px;">{{ technical_details.stack_trace }}</pre>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Service Layer Coordination Section -->
+{% if service_layer_actions %}
+<div class="incident-details">
+    <h3 style="margin: 0 0 15px 0; color: #495057;">⚙️ Service Layer Response</h3>
+    
+    <table class="data-table">
+        <tr>
+            <th>Action Type</th>
+            <th>Status</th>
+            <th>Timestamp</th>
+            <th>Details</th>
+        </tr>
+        {% for action in service_layer_actions %}
+        <tr>
+            <td>{{ action.action_type }}</td>
+            <td>
+                <span class="status-indicator status-{{ action.status | lower }}">
+                    {{ action.status }}
+                </span>
+            </td>
+            <td>{{ action.timestamp | strftime('%H:%M:%S UTC') if action.timestamp else 'Pending' }}</td>
+            <td>{{ action.details | default('N/A') }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+<!-- Recommended Actions -->
+<div class="recommended-actions">
+    <h3 style="margin: 0 0 15px 0; color: #155724;">📋 Immediate Administrative Actions Required</h3>
+    
+    {% if recommended_actions %}
+    <ol style="margin: 0; padding-left: 20px;">
+        {% for action in recommended_actions %}
+        <li style="margin-bottom: 8px;">
+            <strong>{{ action.priority | default('Standard') }} Priority:</strong> {{ action.description }}
+            {% if action.deadline %}
+            <br><em>Deadline: {{ action.deadline | strftime('%Y-%m-%d %H:%M UTC') }}</em>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}
+    <p><strong>Standard Security Incident Response:</strong></p>
+    <ol style="margin: 0; padding-left: 20px;">
+        <li>Review incident details and affected user accounts</li>
+        <li>Verify authentication security measures are functioning</li>
+        <li>Monitor for continued suspicious activity</li>
+        <li>Update security policies if necessary</li>
+        <li>Document incident response and lessons learned</li>
+    </ol>
+    {% endif %}
+    
+    {% if severity in ['CRITICAL', 'HIGH'] %}
+    <p style="margin-top: 15px; padding: 10px; background-color: #f8d7da; border-left: 4px solid #dc3545; border-radius: 4px;">
+        <strong>⚠️ Critical/High Severity Notice:</strong> 
+        This incident requires immediate attention. Consider activating incident response procedures and notifying senior management if not already done.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Quick Action Buttons -->
+<div style="text-align: center; margin: 25px 0;">
+    <h3 style="margin: 0 0 15px 0; color: #495057;">Quick Actions</h3>
+    
+    <a href="{{ dashboard_url | default('#') }}" class="action-button">
+        🔍 View Full Dashboard
+    </a>
+    
+    <a href="{{ incident_details_url | default('#') }}" class="action-button action-button-secondary">
+        📊 Incident Details
+    </a>
+    
+    {% if user_management_url %}
+    <a href="{{ user_management_url }}" class="action-button action-button-secondary">
+        👥 Manage Users
+    </a>
+    {% endif %}
+    
+    {% if security_logs_url %}
+    <a href="{{ security_logs_url }}" class="action-button action-button-secondary">
+        📜 Security Logs
+    </a>
+    {% endif %}
+</div>
+
+<!-- System Information -->
+<div class="technical-details">
+    <h4 style="margin: 0 0 10px 0; color: #495057;">System Information</h4>
+    <table class="data-table">
+        <tr>
+            <th>Environment</th>
+            <td>{{ environment | default('Production') }}</td>
+        </tr>
+        <tr>
+            <th>Flask Version</th>
+            <td>{{ flask_version | default('3.1.1') }}</td>
+        </tr>
+        <tr>
+            <th>Auth System</th>
+            <td>Flask-Login + Auth0 Python SDK {{ auth0_sdk_version | default('4.9.0') }}</td>
+        </tr>
+        <tr>
+            <th>Alert Generated</th>
+            <td>{{ alert_generated_time | strftime('%Y-%m-%d %H:%M:%S UTC') if alert_generated_time else 'Now' }}</td>
+        </tr>
+        <tr>
+            <th>Monitoring System</th>
+            <td>{{ monitoring_system | default('CloudWatch + Sentry + Flask Security Monitor') }}</td>
+        </tr>
+    </table>
+</div>
+
+<!-- Contact Information -->
+<div style="margin-top: 20px; padding: 15px; background-color: #e9ecef; border-radius: 6px;">
+    <h4 style="margin: 0 0 10px 0; color: #495057;">Emergency Contacts</h4>
+    <p style="margin: 5px 0;"><strong>Security Team:</strong> {{ security_team_contact | default('security@company.com') }}</p>
+    <p style="margin: 5px 0;"><strong>On-Call Engineer:</strong> {{ oncall_contact | default('oncall@company.com') }}</p>
+    {% if emergency_phone %}
+    <p style="margin: 5px 0;"><strong>Emergency Phone:</strong> {{ emergency_phone }}</p>
+    {% endif %}
+    <p style="margin: 5px 0;"><strong>Incident Response Playbook:</strong> 
+        <a href="{{ playbook_url | default('#') }}" style="color: #007bff;">Security Incident Response Guide</a>
+    </p>
+</div>
+
+<!-- Footer Notice -->
+<div style="margin-top: 20px; padding: 10px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+    <p style="margin: 0; font-size: 14px; color: #856404;">
+        <strong>🤖 Automated Alert:</strong> This security alert was automatically generated by the Flask Security Monitoring System. 
+        For false positives or system issues, please contact the development team.
+    </p>
+</div>
+{% endblock %}
+
+{% block footer_content %}
+<p style="margin: 0 0 8px 0;"><strong>{{ company_name | default('Your Company') }} Security Operations</strong></p>
+<p style="margin: 0 0 8px 0;">
+    <a href="{{ dashboard_url | default('#') }}" style="color: #6c757d;">Security Dashboard</a> |
+    <a href="{{ documentation_url | default('#') }}" style="color: #6c757d;">Documentation</a> |
+    <a href="{{ support_url | default('#') }}" style="color: #6c757d;">Support</a>
+</p>
+<p style="margin: 0; font-size: 12px; color: #6c757d;">
+    This is an automated security alert. Do not reply to this email.<br>
+    Incident ID: {{ incident_id }} | Generated: {{ alert_generated_time | strftime('%Y-%m-%d %H:%M:%S UTC') if alert_generated_time else 'Now' }}
+</p>
+{% endblock %}
