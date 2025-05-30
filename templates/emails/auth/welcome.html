@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Welcome to Our Platform - Get Started Today</title>
+    <!--[if mso]>
+    <noscript>
+        <xml>
+            <o:OfficeDocumentSettings>
+                <o:PixelsPerInch>96</o:PixelsPerInch>
+            </o:OfficeDocumentSettings>
+        </xml>
+    </noscript>
+    <![endif]-->
+    <style>
+        /* Email-safe CSS with comprehensive client support */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            background-color: #f5f5f5;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        table {
+            border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+        }
+        
+        img {
+            border: 0;
+            outline: none;
+            text-decoration: none;
+            -ms-interpolation-mode: bicubic;
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px 30px;
+            text-align: center;
+            color: #ffffff;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header p {
+            margin: 8px 0 0 0;
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px 30px;
+        }
+        
+        .welcome-message {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .welcome-message h2 {
+            color: #2d3748;
+            font-size: 24px;
+            margin: 0 0 15px 0;
+            font-weight: 600;
+        }
+        
+        .welcome-message p {
+            color: #4a5568;
+            font-size: 16px;
+            margin: 0;
+            line-height: 1.5;
+        }
+        
+        .user-info {
+            background-color: #f7fafc;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 0 6px 6px 0;
+        }
+        
+        .user-info h3 {
+            margin: 0 0 10px 0;
+            color: #2d3748;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .user-info p {
+            margin: 0;
+            color: #4a5568;
+            font-size: 14px;
+        }
+        
+        .features-section {
+            margin: 30px 0;
+        }
+        
+        .features-section h3 {
+            color: #2d3748;
+            font-size: 20px;
+            margin: 0 0 20px 0;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .feature-grid {
+            display: table;
+            width: 100%;
+            margin: 20px 0;
+        }
+        
+        .feature-item {
+            display: table-cell;
+            width: 33.33%;
+            vertical-align: top;
+            padding: 0 15px;
+            text-align: center;
+        }
+        
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            margin: 0 auto 15px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .feature-item h4 {
+            color: #2d3748;
+            font-size: 16px;
+            margin: 0 0 8px 0;
+            font-weight: 600;
+        }
+        
+        .feature-item p {
+            color: #718096;
+            font-size: 14px;
+            margin: 0;
+            line-height: 1.4;
+        }
+        
+        .cta-section {
+            text-align: center;
+            margin: 40px 0 30px 0;
+            padding: 30px 20px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 8px;
+            color: #ffffff;
+        }
+        
+        .cta-section h3 {
+            margin: 0 0 15px 0;
+            font-size: 22px;
+            font-weight: 600;
+        }
+        
+        .cta-section p {
+            margin: 0 0 25px 0;
+            font-size: 16px;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background-color: #ffffff;
+            color: #667eea;
+            padding: 15px 35px;
+            text-decoration: none;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            border: 2px solid #ffffff;
+        }
+        
+        .cta-button:hover {
+            background-color: transparent;
+            color: #ffffff;
+        }
+        
+        .next-steps {
+            margin: 30px 0;
+        }
+        
+        .next-steps h3 {
+            color: #2d3748;
+            font-size: 20px;
+            margin: 0 0 20px 0;
+            font-weight: 600;
+        }
+        
+        .step-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .step-list li {
+            background-color: #f7fafc;
+            margin: 10px 0;
+            padding: 15px 20px;
+            border-radius: 6px;
+            border-left: 4px solid #48bb78;
+            position: relative;
+            color: #2d3748;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+        
+        .step-list li::before {
+            content: attr(data-step);
+            position: absolute;
+            left: -12px;
+            top: 12px;
+            background-color: #48bb78;
+            color: #ffffff;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .support-section {
+            background-color: #edf2f7;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+            text-align: center;
+        }
+        
+        .support-section h3 {
+            color: #2d3748;
+            font-size: 18px;
+            margin: 0 0 15px 0;
+            font-weight: 600;
+        }
+        
+        .support-section p {
+            color: #4a5568;
+            font-size: 14px;
+            margin: 0 0 15px 0;
+            line-height: 1.5;
+        }
+        
+        .support-links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0 15px;
+            font-size: 14px;
+        }
+        
+        .support-links a:hover {
+            text-decoration: underline;
+        }
+        
+        .footer {
+            background-color: #2d3748;
+            color: #a0aec0;
+            padding: 30px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .footer p {
+            margin: 0 0 10px 0;
+            line-height: 1.5;
+        }
+        
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .social-links {
+            margin: 20px 0 10px 0;
+        }
+        
+        .social-links a {
+            display: inline-block;
+            margin: 0 10px;
+            color: #a0aec0;
+            font-size: 18px;
+            text-decoration: none;
+        }
+        
+        /* Responsive design for mobile email clients */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                width: 100% !important;
+                border-radius: 0 !important;
+            }
+            
+            .header,
+            .content {
+                padding: 30px 20px !important;
+            }
+            
+            .feature-grid {
+                display: block !important;
+            }
+            
+            .feature-item {
+                display: block !important;
+                width: 100% !important;
+                padding: 0 0 30px 0 !important;
+            }
+            
+            .cta-section {
+                padding: 25px 15px !important;
+                margin: 30px 0 20px 0 !important;
+            }
+            
+            .cta-button {
+                padding: 12px 25px !important;
+                font-size: 15px !important;
+            }
+            
+            .support-section {
+                padding: 20px 15px !important;
+            }
+            
+            .footer {
+                padding: 25px 20px !important;
+            }
+        }
+        
+        /* Dark mode support for email clients that support it */
+        @media (prefers-color-scheme: dark) {
+            .email-container {
+                background-color: #1a202c !important;
+            }
+            
+            .content {
+                background-color: #1a202c !important;
+                color: #e2e8f0 !important;
+            }
+            
+            .welcome-message h2,
+            .features-section h3,
+            .next-steps h3 {
+                color: #e2e8f0 !important;
+            }
+            
+            .welcome-message p {
+                color: #a0aec0 !important;
+            }
+            
+            .user-info {
+                background-color: #2d3748 !important;
+            }
+            
+            .step-list li {
+                background-color: #2d3748 !important;
+                color: #e2e8f0 !important;
+            }
+            
+            .support-section {
+                background-color: #2d3748 !important;
+            }
+            
+            .support-section h3 {
+                color: #e2e8f0 !important;
+            }
+            
+            .support-section p {
+                color: #a0aec0 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div style="background-color: #f5f5f5; padding: 20px 0;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+            <tr>
+                <td align="center">
+                    <div class="email-container">
+                        <!-- Header Section -->
+                        <div class="header">
+                            <h1>🎉 Welcome Aboard!</h1>
+                            <p>Your journey starts here</p>
+                        </div>
+                        
+                        <!-- Main Content -->
+                        <div class="content">
+                            <!-- Welcome Message -->
+                            <div class="welcome-message">
+                                <h2>Hello {% if user_name %}{{ user_name }}{% else %}there{% endif %}!</h2>
+                                <p>We're thrilled to have you join our platform. Your account has been successfully created and you're all set to explore everything we have to offer.</p>
+                            </div>
+                            
+                            <!-- User Information -->
+                            {% if user_email %}
+                            <div class="user-info">
+                                <h3>Your Account Details</h3>
+                                <p><strong>Email:</strong> {{ user_email }}</p>
+                                <p><strong>Account Created:</strong> {% if registration_date %}{{ registration_date }}{% else %}Today{% endif %}</p>
+                                {% if user_id %}<p><strong>User ID:</strong> {{ user_id }}</p>{% endif %}
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Platform Features -->
+                            <div class="features-section">
+                                <h3>What You Can Do Now</h3>
+                                <div class="feature-grid">
+                                    <div class="feature-item">
+                                        <div class="feature-icon">🚀</div>
+                                        <h4>Get Started</h4>
+                                        <p>Complete your profile setup and personalize your experience with our intuitive onboarding process.</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <div class="feature-icon">🔧</div>
+                                        <h4>Powerful Tools</h4>
+                                        <p>Access our comprehensive suite of tools designed to help you achieve your goals efficiently.</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <div class="feature-icon">👥</div>
+                                        <h4>Join Community</h4>
+                                        <p>Connect with other users, share insights, and collaborate on exciting projects together.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Call to Action -->
+                            <div class="cta-section">
+                                <h3>Ready to Get Started?</h3>
+                                <p>Complete your profile setup and start exploring all the amazing features we have prepared for you.</p>
+                                <a href="{% if dashboard_url %}{{ dashboard_url }}{% else %}#{% endif %}" class="cta-button">Access Your Dashboard</a>
+                            </div>
+                            
+                            <!-- Next Steps -->
+                            <div class="next-steps">
+                                <h3>Your Next Steps</h3>
+                                <ul class="step-list">
+                                    <li data-step="1">
+                                        <strong>Verify Your Email:</strong> {% if email_verified %}✅ Completed{% else %}Check your inbox for a verification link{% endif %}
+                                    </li>
+                                    <li data-step="2">
+                                        <strong>Complete Your Profile:</strong> Add your information to personalize your experience
+                                    </li>
+                                    <li data-step="3">
+                                        <strong>Explore Features:</strong> Take a tour of our platform and discover what's possible
+                                    </li>
+                                    <li data-step="4">
+                                        <strong>Connect & Engage:</strong> Join discussions and start collaborating with our community
+                                    </li>
+                                </ul>
+                            </div>
+                            
+                            <!-- Support Section -->
+                            <div class="support-section">
+                                <h3>Need Help Getting Started?</h3>
+                                <p>Our support team is here to help you every step of the way. Don't hesitate to reach out if you have any questions.</p>
+                                <div class="support-links">
+                                    <a href="{% if help_center_url %}{{ help_center_url }}{% else %}#{% endif %}">Help Center</a>
+                                    <a href="{% if contact_url %}{{ contact_url }}{% else %}#{% endif %}">Contact Support</a>
+                                    <a href="{% if tutorial_url %}{{ tutorial_url }}{% else %}#{% endif %}">Getting Started Guide</a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div class="footer">
+                            <div class="social-links">
+                                <a href="{% if twitter_url %}{{ twitter_url }}{% else %}#{% endif %}" title="Follow us on Twitter">📱</a>
+                                <a href="{% if linkedin_url %}{{ linkedin_url }}{% else %}#{% endif %}" title="Connect on LinkedIn">💼</a>
+                                <a href="{% if facebook_url %}{{ facebook_url }}{% else %}#{% endif %}" title="Like us on Facebook">👍</a>
+                            </div>
+                            <p>© {% if current_year %}{{ current_year }}{% else %}2024{% endif %} {% if company_name %}{{ company_name }}{% else %}Your Company{% endif %}. All rights reserved.</p>
+                            <p>
+                                {% if company_address %}{{ company_address }}{% else %}123 Business Street, City, State 12345{% endif %}
+                            </p>
+                            <p>
+                                <a href="{% if unsubscribe_url %}{{ unsubscribe_url }}{% else %}#{% endif %}">Unsubscribe</a> | 
+                                <a href="{% if privacy_url %}{{ privacy_url }}{% else %}#{% endif %}">Privacy Policy</a> | 
+                                <a href="{% if terms_url %}{{ terms_url }}{% else %}#{% endif %}">Terms of Service</a>
+                            </p>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+</body>
+</html>
