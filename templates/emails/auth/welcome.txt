@@ -1,0 +1,224 @@
+{#
+Welcome Email Text Template for New User Onboarding
+===================================================
+
+This template provides a comprehensive welcome message for new users in plain text format,
+ensuring maximum compatibility with text-only email clients and accessibility requirements.
+The template extends the base text template and delivers engaging onboarding content that
+guides users through initial account setup and feature discovery.
+
+Template Features:
+- Text-only format for broad email client compatibility
+- Engaging welcome content with clear next steps
+- Feature highlights optimized for text display
+- Account setup instructions and onboarding guidance
+- Professional tone maintaining user engagement
+- Accessibility compliance for screen readers
+
+Usage Context:
+- Triggered when new user accounts are created
+- Part of authentication workflow (F-007)
+- Supports both standalone and multipart email delivery
+- Integrates with Flask-Login user management system
+#}
+
+{% extends "emails/base/base.txt" %}
+
+{#- Welcome Email Subject -#}
+{% block subject -%}
+Welcome to Flask Application - Let's Get Started!
+{%- endblock %}
+
+{#- Pre-header text for email previews -#}
+{% block preheader -%}
+Your account is ready! Complete your setup and discover powerful features.
+{%- endblock %}
+
+{#- Main Welcome Content -#}
+{% block content -%}
+Hello {{ user.first_name or 'there' }},
+
+Welcome to Flask Application! We're thrilled to have you join our community.
+
+Your account has been successfully created and is ready to use. Here are your 
+account details:
+
+{{ format_key_value('Email Address', user.email) }}
+{{ format_key_value('Account Created', user.created_at.strftime('%B %d, %Y at %I:%M %p') if user.created_at else 'Just now') }}
+{{ format_key_value('Account ID', user.id) }}
+
+You now have access to all the powerful features that Flask Application offers.
+Let's help you get the most out of your new account!
+{%- endblock %}
+
+{#- Feature Highlights Section -#}
+{% block additional_info -%}
+WHAT YOU CAN DO NOW
+{{ create_section_divider('=', 50) }}
+
+Here are some key features to explore:
+
+{{ format_list_item('Secure API Access - Use our RESTful API endpoints for integration') }}
+{{ format_list_item('Data Management - Store and organize your data securely') }}
+{{ format_list_item('User Dashboard - Monitor your account activity and usage') }}
+{{ format_list_item('Advanced Analytics - Track performance and gain insights') }}
+{{ format_list_item('Team Collaboration - Invite team members and manage permissions') }}
+{{ format_list_item('Custom Integrations - Connect with your favorite tools') }}
+
+GETTING STARTED CHECKLIST
+{{ create_section_divider('=', 50) }}
+
+Follow these steps to complete your account setup:
+
+{{ format_list_item('1. Verify your email address (if not already done)') }}
+{{ format_list_item('2. Complete your profile information') }}
+{{ format_list_item('3. Set up two-factor authentication for enhanced security') }}
+{{ format_list_item('4. Explore the API documentation') }}
+{{ format_list_item('5. Create your first project or integration') }}
+{{ format_list_item('6. Invite team members if needed') }}
+
+QUICK START RESOURCES
+{{ create_section_divider('=', 50) }}
+
+To help you get up and running quickly:
+
+API Documentation: {{ format_url_for_text('https://api.flaskapp.com/docs', 'Complete API Reference') }}
+Getting Started Guide: {{ format_url_for_text('https://help.flaskapp.com/getting-started', 'Step-by-step Tutorial') }}
+Video Tutorials: {{ format_url_for_text('https://learn.flaskapp.com/videos', 'Watch and Learn') }}
+Community Forum: {{ format_url_for_text('https://community.flaskapp.com', 'Connect with Users') }}
+{%- endblock %}
+
+{#- Next Steps and Call-to-Action -#}
+{% block action_items -%}
+READY TO GET STARTED?
+
+{{ format_list_item('Login to your account: https://app.flaskapp.com/login') }}
+{{ format_list_item('Complete your profile: https://app.flaskapp.com/profile') }}
+{{ format_list_item('Explore the dashboard: https://app.flaskapp.com/dashboard') }}
+{{ format_list_item('Read our API docs: https://api.flaskapp.com/docs') }}
+
+If you have any questions or need assistance during setup, our support team
+is here to help. Simply reply to this email or visit our help center.
+
+We're excited to see what you'll build with Flask Application!
+{%- endblock %}
+
+{#- Enhanced Contact Information for New Users -#}
+{% block contact_info -%}
+Need help getting started? Our onboarding team is here for you:
+
+- New User Support: welcome@flaskapp.com
+- Live Chat: Available 24/7 at https://help.flaskapp.com/chat
+- Phone Support: 1-800-FLASK-APP (1-800-352-7527)
+- Help Center: https://help.flaskapp.com
+
+Our onboarding specialists are available:
+Monday - Friday: 8:00 AM - 8:00 PM EST
+Saturday - Sunday: 10:00 AM - 6:00 PM EST
+
+For immediate assistance with account setup, use priority code: WELCOME-{{ user.id }}
+{%- endblock %}
+
+{#- Custom Footer for Welcome Emails -#}
+{% block footer -%}
+
+===============================================================================
+Welcome to Flask Application | Your Journey Starts Here
+===============================================================================
+
+This welcome email confirms that your Flask Application account has been
+successfully created. You're now part of a community of developers and
+businesses building amazing applications with our platform.
+
+{% block unsubscribe_info -%}
+To manage your email preferences:
+https://app.flaskapp.com/settings/notifications
+
+Note: Account security and important service notifications cannot be disabled
+for the security and proper functioning of your account.
+
+{%- endblock %}
+
+{% block legal_info -%}
+© {% now 'Y' %} Flask Application. All rights reserved.
+
+This email contains important account information. Please save this email
+for your records. If you did not create this account, please contact our
+security team immediately at security@flaskapp.com.
+
+{%- endblock %}
+
+{% block compliance_info -%}
+Flask Application Inc.
+456 Technology Drive
+Innovation City, CA 94105
+United States
+
+Terms of Service: https://flaskapp.com/terms
+Privacy Policy: https://flaskapp.com/privacy
+Security Information: https://flaskapp.com/security
+
+{%- endblock %}
+{%- endblock %}
+
+{#- Technical Headers for Welcome Email Tracking -#}
+{% block technical_headers -%}
+{#- Welcome email specific tracking and metadata -#}
+Welcome-Email-Type: new-user-onboarding
+User-Registration-Source: {{ user.registration_source or 'direct' }}
+Account-Type: {{ user.account_type or 'standard' }}
+Welcome-Template-Version: 1.0
+{%- endblock %}
+
+{#-
+Template Usage Notes:
+====================
+
+This template should be used when:
+1. A new user successfully creates an account
+2. User email verification is completed (if required)
+3. Account activation process is finished
+4. Part of the authentication workflow onboarding sequence
+
+Template Variables Expected:
+- user.first_name: User's first name (optional)
+- user.email: User's email address (required)
+- user.created_at: Account creation timestamp (optional)
+- user.id: User's unique identifier (required)
+- user.registration_source: How the user signed up (optional)
+- user.account_type: Type of account created (optional)
+
+Integration with Flask Application:
+- Called from authentication service after successful registration
+- Part of the email notification system
+- Supports both immediate and queued email delivery
+- Compatible with Flask-Login user management
+- Integrates with Flask application factory pattern
+
+Security Considerations:
+- Contains user account ID for support reference
+- Includes security contact information
+- Encourages two-factor authentication setup
+- Provides clear instructions for reporting unauthorized account creation
+
+Accessibility Features:
+- Text-only format supports all email clients and screen readers
+- Clear section headers and consistent formatting
+- Logical content flow and organization
+- Descriptive link text and proper URL formatting
+- Appropriate contrast through text formatting
+
+Maintenance Notes:
+- Update contact information and URLs as needed
+- Review feature list periodically for accuracy
+- Ensure checklist items remain current with application features
+- Test template rendering with various user data scenarios
+- Validate all links and resources periodically
+
+Performance Considerations:
+- Optimized for plain text rendering
+- Minimal processing overhead
+- Efficient template inheritance
+- Cacheable template compilation
+- Fast email delivery compatibility
+-#}
