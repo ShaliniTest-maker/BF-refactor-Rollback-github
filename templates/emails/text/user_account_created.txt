@@ -1,184 +1,139 @@
-========================================================================
-                    NEW USER ACCOUNT CREATED - ADMINISTRATIVE ALERT
-========================================================================
+================================================================================
+NEW USER ACCOUNT CREATED - ADMINISTRATIVE NOTIFICATION
+================================================================================
 
-NOTIFICATION DETAILS
-------------------------------------------------------------------------
-Timestamp:        {{ timestamp }}
-Alert ID:         {{ alert_id }}
-System:           Flask User Management System
-Notification Type: User Account Creation
+Date: {{ created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+Account ID: {{ user.id }}
+System: Flask Application ({{ app_environment|default('Production') }})
 
-USER ACCOUNT INFORMATION
-------------------------------------------------------------------------
-User ID:          {{ user.id }}
-Username:         {{ user.username }}
-Email Address:    {{ user.email }}
-Full Name:        {{ user.full_name or 'Not provided' }}
-Registration Date: {{ user.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-Account Status:   {{ user.status or 'Pending Activation' }}
-Registration IP:  {{ user.registration_ip or 'Not available' }}
-User Agent:       {{ user.registration_user_agent or 'Not available' }}
+================================================================================
+USER ACCOUNT DETAILS
+================================================================================
 
-AUTH0 INTEGRATION DETAILS
-------------------------------------------------------------------------
-Auth0 User ID:    {{ user.auth0_user_id or 'Pending Auth0 sync' }}
-{% if user.auth0_connection %}
-Auth0 Connection: {{ user.auth0_connection }}
-{% endif %}
-{% if user.email_verified %}
-Email Verified:   Yes ({{ user.email_verified_at.strftime('%Y-%m-%d %H:%M:%S UTC') }})
-{% else %}
-Email Verified:   No - Verification Required
-{% endif %}
-{% if user.phone_verified %}
-Phone Verified:   Yes
-{% else %}
-Phone Verified:   No
-{% endif %}
+Username: {{ user.username }}
+Email: {{ user.email }}
+Full Name: {{ user.profile.full_name|default('Not provided') }}
+Registration Method: {{ registration_method|default('Direct Registration') }}
+{% if auth0_user_id %}Auth0 User ID: {{ auth0_user_id }}{% endif %}
 
-ACCOUNT SECURITY INFORMATION
-------------------------------------------------------------------------
-Initial Role:     {{ user.initial_role or 'Default User' }}
-{% if user.assigned_permissions %}
-Permissions:      
-{% for permission in user.assigned_permissions %}
-  - {{ permission }}
-{% endfor %}
-{% else %}
-Permissions:      Default user permissions applied
-{% endif %}
-MFA Status:       {{ 'Enabled' if user.mfa_enabled else 'Not enabled' }}
-{% if user.security_flags %}
-Security Flags:   
-{% for flag in user.security_flags %}
-  - {{ flag }}
-{% endfor %}
-{% endif %}
+Account Status: {{ user.is_active|default(True)|ternary('ACTIVE', 'INACTIVE') }}
+Email Verified: {{ user.email_verified|default(False)|ternary('YES', 'NO') }}
+{% if user.phone_number %}Phone Number: {{ user.phone_number }}{% endif %}
+{% if user.profile.company %}Company: {{ user.profile.company }}{% endif %}
+{% if user.profile.job_title %}Job Title: {{ user.profile.job_title }}{% endif %}
 
-REGISTRATION CONTEXT
-------------------------------------------------------------------------
-Registration Method: {{ user.registration_method or 'Direct signup' }}
-{% if user.invitation_code %}
-Invitation Code:  {{ user.invitation_code }}
-Invited By:       {{ user.invited_by or 'System' }}
-{% endif %}
-{% if user.referral_source %}
-Referral Source:  {{ user.referral_source }}
-{% endif %}
-Account Type:     {{ user.account_type or 'Standard' }}
-{% if user.organization %}
-Organization:     {{ user.organization }}
-{% endif %}
+Registration IP Address: {{ registration_ip|default('Not recorded') }}
+User Agent: {{ user_agent|default('Not recorded') }}
+Preferred Language: {{ user.profile.preferred_language|default('en') }}
+Timezone: {{ user.profile.timezone|default('UTC') }}
 
+================================================================================
 ADMINISTRATIVE ACTION ITEMS
-------------------------------------------------------------------------
+================================================================================
 
 IMMEDIATE ACTIONS REQUIRED:
-1. Review user account details and registration information
-2. Validate email domain against organizational policies
-3. Confirm appropriate role and permission assignments
-4. {% if not user.email_verified %}Verify email verification completion{% else %}Email verification completed{% endif %}
-5. {% if user.requires_approval %}APPROVAL REQUIRED - Account pending administrative approval{% else %}Account automatically approved per current policies{% endif %}
+[ ] Review user account details for compliance
+[ ] Verify email domain against approved organizations
+[ ] Validate registration source and authenticity
+{% if not user.email_verified %}[ ] PRIORITY: Email verification required{% endif %}
+{% if registration_method == 'Admin Created' %}[ ] Complete admin-created account setup{% endif %}
 
-SECURITY REVIEW CHECKLIST:
-□ Verify registration IP address against security policies
-□ Review user agent string for suspicious patterns  
-□ Confirm registration method aligns with access policies
-□ Validate user information completeness and accuracy
-□ Check for duplicate or suspicious account patterns
-□ Review assigned permissions for least privilege compliance
+SECURITY VERIFICATION:
+[ ] Check registration against security policies
+[ ] Verify user identity if required by policy
+[ ] Review account for potential duplicate registrations
+[ ] Validate Auth0 integration status
+{% if suspicious_activity_score is defined and suspicious_activity_score > 50 %}[ ] ALERT: Review suspicious activity indicators (Score: {{ suspicious_activity_score }}){% endif %}
 
-{% if user.requires_approval %}
-APPROVAL WORKFLOW:
-To approve this account:
-1. Log into administrative dashboard
-2. Navigate to Pending User Approvals
-3. Review complete user profile and registration details
-4. Click "Approve Account" or "Reject Account"
-5. Account activation email will be sent upon approval
+ACCOUNT MANAGEMENT:
+[ ] Assign appropriate user roles and permissions
+[ ] Configure access levels based on account type
+[ ] Add to relevant user groups or departments
+[ ] Set up account-specific integrations if needed
+{% if approval_required %}[ ] APPROVAL REQUIRED: Account pending administrative approval{% endif %}
 
-Direct approval link: {{ approval_url }}
-{% endif %}
+COMPLIANCE AND DOCUMENTATION:
+[ ] Document account creation in audit logs
+[ ] Verify GDPR/privacy compliance requirements
+[ ] Update user management records
+[ ] Notify relevant team members or departments
 
+================================================================================
 SYSTEM INTEGRATION STATUS
-------------------------------------------------------------------------
-Flask-SQLAlchemy: Account record created successfully
-Auth0 Integration: {{ 'Synchronized' if user.auth0_synced else 'Pending synchronization' }}
-{% if user.auth0_sync_error %}
-Auth0 Sync Error:  {{ user.auth0_sync_error }}
+================================================================================
+
+Flask-SQLAlchemy User Model: Created successfully
+Auth0 Integration: {{ auth0_status|default('Synchronized') }}
+Database Record: User ID {{ user.id }} in {{ database_name|default('production database') }}
+Session Management: Flask-Login integration ready
+{% if user.roles %}Assigned Roles: {{ user.roles|map(attribute='name')|join(', ') }}{% endif %}
+
+================================================================================
+NEXT STEPS FOR ADMINISTRATORS
+================================================================================
+
+1. ACCESS MANAGEMENT
+   - Login to admin dashboard: {{ admin_dashboard_url|default('[Admin Dashboard URL]') }}
+   - Navigate to User Management > Recent Registrations
+   - Locate User ID {{ user.id }} for detailed review
+
+2. ACCOUNT VERIFICATION
+   - Verify user information accuracy
+   - Check against organizational requirements
+   - Validate email domain and company affiliation
+   {% if manual_verification_required %}
+   - MANUAL VERIFICATION REQUIRED: Contact user directly
+   {% endif %}
+
+3. ROLE ASSIGNMENT
+   - Determine appropriate access levels
+   - Assign roles based on account type and requirements
+   - Configure permissions for system resources
+   - Update group memberships as needed
+
+4. NOTIFICATION WORKFLOW
+   {% if send_welcome_email %}
+   - Send welcome email to {{ user.email }}
+   {% endif %}
+   - Notify relevant team members of new account
+   - Update account status once verification complete
+   {% if approval_workflow_enabled %}
+   - Process approval workflow for account activation
+   {% endif %}
+
+================================================================================
+CONTACT INFORMATION
+================================================================================
+
+Support Team: {{ support_email|default('support@company.com') }}
+Admin Team: {{ admin_email|default('admin@company.com') }}
+Security Team: {{ security_email|default('security@company.com') }}
+
+For urgent security concerns regarding this account:
+- Email: {{ security_email|default('security@company.com') }}
+- Subject: "URGENT: User Account Security Review - ID {{ user.id }}"
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+* This notification is generated automatically by the Flask application
+* Account details are synchronized with Auth0 user management system
+* All administrative actions are logged for audit compliance
+* This account requires administrative review within 24 hours
+{% if data_retention_notice %}
+* User data is subject to data retention policies and GDPR compliance
 {% endif %}
-Service Layer:    User creation workflow completed
-Database Status:  All user data persisted successfully
 
-MONITORING AND COMPLIANCE
-------------------------------------------------------------------------
-Account Creation Rate: {{ daily_account_creation_count }} accounts created today
-Monthly Total:    {{ monthly_account_creation_count }} accounts this month
-Security Score:   {{ user.security_score or 'Not calculated' }}
-Risk Level:       {{ user.risk_level or 'Standard' }}
-Compliance Status: {{ user.compliance_status or 'Under review' }}
+For technical support or questions about this notification:
+- Review Flask-SQLAlchemy User model documentation
+- Check Auth0 integration logs for synchronization status
+- Verify Flask-Login session management configuration
 
-{% if anomaly_detected %}
-SECURITY ALERT: Potential anomaly detected in account creation pattern
-Anomaly Details:  {{ anomaly_details }}
-{% endif %}
+================================================================================
+END OF ADMINISTRATIVE NOTIFICATION
+================================================================================
 
-CONTACT INFORMATION AND ESCALATION
-------------------------------------------------------------------------
-For account approval questions:
-  Email: {{ admin_contact_email }}
-  Phone: {{ admin_contact_phone }}
-
-For security concerns:
-  Email: {{ security_contact_email }}
-  Emergency: {{ security_emergency_phone }}
-
-For Auth0 integration issues:
-  Email: {{ tech_contact_email }}
-  Escalation: {{ tech_escalation_contact }}
-
-ADMINISTRATIVE DASHBOARD LINKS
-------------------------------------------------------------------------
-{% if admin_dashboard_available %}
-User Management:    {{ user_management_url }}
-Account Details:    {{ user_details_url }}
-Security Dashboard: {{ security_dashboard_url }}
-Auth0 Console:      {{ auth0_console_url }}
-Audit Logs:         {{ audit_logs_url }}
-{% else %}
-Administrative dashboard links not available in this notification.
-Please access the system directly for detailed user management.
-{% endif %}
-
-NOTIFICATION SETTINGS
-------------------------------------------------------------------------
-This is an automated administrative notification generated by the
-Flask User Management System. To modify notification preferences or
-unsubscribe from these alerts, contact the system administrator.
-
-Notification ID: {{ notification_id }}
-Generated at:    {{ timestamp }}
-System Version:  {{ system_version }}
-
-For technical support regarding this notification system:
-Email: {{ support_email }}
-Documentation: {{ documentation_url }}
-
-========================================================================
-                    END OF ADMINISTRATIVE NOTIFICATION
-========================================================================
-
-This email was sent to administrative users for account creation oversight.
-If you received this message in error, please contact the system administrator.
-
-CONFIDENTIALITY NOTICE: This message contains sensitive user account 
-information intended only for authorized administrative personnel. If you 
-are not an authorized recipient, please delete this message and notify 
-the sender immediately.
-
-------------------------------------------------------------------------
-{{ company_name }} | Flask User Management System
-{{ company_address }}
-{{ company_contact_info }}
-========================================================================
+Generated by: Flask User Management System
+Template Version: 1.0
+Notification ID: {{ notification_id|default('N/A') }}
