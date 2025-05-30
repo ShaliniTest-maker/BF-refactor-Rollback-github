@@ -1,0 +1,89 @@
+{
+  "timestamp": "{{ timestamp | default(moment().format('YYYY-MM-DDTHH:mm:ss.SSSZ')) }}",
+  "correlation_id": "{{ correlation_id | default(request.headers.get('X-Correlation-ID', generate_uuid())) }}",
+  "request_id": "{{ request_id | default(g.get('request_id', generate_uuid())) }}",
+  "success": {{ success | default(true) | tojson }},
+  "status": {{ status | default(200) }},
+  "message": "{{ message | default('Paginated data retrieved successfully') }}",
+  
+  {%- if data is defined %}
+  "data": {{ data | tojson }},
+  {%- endif %}
+  
+  "pagination": {
+    "current_page": {{ current_page | default(pagination.page if pagination else 1) }},
+    "per_page": {{ per_page | default(pagination.per_page if pagination else 10) }},
+    "total_items": {{ total_items | default(pagination.total if pagination else 0) }},
+    "total_pages": {{ total_pages | default(pagination.pages if pagination else 1) }},
+    
+    "has_prev": {{ has_prev | default(pagination.has_prev if pagination else false) | tojson }},
+    "has_next": {{ has_next | default(pagination.has_next if pagination else false) | tojson }},
+    "prev_page": {{ prev_page | default(pagination.prev_num if pagination else null) | tojson }},
+    "next_page": {{ next_page | default(pagination.next_num if pagination else null) | tojson }},
+    
+    "items_on_page": {{ items_on_page | default(data | length if data else 0) }},
+    "page_range": {
+      "start": {{ ((current_page | default(pagination.page if pagination else 1) - 1) * (per_page | default(pagination.per_page if pagination else 10))) + 1 }},
+      "end": {{ ((current_page | default(pagination.page if pagination else 1) - 1) * (per_page | default(pagination.per_page if pagination else 10))) + (items_on_page | default(data | length if data else 0)) }}
+    }
+  },
+  
+  "links": {
+    "self": "{{ url_for(request.endpoint, page=current_page | default(pagination.page if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
+    
+    {%- if has_prev | default(pagination.has_prev if pagination else false) %}
+    "first": "{{ url_for(request.endpoint, page=1, per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
+    "prev": "{{ url_for(request.endpoint, page=prev_page | default(pagination.prev_num if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
+    {%- endif %}
+    
+    {%- if has_next | default(pagination.has_next if pagination else false) %}
+    "next": "{{ url_for(request.endpoint, page=next_page | default(pagination.next_num if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
+    "last": "{{ url_for(request.endpoint, page=total_pages | default(pagination.pages if pagination else 1), per_page=per_page | default(pagination.per_page if pagination else 10), **request.args) }}",
+    {%- endif %}
+    
+    "resource": "{{ url_for(request.endpoint, **request.args) | replace('?page=' + (current_page | default(pagination.page if pagination else 1) | string), '') | replace('&page=' + (current_page | default(pagination.page if pagination else 1) | string), '') | replace('page=' + (current_page | default(pagination.page if pagination else 1) | string) + '&', '') | replace('page=' + (current_page | default(pagination.page if pagination else 1) | string), '') }}"
+  },
+  
+  "meta": {
+    "api_version": "{{ api_version | default(config.API_VERSION or '1.0') }}",
+    "endpoint": "{{ request.endpoint }}",
+    "method": "{{ request.method }}",
+    "query_params": {{ request.args.to_dict() | tojson }},
+    
+    "pagination_info": {
+      "page_size_limits": {
+        "min": {{ min_per_page | default(config.MIN_PER_PAGE or 1) }},
+        "max": {{ max_per_page | default(config.MAX_PER_PAGE or 100) }},
+        "default": {{ default_per_page | default(config.DEFAULT_PER_PAGE or 10) }}
+      },
+      
+      "navigation_context": {
+        "show_pagination": {{ (total_pages | default(pagination.pages if pagination else 1)) > 1 | tojson }},
+        "is_first_page": {{ (current_page | default(pagination.page if pagination else 1)) == 1 | tojson }},
+        "is_last_page": {{ (current_page | default(pagination.page if pagination else 1)) == (total_pages | default(pagination.pages if pagination else 1)) | tojson }},
+        "pages_remaining": {{ (total_pages | default(pagination.pages if pagination else 1)) - (current_page | default(pagination.page if pagination else 1)) }}
+      },
+      
+      "dataset_statistics": {
+        "total_items_count": {{ total_items | default(pagination.total if pagination else 0) }},
+        "filtered_items_count": {{ filtered_items | default(total_items | default(pagination.total if pagination else 0)) }},
+        "items_per_page": {{ per_page | default(pagination.per_page if pagination else 10) }},
+        "current_page_items": {{ items_on_page | default(data | length if data else 0) }},
+        "empty_result": {{ (total_items | default(pagination.total if pagination else 0)) == 0 | tojson }}
+      }
+    },
+    
+    {%- if filters is defined %}
+    "applied_filters": {{ filters | tojson }},
+    {%- endif %}
+    
+    {%- if sorting is defined %}
+    "sorting": {{ sorting | tojson }},
+    {%- endif %}
+    
+    "performance": {
+      "query_time_ms": {{ query_time_ms | default(g.get('query_time', 0)) }},
+      "total_response_time_ms": {{ response_time_ms | default(g.get('response_time', 0)) }}
+    }
+  }
+}
