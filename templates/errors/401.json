@@ -1,0 +1,390 @@
+{# 
+401 Unauthorized Error Template for Flask Application
+Purpose: Standardized JSON error responses for HTTP 401 authentication failures
+Template Engine: Jinja2 3.1.2+ with Flask 3.1.1 integration
+Security: Auth0 Python SDK integration and Flask-Login session management per Section 6.4.1
+API Compliance: Authentication error formatting per Section 6.4.1.3 session management
+
+Authentication Error Context:
+- Auth0 integration context with identity management requirements
+- JWT token validation error formatting with Flask-Login integration
+- Session management authentication patterns and failure details
+- Security event logging context for authentication monitoring
+
+Template Variables Expected:
+- auth_failure_reason: Specific reason for authentication failure
+- token_expired: Boolean indicating if JWT token has expired
+- token_invalid: Boolean indicating if JWT token is invalid
+- session_expired: Boolean indicating if session has expired
+- auth_method: Authentication method that failed (jwt, session, auth0)
+- auth0_error: Auth0-specific error details
+- jwt_error: JWT validation error details
+- session_error: Flask-Login session error details
+- required_auth_level: Authentication level required for the resource
+- login_url: URL for user login/authentication
+- token_refresh_url: URL for token refresh if applicable
+- auth0_login_url: Auth0 login URL for identity provider authentication
+#}
+{%- extends "errors/base_error.json" -%}
+
+{%- block error_type -%}AuthenticationError{%- endblock -%}
+
+{%- block error_code -%}ERR_UNAUTHORIZED_ACCESS{%- endblock -%}
+
+{%- block error_message -%}
+{%- if token_expired -%}
+Authentication failed. Your access token has expired and needs to be refreshed.
+{%- elif token_invalid -%}
+Authentication failed. The provided access token is invalid or malformed.
+{%- elif session_expired -%}
+Authentication failed. Your session has expired. Please log in again.
+{%- elif auth0_error -%}
+Authentication failed. {{ auth0_error.get('error_description', 'Identity provider authentication error.') }}
+{%- elif jwt_error -%}
+Authentication failed. JWT token validation error: {{ jwt_error }}
+{%- elif auth_failure_reason -%}
+Authentication failed. {{ auth_failure_reason }}
+{%- else -%}
+Authentication required. Please provide valid credentials to access this resource.
+{%- endif -%}
+{%- endblock -%}
+
+{%- block error_details -%}
+{
+  "authentication": {
+    "reason": {{ auth_failure_reason | tojson if auth_failure_reason else "authentication_required" | tojson }},
+    "auth_method_failed": {{ auth_method | tojson if auth_method else null }},
+    "required_auth_level": {{ required_auth_level | tojson if required_auth_level else "basic" | tojson }},
+    "token_status": {
+      "expired": {{ token_expired | tojson if token_expired is defined else false }},
+      "invalid": {{ token_invalid | tojson if token_invalid is defined else false }},
+      "missing": {{ token_missing | tojson if token_missing is defined else false }},
+      "malformed": {{ token_malformed | tojson if token_malformed is defined else false }}
+    },
+    "session_status": {
+      "expired": {{ session_expired | tojson if session_expired is defined else false }},
+      "invalid": {{ session_invalid | tojson if session_invalid is defined else false }},
+      "missing": {{ session_missing | tojson if session_missing is defined else false }},
+      "csrf_failure": {{ csrf_failure | tojson if csrf_failure is defined else false }}
+    }
+  },
+  "auth0_context": {
+    "domain": {{ config.AUTH0_DOMAIN | tojson if config.AUTH0_DOMAIN else null }},
+    "client_id": {{ config.AUTH0_CLIENT_ID | tojson if config.AUTH0_CLIENT_ID else null }},
+    "error_code": {{ auth0_error.get('error') | tojson if auth0_error and auth0_error.get('error') else null }},
+    "error_description": {{ auth0_error.get('error_description') | tojson if auth0_error and auth0_error.get('error_description') else null }},
+    "error_uri": {{ auth0_error.get('error_uri') | tojson if auth0_error and auth0_error.get('error_uri') else null }},
+    "state": {{ auth0_error.get('state') | tojson if auth0_error and auth0_error.get('state') else null }}
+  },
+  "jwt_context": {
+    "algorithm": {{ jwt_algorithm | tojson if jwt_algorithm else "RS256" | tojson }},
+    "issuer": {{ jwt_issuer | tojson if jwt_issuer else null }},
+    "audience": {{ jwt_audience | tojson if jwt_audience else null }},
+    "error_type": {{ jwt_error_type | tojson if jwt_error_type else null }},
+    "error_message": {{ jwt_error | tojson if jwt_error else null }},
+    "token_type": {{ token_type | tojson if token_type else "Bearer" | tojson }},
+    "expires_at": {{ token_expires_at | tojson if token_expires_at else null }},
+    "issued_at": {{ token_issued_at | tojson if token_issued_at else null }}
+  },
+  "flask_login_context": {
+    "session_protection": {{ session_protection_level | tojson if session_protection_level else "basic" | tojson }},
+    "remember_me": {{ remember_me_active | tojson if remember_me_active is defined else false }},
+    "fresh_login_required": {{ fresh_login_required | tojson if fresh_login_required is defined else false }},
+    "login_manager_configured": {{ login_manager_configured | tojson if login_manager_configured is defined else true }},
+    "user_loader_error": {{ user_loader_error | tojson if user_loader_error else null }},
+    "session_cookie_name": {{ config.SESSION_COOKIE_NAME | tojson if config.SESSION_COOKIE_NAME else "session" | tojson }}
+  },
+  "authentication_flows": {
+    "login_url": {{ login_url | tojson if login_url else "/login" | tojson }},
+    "auth0_login_url": {{ auth0_login_url | tojson if auth0_login_url else null }},
+    "token_refresh_url": {{ token_refresh_url | tojson if token_refresh_url else "/auth/refresh" | tojson }},
+    "logout_url": {{ logout_url | tojson if logout_url else "/logout" | tojson }},
+    "supported_methods": {{ supported_auth_methods | tojson if supported_auth_methods else ["session", "jwt", "auth0"] | tojson }},
+    "oauth_providers": {{ oauth_providers | tojson if oauth_providers else ["auth0"] | tojson }}
+  },
+  "security_context": {
+    "authentication_attempt": {
+      "timestamp": "{{ moment().utc().isoformat() if moment else '' }}",
+      "source_ip": "{{ request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr) or '' }}",
+      "user_agent": "{{ request.headers.get('User-Agent', '') | truncate(255) }}",
+      "referer": "{{ request.headers.get('Referer', '') | truncate(255) }}",
+      "request_path": "{{ request.path or '' }}",
+      "request_method": "{{ request.method or '' }}"
+    },
+    "failure_analysis": {
+      "failure_type": {{ failure_type | tojson if failure_type else "authentication_required" | tojson }},
+      "risk_level": {{ risk_level | tojson if risk_level else "low" | tojson }},
+      "suspicious_activity": {{ suspicious_activity | tojson if suspicious_activity is defined else false }},
+      "rate_limit_triggered": {{ rate_limit_triggered | tojson if rate_limit_triggered is defined else false }},
+      "brute_force_detected": {{ brute_force_detected | tojson if brute_force_detected is defined else false }}
+    },
+    "monitoring": {
+      "alert_generated": {{ alert_generated | tojson if alert_generated is defined else false }},
+      "incident_logged": true,
+      "security_event_id": {{ security_event_id | tojson if security_event_id else null }},
+      "correlation_with_previous_attempts": {{ correlation_attempts | tojson if correlation_attempts else null }}
+    }
+  },
+  "client_guidance": {
+    "next_steps": [
+      {%- if token_expired -%}
+      "Refresh your access token using the refresh token",
+      "Re-authenticate if refresh token is also expired"
+      {%- elif token_invalid -%}
+      "Obtain a new access token through authentication",
+      "Verify token format and signing algorithm"
+      {%- elif session_expired -%}
+      "Navigate to the login page to establish a new session",
+      "Clear browser cookies and try again"
+      {%- elif auth0_error -%}
+      "Check Auth0 configuration and try again",
+      "Contact support if Auth0 errors persist"
+      {%- else -%}
+      "Provide valid authentication credentials",
+      "Use supported authentication methods"
+      {%- endif -%}
+    ],
+    "authentication_requirements": {
+      "methods_accepted": {{ supported_auth_methods | tojson if supported_auth_methods else ["session", "jwt", "auth0"] | tojson }},
+      "token_location": {{ token_locations | tojson if token_locations else ["headers", "cookies"] | tojson }},
+      "csrf_protection": {{ csrf_protection_enabled | tojson if csrf_protection_enabled is defined else true }},
+      "secure_cookies_required": {{ secure_cookies_required | tojson if secure_cookies_required is defined else true }}
+    }
+  }
+}
+{%- endblock -%}
+
+{%- block api_version -%}1.0{%- endblock -%}
+
+{%- block support_contact -%}support@company.com{%- endblock -%}
+
+{%- block documentation_url -%}https://docs.company.com/api/errors/401-unauthorized{%- endblock -%}
+
+{%- block help_text -%}
+{%- if token_expired -%}
+Your access token has expired. Please refresh your token or log in again to continue accessing this resource.
+{%- elif token_invalid -%}
+The provided access token is invalid. Please obtain a new token through the authentication process.
+{%- elif session_expired -%}
+Your session has expired for security reasons. Please log in again to establish a new authenticated session.
+{%- elif auth0_error -%}
+Authentication failed through the identity provider. Please try logging in again or contact support if the issue persists.
+{%- else -%}
+Authentication is required to access this resource. Please log in with valid credentials or provide a valid access token.
+{%- endif -%}
+{%- endblock -%}
+
+{%- if config.DEBUG -%}
+{%- block debug_variables -%}
+{
+  "authentication_debug": {
+    "auth_header": {{ request.headers.get('Authorization', 'Not provided') | tojson }},
+    "cookie_names": {{ request.cookies.keys() | list | tojson }},
+    "session_data": {{ dict(session) | tojson if session else {} }},
+    "flask_login_user": {{ current_user.__dict__ | tojson if current_user and hasattr(current_user, '__dict__') else null }},
+    "jwt_header": {{ jwt_header | tojson if jwt_header else null }},
+    "jwt_payload": {{ jwt_payload | tojson if jwt_payload else null }},
+    "auth0_config": {
+      "domain_configured": {{ (config.AUTH0_DOMAIN is not none) | tojson }},
+      "client_id_configured": {{ (config.AUTH0_CLIENT_ID is not none) | tojson }},
+      "algorithms": {{ config.AUTH0_ALGORITHMS | tojson if config.AUTH0_ALGORITHMS else ["RS256"] | tojson }}
+    }
+  },
+  "flask_context": {
+    "login_manager": {{ login_manager_debug_info | tojson if login_manager_debug_info else {} }},
+    "session_interface": {{ session_interface_info | tojson if session_interface_info else {} }},
+    "request_context": {
+      "blueprint": "{{ request.blueprint or '' }}",
+      "endpoint": "{{ request.endpoint or '' }}",
+      "view_function": "{{ request.url_rule.endpoint if request.url_rule else '' }}",
+      "before_request_funcs": {{ before_request_debug | tojson if before_request_debug else [] }}
+    }
+  },
+  "security_debug": {
+    "csrf_token": {{ csrf_token | tojson if csrf_token else null }},
+    "csrf_valid": {{ csrf_valid | tojson if csrf_valid is defined else null }},
+    "rate_limit_status": {{ rate_limit_status | tojson if rate_limit_status else {} }},
+    "security_headers": {{ security_headers_debug | tojson if security_headers_debug else {} }},
+    "authentication_timing": {
+      "total_auth_time_ms": {{ auth_timing_ms | tojson if auth_timing_ms else null }},
+      "token_validation_time_ms": {{ token_validation_ms | tojson if token_validation_ms else null }},
+      "session_lookup_time_ms": {{ session_lookup_ms | tojson if session_lookup_ms else null }}
+    }
+  }
+}
+{%- endblock -%}
+
+{%- block debug_request_data -%}
+{
+  "request_headers": {
+    "authorization": "{{ request.headers.get('Authorization', 'Not provided') | truncate(50) + '...' if request.headers.get('Authorization') and request.headers.get('Authorization')|length > 50 else request.headers.get('Authorization', 'Not provided') }}",
+    "cookie": "{{ request.headers.get('Cookie', 'Not provided') | truncate(100) + '...' if request.headers.get('Cookie') and request.headers.get('Cookie')|length > 100 else request.headers.get('Cookie', 'Not provided') }}",
+    "x_requested_with": "{{ request.headers.get('X-Requested-With', 'Not provided') }}",
+    "content_type": "{{ request.headers.get('Content-Type', 'Not provided') }}",
+    "accept": "{{ request.headers.get('Accept', 'Not provided') }}"
+  },
+  "environment_variables": {
+    "auth0_configured": {{ (config.AUTH0_DOMAIN and config.AUTH0_CLIENT_ID) | tojson }},
+    "jwt_secret_configured": {{ (config.JWT_SECRET_KEY is not none) | tojson }},
+    "session_secret_configured": {{ (config.SECRET_KEY is not none) | tojson }},
+    "flask_env": "{{ config.ENV or 'unknown' }}",
+    "debug_mode": {{ config.DEBUG | tojson }}
+  },
+  "authentication_config": {
+    "session_cookie_secure": {{ config.SESSION_COOKIE_SECURE | tojson if config.SESSION_COOKIE_SECURE is defined else null }},
+    "session_cookie_httponly": {{ config.SESSION_COOKIE_HTTPONLY | tojson if config.SESSION_COOKIE_HTTPONLY is defined else null }},
+    "session_cookie_samesite": {{ config.SESSION_COOKIE_SAMESITE | tojson if config.SESSION_COOKIE_SAMESITE is defined else null }},
+    "permanent_session_lifetime": {{ config.PERMANENT_SESSION_LIFETIME | string if config.PERMANENT_SESSION_LIFETIME else null }},
+    "jwt_token_location": {{ config.JWT_TOKEN_LOCATION | tojson if config.JWT_TOKEN_LOCATION else null }},
+    "jwt_cookie_csrf_protect": {{ config.JWT_COOKIE_CSRF_PROTECT | tojson if config.JWT_COOKIE_CSRF_PROTECT is defined else null }}
+  }
+}
+{%- endblock -%}
+{%- endif -%}
+
+{# 
+Authentication Error Template Documentation:
+
+Purpose:
+This template provides standardized 401 Unauthorized error responses with comprehensive
+authentication failure context, supporting Auth0 Python SDK integration, Flask-Login
+session management, and JWT token validation as specified in Section 6.4.1.
+
+Key Features:
+1. Auth0 Integration Context:
+   - Auth0 Python SDK 4.9.0 integration with identity management requirements
+   - Auth0 domain, client ID, and error context for debugging
+   - Identity provider authentication error handling and user guidance
+   - OAuth flow support with Auth0 login URL redirection
+
+2. JWT Token Validation:
+   - Comprehensive JWT token validation error formatting
+   - Token expiration, invalidity, and malformation detection
+   - Algorithm, issuer, and audience validation context
+   - Token refresh guidance and URL provision
+
+3. Flask-Login Session Management:
+   - Session expiration and invalidity detection
+   - CSRF protection failure handling
+   - Remember me functionality status
+   - Fresh login requirement indication
+
+4. Security Monitoring Integration:
+   - Real-time security monitoring per Section 6.4.6.1
+   - Authentication failure logging with detailed context
+   - Suspicious activity detection and correlation
+   - Rate limiting and brute force detection integration
+
+Template Usage in Flask Blueprints:
+
+from flask import render_template
+from flask_jwt_extended import jwt_required, JWTManager
+from flask_login import login_required
+
+@blueprint.route('/protected-resource')
+@jwt_required()
+def jwt_protected_endpoint():
+    return jsonify({'data': 'jwt protected content'})
+
+@blueprint.route('/session-protected')
+@login_required
+def session_protected_endpoint():
+    return jsonify({'data': 'session protected content'})
+
+# Error handler for 401 responses
+@blueprint.errorhandler(401)
+def handle_unauthorized(error):
+    # Determine authentication context
+    auth_context = {
+        'auth_failure_reason': getattr(error, 'description', None),
+        'token_expired': getattr(error, 'token_expired', False),
+        'token_invalid': getattr(error, 'token_invalid', False),
+        'session_expired': getattr(error, 'session_expired', False),
+        'auth_method': getattr(error, 'auth_method', None),
+        'auth0_error': getattr(error, 'auth0_error', None),
+        'jwt_error': getattr(error, 'jwt_error', None)
+    }
+    
+    return render_template('errors/401.json', **auth_context), 401, {
+        'Content-Type': 'application/json',
+        'WWW-Authenticate': 'Bearer realm="API"'
+    }
+
+Auth0 Integration Example:
+
+from auth0.authentication import Users
+from auth0.exceptions import Auth0Error
+
+class Auth0Service:
+    def validate_token(self, token):
+        try:
+            # Validate token with Auth0
+            return self.auth0_client.userinfo(token)
+        except Auth0Error as e:
+            # Raise 401 with Auth0 context
+            error = UnauthorizedError(
+                auth_method='auth0',
+                auth0_error={
+                    'error': e.error_code,
+                    'error_description': e.message
+                }
+            )
+            raise error
+
+JWT Token Validation Example:
+
+from flask_jwt_extended import verify_jwt_in_request
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    return render_template('errors/401.json',
+        token_expired=True,
+        auth_method='jwt',
+        jwt_error='Token has expired',
+        token_expires_at=jwt_payload.get('exp')
+    ), 401
+
+@jwt.invalid_token_loader
+def invalid_token_callback(error):
+    return render_template('errors/401.json',
+        token_invalid=True,
+        auth_method='jwt',
+        jwt_error=str(error)
+    ), 401
+
+Flask-Login Integration Example:
+
+from flask_login import LoginManager
+
+@login_manager.unauthorized_handler
+def unauthorized_callback():
+    return render_template('errors/401.json',
+        session_expired=True,
+        auth_method='session',
+        session_error='Login required'
+    ), 401
+
+Security Monitoring Integration:
+- All 401 errors automatically generate security audit events
+- Integration with CloudWatch Logs and Sentry for real-time alerting
+- Authentication failure patterns tracked for security analysis
+- Brute force detection and rate limiting integration
+- Suspicious activity correlation with security monitoring systems
+
+API Contract Compliance:
+- Maintains consistent error response structure per Section 4.3.1.4
+- JSON response formatting compatible with existing client applications
+- HTTP status code preservation with enhanced authentication context
+- Template inheritance ensuring consistent error handling patterns
+
+Multi-Authentication Method Support:
+- Session-based authentication via Flask-Login
+- JWT token authentication with comprehensive validation
+- Auth0 OAuth2/OIDC integration for identity provider authentication
+- Hybrid authentication flows supporting multiple concurrent methods
+
+This template ensures comprehensive authentication error handling while maintaining
+security best practices and providing detailed context for troubleshooting and
+authentication flow guidance across the Flask application architecture.
+#}
