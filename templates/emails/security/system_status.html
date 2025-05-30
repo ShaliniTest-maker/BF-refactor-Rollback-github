@@ -1,0 +1,652 @@
+{% extends "emails/base/layout.html" %}
+
+{# Security System Status Report Email Template #}
+{# Comprehensive security posture assessment and monitoring dashboard data #}
+{# Supports both executive summary and detailed technical security metrics #}
+
+{% set email_title = "Security System Status Report" %}
+{% set email_subject = security_subject or ("Security Status Report - " + (report_period or "Weekly Summary")) %}
+
+{% block email_main_content %}
+<!-- Security Status Report Header -->
+<div class="security-header" style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 25px; border-radius: 8px; margin-bottom: 30px; text-align: center;">
+    <h1 style="margin: 0 0 10px 0; font-size: 28px; font-weight: 700;">
+        🛡️ Security System Status Report
+    </h1>
+    <p style="margin: 0; font-size: 16px; opacity: 0.9;">
+        Comprehensive Security Posture Assessment for {{ report_period or "Current Period" }}
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.8;">
+        Generated: {{ report_timestamp.strftime('%B %d, %Y at %I:%M %p %Z') if report_timestamp else 'N/A' }}
+    </p>
+</div>
+
+<!-- Executive Security Summary -->
+<div class="executive-summary" style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 25px; margin-bottom: 30px;">
+    <h2 style="margin: 0 0 20px 0; color: #2c3e50; font-size: 22px; font-weight: 600;">
+        📊 Executive Security Summary
+    </h2>
+    
+    <!-- Security Score Overview -->
+    <div class="security-score-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 25px;">
+        <!-- Overall Security Score -->
+        <div class="metric-card" style="background: white; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; text-align: center;">
+            <div class="metric-value" style="font-size: 32px; font-weight: 700; margin-bottom: 8px; color: {% if overall_security_score >= 90 %}#28a745{% elif overall_security_score >= 70 %}#ffc107{% else %}#dc3545{% endif %};">
+                {{ overall_security_score or 'N/A' }}{% if overall_security_score %}/100{% endif %}
+            </div>
+            <div class="metric-label" style="font-size: 14px; color: #6c757d; font-weight: 500;">
+                Overall Security Score
+            </div>
+            {% if security_score_trend %}
+            <div class="metric-trend" style="font-size: 12px; margin-top: 5px; color: {% if security_score_trend > 0 %}#28a745{% elif security_score_trend < 0 %}#dc3545{% else %}#6c757d{% endif %};">
+                {% if security_score_trend > 0 %}↗️{% elif security_score_trend < 0 %}↘️{% else %}➡️{% endif %} {{ security_score_trend }}% vs last period
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Authentication Success Rate -->
+        <div class="metric-card" style="background: white; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; text-align: center;">
+            <div class="metric-value" style="font-size: 32px; font-weight: 700; margin-bottom: 8px; color: {% if auth_success_rate >= 98 %}#28a745{% elif auth_success_rate >= 95 %}#ffc107{% else %}#dc3545{% endif %};">
+                {{ "%.1f"|format(auth_success_rate) if auth_success_rate else 'N/A' }}{% if auth_success_rate %}%{% endif %}
+            </div>
+            <div class="metric-label" style="font-size: 14px; color: #6c757d; font-weight: 500;">
+                Authentication Success Rate
+            </div>
+            {% if auth_success_trend %}
+            <div class="metric-trend" style="font-size: 12px; margin-top: 5px; color: {% if auth_success_trend >= 0 %}#28a745{% else %}#dc3545{% endif %};">
+                {% if auth_success_trend >= 0 %}↗️{% else %}↘️{% endif %} {{ "%.1f"|format(auth_success_trend) }}% vs last period
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Security Incidents -->
+        <div class="metric-card" style="background: white; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; text-align: center;">
+            <div class="metric-value" style="font-size: 32px; font-weight: 700; margin-bottom: 8px; color: {% if security_incidents_count == 0 %}#28a745{% elif security_incidents_count <= 2 %}#ffc107{% else %}#dc3545{% endif %};">
+                {{ security_incidents_count or 0 }}
+            </div>
+            <div class="metric-label" style="font-size: 14px; color: #6c757d; font-weight: 500;">
+                Security Incidents
+            </div>
+            {% if security_incidents_resolved %}
+            <div class="metric-detail" style="font-size: 12px; margin-top: 5px; color: #28a745;">
+                ✅ {{ security_incidents_resolved }} resolved
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Compliance Status -->
+        <div class="metric-card" style="background: white; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; text-align: center;">
+            <div class="metric-value" style="font-size: 32px; font-weight: 700; margin-bottom: 8px; color: {% if compliance_score >= 95 %}#28a745{% elif compliance_score >= 85 %}#ffc107{% else %}#dc3545{% endif %};">
+                {{ "%.0f"|format(compliance_score) if compliance_score else 'N/A' }}{% if compliance_score %}%{% endif %}
+            </div>
+            <div class="metric-label" style="font-size: 14px; color: #6c757d; font-weight: 500;">
+                Compliance Score
+            </div>
+            <div class="metric-detail" style="font-size: 12px; margin-top: 5px; color: #6c757d;">
+                GDPR • SOC 2 • ISO 27001
+            </div>
+        </div>
+    </div>
+    
+    <!-- Security Status Indicators -->
+    <div class="status-indicators" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+        <!-- Container Security Status -->
+        <div class="status-item" style="display: flex; align-items: center; padding: 15px; background: white; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div class="status-icon" style="width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; background-color: {% if container_security_status == 'healthy' %}#28a745{% elif container_security_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %};"></div>
+            <div class="status-content">
+                <div style="font-weight: 600; font-size: 14px; color: #495057;">Container Security</div>
+                <div style="font-size: 12px; color: #6c757d;">{{ container_security_details or 'All containers secured' }}</div>
+            </div>
+        </div>
+        
+        <!-- WSGI Server Security Status -->
+        <div class="status-item" style="display: flex; align-items: center; padding: 15px; background: white; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div class="status-icon" style="width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; background-color: {% if wsgi_security_status == 'healthy' %}#28a745{% elif wsgi_security_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %};"></div>
+            <div class="status-content">
+                <div style="font-weight: 600; font-size: 14px; color: #495057;">WSGI Server Security</div>
+                <div style="font-size: 12px; color: #6c757d;">{{ wsgi_security_details or 'Gunicorn workers secured' }}</div>
+            </div>
+        </div>
+        
+        <!-- Database Security Status -->
+        <div class="status-item" style="display: flex; align-items: center; padding: 15px; background: white; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div class="status-icon" style="width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; background-color: {% if database_security_status == 'healthy' %}#28a745{% elif database_security_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %};"></div>
+            <div class="status-content">
+                <div style="font-weight: 600; font-size: 14px; color: #495057;">Database Security</div>
+                <div style="font-size: 12px; color: #6c757d;">{{ database_security_details or 'PostgreSQL encrypted & secured' }}</div>
+            </div>
+        </div>
+        
+        <!-- Auth0 Integration Status -->
+        <div class="status-item" style="display: flex; align-items: center; padding: 15px; background: white; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div class="status-icon" style="width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; background-color: {% if auth0_security_status == 'healthy' %}#28a745{% elif auth0_security_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %};"></div>
+            <div class="status-content">
+                <div style="font-weight: 600; font-size: 14px; color: #495057;">Auth0 Integration</div>
+                <div style="font-size: 12px; color: #6c757d;">{{ auth0_security_details or 'Authentication service operational' }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Security Metrics Section -->
+<div class="detailed-metrics" style="margin-bottom: 30px;">
+    <h2 style="margin: 0 0 25px 0; color: #2c3e50; font-size: 22px; font-weight: 600;">
+        📈 Detailed Security Metrics
+    </h2>
+    
+    <!-- Authentication & Authorization Metrics -->
+    <div class="metrics-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 20px;">
+        <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+            <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #495057;">🔐 Authentication & Authorization</h3>
+        </div>
+        <div class="section-content" style="padding: 20px;">
+            <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                        {{ "{:,}".format(total_auth_attempts) if total_auth_attempts else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Total Authentication Attempts</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #28a745; margin-bottom: 5px;">
+                        {{ "{:,}".format(successful_auths) if successful_auths else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Successful Authentications</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #dc3545; margin-bottom: 5px;">
+                        {{ "{:,}".format(failed_auths) if failed_auths else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Failed Authentication Attempts</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #ffc107; margin-bottom: 5px;">
+                        {{ "{:,}".format(authorization_violations) if authorization_violations else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Authorization Violations</div>
+                </div>
+            </div>
+            
+            <!-- JWT Token Security Metrics -->
+            {% if jwt_metrics %}
+            <div class="jwt-metrics" style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-top: 15px;">
+                <h4 style="margin: 0 0 10px 0; font-size: 16px; font-weight: 600; color: #495057;">JWT Token Security</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ jwt_metrics.active_tokens or 'N/A' }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Active JWT Tokens</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ jwt_metrics.revoked_tokens or 'N/A' }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Revoked Tokens</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ "%.1f"|format(jwt_metrics.avg_token_age) if jwt_metrics.avg_token_age else 'N/A' }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Avg Token Age (hours)</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Infrastructure Security Metrics -->
+    <div class="metrics-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 20px;">
+        <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+            <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #495057;">🏗️ Infrastructure Security</h3>
+        </div>
+        <div class="section-content" style="padding: 20px;">
+            <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                <!-- Container Security Metrics -->
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                        {{ container_metrics.healthy_containers if container_metrics else 'N/A' }}/{{ container_metrics.total_containers if container_metrics else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Healthy Containers</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                        {{ container_metrics.security_scans_passed if container_metrics else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Security Scans Passed</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: {% if container_metrics and container_metrics.vulnerabilities_found == 0 %}#28a745{% elif container_metrics and container_metrics.vulnerabilities_found <= 3 %}#ffc107{% else %}#dc3545{% endif %}; margin-bottom: 5px;">
+                        {{ container_metrics.vulnerabilities_found if container_metrics else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Vulnerabilities Found</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                        {{ "%.1f"|format(wsgi_metrics.avg_response_time) if wsgi_metrics and wsgi_metrics.avg_response_time else 'N/A' }}ms
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">WSGI Avg Response Time</div>
+                </div>
+            </div>
+            
+            <!-- AWS GuardDuty Findings -->
+            {% if guardduty_findings %}
+            <div class="guardduty-section" style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-top: 15px;">
+                <h4 style="margin: 0 0 10px 0; font-size: 16px; font-weight: 600; color: #495057;">🔍 AWS GuardDuty Findings</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #dc3545;">{{ guardduty_findings.high_severity or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">High Severity</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #ffc107;">{{ guardduty_findings.medium_severity or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Medium Severity</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #28a745;">{{ guardduty_findings.low_severity or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Low Severity</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ guardduty_findings.resolved or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Resolved</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Database Security & Connection Pool Health -->
+    <div class="metrics-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 20px;">
+        <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+            <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #495057;">🗄️ Database Security & Performance</h3>
+        </div>
+        <div class="section-content" style="padding: 20px;">
+            <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: {% if db_metrics and db_metrics.encryption_status == 'enabled' %}#28a745{% else %}#dc3545{% endif %}; margin-bottom: 5px;">
+                        {{ db_metrics.encryption_status.title() if db_metrics and db_metrics.encryption_status else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Database Encryption</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                        {{ db_metrics.active_connections if db_metrics else 'N/A' }}/{{ db_metrics.max_connections if db_metrics else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Connection Pool Usage</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                        {{ "%.1f"|format(db_metrics.avg_query_time) if db_metrics and db_metrics.avg_query_time else 'N/A' }}ms
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Average Query Time</div>
+                </div>
+                <div class="metric-item">
+                    <div style="font-size: 24px; font-weight: 700; color: {% if db_metrics and db_metrics.failed_connections == 0 %}#28a745{% elif db_metrics and db_metrics.failed_connections <= 5 %}#ffc107{% else %}#dc3545{% endif %}; margin-bottom: 5px;">
+                        {{ db_metrics.failed_connections if db_metrics else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; color: #6c757d;">Failed Connections</div>
+                </div>
+            </div>
+            
+            <!-- SQL Injection Attempts -->
+            {% if sql_security_metrics %}
+            <div class="sql-security" style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-top: 15px;">
+                <h4 style="margin: 0 0 10px 0; font-size: 16px; font-weight: 600; color: #495057;">🛡️ SQL Security Monitoring</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: {% if sql_security_metrics.injection_attempts == 0 %}#28a745{% else %}#dc3545{% endif %};">{{ sql_security_metrics.injection_attempts or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">SQL Injection Attempts</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ sql_security_metrics.blocked_queries or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Queries Blocked</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ sql_security_metrics.suspicious_patterns or 0 }}</div>
+                        <div style="font-size: 12px; color: #6c757d;">Suspicious Patterns</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Compliance Status Section -->
+<div class="compliance-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 30px;">
+    <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 22px; font-weight: 600; color: #2c3e50;">📋 Compliance Status</h2>
+    </div>
+    <div class="section-content" style="padding: 20px;">
+        <div class="compliance-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+            <!-- GDPR Compliance -->
+            <div class="compliance-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 20px;">
+                <div class="compliance-header" style="display: flex; align-items: center; margin-bottom: 15px;">
+                    <div class="compliance-icon" style="width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; background-color: {% if compliance_metrics and compliance_metrics.gdpr_score >= 95 %}#28a745{% elif compliance_metrics and compliance_metrics.gdpr_score >= 85 %}#ffc107{% else %}#dc3545{% endif %};"></div>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #495057;">GDPR Compliance</h3>
+                </div>
+                <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 10px;">
+                    {{ "%.0f"|format(compliance_metrics.gdpr_score) if compliance_metrics and compliance_metrics.gdpr_score else 'N/A' }}{% if compliance_metrics and compliance_metrics.gdpr_score %}%{% endif %}
+                </div>
+                <div style="font-size: 14px; color: #6c757d; margin-bottom: 10px;">
+                    Data Protection & Privacy
+                </div>
+                {% if compliance_metrics and compliance_metrics.gdpr_details %}
+                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #6c757d;">
+                    {% for detail in compliance_metrics.gdpr_details %}
+                    <li>{{ detail }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            
+            <!-- SOC 2 Compliance -->
+            <div class="compliance-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 20px;">
+                <div class="compliance-header" style="display: flex; align-items: center; margin-bottom: 15px;">
+                    <div class="compliance-icon" style="width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; background-color: {% if compliance_metrics and compliance_metrics.soc2_score >= 95 %}#28a745{% elif compliance_metrics and compliance_metrics.soc2_score >= 85 %}#ffc107{% else %}#dc3545{% endif %};"></div>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #495057;">SOC 2 Compliance</h3>
+                </div>
+                <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 10px;">
+                    {{ "%.0f"|format(compliance_metrics.soc2_score) if compliance_metrics and compliance_metrics.soc2_score else 'N/A' }}{% if compliance_metrics and compliance_metrics.soc2_score %}%{% endif %}
+                </div>
+                <div style="font-size: 14px; color: #6c757d; margin-bottom: 10px;">
+                    Security Controls & Processes
+                </div>
+                {% if compliance_metrics and compliance_metrics.soc2_details %}
+                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #6c757d;">
+                    {% for detail in compliance_metrics.soc2_details %}
+                    <li>{{ detail }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            
+            <!-- ISO 27001 Compliance -->
+            <div class="compliance-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 20px;">
+                <div class="compliance-header" style="display: flex; align-items: center; margin-bottom: 15px;">
+                    <div class="compliance-icon" style="width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; background-color: {% if compliance_metrics and compliance_metrics.iso27001_score >= 95 %}#28a745{% elif compliance_metrics and compliance_metrics.iso27001_score >= 85 %}#ffc107{% else %}#dc3545{% endif %};"></div>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #495057;">ISO 27001 Compliance</h3>
+                </div>
+                <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 10px;">
+                    {{ "%.0f"|format(compliance_metrics.iso27001_score) if compliance_metrics and compliance_metrics.iso27001_score else 'N/A' }}{% if compliance_metrics and compliance_metrics.iso27001_score %}%{% endif %}
+                </div>
+                <div style="font-size: 14px; color: #6c757d; margin-bottom: 10px;">
+                    Information Security Management
+                </div>
+                {% if compliance_metrics and compliance_metrics.iso27001_details %}
+                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #6c757d;">
+                    {% for detail in compliance_metrics.iso27001_details %}
+                    <li>{{ detail }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Compliance Audit Trail -->
+        {% if compliance_audit_trail %}
+        <div class="audit-trail" style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-top: 20px;">
+            <h4 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #495057;">📝 Recent Compliance Activities</h4>
+            <div style="max-height: 150px; overflow-y: auto;">
+                {% for activity in compliance_audit_trail[:5] %}
+                <div style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-size: 13px; display: flex; justify-content: space-between;">
+                    <span style="color: #495057;">{{ activity.description }}</span>
+                    <span style="color: #6c757d;">{{ activity.timestamp.strftime('%m/%d %H:%M') if activity.timestamp else '' }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Threat Detection & Security Incidents -->
+{% if security_incidents or threat_detection_summary %}
+<div class="threats-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 30px;">
+    <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 22px; font-weight: 600; color: #2c3e50;">🚨 Threat Detection & Incidents</h2>
+    </div>
+    <div class="section-content" style="padding: 20px;">
+        {% if threat_detection_summary %}
+        <div class="threat-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+            <div class="threat-metric">
+                <div style="font-size: 24px; font-weight: 700; color: {% if threat_detection_summary.threats_blocked == 0 %}#28a745{% else %}#dc3545{% endif %}; margin-bottom: 5px;">
+                    {{ threat_detection_summary.threats_blocked or 0 }}
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">Threats Blocked</div>
+            </div>
+            <div class="threat-metric">
+                <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                    {{ threat_detection_summary.suspicious_ips or 0 }}
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">Suspicious IPs</div>
+            </div>
+            <div class="threat-metric">
+                <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                    {{ threat_detection_summary.malware_detected or 0 }}
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">Malware Detected</div>
+            </div>
+            <div class="threat-metric">
+                <div style="font-size: 24px; font-weight: 700; color: #495057; margin-bottom: 5px;">
+                    {{ threat_detection_summary.ddos_attempts or 0 }}
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">DDoS Attempts</div>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if security_incidents %}
+        <div class="incidents-list" style="background-color: #f8f9fa; padding: 15px; border-radius: 6px;">
+            <h4 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #495057;">Recent Security Incidents</h4>
+            {% for incident in security_incidents[:3] %}
+            <div style="background: white; padding: 15px; border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-weight: 600; color: {% if incident.severity == 'critical' %}#dc3545{% elif incident.severity == 'high' %}#fd7e14{% elif incident.severity == 'medium' %}#ffc107{% else %}#28a745{% endif %};">
+                        {{ incident.title }}
+                    </span>
+                    <span style="font-size: 12px; color: #6c757d; margin-left: auto;">
+                        {{ incident.timestamp.strftime('%m/%d/%Y %H:%M') if incident.timestamp else '' }}
+                    </span>
+                </div>
+                <div style="font-size: 14px; color: #6c757d; margin-bottom: 8px;">
+                    {{ incident.description }}
+                </div>
+                <div style="font-size: 12px; color: {% if incident.status == 'resolved' %}#28a745{% elif incident.status == 'investigating' %}#ffc107{% else %}#dc3545{% endif %};">
+                    Status: {{ incident.status.title() }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Monitoring Dashboard Status -->
+<div class="monitoring-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 30px;">
+    <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 22px; font-weight: 600; color: #2c3e50;">📊 Monitoring Dashboard Status</h2>
+    </div>
+    <div class="section-content" style="padding: 20px;">
+        <div class="monitoring-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+            <!-- Prometheus Metrics Status -->
+            <div class="monitoring-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; text-align: center;">
+                <div style="font-size: 18px; font-weight: 600; color: {% if prometheus_status == 'healthy' %}#28a745{% elif prometheus_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %}; margin-bottom: 8px;">
+                    {% if prometheus_status == 'healthy' %}✅{% elif prometheus_status == 'warning' %}⚠️{% else %}❌{% endif %} Prometheus
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">
+                    {{ prometheus_details or 'Metrics collection active' }}
+                </div>
+            </div>
+            
+            <!-- CloudWatch Status -->
+            <div class="monitoring-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; text-align: center;">
+                <div style="font-size: 18px; font-weight: 600; color: {% if cloudwatch_status == 'healthy' %}#28a745{% elif cloudwatch_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %}; margin-bottom: 8px;">
+                    {% if cloudwatch_status == 'healthy' %}✅{% elif cloudwatch_status == 'warning' %}⚠️{% else %}❌{% endif %} CloudWatch
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">
+                    {{ cloudwatch_details or 'AWS monitoring operational' }}
+                </div>
+            </div>
+            
+            <!-- Sentry Error Tracking -->
+            <div class="monitoring-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; text-align: center;">
+                <div style="font-size: 18px; font-weight: 600; color: {% if sentry_status == 'healthy' %}#28a745{% elif sentry_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %}; margin-bottom: 8px;">
+                    {% if sentry_status == 'healthy' %}✅{% elif sentry_status == 'warning' %}⚠️{% else %}❌{% endif %} Sentry
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">
+                    {{ sentry_details or 'Error tracking active' }}
+                </div>
+            </div>
+            
+            <!-- Flask MonitoringDashboard -->
+            <div class="monitoring-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; text-align: center;">
+                <div style="font-size: 18px; font-weight: 600; color: {% if flask_monitoring_status == 'healthy' %}#28a745{% elif flask_monitoring_status == 'warning' %}#ffc107{% else %}#dc3545{% endif %}; margin-bottom: 8px;">
+                    {% if flask_monitoring_status == 'healthy' %}✅{% elif flask_monitoring_status == 'warning' %}⚠️{% else %}❌{% endif %} Flask Monitor
+                </div>
+                <div style="font-size: 14px; color: #6c757d;">
+                    {{ flask_monitoring_details or 'Application monitoring active' }}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Alert Summary -->
+        {% if alert_summary %}
+        <div class="alert-summary" style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-top: 20px;">
+            <h4 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #495057;">🔔 Active Alerts Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+                <div>
+                    <div style="font-size: 18px; font-weight: 600; color: #dc3545;">{{ alert_summary.critical or 0 }}</div>
+                    <div style="font-size: 12px; color: #6c757d;">Critical Alerts</div>
+                </div>
+                <div>
+                    <div style="font-size: 18px; font-weight: 600; color: #ffc107;">{{ alert_summary.warning or 0 }}</div>
+                    <div style="font-size: 12px; color: #6c757d;">Warning Alerts</div>
+                </div>
+                <div>
+                    <div style="font-size: 18px; font-weight: 600; color: #17a2b8;">{{ alert_summary.info or 0 }}</div>
+                    <div style="font-size: 12px; color: #6c757d;">Info Alerts</div>
+                </div>
+                <div>
+                    <div style="font-size: 18px; font-weight: 600; color: #495057;">{{ alert_summary.total_alerts or 0 }}</div>
+                    <div style="font-size: 12px; color: #6c757d;">Total Active</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Recommendations & Next Steps -->
+<div class="recommendations-section" style="background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 30px;">
+    <div class="section-header" style="background-color: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 22px; font-weight: 600; color: #2c3e50;">💡 Security Recommendations</h2>
+    </div>
+    <div class="section-content" style="padding: 20px;">
+        {% if security_recommendations %}
+        <div class="recommendations-list">
+            {% for recommendation in security_recommendations %}
+            <div style="background-color: {% if recommendation.priority == 'high' %}#fff5f5{% elif recommendation.priority == 'medium' %}#fffbf0{% else %}#f0f9ff{% endif %}; border: 1px solid {% if recommendation.priority == 'high' %}#fed7d7{% elif recommendation.priority == 'medium' %}#feebc8{% else %}#bfdbfe{% endif %}; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 16px; margin-right: 8px;">
+                        {% if recommendation.priority == 'high' %}🔴{% elif recommendation.priority == 'medium' %}🟡{% else %}🔵{% endif %}
+                    </span>
+                    <span style="font-weight: 600; color: {% if recommendation.priority == 'high' %}#dc3545{% elif recommendation.priority == 'medium' %}#fd7e14{% else %}#0d6efd{% endif %};">
+                        {{ recommendation.title }}
+                    </span>
+                </div>
+                <div style="font-size: 14px; color: #495057; margin-bottom: 8px;">
+                    {{ recommendation.description }}
+                </div>
+                {% if recommendation.action_items %}
+                <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #6c757d;">
+                    {% for action in recommendation.action_items %}
+                    <li>{{ action }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 30px; color: #28a745;">
+            <div style="font-size: 48px; margin-bottom: 15px;">✅</div>
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">No Critical Security Recommendations</div>
+            <div style="font-size: 14px; color: #6c757d;">Your security posture is currently optimal.</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Footer Actions -->
+<div class="footer-actions" style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; text-align: center;">
+    <h3 style="margin: 0 0 15px 0; color: #495057; font-size: 18px; font-weight: 600;">📋 Actions & Resources</h3>
+    <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px;">
+        {% if security_dashboard_url %}
+        <a href="{{ security_dashboard_url }}" style="background-color: #007bff; color: white; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600; display: inline-block;">
+            View Security Dashboard
+        </a>
+        {% endif %}
+        {% if compliance_reports_url %}
+        <a href="{{ compliance_reports_url }}" style="background-color: #28a745; color: white; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600; display: inline-block;">
+            Compliance Reports
+        </a>
+        {% endif %}
+        {% if incident_management_url %}
+        <a href="{{ incident_management_url }}" style="background-color: #dc3545; color: white; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600; display: inline-block;">
+            Incident Management
+        </a>
+        {% endif %}
+        {% if monitoring_alerts_url %}
+        <a href="{{ monitoring_alerts_url }}" style="background-color: #ffc107; color: #212529; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600; display: inline-block;">
+            Monitoring Alerts
+        </a>
+        {% endif %}
+    </div>
+    
+    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6; font-size: 14px; color: #6c757d;">
+        <p style="margin: 0;">
+            This security status report is automatically generated from Prometheus metrics, CloudWatch data, 
+            Flask-MonitoringDashboard analytics, and AWS GuardDuty findings.
+        </p>
+        <p style="margin: 5px 0 0 0;">
+            For immediate security concerns, contact the security team at 
+            <a href="mailto:{{ security_email or 'security@company.com' }}" style="color: #007bff; text-decoration: none;">
+                {{ security_email or 'security@company.com' }}
+            </a>
+        </p>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block email_additional_content %}
+<!-- Technical Appendix for Technical Teams -->
+{% if show_technical_details %}
+<div class="technical-appendix" style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-top: 30px;">
+    <h3 style="margin: 0 0 20px 0; color: #495057; font-size: 18px; font-weight: 600;">🔧 Technical Appendix</h3>
+    
+    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #495057;">
+        <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">System Configuration</h4>
+        <div style="background: white; padding: 15px; border: 1px solid #dee2e6; border-radius: 4px; margin-bottom: 15px;">
+            <div>Flask Version: {{ flask_version or 'N/A' }}</div>
+            <div>Gunicorn Version: {{ gunicorn_version or 'N/A' }}</div>
+            <div>Python Version: {{ python_version or 'N/A' }}</div>
+            <div>Auth0 SDK Version: {{ auth0_version or 'N/A' }}</div>
+            <div>Container Runtime: {{ container_runtime or 'N/A' }}</div>
+            <div>Last Security Scan: {{ last_security_scan.strftime('%Y-%m-%d %H:%M:%S %Z') if last_security_scan else 'N/A' }}</div>
+        </div>
+        
+        {% if security_events_log %}
+        <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">Recent Security Events Log</h4>
+        <div style="background: white; padding: 15px; border: 1px solid #dee2e6; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+            {% for event in security_events_log[:10] %}
+            <div style="padding: 5px 0; border-bottom: 1px solid #f1f3f4; font-size: 11px;">
+                <span style="color: #6c757d;">[{{ event.timestamp.strftime('%m/%d %H:%M:%S') if event.timestamp else '' }}]</span>
+                <span style="color: {% if event.level == 'ERROR' %}#dc3545{% elif event.level == 'WARNING' %}#ffc107{% else %}#495057{% endif %};">{{ event.level }}</span>
+                <span style="color: #495057;">{{ event.message }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
