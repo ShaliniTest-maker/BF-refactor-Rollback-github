@@ -1,0 +1,122 @@
+{
+  "status": "success",
+  "timestamp": "{{ timestamp | default(moment().utc().format()) }}",
+  "request_id": "{{ request_id | default(g.request_id if g.request_id else uuid4()) }}",
+  "data": {
+    "items": [
+      {% for item in items -%}
+      {
+        {% if item.to_dict is defined -%}
+        {%- for key, value in item.to_dict().items() -%}
+        "{{ key }}": {% if value is string %}"{{ value | escape }}"{% elif value is none %}null{% elif value is boolean %}{{ value | lower }}{% elif value is number %}{{ value }}{% elif value is iterable and value is not string %}{{ value | tojson }}{% else %}"{{ value | string | escape }}"{% endif %}{% if not loop.last %},{% endif %}
+        {%- endfor -%}
+        {% else -%}
+        {%- for key, value in item.items() -%}
+        "{{ key }}": {% if value is string %}"{{ value | escape }}"{% elif value is none %}null{% elif value is boolean %}{{ value | lower }}{% elif value is number %}{{ value }}{% elif value is iterable and value is not string %}{{ value | tojson }}{% else %}"{{ value | string | escape }}"{% endif %}{% if not loop.last %},{% endif %}
+        {%- endfor -%}
+        {% endif -%}
+        {% if metadata and metadata.include_relationships and item.id is defined -%}
+        ,
+        "_links": {
+          "self": "{{ url_for(metadata.self_endpoint, id=item.id, _external=True) if metadata.self_endpoint else '#' }}",
+          {% if metadata.parent_endpoint -%}
+          "parent": "{{ url_for(metadata.parent_endpoint, _external=True) if metadata.parent_endpoint else '#' }}",
+          {% endif -%}
+          {% if metadata.related_endpoints -%}
+          {% for rel_name, rel_endpoint in metadata.related_endpoints.items() -%}
+          "{{ rel_name }}": "{{ url_for(rel_endpoint, id=item.id, _external=True) if rel_endpoint else '#' }}"{% if not loop.last %},{% endif %}
+          {% endfor -%}
+          {% endif -%}
+        }
+        {% endif -%}
+      }{% if not loop.last %},{% endif %}
+      {% endfor -%}
+    ],
+    "collection_metadata": {
+      "count": {{ collection.count | default(items | length) }},
+      "total_items": {{ collection.total | default(items | length) }},
+      {% if collection.has_pagination -%}
+      "total_pages": {{ collection.pages | default(1) }},
+      "current_page": {{ collection.page | default(1) }},
+      "per_page": {{ collection.per_page | default(20) }},
+      "has_next": {{ collection.has_next | default(false) | lower }},
+      "has_prev": {{ collection.has_prev | default(false) | lower }},
+      {% endif -%}
+      {% if collection.query_time -%}
+      "query_time_ms": {{ collection.query_time }},
+      {% endif -%}
+      "resource_type": "{{ collection.resource_type | default('collection') }}"
+    },
+    {% if sorting -%}
+    "sorting": {
+      "sort_by": "{{ sorting.sort_by | default('id') }}",
+      "sort_direction": "{{ sorting.sort_direction | default('asc') }}",
+      "available_sort_fields": {{ sorting.available_fields | default(['id', 'created_at', 'updated_at']) | tojson }}
+    },
+    {% endif -%}
+    {% if filtering -%}
+    "filtering": {
+      "active_filters": {{ filtering.active_filters | default({}) | tojson }},
+      "available_filters": {{ filtering.available_filters | default([]) | tojson }},
+      {% if filtering.search_query -%}
+      "search_query": "{{ filtering.search_query | escape }}",
+      {% endif -%}
+      "filter_count": {{ filtering.active_filters.keys() | list | length if filtering.active_filters else 0 }}
+    },
+    {% endif -%}
+    {% if collection.has_pagination -%}
+    "pagination": {
+      "links": {
+        {% if collection.has_prev -%}
+        "prev": "{{ url_for(request.endpoint, page=collection.prev_num, per_page=collection.per_page, **request.args.to_dict(flat=False)) if collection.prev_num else null }}",
+        {% endif -%}
+        {% if collection.has_next -%}
+        "next": "{{ url_for(request.endpoint, page=collection.next_num, per_page=collection.per_page, **request.args.to_dict(flat=False)) if collection.next_num else null }}",
+        {% endif -%}
+        "first": "{{ url_for(request.endpoint, page=1, per_page=collection.per_page, **request.args.to_dict(flat=False)) }}",
+        "last": "{{ url_for(request.endpoint, page=collection.pages, per_page=collection.per_page, **request.args.to_dict(flat=False)) if collection.pages else '#' }}"
+      },
+      "page_info": {
+        "current": {{ collection.page | default(1) }},
+        "total": {{ collection.pages | default(1) }},
+        "per_page": {{ collection.per_page | default(20) }},
+        "showing_from": {{ ((collection.page - 1) * collection.per_page + 1) if collection.page and collection.per_page and collection.count > 0 else 0 }},
+        "showing_to": {{ [collection.page * collection.per_page, collection.total] | min if collection.page and collection.per_page else collection.count | default(0) }}
+      }
+    },
+    {% endif -%}
+    "api_metadata": {
+      "endpoint": "{{ request.endpoint | default('unknown') }}",
+      "method": "{{ request.method | default('GET') }}",
+      "base_url": "{{ request.base_url }}",
+      {% if request.args -%}
+      "query_parameters": {{ request.args.to_dict() | tojson }},
+      {% endif -%}
+      "response_format": "application/json",
+      "api_version": "{{ api_version | default('1.0') }}"
+    }
+  },
+  {% if collection.count == 0 -%}
+  "message": "No items found matching the specified criteria",
+  {% else -%}
+  "message": "Collection retrieved successfully",
+  {% endif -%}
+  {% if warnings -%}
+  "warnings": {{ warnings | tojson }},
+  {% endif -%}
+  {% if debug_info and config.DEBUG -%}
+  "debug": {
+    "sql_queries": {{ debug_info.sql_queries | default([]) | tojson }},
+    "execution_time_ms": {{ debug_info.execution_time | default(0) }},
+    "memory_usage_mb": {{ debug_info.memory_usage | default(0) }}
+  },
+  {% endif -%}
+  "performance": {
+    "response_time_ms": {{ response_time | default(0) }},
+    "cache_status": "{{ cache_status | default('miss') }}",
+    {% if collection.query_time -%}
+    "database_query_time_ms": {{ collection.query_time }},
+    {% endif -%}
+    "serialization_time_ms": {{ serialization_time | default(0) }}
+  }
+}
