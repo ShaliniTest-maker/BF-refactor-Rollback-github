@@ -2,927 +2,833 @@
 Base Service Layer Implementation for Flask Application
 
 This module provides the foundational Service Layer pattern implementation for the Flask 3.1.1
-application, featuring dependency injection framework, SQLAlchemy session management, and 
-comprehensive type-safe database operations. The base service class establishes the architecture
-for business logic abstraction with enhanced testability through dependency injection patterns.
+application architecture, establishing dependency injection framework, SQLAlchemy session management,
+and common service functionality. The base service class serves as the foundation for all business
+logic services within the application, ensuring consistent database transaction handling, type safety,
+and enhanced testability.
 
 Key Features:
-- Dependency injection framework with SQLAlchemy session management
-- Type-safe database operations with comprehensive type annotations
-- Service Layer pattern implementation for business logic abstraction
-- Flask application factory pattern compatibility
-- Enhanced testability through dependency injection for Pytest fixtures
-- Transaction management with automatic rollback capabilities
-- Comprehensive error handling and logging integration
+- Dependency injection pattern with SQLAlchemy session management per Section 4.5.1.2
+- Type-safe database operations with comprehensive type annotations per Section 4.5.1.3
+- Service class structure implementing business logic abstraction per Section 4.5.1.2
+- Flask application factory pattern compatibility per Section 6.1.5
+- Enhanced testability through dependency injection for Pytest fixtures per Section 4.5.1.4
 
-Architecture:
-This implementation follows the Service Layer pattern as specified in Section 4.5.1.2 of the
-technical specification, providing clear separation between presentation, business logic, and
-data access layers within the Flask monolithic architecture.
+Architecture Benefits:
+- Clear separation of concerns between presentation, business logic, and data access layers
+- Comprehensive error handling and transaction management
+- Database session isolation and connection pooling optimization
+- Service-oriented design enabling modular business logic organization
+- Type-safe interface definitions for improved IDE support and static analysis
+
+Dependencies:
+- Flask-SQLAlchemy 3.1.1: Database ORM and session management
+- SQLAlchemy: Core database abstraction and type definitions
+- typing: Comprehensive type annotations for enhanced code clarity
+- abc: Abstract base class definitions for service contracts
+- contextlib: Context manager support for transaction handling
 """
-
-from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import (
-    Any, 
-    Dict, 
-    Generic, 
-    List, 
-    Optional, 
-    Protocol, 
-    Type, 
-    TypeVar, 
-    Union,
-    runtime_checkable,
-    ContextManager
+    Any, Dict, List, Optional, TypeVar, Generic, Protocol, Union,
+    Type, Callable, ClassVar, runtime_checkable, ContextManager
 )
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
 
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from sqlalchemy import and_, or_, func
-from flask import current_app, g
-from werkzeug.exceptions import BadRequest, NotFound, InternalServerError
+from flask import current_app, has_app_context
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
+from sqlalchemy.engine import Engine
+from sqlalchemy import event, text
 
+# Import database instance from models module
+from models import db
 
-# Type variables for generic implementations
+# Configure logging for service layer operations
+logger = logging.getLogger(__name__)
+
+# Generic type variables for enhanced type safety
+T = TypeVar('T')
 ModelType = TypeVar('ModelType')
-CreateSchemaType = TypeVar('CreateSchemaType')
-UpdateSchemaType = TypeVar('UpdateSchemaType')
+ServiceType = TypeVar('ServiceType', bound='BaseService')
+
+
+class ServiceError(Exception):
+    """Base exception for service layer operations."""
+    
+    def __init__(self, message: str, error_code: Optional[str] = None, 
+                 cause: Optional[Exception] = None) -> None:
+        """
+        Initialize service error with comprehensive error information.
+        
+        Args:
+            message: Human-readable error description
+            error_code: Optional error code for programmatic handling
+            cause: Optional underlying exception that caused this error
+        """
+        super().__init__(message)
+        self.message = message
+        self.error_code = error_code
+        self.cause = cause
+        self.timestamp = datetime.now(timezone.utc)
+
+
+class DatabaseError(ServiceError):
+    """Database-specific service error for transaction and query failures."""
+    pass
+
+
+class ValidationError(ServiceError):
+    """Business rule validation error for constraint violations."""
+    pass
+
+
+class NotFoundError(ServiceError):
+    """Resource not found error for entity lookup failures."""
+    pass
+
+
+class TransactionStatus(Enum):
+    """Database transaction status enumeration."""
+    PENDING = "pending"
+    COMMITTED = "committed"
+    ROLLED_BACK = "rolled_back"
+    FAILED = "failed"
+
+
+@dataclass
+class ServiceResult(Generic[T]):
+    """
+    Standardized service operation result container with comprehensive metadata.
+    
+    Provides consistent result handling across all service layer operations
+    with success/failure indication, error details, and operation metadata.
+    """
+    
+    success: bool
+    data: Optional[T] = None
+    error: Optional[ServiceError] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    def __post_init__(self) -> None:
+        """Validate result consistency after initialization."""
+        if self.success and self.error is not None:
+            raise ValueError("Successful result cannot contain error information")
+        if not self.success and self.error is None:
+            raise ValueError("Failed result must contain error information")
+    
+    @classmethod
+    def success_result(cls, data: T, metadata: Optional[Dict[str, Any]] = None) -> 'ServiceResult[T]':
+        """
+        Create successful service result with data and optional metadata.
+        
+        Args:
+            data: Result data payload
+            metadata: Optional operation metadata
+            
+        Returns:
+            ServiceResult instance indicating successful operation
+        """
+        return cls(
+            success=True,
+            data=data,
+            metadata=metadata or {}
+        )
+    
+    @classmethod
+    def error_result(cls, error: ServiceError, metadata: Optional[Dict[str, Any]] = None) -> 'ServiceResult[T]':
+        """
+        Create failed service result with error information and optional metadata.
+        
+        Args:
+            error: Service error instance
+            metadata: Optional operation metadata
+            
+        Returns:
+            ServiceResult instance indicating failed operation
+        """
+        return cls(
+            success=False,
+            error=error,
+            metadata=metadata or {}
+        )
 
 
 @runtime_checkable
 class DatabaseSession(Protocol):
     """
-    Protocol defining the expected interface for database session objects.
+    Type protocol defining database session interface for dependency injection.
     
-    This protocol ensures type safety for dependency injection while maintaining
-    flexibility for testing with mock objects and different session implementations.
-    
-    Methods defined here represent the core database operations required by all
-    service layer implementations for CRUD operations and transaction management.
+    Provides type-safe database session contract for service layer operations
+    enabling enhanced testing capabilities and clear interface boundaries.
     """
     
     def add(self, instance: Any) -> None:
-        """Add an instance to the session for persistence."""
+        """Add instance to session for persistence."""
         ...
     
     def delete(self, instance: Any) -> None:
-        """Mark an instance for deletion from the database."""
+        """Mark instance for deletion from session."""
         ...
     
     def commit(self) -> None:
-        """Commit the current transaction to the database."""
+        """Commit current transaction."""
         ...
     
     def rollback(self) -> None:
-        """Rollback the current transaction."""
+        """Rollback current transaction."""
         ...
     
     def flush(self) -> None:
-        """Flush pending changes to the database without committing."""
+        """Flush pending changes without committing."""
         ...
     
     def close(self) -> None:
-        """Close the database session."""
+        """Close database session."""
         ...
     
     def query(self, *entities: Any) -> Any:
-        """Create a query object for database operations."""
+        """Query database entities."""
         ...
     
-    def get(self, entity: Type[ModelType], ident: Any) -> Optional[ModelType]:
-        """Get an entity by its primary key identifier."""
-        ...
-    
-    def merge(self, instance: ModelType) -> ModelType:
-        """Merge an object into the session."""
+    def execute(self, statement: Any) -> Any:
+        """Execute raw SQL statement."""
         ...
 
 
-@dataclass
-class ServiceResult:
+@runtime_checkable
+class ServiceRegistry(Protocol):
     """
-    Standardized service operation result container.
+    Type protocol defining service registry interface for dependency resolution.
     
-    This class provides consistent return value structure for all service layer
-    operations, enabling standardized error handling, success validation, and
-    result data access patterns throughout the application.
-    
-    Attributes:
-        success: Boolean indicating operation success/failure
-        data: The actual result data from the operation
-        error: Error message if the operation failed
-        error_code: Standardized error code for error categorization
-        metadata: Additional context information about the operation
+    Enables service discovery and dependency injection within Flask application
+    context while maintaining type safety and clear interface contracts.
     """
     
-    success: bool
-    data: Optional[Any] = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    def register_service(self, service_class: Type[ServiceType], instance: ServiceType) -> None:
+        """Register service instance in registry."""
+        ...
     
-    @classmethod
-    def success_result(
-        cls, 
-        data: Any = None, 
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> ServiceResult:
-        """Create a successful service result."""
-        return cls(success=True, data=data, metadata=metadata)
+    def get_service(self, service_class: Type[ServiceType]) -> ServiceType:
+        """Retrieve service instance from registry."""
+        ...
     
-    @classmethod
-    def error_result(
-        cls,
-        error: str,
-        error_code: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> ServiceResult:
-        """Create an error service result."""
-        return cls(
-            success=False, 
-            error=error, 
-            error_code=error_code, 
-            metadata=metadata
-        )
+    def has_service(self, service_class: Type[ServiceType]) -> bool:
+        """Check if service is registered in registry."""
+        ...
 
 
-@dataclass
-class ValidationResult:
+class BaseService(ABC):
     """
-    Business logic validation result container.
+    Abstract base service class providing dependency injection framework,
+    SQLAlchemy session management, and common service functionality.
     
-    This class provides structured validation results for business rule enforcement,
-    data validation, and constraint checking throughout the service layer.
-    
-    Attributes:
-        is_valid: Boolean indicating validation success/failure
-        errors: List of validation error messages
-        warnings: List of validation warning messages
-        field_errors: Dictionary mapping field names to specific errors
-    """
-    
-    is_valid: bool
-    errors: List[str]
-    warnings: List[str] = None
-    field_errors: Dict[str, List[str]] = None
-    
-    def __post_init__(self):
-        """Initialize optional attributes with default values."""
-        if self.warnings is None:
-            self.warnings = []
-        if self.field_errors is None:
-            self.field_errors = {}
-    
-    def add_error(self, error: str, field: Optional[str] = None) -> None:
-        """Add a validation error to the result."""
-        self.errors.append(error)
-        if field:
-            if field not in self.field_errors:
-                self.field_errors[field] = []
-            self.field_errors[field].append(error)
-        self.is_valid = False
-    
-    def add_warning(self, warning: str) -> None:
-        """Add a validation warning to the result."""
-        self.warnings.append(warning)
-
-
-class ServiceException(Exception):
-    """
-    Base exception class for service layer operations.
-    
-    This exception provides structured error handling for service layer operations
-    with standardized error codes, messages, and context information for debugging
-    and error reporting.
-    
-    Attributes:
-        message: Human-readable error message
-        error_code: Standardized error code for categorization
-        details: Additional error context and debugging information
-    """
-    
-    def __init__(
-        self, 
-        message: str, 
-        error_code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
-    ):
-        """Initialize service exception with error details."""
-        super().__init__(message)
-        self.message = message
-        self.error_code = error_code or 'SERVICE_ERROR'
-        self.details = details or {}
-
-
-class ValidationException(ServiceException):
-    """Exception raised for business logic validation failures."""
-    
-    def __init__(
-        self, 
-        message: str, 
-        validation_result: Optional[ValidationResult] = None,
-        details: Optional[Dict[str, Any]] = None
-    ):
-        """Initialize validation exception with validation result context."""
-        super().__init__(message, 'VALIDATION_ERROR', details)
-        self.validation_result = validation_result
-
-
-class DatabaseException(ServiceException):
-    """Exception raised for database operation failures."""
-    
-    def __init__(
-        self, 
-        message: str, 
-        original_exception: Optional[Exception] = None,
-        details: Optional[Dict[str, Any]] = None
-    ):
-        """Initialize database exception with original exception context."""
-        super().__init__(message, 'DATABASE_ERROR', details)
-        self.original_exception = original_exception
-
-
-class BaseService(ABC, Generic[ModelType]):
-    """
-    Abstract base service class implementing the Service Layer pattern.
-    
-    This class provides the foundational architecture for all business logic services
-    in the Flask application. It implements dependency injection for SQLAlchemy sessions,
-    type-safe database operations, comprehensive error handling, and transaction management.
-    
-    The base service follows the Service Layer pattern as specified in Section 4.5.1.2
-    of the technical specification, enabling clear separation of concerns between
-    presentation, business logic, and data access layers.
+    This foundational class establishes the Service Layer pattern architecture
+    with type-safe database operations and standardized service initialization.
+    All business logic services inherit from this base class to ensure
+    consistent transaction handling, error management, and testing capabilities.
     
     Key Features:
-    - Dependency injection with type-safe session management
-    - Comprehensive transaction management with automatic rollback
-    - Standardized error handling and logging integration
-    - Type-safe CRUD operations with validation support
-    - Enhanced testability through dependency injection patterns
-    - Flask application factory pattern compatibility
+    - Dependency injection of SQLAlchemy sessions for database operations
+    - Comprehensive transaction management with automatic rollback on errors
+    - Type-safe database operations with full type annotations
+    - Flask application factory pattern integration
+    - Enhanced testability through constructor injection and session mocking
+    - Standardized error handling and result containers
+    - Connection pooling optimization through SQLAlchemy session management
     
-    Generic Parameters:
-        ModelType: The SQLAlchemy model type this service manages
-    
-    Attributes:
-        db_session: Injected database session for all operations
-        logger: Service-specific logger for operation tracking
-        model_class: The SQLAlchemy model class managed by this service
+    Usage Example:
+        class UserService(BaseService):
+            def create_user(self, username: str, email: str) -> ServiceResult[User]:
+                try:
+                    user = User(username=username, email=email)
+                    self.db_session.add(user)
+                    self.db_session.commit()
+                    return ServiceResult.success_result(user)
+                except Exception as e:
+                    self.db_session.rollback()
+                    return ServiceResult.error_result(
+                        ServiceError(f"Failed to create user: {e}")
+                    )
     """
     
-    def __init__(
-        self, 
-        db_session: DatabaseSession,
-        model_class: Optional[Type[ModelType]] = None
-    ) -> None:
+    # Class-level configuration for service behavior
+    _enable_transaction_logging: ClassVar[bool] = True
+    _enable_performance_monitoring: ClassVar[bool] = True
+    _default_query_timeout: ClassVar[int] = 30  # seconds
+    
+    def __init__(self, db_session: Optional[DatabaseSession] = None) -> None:
         """
-        Initialize base service with dependency injection.
+        Initialize base service with dependency injection of database session.
+        
+        Implements constructor injection pattern enabling comprehensive testing
+        with mock sessions while supporting Flask application context integration
+        for production usage with Flask-SQLAlchemy session management.
         
         Args:
-            db_session: SQLAlchemy database session for data operations
-            model_class: Optional SQLAlchemy model class for CRUD operations
-            
+            db_session: Optional database session for dependency injection.
+                       If None, uses Flask-SQLAlchemy session from application context.
+                       
         Raises:
-            TypeError: If db_session doesn't implement DatabaseSession protocol
+            RuntimeError: If no session provided and Flask application context unavailable
+            DatabaseError: If database session initialization fails
         """
-        # Validate session protocol compliance for type safety
-        if not isinstance(db_session, DatabaseSession):
-            raise TypeError(
-                f"db_session must implement DatabaseSession protocol, "
-                f"got {type(db_session).__name__}"
+        # Initialize database session through dependency injection or Flask context
+        if db_session is not None:
+            self.db_session = db_session
+            logger.debug(f"Service {self.__class__.__name__} initialized with injected database session")
+        elif has_app_context():
+            self.db_session = db.session
+            logger.debug(f"Service {self.__class__.__name__} initialized with Flask-SQLAlchemy session")
+        else:
+            raise RuntimeError(
+                f"Service {self.__class__.__name__} requires database session injection "
+                "or Flask application context for session access"
             )
         
-        self.db_session = db_session
-        self.model_class = model_class
-        
-        # Initialize service-specific logger
-        self.logger = logging.getLogger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        
-        # Service operation metrics for monitoring
+        # Initialize service metadata and performance tracking
+        self._service_name = self.__class__.__name__
+        self._initialization_time = datetime.now(timezone.utc)
         self._operation_count = 0
         self._error_count = 0
         
-        self.logger.debug(
-            f"Initialized {self.__class__.__name__} with session type: {type(db_session).__name__}"
-        )
+        # Validate database session compatibility
+        self._validate_database_session()
+        
+        # Initialize service-specific configuration
+        self._initialize_service_configuration()
+        
+        logger.info(f"Service {self._service_name} initialized successfully")
     
-    @property
-    def operation_metrics(self) -> Dict[str, int]:
-        """Get service operation metrics for monitoring."""
-        return {
-            'operation_count': self._operation_count,
-            'error_count': self._error_count,
-            'success_rate': (
-                (self._operation_count - self._error_count) / max(self._operation_count, 1)
-            ) * 100
+    def _validate_database_session(self) -> None:
+        """
+        Validate database session compatibility and connectivity.
+        
+        Performs comprehensive validation of database session including
+        protocol compliance, connection verification, and transaction capability.
+        
+        Raises:
+            DatabaseError: If session validation fails
+        """
+        try:
+            # Verify session implements required protocol methods
+            if not hasattr(self.db_session, 'add') or not hasattr(self.db_session, 'commit'):
+                raise DatabaseError(
+                    "Database session does not implement required protocol methods",
+                    error_code="SESSION_PROTOCOL_ERROR"
+                )
+            
+            # Test database connectivity with simple query
+            if hasattr(self.db_session, 'execute'):
+                result = self.db_session.execute(text('SELECT 1')).scalar()
+                if result != 1:
+                    raise DatabaseError(
+                        "Database connectivity test failed",
+                        error_code="CONNECTIVITY_TEST_FAILED"
+                    )
+                    
+                logger.debug(f"Database session validation successful for {self._service_name}")
+                
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Database session validation failed: {e}",
+                error_code="SESSION_VALIDATION_ERROR",
+                cause=e
+            )
+    
+    def _initialize_service_configuration(self) -> None:
+        """
+        Initialize service-specific configuration and performance monitoring.
+        
+        Override this method in derived services to implement service-specific
+        initialization logic, configuration loading, and dependency setup.
+        """
+        # Configure transaction logging if enabled
+        if self._enable_transaction_logging and hasattr(self.db_session, 'bind'):
+            self._setup_transaction_logging()
+        
+        # Initialize performance monitoring if enabled
+        if self._enable_performance_monitoring:
+            self._setup_performance_monitoring()
+    
+    def _setup_transaction_logging(self) -> None:
+        """Configure SQLAlchemy event listeners for transaction logging."""
+        try:
+            engine = self.db_session.bind
+            
+            @event.listens_for(engine, "begin")
+            def log_transaction_begin(conn):
+                logger.debug(f"Transaction started for service {self._service_name}")
+            
+            @event.listens_for(engine, "commit")
+            def log_transaction_commit(conn):
+                logger.debug(f"Transaction committed for service {self._service_name}")
+            
+            @event.listens_for(engine, "rollback")
+            def log_transaction_rollback(conn):
+                logger.warning(f"Transaction rolled back for service {self._service_name}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to setup transaction logging for {self._service_name}: {e}")
+    
+    def _setup_performance_monitoring(self) -> None:
+        """Initialize performance monitoring capabilities."""
+        self._performance_metrics = {
+            'total_operations': 0,
+            'successful_operations': 0,
+            'failed_operations': 0,
+            'total_execution_time': 0.0,
+            'average_execution_time': 0.0
         }
-    
-    def _increment_operation_count(self) -> None:
-        """Increment operation counter for metrics tracking."""
-        self._operation_count += 1
-    
-    def _increment_error_count(self) -> None:
-        """Increment error counter for metrics tracking."""
-        self._error_count += 1
+        
+        logger.debug(f"Performance monitoring initialized for {self._service_name}")
     
     @contextmanager
-    def transaction(self) -> ContextManager[None]:
+    def transaction_scope(self, autocommit: bool = True) -> ContextManager[DatabaseSession]:
         """
-        Context manager for database transaction management.
+        Context manager for explicit database transaction control.
         
-        This context manager provides automatic transaction handling with
-        commit on success and rollback on any exception. It ensures data
-        consistency and proper error handling for all database operations.
+        Provides comprehensive transaction management with automatic rollback
+        on exceptions and optional autocommit behavior for complex operations
+        spanning multiple database entities.
         
+        Args:
+            autocommit: Whether to automatically commit transaction on success
+            
         Yields:
-            None
+            Database session for transaction operations
             
         Raises:
-            DatabaseException: If transaction operations fail
+            DatabaseError: If transaction operations fail
             
         Example:
-            ```python
-            with self.transaction():
-                self.db_session.add(new_entity)
-                # Transaction automatically committed on success
-                # or rolled back on exception
-            ```
+            with self.transaction_scope() as session:
+                user = User.create(username='test')
+                session.add(user)
+                profile = UserProfile.create(user_id=user.id)
+                session.add(profile)
+                # Automatic commit on success, rollback on exception
         """
-        self._increment_operation_count()
+        transaction_start = datetime.now(timezone.utc)
+        transaction_status = TransactionStatus.PENDING
         
         try:
-            self.logger.debug("Starting database transaction")
-            yield
-            self.db_session.commit()
-            self.logger.debug("Database transaction committed successfully")
+            # Begin transaction if not already active
+            if not self.db_session.in_transaction() if hasattr(self.db_session, 'in_transaction') else True:
+                self.db_session.begin()
             
-        except SQLAlchemyError as e:
-            self._increment_error_count()
-            self.logger.error(f"Database error in transaction: {str(e)}")
-            try:
-                self.db_session.rollback()
-                self.logger.debug("Database transaction rolled back")
-            except Exception as rollback_error:
-                self.logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
+            logger.debug(f"Transaction scope started for {self._service_name}")
             
-            raise DatabaseException(
-                message=f"Database operation failed: {str(e)}",
-                original_exception=e,
-                details={'transaction_error': True}
-            )
+            yield self.db_session
+            
+            # Commit transaction if autocommit enabled
+            if autocommit:
+                self.db_session.commit()
+                transaction_status = TransactionStatus.COMMITTED
+                logger.debug(f"Transaction committed successfully for {self._service_name}")
             
         except Exception as e:
-            self._increment_error_count()
-            self.logger.error(f"Unexpected error in transaction: {str(e)}")
+            # Rollback transaction on any exception
             try:
                 self.db_session.rollback()
-                self.logger.debug("Database transaction rolled back due to unexpected error")
+                transaction_status = TransactionStatus.ROLLED_BACK
+                logger.warning(f"Transaction rolled back for {self._service_name}: {e}")
             except Exception as rollback_error:
-                self.logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
+                transaction_status = TransactionStatus.FAILED
+                logger.error(f"Transaction rollback failed for {self._service_name}: {rollback_error}")
+                raise DatabaseError(
+                    f"Transaction rollback failed: {rollback_error}",
+                    error_code="ROLLBACK_FAILED",
+                    cause=rollback_error
+                )
             
-            raise ServiceException(
-                message=f"Service operation failed: {str(e)}",
-                error_code='TRANSACTION_ERROR',
-                details={'original_error': str(e)}
+            # Re-raise original exception as DatabaseError
+            raise DatabaseError(
+                f"Transaction failed: {e}",
+                error_code="TRANSACTION_FAILED",
+                cause=e
             )
+        
+        finally:
+            # Record transaction metrics
+            transaction_duration = (datetime.now(timezone.utc) - transaction_start).total_seconds()
+            self._record_transaction_metrics(transaction_status, transaction_duration)
     
-    def validate_data(
-        self, 
-        data: Dict[str, Any], 
-        rules: Optional[Dict[str, Any]] = None
-    ) -> ValidationResult:
-        """
-        Validate data against business rules and constraints.
-        
-        This method provides comprehensive data validation for business rule
-        enforcement, field validation, and constraint checking. It can be
-        extended by subclasses to implement domain-specific validation logic.
-        
-        Args:
-            data: Dictionary containing data to validate
-            rules: Optional validation rules dictionary
+    def _record_transaction_metrics(self, status: TransactionStatus, duration: float) -> None:
+        """Record transaction performance metrics for monitoring."""
+        if hasattr(self, '_performance_metrics'):
+            self._performance_metrics['total_operations'] += 1
+            self._performance_metrics['total_execution_time'] += duration
             
-        Returns:
-            ValidationResult: Structured validation result with errors and warnings
-            
-        Example:
-            ```python
-            validation = self.validate_data(
-                {'email': 'invalid-email'},
-                {'email': {'required': True, 'format': 'email'}}
-            )
-            if not validation.is_valid:
-                raise ValidationException("Invalid data", validation)
-            ```
-        """
-        self.logger.debug(f"Validating data with {len(data)} fields")
-        
-        validation_result = ValidationResult(is_valid=True, errors=[])
-        
-        # Basic validation implementation - can be extended by subclasses
-        if rules:
-            for field, field_rules in rules.items():
-                value = data.get(field)
-                
-                # Required field validation
-                if field_rules.get('required', False) and not value:
-                    validation_result.add_error(
-                        f"Field '{field}' is required", 
-                        field=field
-                    )
-                
-                # Type validation
-                expected_type = field_rules.get('type')
-                if expected_type and value is not None:
-                    if not isinstance(value, expected_type):
-                        validation_result.add_error(
-                            f"Field '{field}' must be of type {expected_type.__name__}",
-                            field=field
-                        )
-        
-        self.logger.debug(
-            f"Validation completed: {'PASSED' if validation_result.is_valid else 'FAILED'} "
-            f"with {len(validation_result.errors)} errors"
-        )
-        
-        return validation_result
-    
-    def get_by_id(self, entity_id: Any) -> Optional[ModelType]:
-        """
-        Retrieve entity by primary key identifier.
-        
-        Args:
-            entity_id: Primary key value for entity lookup
-            
-        Returns:
-            Model instance if found, None otherwise
-            
-        Raises:
-            ValueError: If model_class is not configured
-            DatabaseException: If database operation fails
-        """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        self._increment_operation_count()
-        
-        try:
-            self.logger.debug(f"Retrieving {self.model_class.__name__} with ID: {entity_id}")
-            entity = self.db_session.get(self.model_class, entity_id)
-            
-            if entity:
-                self.logger.debug(f"Found {self.model_class.__name__} with ID: {entity_id}")
+            if status == TransactionStatus.COMMITTED:
+                self._performance_metrics['successful_operations'] += 1
             else:
-                self.logger.debug(f"No {self.model_class.__name__} found with ID: {entity_id}")
+                self._performance_metrics['failed_operations'] += 1
             
-            return entity
+            # Update average execution time
+            total_ops = self._performance_metrics['total_operations']
+            total_time = self._performance_metrics['total_execution_time']
+            self._performance_metrics['average_execution_time'] = total_time / total_ops if total_ops > 0 else 0.0
+    
+    def execute_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> ServiceResult[List[Dict[str, Any]]]:
+        """
+        Execute raw SQL query with comprehensive error handling and result processing.
+        
+        Provides type-safe query execution with parameter binding, error handling,
+        and standardized result formatting for complex database operations.
+        
+        Args:
+            query: SQL query string to execute
+            parameters: Optional query parameters for safe parameter binding
+            
+        Returns:
+            ServiceResult containing query results or error information
+        """
+        operation_start = datetime.now(timezone.utc)
+        
+        try:
+            # Execute query with parameter binding
+            if parameters:
+                result = self.db_session.execute(text(query), parameters)
+            else:
+                result = self.db_session.execute(text(query))
+            
+            # Process query results into standardized format
+            if result.returns_rows:
+                rows = []
+                for row in result:
+                    # Convert row to dictionary for consistent API
+                    if hasattr(row, '_asdict'):
+                        rows.append(row._asdict())
+                    else:
+                        rows.append(dict(row))
+                
+                result_data = rows
+            else:
+                # For non-SELECT queries, return affected row count
+                result_data = [{'affected_rows': result.rowcount}]
+            
+            # Record successful operation metrics
+            execution_time = (datetime.now(timezone.utc) - operation_start).total_seconds()
+            metadata = {
+                'execution_time': execution_time,
+                'query': query,
+                'parameters': parameters,
+                'row_count': len(result_data)
+            }
+            
+            logger.debug(f"Query executed successfully in {execution_time:.3f}s: {query[:100]}...")
+            
+            return ServiceResult.success_result(result_data, metadata)
             
         except SQLAlchemyError as e:
-            self._increment_error_count()
-            self.logger.error(f"Database error retrieving entity: {str(e)}")
-            raise DatabaseException(
-                message=f"Failed to retrieve {self.model_class.__name__} with ID {entity_id}",
-                original_exception=e
+            # Handle database-specific errors
+            execution_time = (datetime.now(timezone.utc) - operation_start).total_seconds()
+            metadata = {
+                'execution_time': execution_time,
+                'query': query,
+                'parameters': parameters
+            }
+            
+            error = DatabaseError(
+                f"Query execution failed: {e}",
+                error_code="QUERY_EXECUTION_ERROR",
+                cause=e
             )
+            
+            logger.error(f"Query execution failed after {execution_time:.3f}s: {e}")
+            
+            return ServiceResult.error_result(error, metadata)
     
-    def get_all(
-        self, 
-        limit: Optional[int] = None, 
-        offset: Optional[int] = None,
-        filters: Optional[Dict[str, Any]] = None,
-        order_by: Optional[str] = None
-    ) -> List[ModelType]:
+    def get_performance_metrics(self) -> Dict[str, Any]:
         """
-        Retrieve multiple entities with optional filtering and pagination.
+        Get comprehensive performance metrics for service operations.
+        
+        Returns:
+            Dictionary containing performance metrics and operational statistics
+        """
+        base_metrics = {
+            'service_name': self._service_name,
+            'initialization_time': self._initialization_time.isoformat(),
+            'uptime_seconds': (datetime.now(timezone.utc) - self._initialization_time).total_seconds(),
+            'operation_count': self._operation_count,
+            'error_count': self._error_count,
+            'error_rate': self._error_count / max(self._operation_count, 1)
+        }
+        
+        # Add performance monitoring metrics if available
+        if hasattr(self, '_performance_metrics'):
+            base_metrics.update(self._performance_metrics)
+        
+        return base_metrics
+    
+    def validate_business_rules(self, entity: Any, operation: str) -> ServiceResult[bool]:
+        """
+        Validate business rules for entity operations.
+        
+        Override this method in derived services to implement specific
+        business rule validation logic for create, update, and delete operations.
         
         Args:
-            limit: Maximum number of entities to return
-            offset: Number of entities to skip for pagination
-            filters: Dictionary of field/value pairs for filtering
-            order_by: Field name for result ordering
+            entity: Entity instance to validate
+            operation: Operation type ('create', 'update', 'delete')
             
         Returns:
-            List of model instances matching criteria
-            
-        Raises:
-            ValueError: If model_class is not configured
-            DatabaseException: If database operation fails
+            ServiceResult indicating validation success or failure with error details
         """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        self._increment_operation_count()
-        
-        try:
-            self.logger.debug(
-                f"Retrieving {self.model_class.__name__} entities with "
-                f"limit={limit}, offset={offset}, filters={filters}"
-            )
-            
-            query = self.db_session.query(self.model_class)
-            
-            # Apply filters if provided
-            if filters:
-                for field, value in filters.items():
-                    if hasattr(self.model_class, field):
-                        query = query.filter(getattr(self.model_class, field) == value)
-            
-            # Apply ordering if specified
-            if order_by and hasattr(self.model_class, order_by):
-                query = query.order_by(getattr(self.model_class, order_by))
-            
-            # Apply pagination
-            if offset:
-                query = query.offset(offset)
-            if limit:
-                query = query.limit(limit)
-            
-            entities = query.all()
-            
-            self.logger.debug(f"Retrieved {len(entities)} {self.model_class.__name__} entities")
-            return entities
-            
-        except SQLAlchemyError as e:
-            self._increment_error_count()
-            self.logger.error(f"Database error retrieving entities: {str(e)}")
-            raise DatabaseException(
-                message=f"Failed to retrieve {self.model_class.__name__} entities",
-                original_exception=e
-            )
-    
-    def create(self, data: Dict[str, Any]) -> ServiceResult:
-        """
-        Create new entity with validation and transaction management.
-        
-        Args:
-            data: Dictionary containing entity data
-            
-        Returns:
-            ServiceResult: Result containing created entity or error information
-            
-        Raises:
-            ValueError: If model_class is not configured
-        """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        try:
-            # Validate data before creation
-            validation_result = self.validate_data(data)
-            if not validation_result.is_valid:
-                return ServiceResult.error_result(
-                    error="Validation failed",
-                    error_code="VALIDATION_ERROR",
-                    metadata={'validation_errors': validation_result.errors}
-                )
-            
-            with self.transaction():
-                # Create new entity instance
-                entity = self.model_class(**data)
-                self.db_session.add(entity)
-                self.db_session.flush()  # Flush to get generated ID
-                
-                self.logger.info(f"Created new {self.model_class.__name__} entity")
-                
-                return ServiceResult.success_result(
-                    data=entity,
-                    metadata={'operation': 'create', 'entity_type': self.model_class.__name__}
-                )
-                
-        except (ValidationException, DatabaseException) as e:
-            self.logger.error(f"Failed to create entity: {str(e)}")
-            return ServiceResult.error_result(
-                error=str(e),
-                error_code=e.error_code,
-                metadata={'operation': 'create', 'entity_type': self.model_class.__name__}
-            )
-        
-        except Exception as e:
-            self._increment_error_count()
-            self.logger.error(f"Unexpected error creating entity: {str(e)}")
-            return ServiceResult.error_result(
-                error=f"Failed to create entity: {str(e)}",
-                error_code="UNEXPECTED_ERROR",
-                metadata={'operation': 'create', 'entity_type': self.model_class.__name__}
-            )
-    
-    def update(self, entity_id: Any, data: Dict[str, Any]) -> ServiceResult:
-        """
-        Update existing entity with validation and transaction management.
-        
-        Args:
-            entity_id: Primary key of entity to update
-            data: Dictionary containing updated field values
-            
-        Returns:
-            ServiceResult: Result containing updated entity or error information
-        """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        try:
-            # Retrieve existing entity
-            entity = self.get_by_id(entity_id)
-            if not entity:
-                return ServiceResult.error_result(
-                    error=f"{self.model_class.__name__} not found",
-                    error_code="NOT_FOUND",
-                    metadata={'entity_id': entity_id, 'operation': 'update'}
-                )
-            
-            # Validate update data
-            validation_result = self.validate_data(data)
-            if not validation_result.is_valid:
-                return ServiceResult.error_result(
-                    error="Validation failed",
-                    error_code="VALIDATION_ERROR",
-                    metadata={'validation_errors': validation_result.errors}
-                )
-            
-            with self.transaction():
-                # Update entity attributes
-                for field, value in data.items():
-                    if hasattr(entity, field):
-                        setattr(entity, field, value)
-                
-                self.db_session.flush()
-                
-                self.logger.info(f"Updated {self.model_class.__name__} entity with ID: {entity_id}")
-                
-                return ServiceResult.success_result(
-                    data=entity,
-                    metadata={'operation': 'update', 'entity_id': entity_id}
-                )
-                
-        except (ValidationException, DatabaseException) as e:
-            self.logger.error(f"Failed to update entity: {str(e)}")
-            return ServiceResult.error_result(
-                error=str(e),
-                error_code=e.error_code,
-                metadata={'operation': 'update', 'entity_id': entity_id}
-            )
-        
-        except Exception as e:
-            self._increment_error_count()
-            self.logger.error(f"Unexpected error updating entity: {str(e)}")
-            return ServiceResult.error_result(
-                error=f"Failed to update entity: {str(e)}",
-                error_code="UNEXPECTED_ERROR",
-                metadata={'operation': 'update', 'entity_id': entity_id}
-            )
-    
-    def delete(self, entity_id: Any) -> ServiceResult:
-        """
-        Delete entity by primary key with transaction management.
-        
-        Args:
-            entity_id: Primary key of entity to delete
-            
-        Returns:
-            ServiceResult: Result indicating success or failure
-        """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        try:
-            # Retrieve entity to delete
-            entity = self.get_by_id(entity_id)
-            if not entity:
-                return ServiceResult.error_result(
-                    error=f"{self.model_class.__name__} not found",
-                    error_code="NOT_FOUND",
-                    metadata={'entity_id': entity_id, 'operation': 'delete'}
-                )
-            
-            with self.transaction():
-                self.db_session.delete(entity)
-                
-                self.logger.info(f"Deleted {self.model_class.__name__} entity with ID: {entity_id}")
-                
-                return ServiceResult.success_result(
-                    data={'deleted_id': entity_id},
-                    metadata={'operation': 'delete', 'entity_id': entity_id}
-                )
-                
-        except DatabaseException as e:
-            self.logger.error(f"Failed to delete entity: {str(e)}")
-            return ServiceResult.error_result(
-                error=str(e),
-                error_code=e.error_code,
-                metadata={'operation': 'delete', 'entity_id': entity_id}
-            )
-        
-        except Exception as e:
-            self._increment_error_count()
-            self.logger.error(f"Unexpected error deleting entity: {str(e)}")
-            return ServiceResult.error_result(
-                error=f"Failed to delete entity: {str(e)}",
-                error_code="UNEXPECTED_ERROR",
-                metadata={'operation': 'delete', 'entity_id': entity_id}
-            )
-    
-    def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
-        """
-        Count entities matching optional filters.
-        
-        Args:
-            filters: Optional dictionary of field/value pairs for filtering
-            
-        Returns:
-            Integer count of matching entities
-            
-        Raises:
-            ValueError: If model_class is not configured
-            DatabaseException: If database operation fails
-        """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        self._increment_operation_count()
-        
-        try:
-            query = self.db_session.query(func.count(self.model_class.id))
-            
-            # Apply filters if provided
-            if filters:
-                for field, value in filters.items():
-                    if hasattr(self.model_class, field):
-                        query = query.filter(getattr(self.model_class, field) == value)
-            
-            count = query.scalar()
-            
-            self.logger.debug(f"Counted {count} {self.model_class.__name__} entities")
-            return count
-            
-        except SQLAlchemyError as e:
-            self._increment_error_count()
-            self.logger.error(f"Database error counting entities: {str(e)}")
-            raise DatabaseException(
-                message=f"Failed to count {self.model_class.__name__} entities",
-                original_exception=e
-            )
-    
-    def exists(self, entity_id: Any) -> bool:
-        """
-        Check if entity exists by primary key.
-        
-        Args:
-            entity_id: Primary key value to check
-            
-        Returns:
-            Boolean indicating entity existence
-            
-        Raises:
-            ValueError: If model_class is not configured
-            DatabaseException: If database operation fails
-        """
-        if not self.model_class:
-            raise ValueError("model_class must be configured for CRUD operations")
-        
-        try:
-            entity = self.get_by_id(entity_id)
-            exists = entity is not None
-            
-            self.logger.debug(
-                f"{self.model_class.__name__} with ID {entity_id} "
-                f"{'exists' if exists else 'does not exist'}"
-            )
-            
-            return exists
-            
-        except DatabaseException:
-            # Re-raise database exceptions
-            raise
+        # Default implementation returns success - override in derived services
+        return ServiceResult.success_result(
+            True,
+            metadata={'operation': operation, 'entity_type': type(entity).__name__}
+        )
     
     @abstractmethod
-    def get_business_rules(self) -> Dict[str, Any]:
+    def get_service_name(self) -> str:
         """
-        Abstract method for service-specific business rules definition.
+        Get service name for identification and logging purposes.
         
-        Subclasses must implement this method to define validation rules,
-        constraints, and business logic specific to their domain.
+        Abstract method requiring implementation in derived service classes
+        to provide clear service identification for monitoring and debugging.
         
         Returns:
-            Dictionary containing business rules and validation constraints
+            Service name string for identification
         """
         pass
     
-    def __enter__(self) -> BaseService[ModelType]:
-        """Context manager entry for resource management."""
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit with cleanup."""
-        try:
-            if exc_type is None:
-                # No exception occurred, normal exit
-                pass
-            else:
-                # Exception occurred, ensure rollback
-                try:
-                    self.db_session.rollback()
-                    self.logger.debug("Rolled back transaction due to exception")
-                except Exception as rollback_error:
-                    self.logger.error(f"Failed to rollback on context exit: {str(rollback_error)}")
-        finally:
-            self.logger.debug(f"Exiting {self.__class__.__name__} context")
-
-
-def create_service_factory(
-    service_class: Type[BaseService[ModelType]],
-    model_class: Optional[Type[ModelType]] = None
-) -> callable:
-    """
-    Factory function for creating service instances with dependency injection.
-    
-    This factory function facilitates Flask application factory pattern integration
-    by providing a standardized way to create service instances with proper
-    dependency injection for database sessions and model classes.
-    
-    Args:
-        service_class: The service class to instantiate
-        model_class: Optional model class for CRUD operations
-        
-    Returns:
-        Factory function that creates service instances with injected dependencies
-        
-    Example:
-        ```python
-        # In Flask application factory
-        user_service_factory = create_service_factory(UserService, User)
-        
-        # In blueprint or route handler
-        @app.route('/users')
-        def get_users():
-            with user_service_factory(db.session) as service:
-                return service.get_all()
-        ```
-    """
-    def factory(db_session: DatabaseSession) -> BaseService[ModelType]:
+    @abstractmethod
+    def health_check(self) -> ServiceResult[Dict[str, Any]]:
         """
-        Create service instance with injected dependencies.
+        Perform comprehensive service health check including database connectivity.
+        
+        Abstract method requiring implementation in derived service classes
+        to provide service-specific health validation including external
+        dependencies, business logic validation, and resource availability.
+        
+        Returns:
+            ServiceResult containing health status and diagnostic information
+        """
+        pass
+
+
+class ServiceFactory:
+    """
+    Service factory class for dependency injection and service lifecycle management.
+    
+    Provides centralized service creation, configuration, and dependency resolution
+    supporting Flask application factory pattern integration with comprehensive
+    service registry and dependency injection capabilities.
+    """
+    
+    def __init__(self) -> None:
+        """Initialize service factory with empty service registry."""
+        self._services: Dict[Type[BaseService], BaseService] = {}
+        self._configuration: Dict[str, Any] = {}
+        self._logger = logging.getLogger(f"{__name__}.ServiceFactory")
+    
+    def register_service(self, service_class: Type[BaseService], 
+                        session: Optional[DatabaseSession] = None) -> BaseService:
+        """
+        Register service instance with optional session injection.
         
         Args:
-            db_session: Database session for dependency injection
+            service_class: Service class to instantiate and register
+            session: Optional database session for dependency injection
             
         Returns:
-            Configured service instance ready for use
+            Configured service instance
+            
+        Raises:
+            ServiceError: If service registration fails
         """
-        return service_class(db_session=db_session, model_class=model_class)
+        try:
+            # Create service instance with session injection
+            if session:
+                service_instance = service_class(db_session=session)
+            else:
+                service_instance = service_class()
+            
+            # Register service in registry
+            self._services[service_class] = service_instance
+            
+            self._logger.info(f"Service {service_class.__name__} registered successfully")
+            
+            return service_instance
+            
+        except Exception as e:
+            error_msg = f"Failed to register service {service_class.__name__}: {e}"
+            self._logger.error(error_msg)
+            raise ServiceError(error_msg, error_code="SERVICE_REGISTRATION_ERROR", cause=e)
     
-    return factory
+    def get_service(self, service_class: Type[ServiceType]) -> ServiceType:
+        """
+        Retrieve registered service instance with type safety.
+        
+        Args:
+            service_class: Service class to retrieve
+            
+        Returns:
+            Configured service instance
+            
+        Raises:
+            ServiceError: If service not found in registry
+        """
+        if service_class not in self._services:
+            raise ServiceError(
+                f"Service {service_class.__name__} not found in registry",
+                error_code="SERVICE_NOT_FOUND"
+            )
+        
+        return self._services[service_class]  # type: ignore
+    
+    def has_service(self, service_class: Type[BaseService]) -> bool:
+        """
+        Check if service is registered in factory.
+        
+        Args:
+            service_class: Service class to check
+            
+        Returns:
+            True if service is registered, False otherwise
+        """
+        return service_class in self._services
+    
+    def configure_services(self, configuration: Dict[str, Any]) -> None:
+        """
+        Apply configuration to all registered services.
+        
+        Args:
+            configuration: Configuration dictionary for services
+        """
+        self._configuration.update(configuration)
+        
+        for service_instance in self._services.values():
+            if hasattr(service_instance, 'configure'):
+                service_instance.configure(configuration)
+        
+        self._logger.info("Service configuration applied to all registered services")
+    
+    def get_service_registry(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get comprehensive service registry information for monitoring.
+        
+        Returns:
+            Dictionary containing service registry metadata and health information
+        """
+        registry_info = {
+            'total_services': len(self._services),
+            'registered_services': {},
+            'configuration': self._configuration
+        }
+        
+        for service_class, service_instance in self._services.items():
+            registry_info['registered_services'][service_class.__name__] = {
+                'class': service_class.__name__,
+                'instance_id': id(service_instance),
+                'performance_metrics': service_instance.get_performance_metrics()
+            }
+        
+        return registry_info
 
 
-def get_current_user_id() -> Optional[int]:
+# Global service factory instance for Flask application integration
+service_factory = ServiceFactory()
+
+
+def init_service_layer(app) -> None:
     """
-    Utility function to get current authenticated user ID from Flask context.
+    Initialize service layer for Flask application factory pattern.
     
-    This function integrates with Flask-Login for user context tracking
-    in audit trails and user attribution for service operations.
-    
-    Returns:
-        Current user ID if authenticated, None otherwise
-    """
-    try:
-        # Try to get user from Flask-Login current_user
-        from flask_login import current_user
-        if hasattr(current_user, 'id') and current_user.is_authenticated:
-            return current_user.id
-    except ImportError:
-        # Flask-Login not available, try Flask g context
-        pass
-    
-    # Fallback to Flask g context
-    return getattr(g, 'user_id', None)
-
-
-def get_service_logger(service_name: str) -> logging.Logger:
-    """
-    Get configured logger instance for service operations.
+    Configures service factory, database session management, and service
+    registration for Flask application context integration.
     
     Args:
-        service_name: Name of the service for logger identification
+        app: Flask application instance
+    """
+    try:
+        # Configure service factory with Flask application configuration
+        service_config = {
+            'database_uri': app.config.get('SQLALCHEMY_DATABASE_URI'),
+            'enable_transaction_logging': app.config.get('SERVICE_TRANSACTION_LOGGING', True),
+            'enable_performance_monitoring': app.config.get('SERVICE_PERFORMANCE_MONITORING', True),
+            'query_timeout': app.config.get('SERVICE_QUERY_TIMEOUT', 30)
+        }
+        
+        service_factory.configure_services(service_config)
+        
+        # Store service factory in Flask application instance
+        app.service_factory = service_factory
+        
+        logger.info("Service layer initialized successfully for Flask application")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize service layer: {e}")
+        raise ServiceError(
+            f"Service layer initialization failed: {e}",
+            error_code="SERVICE_LAYER_INIT_ERROR",
+            cause=e
+        )
+
+
+def get_service(service_class: Type[ServiceType]) -> ServiceType:
+    """
+    Get service instance from Flask application context.
+    
+    Convenience function for retrieving service instances within Flask
+    request context with automatic service factory access.
+    
+    Args:
+        service_class: Service class to retrieve
         
     Returns:
-        Configured logger instance with appropriate formatting
+        Configured service instance
+        
+    Raises:
+        RuntimeError: If called outside Flask application context
+        ServiceError: If service not found or retrieval fails
     """
-    logger = logging.getLogger(f"services.{service_name}")
+    if not has_app_context():
+        raise RuntimeError("get_service() must be called within Flask application context")
     
-    # Configure logger if not already configured
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    if not hasattr(current_app, 'service_factory'):
+        raise ServiceError(
+            "Service factory not initialized in Flask application",
+            error_code="SERVICE_FACTORY_NOT_INITIALIZED"
         )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
     
-    return logger
+    return current_app.service_factory.get_service(service_class)
+
+
+# Export all public classes and functions for service layer integration
+__all__ = [
+    # Base service classes
+    'BaseService',
+    'ServiceFactory',
+    
+    # Result and error types
+    'ServiceResult',
+    'ServiceError',
+    'DatabaseError',
+    'ValidationError',
+    'NotFoundError',
+    'TransactionStatus',
+    
+    # Protocol types for dependency injection
+    'DatabaseSession',
+    'ServiceRegistry',
+    
+    # Flask integration functions
+    'init_service_layer',
+    'get_service',
+    'service_factory',
+    
+    # Type variables
+    'T',
+    'ModelType',
+    'ServiceType'
+]
