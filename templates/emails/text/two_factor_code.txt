@@ -1,0 +1,65 @@
+SECURITY VERIFICATION - TWO-FACTOR AUTHENTICATION CODE
+================================================================
+
+Your Verification Code: {{ verification_code }}
+
+================================================================
+
+Hello {{ user_name or "User" }},
+
+You have requested to sign in to your account. To complete your authentication, please use the verification code above.
+
+VERIFICATION DETAILS:
+- Account: {{ user_email }}
+- Request Time: {{ timestamp or "Now" }}
+- IP Address: {{ ip_address or "Not available" }}
+- Browser: {{ user_agent or "Not available" }}
+- Expires: {{ expiration_time or "10 minutes from request time" }}
+
+IMPORTANT SECURITY INFORMATION:
+- This code is valid for {{ expiration_minutes or "10" }} minutes only
+- Use this code only on the website or application where you initiated the sign-in
+- Never share this code with anyone - legitimate services will never ask for it via email, phone, or text
+- If you did not request this code, your account may be compromised
+
+HOW TO USE YOUR CODE:
+1. Return to the sign-in page where you were prompted for verification
+2. Enter the 6-digit code exactly as shown above: {{ verification_code }}
+3. Complete your sign-in process
+4. You will be securely logged into your account
+
+SECURITY BEST PRACTICES:
+- Always verify the website URL before entering your code
+- Ensure you are on a secure connection (https://)
+- Clear your browser cache after signing in on shared computers
+- Enable additional security features in your account settings
+
+TROUBLESHOOTING:
+- Code not working? Make sure you're entering all 6 digits correctly
+- Code expired? Request a new verification code from the sign-in page
+- Still having issues? Contact our support team for assistance
+
+IF YOU DID NOT REQUEST THIS CODE:
+1. Do not use this verification code
+2. Change your account password immediately
+3. Review your account activity for unauthorized access
+4. Contact our security team if you suspect unauthorized access
+5. Consider enabling additional security measures on your account
+
+ACCOUNT SECURITY REMINDER:
+Your account security is important to us. We use two-factor authentication to protect your information and ensure that only you can access your account. This additional verification step helps keep your data safe from unauthorized access.
+
+================================================================
+
+This is an automated security message from {{ company_name or "our system" }}.
+For security reasons, please do not reply to this email.
+
+Support: {{ support_email or "Contact your system administrator" }}
+Security: {{ security_email or "Contact your system administrator" }}
+
+================================================================
+
+TEXT-ONLY EMAIL NOTICE:
+This message has been formatted for text-only email clients to ensure accessibility compliance. All essential information for completing your two-factor authentication is included in this plain text format.
+
+{{ company_name or "Company" }} - Secure Authentication System
