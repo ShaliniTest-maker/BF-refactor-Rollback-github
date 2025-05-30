@@ -1,0 +1,438 @@
+{% extends "emails/base/layout.html" %}
+
+{# Access Pattern Anomaly Detection Email Template #}
+{# This template provides security team notifications for unusual user behavior, #}
+{# suspicious login patterns, and irregular resource access attempts detected #}
+{# by machine learning-based anomaly detection systems integrated with Flask application #}
+
+{% block title %}
+  Security Alert: Access Pattern Anomaly Detected
+{% endblock %}
+
+{% block email_title %}
+  🚨 Security Alert: Access Pattern Anomaly Detected
+{% endblock %}
+
+{% block email_greeting %}
+  <p style="margin: 0 0 20px 0; font-size: 16px; color: #333333;">
+    Hello Security Team,
+  </p>
+{% endblock %}
+
+{% block email_main_content %}
+  <!-- Critical Alert Header -->
+  <div class="alert-header" style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <div style="display: flex; align-items: center; margin-bottom: 10px;">
+      <div style="background-color: #ff6b6b; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; margin-right: 10px;">!</div>
+      <h3 style="margin: 0; color: #d63031; font-size: 18px; font-weight: 600;">
+        {{ anomaly_data.severity | upper }} PRIORITY SECURITY ANOMALY
+      </h3>
+    </div>
+    <p style="margin: 0; font-size: 14px; color: #636e72;">
+      Automated detection by Flask Security Monitoring System at {{ anomaly_data.detection_timestamp | strftime('%Y-%m-%d %H:%M:%S UTC') }}
+    </p>
+  </div>
+
+  <!-- Anomaly Summary Section -->
+  <div class="anomaly-summary" style="background-color: #f8f9fa; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #2d3436;">
+      📊 Anomaly Summary
+    </h3>
+    
+    <div class="summary-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+      <div class="summary-item">
+        <strong style="color: #636e72; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Anomaly Type:</strong>
+        <div style="font-size: 15px; font-weight: 600; color: #2d3436; margin-top: 3px;">
+          {{ anomaly_data.anomaly_type | title }}
+        </div>
+      </div>
+      
+      <div class="summary-item">
+        <strong style="color: #636e72; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Risk Score:</strong>
+        <div style="font-size: 15px; font-weight: 600; margin-top: 3px; color: {% if anomaly_data.risk_score >= 80 %}#d63031{% elif anomaly_data.risk_score >= 60 %}#e17055{% else %}#f39c12{% endif %};">
+          {{ anomaly_data.risk_score }}/100
+          <span style="font-size: 12px; font-weight: normal;">
+            ({{ 'Critical' if anomaly_data.risk_score >= 80 else 'High' if anomaly_data.risk_score >= 60 else 'Medium' if anomaly_data.risk_score >= 40 else 'Low' }})
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="summary-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+      <div class="summary-item">
+        <strong style="color: #636e72; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Affected User:</strong>
+        <div style="font-size: 15px; font-weight: 600; color: #2d3436; margin-top: 3px;">
+          {{ anomaly_data.user_info.username or 'Anonymous' }}
+          {% if anomaly_data.user_info.user_id %}
+            <span style="font-size: 12px; color: #636e72;">(ID: {{ anomaly_data.user_info.user_id }})</span>
+          {% endif %}
+        </div>
+      </div>
+      
+      <div class="summary-item">
+        <strong style="color: #636e72; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Detection Source:</strong>
+        <div style="font-size: 15px; font-weight: 600; color: #2d3436; margin-top: 3px;">
+          {{ anomaly_data.detection_source | title }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Behavioral Analysis Section -->
+  <div class="behavioral-analysis" style="background-color: #f1f3f4; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #2d3436;">
+      🧠 Machine Learning Behavioral Analysis
+    </h3>
+    
+    <!-- User Session Patterns -->
+    <div class="analysis-section" style="margin-bottom: 20px;">
+      <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #636e72;">
+        Session Pattern Analysis
+      </h4>
+      <div class="pattern-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div class="pattern-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Typical Session Duration</div>
+          <div style="font-size: 14px; font-weight: 600; color: #2d3436;">{{ anomaly_data.behavioral_analysis.typical_session_duration }} minutes</div>
+        </div>
+        <div class="pattern-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Current Session Duration</div>
+          <div style="font-size: 14px; font-weight: 600; color: {% if anomaly_data.behavioral_analysis.current_session_duration > (anomaly_data.behavioral_analysis.typical_session_duration * 2) %}#d63031{% else %}#2d3436{% endif %};">
+            {{ anomaly_data.behavioral_analysis.current_session_duration }} minutes
+          </div>
+        </div>
+        <div class="pattern-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Typical Login Hours</div>
+          <div style="font-size: 14px; font-weight: 600; color: #2d3436;">{{ anomaly_data.behavioral_analysis.typical_login_hours }}</div>
+        </div>
+        <div class="pattern-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Current Login Time</div>
+          <div style="font-size: 14px; font-weight: 600; color: {% if anomaly_data.behavioral_analysis.unusual_time_flag %}#d63031{% else %}#2d3436{% endif %};">
+            {{ anomaly_data.behavioral_analysis.current_login_time }}
+            {% if anomaly_data.behavioral_analysis.unusual_time_flag %}
+              <span style="color: #d63031; font-size: 11px;">⚠️ UNUSUAL</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Geographic Analysis -->
+    <div class="analysis-section" style="margin-bottom: 20px;">
+      <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #636e72;">
+        Geographic Analysis
+      </h4>
+      <div class="geo-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div class="geo-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Primary Location</div>
+          <div style="font-size: 14px; font-weight: 600; color: #2d3436;">{{ anomaly_data.geographic_analysis.primary_location }}</div>
+        </div>
+        <div class="geo-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Current Location</div>
+          <div style="font-size: 14px; font-weight: 600; color: {% if anomaly_data.geographic_analysis.location_anomaly %}#d63031{% else %}#2d3436{% endif %};">
+            {{ anomaly_data.geographic_analysis.current_location }}
+            {% if anomaly_data.geographic_analysis.location_anomaly %}
+              <span style="color: #d63031; font-size: 11px;">⚠️ ANOMALY</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="geo-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">Distance from Usual</div>
+          <div style="font-size: 14px; font-weight: 600; color: {% if anomaly_data.geographic_analysis.distance_km > 1000 %}#d63031{% elif anomaly_data.geographic_analysis.distance_km > 500 %}#e17055{% else %}#2d3436{% endif %};">
+            {{ anomaly_data.geographic_analysis.distance_km }} km
+          </div>
+        </div>
+        <div class="geo-item">
+          <div style="font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.5px;">VPN/Proxy Detection</div>
+          <div style="font-size: 14px; font-weight: 600; color: {% if anomaly_data.geographic_analysis.vpn_detected %}#d63031{% else %}#27ae60{% endif %};">
+            {% if anomaly_data.geographic_analysis.vpn_detected %}
+              ⚠️ DETECTED
+            {% else %}
+              ✓ NONE DETECTED
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Access Pattern Correlation -->
+    <div class="analysis-section">
+      <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #636e72;">
+        Access Pattern Correlation
+      </h4>
+      <div class="correlation-items">
+        {% for pattern in anomaly_data.behavioral_analysis.access_patterns %}
+        <div class="correlation-item" style="background-color: white; border-radius: 3px; padding: 10px; margin-bottom: 8px; border-left: 3px solid {% if pattern.anomaly_score >= 80 %}#d63031{% elif pattern.anomaly_score >= 60 %}#e17055{% else %}#f39c12{% endif %};">
+          <div style="display: flex; justify-content: between; align-items: center;">
+            <div style="flex: 1;">
+              <strong style="font-size: 13px; color: #2d3436;">{{ pattern.resource_type | title }}</strong>
+              <div style="font-size: 12px; color: #636e72; margin-top: 2px;">{{ pattern.description }}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 12px; color: #636e72;">Anomaly Score</div>
+              <div style="font-size: 14px; font-weight: 600; color: {% if pattern.anomaly_score >= 80 %}#d63031{% elif pattern.anomaly_score >= 60 %}#e17055{% else %}#f39c12{% endif %};">
+                {{ pattern.anomaly_score }}/100
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Technical Details Section -->
+  <div class="technical-details" style="background-color: #f8f9fa; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #2d3436;">
+      🔍 Technical Detection Details
+    </h3>
+    
+    <div class="details-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+      <div class="detail-section">
+        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #636e72;">Flask Application Context</h4>
+        <div style="font-size: 12px; color: #2d3436; line-height: 1.4;">
+          <strong>Endpoint:</strong> {{ anomaly_data.flask_context.endpoint }}<br>
+          <strong>Method:</strong> {{ anomaly_data.flask_context.method }}<br>
+          <strong>User Agent:</strong> {{ anomaly_data.flask_context.user_agent[:50] }}{% if anomaly_data.flask_context.user_agent|length > 50 %}...{% endif %}<br>
+          <strong>IP Address:</strong> {{ anomaly_data.flask_context.ip_address }}
+        </div>
+      </div>
+      
+      <div class="detail-section">
+        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #636e72;">Authentication Details</h4>
+        <div style="font-size: 12px; color: #2d3436; line-height: 1.4;">
+          <strong>Auth Method:</strong> {{ anomaly_data.auth_context.method }}<br>
+          <strong>Session ID:</strong> {{ anomaly_data.auth_context.session_id[:16] }}...<br>
+          <strong>JWT Claims:</strong> 
+          {% if anomaly_data.auth_context.jwt_claims %}
+            {% for key, value in anomaly_data.auth_context.jwt_claims.items() %}
+              {{ key }}: {{ value }}<br>
+            {% endfor %}
+          {% else %}
+            None
+          {% endif %}
+        </div>
+      </div>
+      
+      <div class="detail-section">
+        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #636e72;">AWS CloudWatch Metrics</h4>
+        <div style="font-size: 12px; color: #2d3436; line-height: 1.4;">
+          <strong>Container ID:</strong> {{ anomaly_data.cloudwatch_metrics.container_id[:12] }}...<br>
+          <strong>CPU Usage:</strong> {{ anomaly_data.cloudwatch_metrics.cpu_utilization }}%<br>
+          <strong>Memory Usage:</strong> {{ anomaly_data.cloudwatch_metrics.memory_utilization }}%<br>
+          <strong>Request Rate:</strong> {{ anomaly_data.cloudwatch_metrics.request_rate }}/min
+        </div>
+      </div>
+      
+      <div class="detail-section">
+        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #636e72;">Sentry Context</h4>
+        <div style="font-size: 12px; color: #2d3436; line-height: 1.4;">
+          <strong>Event ID:</strong> {{ anomaly_data.sentry_context.event_id }}<br>
+          <strong>Environment:</strong> {{ anomaly_data.sentry_context.environment }}<br>
+          <strong>Release:</strong> {{ anomaly_data.sentry_context.release }}<br>
+          <strong>Tags:</strong> {{ anomaly_data.sentry_context.tags | join(', ') }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Risk Assessment and Recommendations -->
+  <div class="risk-assessment" style="background-color: {% if anomaly_data.risk_score >= 80 %}#fff5f5{% elif anomaly_data.risk_score >= 60 %}#fff8f1{% else %}#f0f9ff{% endif %}; border: 1px solid {% if anomaly_data.risk_score >= 80 %}#fed7d7{% elif anomaly_data.risk_score >= 60 %}#fed7aa{% else %}#bee3f8{% endif %}; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #2d3436;">
+      ⚖️ Risk Assessment & Investigation Procedures
+    </h3>
+    
+    <!-- Risk Factors -->
+    <div class="risk-factors" style="margin-bottom: 20px;">
+      <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #636e72;">
+        Primary Risk Factors
+      </h4>
+      <div class="risk-list">
+        {% for factor in anomaly_data.risk_assessment.primary_factors %}
+        <div class="risk-item" style="display: flex; align-items: center; margin-bottom: 8px;">
+          <div style="background-color: {% if factor.severity == 'HIGH' %}#d63031{% elif factor.severity == 'MEDIUM' %}#e17055{% else %}#f39c12{% endif %}; color: white; border-radius: 3px; padding: 2px 6px; font-size: 10px; font-weight: 600; margin-right: 10px; min-width: 50px; text-align: center;">
+            {{ factor.severity }}
+          </div>
+          <div style="font-size: 13px; color: #2d3436;">{{ factor.description }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    
+    <!-- Recommended Investigation Steps -->
+    <div class="investigation-steps">
+      <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #636e72;">
+        Recommended Investigation Procedures
+      </h4>
+      <div class="steps-list">
+        {% for step in anomaly_data.investigation_procedures %}
+        <div class="step-item" style="display: flex; margin-bottom: 12px; padding: 10px; background-color: white; border-radius: 3px; border-left: 3px solid {% if step.priority == 'IMMEDIATE' %}#d63031{% elif step.priority == 'HIGH' %}#e17055{% else %}#0984e3{% endif %};">
+          <div style="background-color: {% if step.priority == 'IMMEDIATE' %}#d63031{% elif step.priority == 'HIGH' %}#e17055{% else %}#0984e3{% endif %}; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; margin-right: 12px; flex-shrink: 0;">
+            {{ loop.index }}
+          </div>
+          <div style="flex: 1;">
+            <div style="font-size: 13px; font-weight: 600; color: #2d3436; margin-bottom: 3px;">{{ step.action }}</div>
+            <div style="font-size: 12px; color: #636e72; line-height: 1.3;">{{ step.description }}</div>
+            {% if step.estimated_time %}
+            <div style="font-size: 11px; color: #999; margin-top: 5px;">
+              <strong>Est. Time:</strong> {{ step.estimated_time }}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Security Charts Integration -->
+  {% if anomaly_data.chart_data %}
+  <div class="security-charts" style="background-color: #f8f9fa; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #2d3436;">
+      📈 Security Analytics Visualization
+    </h3>
+    
+    <div style="text-align: center; color: #636e72; font-size: 13px;">
+      <p style="margin: 0 0 10px 0;">
+        Interactive security charts and detailed analytics are available in the security dashboard.
+      </p>
+      <div style="background-color: #e3f2fd; border-radius: 3px; padding: 10px; margin: 10px 0;">
+        <strong style="color: #1976d2;">Chart Data Available:</strong><br>
+        • Access pattern timeline analysis<br>
+        • Geographic access heat map<br>
+        • Risk score trend analysis<br>
+        • Behavioral pattern correlation matrix
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Action Required Section -->
+  <div class="action-required" style="background-color: {% if anomaly_data.risk_score >= 80 %}#fff5f5{% elif anomaly_data.risk_score >= 60 %}#fff8f1{% else %}#f0f9ff{% endif %}; border: 2px solid {% if anomaly_data.risk_score >= 80 %}#d63031{% elif anomaly_data.risk_score >= 60 %}#e17055{% else %}#0984e3{% endif %}; border-radius: 5px; padding: 20px; margin-bottom: 25px;">
+    <h3 style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: {% if anomaly_data.risk_score >= 80 %}#d63031{% elif anomaly_data.risk_score >= 60 %}#e17055{% else %}#0984e3{% endif %};">
+      🚨 Action Required
+    </h3>
+    
+    <div style="font-size: 14px; color: #2d3436; margin-bottom: 15px;">
+      {% if anomaly_data.risk_score >= 80 %}
+        <strong>IMMEDIATE ACTION REQUIRED:</strong> This anomaly represents a critical security risk and requires immediate investigation and response.
+      {% elif anomaly_data.risk_score >= 60 %}
+        <strong>HIGH PRIORITY:</strong> This anomaly should be investigated within the next 2 hours to prevent potential security incidents.
+      {% else %}
+        <strong>MONITOR:</strong> This anomaly should be reviewed and monitored for escalation patterns.
+      {% endif %}
+    </div>
+    
+    <div style="font-size: 13px; color: #636e72; background-color: white; padding: 10px; border-radius: 3px;">
+      <strong>Next Steps:</strong>
+      <ol style="margin: 5px 0 0 0; padding-left: 20px;">
+        <li>Review the behavioral analysis and technical details above</li>
+        <li>Access the security dashboard for detailed analytics</li>
+        <li>Follow the recommended investigation procedures</li>
+        <li>Document findings in the incident response system</li>
+        <li>Escalate to security lead if risk score exceeds 80</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- Contact Information -->
+  <div class="contact-info" style="background-color: #f1f3f4; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+    <div style="font-size: 12px; color: #636e72; text-align: center;">
+      <strong>Emergency Security Contact:</strong> security-alerts@company.com | 24/7 Security Hotline: +1 (555) 123-SECURITY
+    </div>
+  </div>
+{% endblock %}
+
+{% block email_cta %}
+  <div class="email-cta" style="text-align: center; margin: 30px 0;">
+    <a href="{{ security_dashboard_url }}" 
+       style="display: inline-block; background-color: {% if anomaly_data.risk_score >= 80 %}#d63031{% elif anomaly_data.risk_score >= 60 %}#e17055{% else %}#0984e3{% endif %}; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 5px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+      🔍 View Security Dashboard
+    </a>
+    <a href="{{ incident_response_url }}" 
+       style="display: inline-block; background-color: #636e72; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 5px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+      📋 Create Incident Report
+    </a>
+  </div>
+{% endblock %}
+
+{% block email_additional_content %}
+  <!-- Compliance and Audit Information -->
+  <div class="compliance-info" style="background-color: #f8f9fa; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 600; color: #636e72;">
+      Compliance & Audit Trail
+    </h4>
+    <div style="font-size: 11px; color: #636e72; line-height: 1.4;">
+      <strong>Detection ID:</strong> {{ anomaly_data.detection_id }}<br>
+      <strong>Alert Generated:</strong> {{ anomaly_data.detection_timestamp | strftime('%Y-%m-%d %H:%M:%S UTC') }}<br>
+      <strong>ML Model Version:</strong> {{ anomaly_data.ml_model_version }}<br>
+      <strong>Confidence Level:</strong> {{ anomaly_data.confidence_level }}%<br>
+      <strong>Data Retention:</strong> This security event data will be retained for 7 years in compliance with security policy<br>
+      <strong>Privacy Notice:</strong> This alert contains user activity data processed for security purposes under legitimate interest
+    </div>
+  </div>
+
+  <!-- System Information -->
+  <div class="system-info" style="font-size: 11px; color: #999; text-align: center; border-top: 1px solid #e9ecef; padding-top: 15px;">
+    <p style="margin: 0;">
+      This automated security alert was generated by the Flask Security Monitoring System v{{ system_version | default('2.1.0') }}<br>
+      Powered by Sentry SDK {{ sentry_version | default('2.29.1') }} | AWS CloudWatch Container Insights | Machine Learning Anomaly Detection<br>
+      Alert Classification: {{ anomaly_data.classification | upper }} | Processing Time: {{ anomaly_data.processing_time_ms }}ms
+    </p>
+  </div>
+{% endblock %}
+
+<!-- Email-specific CSS for security styling -->
+<style type="text/css">
+  /* Security-specific responsive design */
+  @media only screen and (max-width: 600px) {
+    .summary-grid, .details-grid, .pattern-grid, .geo-grid {
+      grid-template-columns: 1fr !important;
+      gap: 10px !important;
+    }
+    
+    .correlation-item, .step-item {
+      padding: 8px !important;
+      margin-bottom: 6px !important;
+    }
+    
+    .email-cta a {
+      display: block !important;
+      width: 90% !important;
+      margin: 10px auto !important;
+      padding: 12px 20px !important;
+    }
+  }
+  
+  /* Dark mode adjustments for security alerts */
+  @media (prefers-color-scheme: dark) {
+    .alert-header {
+      background-color: #2d3436 !important;
+      border-color: #636e72 !important;
+    }
+    
+    .behavioral-analysis, .technical-details, .security-charts {
+      background-color: #2d3436 !important;
+      color: #ddd !important;
+    }
+    
+    .pattern-item, .geo-item, .detail-section {
+      background-color: #636e72 !important;
+      color: #fff !important;
+    }
+  }
+  
+  /* High contrast mode for accessibility */
+  @media (prefers-contrast: high) {
+    .alert-header {
+      border: 3px solid #000 !important;
+    }
+    
+    .risk-assessment {
+      border: 3px solid #d63031 !important;
+    }
+    
+    .action-required {
+      border: 4px solid #d63031 !important;
+    }
+  }
+</style>
